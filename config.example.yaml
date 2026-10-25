@@ -1,0 +1,47 @@
+schema_version: 1
+
+server:
+  listen_address: 192.168.40.8:8080
+  allowed_cidrs:
+    - 192.168.40.0/24
+  allowed_origins:
+    - http://192.168.40.8:8080
+  trusted_proxies: []
+
+security:
+  auth_mode: disabled
+  mcp_listen_address: 127.0.0.1:8081
+
+features:
+  allow_device_format: false
+  allow_original_delete: false
+  allow_archive_replace: false
+
+provider_accounts:
+  - id: provider-primary
+    provider: openai
+    enabled: false
+    secret_ref: wincred://video-archive/providers/provider-primary
+
+workers:
+  heartbeat_ttl: 30s
+  definitions:
+    - id: worker-main
+      enabled: true
+      credential_ref: wincred://video-archive/workers/worker-main
+      processing_kinds:
+        - INSPECT
+        - RENDER
+        - CHECKSUM
+        - DEVICE
+      allowed_storage_ids:
+        - scratch-main
+        - archive-primary
+
+storage:
+  - id: scratch-main
+    role: scratch
+    root: D:/VideoArchive/scratch
+  - id: archive-primary
+    role: archive_primary
+    root: E:/VideoArchive/archive

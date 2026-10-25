@@ -1,0 +1,122 @@
+# Local runtime workspace. Operational evidence belongs in SQLite/archive
+# storage, not in source control. Keep sanitized fixtures under testdata/.
+/.local/
+/runtime/
+/var/
+/data/
+
+# Runtime data accidentally created at the repository root
+/db/
+/logs/
+/evidence/
+/events/
+/scratch/
+/staging/
+/cache/
+/diagnostics/
+/backups/
+/exports/
+/uploads/
+/outputs/
+/media/
+/raw/
+/proxy/
+/renders/
+/transcripts/
+/thumbnails/
+/models/
+/archive/
+/archives/
+/artifacts/
+
+# Large media accidentally dropped at the repository root. Media fixtures in
+# testdata/ remain trackable because these patterns are root-anchored.
+/*.mp4
+/*.mov
+/*.mxf
+/*.mkv
+/*.avi
+/*.webm
+/*.mts
+/*.m2ts
+/*.mpg
+/*.mpeg
+/*.wmv
+/*.wav
+/*.mp3
+/*.aac
+/*.flac
+/*.m4a
+/*.aiff
+
+# Local databases and logs at the repository root
+/*.db
+/*.db-wal
+/*.db-shm
+/*.sqlite
+/*.sqlite-wal
+/*.sqlite-shm
+/*.sqlite3
+/*.sqlite3-wal
+/*.sqlite3-shm
+/*.log
+
+# Machine-local configuration and environment files
+/config.yaml
+/config.local.yaml
+/config.*.local.yaml
+/.env
+/.env.*
+!/.env.example
+
+# Credentials, private keys, and local certificates
+/secrets/
+/credentials/
+*.key
+*.pem
+*.pfx
+*.p12
+
+# Go and native build products
+/bin/
+/build/
+/dist/
+*.exe
+*.dll
+*.dylib
+*.so
+*.pdb
+*.test
+*.o
+*.obj
+
+# Test, coverage, profiling, and diagnostic output
+/coverage/
+/test-results/
+/profiles/
+coverage*.txt
+coverage*.html
+*.prof
+*.trace
+*.pprof
+
+# Frontend and optional Rust build caches
+node_modules/
+.vite/
+.next/
+target/
+
+# Editor and operating-system metadata
+/.idea/
+/.vscode/
+/.cursor/
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Temporary and interrupted-write files
+*.tmp
+*.temp
+*.part
+*.swp
+*~
