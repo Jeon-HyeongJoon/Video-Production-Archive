@@ -143,9 +143,9 @@ ExecutionLeaseExpired
 | 9 | `RunIntegratedQC` | `QCReportPublished` | 통과한 경우 아카이브 패키지 준비 |
 | 10 | §10의 공통 아카이브 흐름 | `ArchiveCommitted` | 검색·아카이브 조회 화면 갱신 |
 
-STT 원문은 요약으로 대체하지 않는다. 요약과 키워드는 STT 아티팩트를 입력으로 가진 별도 아티팩트이며, 사람이 한 검수는 실행 승인과 구분한다.
+STT 원문은 요약으로 대체하지 않는다. Transcript는 STT Artifact의 provenance와 검색 가능한 언어·시간 구간을 함께 가지며, 요약과 키워드는 Transcript를 입력으로 가진 별도 아티팩트다. 사람이 한 검수는 실행 승인과 구분한다.
 
-연결 요구사항: `PIP-001`, `ARC-002~007`, `RND-001~003`, `QCT-001~002`.
+연결 요구사항: `PIP-001`, `ARC-002~007`, `RND-001~003`, `TRN-001~003`, `QCT-001~002`.
 
 ## 8. VJ 통합
 
@@ -275,7 +275,7 @@ CommandRecord는 감사와 멱등성의 영속 기록이지만 업무 Aggregate 
 | ES-01 | 아카이브 승인의 정확한 대상 | staged ArchivePackage의 리비전과 manifest digest를 승인 | `ARC-004`로 고정 |
 | ES-02 | Review 결과의 식별자·상태·리비전이 용어집에 없음 | 변경 불가능한 ContentReview 기록과 검수 상태 정의 | `content-review` 용어와 `PIP-006`으로 고정 |
 | ES-03 | Timeline과 cut 선택이 용어집에 없음 | Timeline Entity와 CutSelection Value 정의 | 결정 필요 |
-| ES-04 | STT·요약·기술정보를 모두 일반 Artifact로만 표현할지 | 검색과 검수 규칙이 다르므로 Transcript, Summary, MediaInspection을 Artifact의 종류로 정의 | 결정 필요 |
+| ES-04 | STT·요약·기술정보를 모두 일반 Artifact로만 표현할지 | 공통 파일 생애주기는 Artifact가 소유하고 전용 구조는 별도 모델로 둠 | Transcript는 Artifact subtype(`TRN-001`), MediaInspection은 Record(`MED-001`)로 고정; Summary 결정 필요 |
 | ES-05 | SourceMedia와 PhysicalDevice의 식별자가 중복될 가능성 | 별도 SourceMedia Entity를 두지 않고 SOURCE_MEDIA는 StorageRole로만 사용하며 작업 공간은 PhysicalDevice ID로 식별 | `workspace-drive`, `storage-role` 용어와 `DEV-006`으로 고정 |
 | ES-06 | Job 자체 상태가 필요한지 | 초기에는 Step 투영으로 계산하고 별도 JobState를 만들지 않음 | `job` 규칙으로 고정 |
 | ES-07 | 저장하지 않는 Notification의 reconnect cursor | 이벤트 기반 알림은 event ID로 재생하고 metric 알림은 재생하지 않음 | `NTF-001`, `NTF-002`로 고정 |
@@ -288,7 +288,7 @@ CommandRecord는 감사와 멱등성의 영속 기록이지만 업무 Aggregate 
 
 ## 15. 요구사항으로 내리는 순서
 
-1. 아직 열린 ES-03~04, ES-09, ES-13의 용어와 상태 집합을 결정한다.
+1. 아직 열린 ES-03, ES-04의 Summary, ES-09, ES-13의 용어와 상태 집합을 결정한다.
 2. 대용량 파일 입고와 작업 공간 드라이브 해제를 첫 Adapter 수직 슬라이스로 연결한다.
 3. SQLite projection·migration·backup/restore 요구사항을 추가하고 기존 `PER-001` Command Store에 연결한다.
 4. 행사 기록, VJ 통합, 최종 편집본 Template을 실제 FFmpeg·STT Adapter에 연결한다.

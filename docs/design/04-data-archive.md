@@ -58,6 +58,8 @@ created_at + created_by
 size + sha256
 ```
 
+`Transcript`는 STT가 게시한 JSON Artifact이면서 언어와 순서 있는 millisecond 시간 구간을 제공하는 구조화 결과다. 원본 `whisper.cpp` JSON의 host 정보와 모델 파일 경로는 게시하지 않고 Profile reference와 정규 구간만 sidecar에 남긴다. 공통 checksum·게시·provenance는 Artifact가 소유하고 전사문 검색과 타임코드 이동에 필요한 필드는 Transcript가 소유한다. `TRN-001~002`
+
 내용 검수는 provenance를 덮어쓰지 않고 대상 아티팩트 리비전을 참조하는 추가 전용 ContentReview로 기록한다. 현재 검수 상태는 가장 큰 Event 저장 순번의 기록에서 투영한다. `REV-001`
 
 ## 5. SQLite 운영 원칙

@@ -940,6 +940,27 @@
       "decided": "2026-10-20"
     },
     {
+      "id": "transcript",
+      "layer": "product",
+      "kind": "entity",
+      "name": {"ko": "전사문", "en": "Transcript"},
+      "code_name": "Transcript",
+      "definition": "STT가 AudioArtifact에서 인식해 게시한, 언어와 순서 있는 millisecond 시간 구간을 가진 구조화 아티팩트.",
+      "rules": [
+        "공통 파일 생애주기·checksum·provenance는 Artifact가 소유하고 언어·시간 구간 의미는 Transcript가 소유한다.",
+        "구간은 순서가 있고 서로 겹치지 않으며 비어 있지 않은 text를 가진다.",
+        "STT 인식 결과이며 Summary나 사람이 확인한 사실을 대신하지 않는다.",
+        "게시 JSON에 Worker host 정보나 실제 모델 파일 경로를 포함하지 않는다."
+      ],
+      "forbidden": {"words": [], "code": []},
+      "relations": [
+        {"type": "is-a", "target": "artifact"},
+        {"type": "refers-to", "target": "profile"}
+      ],
+      "sources": ["idea.md §4.2", "docs/design/03-domain-workflow.md §1", "requirements TRN-001, TRN-002"],
+      "decided": "2026-10-26"
+    },
+    {
       "id": "rendition",
       "layer": "product",
       "kind": "entity",
@@ -1208,10 +1229,10 @@
       "name": {"ko": "프로파일", "en": "Profile"},
       "code_name": "Profile",
       "definition": "처리 하나를 어떻게 실행할지 정한, 이름과 버전이 있는 파라미터 묶음. 렌더, STT, 포맷 프로파일이 있다.",
-      "rules": ["'권한 프로파일'은 권한 정책, 'Provider 프로파일'은 Provider 계정이라고 부른다.", "렌더 Profile은 codec과 자원 제한을 포함하며 판이 바뀌면 버전을 올린다."],
+      "rules": ["'권한 프로파일'은 권한 정책, 'Provider 프로파일'은 Provider 계정이라고 부른다.", "렌더 Profile은 codec과 자원 제한을 포함하며 판이 바뀌면 버전을 올린다.", "STT Profile은 모델 식별자·언어·thread 상한을 포함하고 실제 모델 파일 경로는 Adapter 입력으로 분리한다."],
       "forbidden": {"words": ["권한 프로파일", "Provider 프로파일", "제공자 프로파일"], "code": []},
       "relations": [{"type": "refers-to", "target": "processing-kind"}],
-      "sources": ["사용자 결정: 프로파일은 실행 파라미터 묶음만", "idea.md §4.1, §13", "requirements RND-001"],
+      "sources": ["사용자 결정: 프로파일은 실행 파라미터 묶음만", "idea.md §4.1, §13", "requirements RND-001, TRN-001"],
       "decided": "2026-10-20"
     },
     {
@@ -1404,7 +1425,7 @@
     },
     {
       "id": "processing-output-model",
-      "words": ["Transcript", "Summary", "Thumbnail"],
+      "words": ["Summary", "Thumbnail"],
       "senses": [
         {
           "meaning": "ProcessingKind만 다른 일반 Artifact",

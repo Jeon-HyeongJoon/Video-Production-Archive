@@ -1344,6 +1344,42 @@
       "test_name": "TestSQLiteCatalogSearchUsesLatestDescriptionCodecAndDurationWithoutPaths",
       "status": "implemented",
       "level": "integration"
+    },
+    {
+      "id": "TRN-001",
+      "design": "transcript-domain",
+      "statement": "Transcript는 versioned STT Profile과 AudioArtifact provenance에 묶이고 검색·타임코드 이동을 위한 순서 있는 비중첩 millisecond 구간을 가진 게시 Artifact여야 한다.",
+      "given": "모델·언어·thread 상한이 있는 Profile, AudioArtifact를 입력으로 만든 Transcript Artifact와 공백 또는 겹침이 있는 시간 구간이 있다.",
+      "when": "Transcript를 생성한다.",
+      "then": "언어·구간 text·Profile이 정규화되고 완전한 STT provenance와 순서 있는 비중첩 구간만 허용된다.",
+      "test_file": "internal/core/transcription/transcription_test.go",
+      "test_name": "TestTranscriptKeepsTimedSegmentsAndVersionedSTTProvenance",
+      "status": "implemented",
+      "level": "unit"
+    },
+    {
+      "id": "TRN-002",
+      "design": "whispercpp-adapter",
+      "statement": "whisper.cpp Adapter는 해석 완료된 모델과 AudioArtifact 입력을 shell 없는 인수 배열로 실행하고 임시 JSON 구간을 검증한 뒤 정규 Transcript JSON만 게시해야 한다.",
+      "given": "공백과 shell 메타문자가 포함된 모델·오디오 경로 및 실제 subprocess로 동작하는 whisper.cpp JSON fixture가 있다.",
+      "when": "versioned STT Profile로 전사를 실행한다.",
+      "then": "각 경로는 단일 인수로 전달되고 host·모델 실제 경로가 제거된 언어·시간 구간만 검증·게시되며 결과는 AudioArtifact와 처리기·Profile·Worker provenance를 가진다.",
+      "test_file": "internal/adapter/whispercpp/transcriber_test.go",
+      "test_name": "TestWhisperCPPAdapterExecutesArgumentArrayAndPublishesVerifiedTranscript",
+      "status": "implemented",
+      "level": "integration"
+    },
+    {
+      "id": "TRN-003",
+      "design": "windows-whispercpp-acceptance",
+      "statement": "Windows Worker의 실제 whisper.cpp와 운영 모델은 대표 한국어 행사 음성을 전사해 정규 Transcript를 게시해야 한다.",
+      "given": "운영 버전 whisper.cpp·고정 모델과 대표 한국어 행사 AudioArtifact가 설치된 격리 Windows Worker가 있다.",
+      "when": "background STT slot 하나로 versioned Profile을 실행한다.",
+      "then": "비어 있지 않은 한국어 시간 구간, checksum·처리시간·최대 메모리와 모델·Profile·Worker provenance가 기록되고 입력 AudioArtifact는 변경되지 않는다.",
+      "test_file": "",
+      "test_name": "",
+      "status": "planned",
+      "level": "acceptance"
     }
   ]
 }
