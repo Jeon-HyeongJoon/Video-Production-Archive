@@ -115,3 +115,5 @@ Worker 종료:
 - process 원문 로그: 회전 파일, DB에는 위치와 tail만 저장
 
 Provider 관련 필드는 저장 전 `AGT-008` 허용 목록 정책으로 정제한다. feed의 replay 분리는 `NTF-001`, 실제 HTTP/SSE 재연결은 `NTF-002` integration test가 검증한다.
+
+도메인 기능 실행은 Capability Executor의 공통 Evidence Sink가 시작·진행·완료·실패와 상관 ID를 기록한다. requirement test는 CI evidence runner가 구조화한 뒤 CI artifact로 누적한다. 로컬 테스트 실행은 완료 판정 증적으로 사용하지 않는다. 운영 증적과 테스트 증적은 형식을 공유할 수 있지만 저장 수명주기와 원장은 분리한다. 자세한 계약은 [10. 도메인 기능 실행과 검증 증적](10-capabilities-observability.md)을 따른다. `OBS-001`, `TST-001`

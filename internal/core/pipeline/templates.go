@@ -126,17 +126,15 @@ func FinalEdit() Template {
 	)
 }
 
-func SourceMediaIntake() Template {
-	return newTemplate("source-media-intake",
-		lightStep("detect_device", vocabulary.ProcessingDevice),
-		lightStep("inspect_volume", vocabulary.ProcessingDevice, "detect_device"),
-		humanStep("assign_source_role", "inspect_volume"),
-		heavyStep("copy_first", vocabulary.ProcessingChecksum, "assign_source_role"),
+func LargeFileIntake() Template {
+	return newTemplate("large-file-intake",
+		lightStep("inspect_inputs", vocabulary.ProcessingInspect),
+		controlStep("register_original_assets", "inspect_inputs"),
+		heavyStep("copy_first", vocabulary.ProcessingChecksum, "register_original_assets"),
 		heavyStep("verify_first", vocabulary.ProcessingChecksum, "copy_first"),
 		heavyStep("copy_second", vocabulary.ProcessingChecksum, "verify_first"),
 		heavyStep("verify_second", vocabulary.ProcessingChecksum, "copy_second"),
-		approvalStep("return_approval", "verify_first", "verify_second"),
-		lightStep("safe_eject", vocabulary.ProcessingDevice, "return_approval"),
+		lightStep("release_workspace_drive", vocabulary.ProcessingDevice, "verify_second"),
 	)
 }
 

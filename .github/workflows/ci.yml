@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      EVIDENCE_DIR: evidence/${{ github.run_id }}-${{ github.run_attempt }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Download modules
+        run: go mod download
+
+      - name: Run all tests and normalize evidence
+        id: tests
+        shell: bash
+        run: |
+          mkdir -p "$EVIDENCE_DIR"
+          set +e
+          go test -json ./... > "$EVIDENCE_DIR/go-test.jsonl"
+          test_status=$?
+          set -e
+          go run ./cmd/testevidence \
+            -input "$EVIDENCE_DIR/go-test.jsonl" \
+            -output "$EVIDENCE_DIR" \
+            -run-id "${{ github.run_id }}-${{ github.run_attempt }}" \
+            -revision "${{ github.sha }}" \
+            -repository "${{ github.repository }}"
+          exit "$test_status"
+
+      - name: Check requirement traceability
+        if: always()
+        shell: bash
+        run: go run ./cmd/reqcheck 2>&1 | tee "$EVIDENCE_DIR/requirements.log"
+
+      - name: Check ontology
+        if: always()
+        shell: bash
+        run: go run ./cmd/ontocheck 2>&1 | tee "$EVIDENCE_DIR/ontology.log"
+
+      - name: Run go vet
+        if: always()
+        shell: bash
+        run: go vet ./... 2>&1 | tee "$EVIDENCE_DIR/vet.log"
+
+      - name: Build Linux packages
+        if: always()
+        shell: bash
+        run: go build ./... 2>&1 | tee "$EVIDENCE_DIR/build-linux.log"
+
+      - name: Cross-build Windows amd64 packages
+        if: always()
+        shell: bash
+        run: GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build ./... 2>&1 | tee "$EVIDENCE_DIR/build-windows-amd64.log"
+
+      - name: Upload CI evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.EVIDENCE_DIR }}
+          if-no-files-found: error
+          retention-days: 30

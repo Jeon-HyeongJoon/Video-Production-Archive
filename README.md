@@ -9,7 +9,7 @@
 - 공통 Command envelope, 권한 선판정, optimistic concurrency, 의미 기반 idempotency와 명령·Event journal 계약
 - 영속 워크플로에 사용할 상태 전이, Approval 리비전, ExecutionLease fencing, 게시 결과 복구와 실패 분류
 - 32GB 단일 PC용 유휴·메모리·scratch·heavy slot·물리 장치 예약 정책
-- 행사 기록, VJ, 최종 편집본, 원본 매체 입고 Template의 무순환·자원·처리 기능 선언
+- 행사 기록, VJ, 최종 편집본, 대용량 파일 입고 Template의 무순환·자원·처리 기능 선언
 - 원본 불변성, 파생본 provenance, 결정적 manifest, 아카이브 확정 조건과 DB 없는 메타데이터 round-trip
 - 외장 볼륨 lock과 포맷 사전조건
 - Provider 계정 분리 저장, cooldown 복구·overload 격리, 안전한 Tool Call, 중복 없는 폴백과 허용 목록 로그
@@ -20,7 +20,7 @@
 - 시작 설정 전용 관리 모델과 여러 작업 PC Worker registry·heartbeat·배정 정책
 - 요구사항과 테스트의 자동 1:1 추적 검사
 
-현재는 SQLite Command Unit of Work, 아카이브 sidecar export/import, 게시 장애 조정과 Notification SSE 재연결 Adapter의 integration 계약까지 구현되어 있다. 전체 Control DB projection·migration·backup, HTTP Command API와 Dashboard, MCP Adapter, Windows Device Adapter, 실제 FFmpeg/ffprobe/STT 실행 Adapter와 Provider API Adapter는 아직 구현하지 않았다. Windows 실장비가 필요한 `DEV-005`, `ARC-008`은 계획된 acceptance 요구사항으로 남겨 둔다.
+현재는 SQLite Command Unit of Work, 아카이브 sidecar export/import, 게시 장애 조정과 Notification SSE 재연결 Adapter의 integration 계약까지 구현되어 있다. 전체 Control DB projection·migration·backup, HTTP Command API와 Dashboard, MCP Adapter, Windows Device Adapter, 실제 FFmpeg/ffprobe/STT 실행 Adapter와 Provider API Adapter는 아직 구현하지 않았다. 작업 공간 드라이브 해석, 독립 Capability 실행, 기능·테스트 증적 수집과 Dashboard 투영은 `DEV-006`, `APP-001`, `OBS-001`, `TST-001`, `DSH-001`의 계획된 integration 요구사항이며, Windows 실장비가 필요한 `DEV-005`, `ARC-008`도 계획 상태다.
 
 ## 문서 읽는 순서
 
@@ -33,8 +33,10 @@
 7. [에이전트와 보안](docs/design/06-agent-security.md)
 8. [다중 Worker 운영](docs/design/07-worker-fleet.md)
 9. [이벤트 스토밍](docs/design/08-event-storming.md)
-10. [요구사항 운영 규칙](requirements/README.md)
-11. [기계 판독 요구사항 카탈로그](requirements/catalog.json)
+10. [Dashboard 운영 투영](docs/design/09-dashboard-operations.md)
+11. [도메인 기능 실행과 검증 증적](docs/design/10-capabilities-observability.md)
+12. [요구사항 운영 규칙](requirements/README.md)
+13. [기계 판독 요구사항 카탈로그](requirements/catalog.json)
 
 초기 설정 예시는 [config.example.yaml](config.example.yaml)에 있다. 실제 credential은 이 파일에 쓰지 않고 Windows Credential Manager 또는 DPAPI reference만 기록한다.
 

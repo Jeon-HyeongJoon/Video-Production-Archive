@@ -3,11 +3,11 @@
 - 문서 상태: 초기 설계안
 - 작성일: 2026-10-05
 - 대상: 사무실 영상 입고, 처리, 기록, 검색, 외장 미디어 및 아카이브 운영
-- 구현 단계: 도메인 및 운영 구조 설계. 아직 기능 구현 전
+- 구현 단계: Core와 일부 Adapter 계약 기준선 구현, 전체 운영 기능은 설계·구현 중
 
 ## 1. 목적
 
-촬영 원본을 안전하게 입고하고, 영상 유형에 맞게 렌더링·전사·요약·병합한 뒤, 결과와 처리 이력을 검색 가능한 형태로 기록한다. 에이전트가 자동으로 작업을 계획하고 실행할 수 있어야 하며, 사람이 대시보드에서 작업을 확인하고 중간에 개입하거나 에이전트 없이 전체 작업을 수동으로 수행할 수 있어야 한다.
+촬영 원본을 안전하게 입고하고, 영상 유형에 맞게 렌더링·전사·요약·병합한 뒤, 결과와 처리 이력을 검색 가능한 형태로 기록한다. 에이전트가 자동으로 대용량 파일 Job을 계획하고 실행할 수 있어야 하며, 사람이 대시보드에서 업무 현황과 증적을 확인하고 중간에 개입하거나 에이전트 없이 같은 도메인 기능을 직접 실행할 수 있어야 한다.
 
 최종적으로 다음을 달성한다.
 
@@ -16,7 +16,7 @@
 3. 영상 설명, 기술정보, STT, 요약, 체크섬, 보관 위치를 함께 기록한다.
 4. DB를 이용해 빠르게 검색하되 DB가 없어도 아카이브 내용을 해석하고 목록을 복구할 수 있게 한다.
 5. MCP, HTTP API, 대시보드, CLI가 동일한 도메인 기능을 사용한다.
-6. 외장 하드, USB, SD 카드의 입고·복사·검증·배출·포맷을 통제한다.
+6. USB, SSD, HDD 같은 PhysicalDevice를 작업 공간 단위로 삼아 입고·복사·검증·안전 해제·포맷을 통제한다.
 7. 에이전트 장애나 AI 미사용 상황에서도 사람이 운영을 계속할 수 있게 한다.
 
 ## 2. 핵심 설계 원칙
@@ -157,8 +157,8 @@ Scheduler는 heartbeat가 유효하고 필요한 처리 종류와 Storage 접근
 | Quality Control | 재생, 길이, 싱크, 손상, 무음·블랙 검사 | `QCReport` |
 | Catalog | 제목, 설명, 프로젝트, 인물, 권리, 분류 | `CatalogRecord` |
 | Archive | 패키지 생성, 복제, 검증, 보존 확정 | `ArchivePackage` |
-| Device Management | 물리 장치, 파티션, 볼륨, 마운트, 배출, 포맷 | `Device`, `Volume` |
-| Storage Inventory | 저장 매체 역할, 물리 위치, 용량, 수명주기 | `StorageRegistration` |
+| Device Management | 물리 장치, 파티션, 볼륨, 마운트, 배출, 포맷 | `PhysicalDevice`, `Volume` |
+| Storage Inventory | 저장 매체 역할, 물리 위치, 용량, 수명주기 | `Storage` |
 | Workflow | 단계 의존성, 병렬 실행, 재시도, 승인 | `Job`, `Step` |
 | Search | 메타데이터·전사문·구간 색인 | 검색 인덱스 |
 
@@ -198,8 +198,9 @@ STT는 인식 결과이고 요약은 AI 해석 결과다. 사람이 작성한 �
 - `Transcript`: 시간 정보가 포함된 전사 결과
 - `ArchivePackage`: 영상과 사이드카를 묶은 보존 단위
 - `PhysicalDevice`: 실제 USB, SD 카드, HDD, SSD
+- `WorkspaceDrive`: Job이 대용량 파일 I/O를 위해 예약한 PhysicalDevice의 역할
 - `Volume`: 운영체제가 마운트한 파일시스템
-- `StorageRegistration`: 볼륨의 업무 역할과 물리 위치
+- `Storage`: 볼륨 안의 등록 root와 업무 역할
 - `Job`, `Step`: 전체 작업과 개별 실행 단계
 - `Command`, `Event`, `Approval`: 조작, 상태변경, 승인 기록
 
@@ -273,7 +274,7 @@ vj.create_timeline
 render.create_rendition
 qc.validate_rendition
 archive.commit_package
-device.request_safe_eject
+device.release_workspace_drive
 ```
 
 `run_ffmpeg`, `execute_shell`, 임의 경로를 받는 `move_file` 같은 범용 기능은 에이전트에 노출하지 않는다.
@@ -475,18 +476,18 @@ flowchart LR
 → 납품 및 아카이브 위치 기록
 ```
 
-### 8.4 원본 미디어 입고
+### 8.4 대용량 파일 입고
 
 ```text
-장치 감지
-→ 물리 장치·볼륨 조사
-→ source_media 역할 지정
-→ 읽기 중심 입고
+등록된 작업 공간 드라이브 선택
+→ 입력 파일 조사·원본 자산 등록
 → 원본과 복사본 체크섬 비교
 → 두 번째 보존 위치 검증
-→ 반환 승인
-→ 안전 제거
+→ 활성 lock·파일 handle 확인
+→ 작업 공간 드라이브 안전 해제
 ```
+
+작업 공간 하나는 USB 메모리, SSD, HDD 같은 PhysicalDevice 하나다. Job은 입력·출력에 여러 작업 공간 드라이브를 사용할 수 있지만 예약, I/O 충돌 판정, 자원 metric과 해제는 각 PhysicalDevice ID 단위로 수행한다. 해제는 OS의 안전 제거 동작이며 매체 소유권 반환이나 인수인계 승인을 뜻하지 않는다.
 
 ## 9. 병렬 실행 및 자원 정책
 
@@ -553,21 +554,23 @@ CRITICAL     데이터 안전 위험: 안전 종료 또는 재시도 전환
 
 ### 10.1 기본 원칙
 
-- 버튼과 폼: 실제 실행, 승인, 설정 변경
+- 첫 화면의 목적: 에이전트가 관리하는 Job·Step·Tool Call·Worker 실행의 현재 업무 현황 파악
+- 버튼과 폼: pause, retry, cancel, 제어 모드 변경, 필요한 입력·승인과 Agent 부재 시 직접 실행
 - 작업 그래프와 표: 상태, 진행률, 선행 관계 확인
 - 채팅: 검색, 계획 생성, 오류 설명, 일괄 작업 제안
 - 채팅에서 생성한 변경은 실행 계획 카드로 보여준 뒤 승인 버튼으로 실행
+- Provider·Worker·Storage·보안 설정은 Dashboard에서 바꾸지 않고 로컬 설정 파일과 서비스 재시작으로 적용
+- 매체 소유권·대여·반환 승인·반환 이력은 Dashboard 범위에서 제외
 
 ### 10.2 주요 화면
 
-1. 작업함: 대기, 실행, 승인 대기, 실패
-2. 작업 상세: DAG, 진행률, 로그, 결과, 작업자, 피드백
-3. 장치: 연결 장치, 볼륨, 역할, 용량, 잠금, 배출 가능 여부
-4. 입고: 카드 및 외장 하드 복사와 체크섬
-5. 아카이브: 패키지, 복제 수, 보관 위치, 무결성 검사 일정
-6. 검색: 제목, 설명, 인물, 프로젝트, STT, 타임코드
-7. 정책: 렌더, STT, 저장, 포맷, 권한 프로파일
-8. 채팅 보조: 현재 작업과 화면을 문맥으로 사용
+1. 작업함: 에이전트 제어 모드, 현재 Step·Tool Call, 대기, 실행, 승인 대기, 실패
+2. 작업 상세: DAG, 진행률, Event, 로그 참조, 결과, Worker, 사람 개입
+3. 실패·개입: 오류 분류, 재시도, 일시정지, 제어 모드 전환, 에이전트에게 질문
+4. Worker·자원: CPU, memory, GPU/VRAM, scratch, PhysicalDevice lock과 안전 해제 가능 여부
+5. 채팅 보조: 현재 Job과 화면을 문맥으로 설명·분석·계획 제안
+
+아카이브 검색과 기록 조회는 같은 웹 애플리케이션에 둘 수 있지만 운영 Dashboard의 첫 책임과 분리한다. 원격 정책·계정·Worker registry 편집 화면은 인증 비활성 초기 범위에 두지 않는다.
 
 ### 10.3 사람 개입
 
@@ -748,25 +751,26 @@ ARCH-0042-A/
 ### 12.1 모델 구분
 
 ```text
-PhysicalDevice → Partition → Volume → StorageRegistration
+PhysicalDevice(WorkspaceDrive) → Partition → Volume → Storage
 ```
 
 - `PhysicalDevice`: 실제 HDD, SSD, USB, SD 카드
 - `Partition`: 장치의 파티션
 - `Volume`: 마운트된 파일시스템
-- `StorageRegistration`: 업무 역할, 라벨, 보관 위치
+- `Storage`: 업무 역할, 라벨, 등록 root
 
 마운트 경로는 식별자가 아니다. 파일시스템 UUID, 장치 시리얼, 모델, 용량과 물리 라벨을 조합한다. 시리얼이 없는 매체를 위해 QR 또는 바코드 라벨을 사용한다.
 
 ### 12.2 장치 역할
 
 ```text
-source_media
-working_storage
-transfer_media
-archive_primary
-archive_mirror
-backup_offsite
+SOURCE_MEDIA
+SCRATCH
+WORKING
+TRANSFER_MEDIA
+ARCHIVE_PRIMARY
+ARCHIVE_MIRROR
+BACKUP_OFFSITE
 ```
 
 ### 12.3 Worker Device Adapter
@@ -793,7 +797,7 @@ maintenance     검사·복구·포맷
 eject_pending   신규 작업 금지
 ```
 
-포맷과 안전 제거는 모든 읽기·쓰기 작업과 상호 배타적이다.
+포맷과 작업 공간 드라이브 안전 해제는 같은 PhysicalDevice의 모든 읽기·쓰기 작업과 상호 배타적이다.
 
 ## 13. 포맷 정책
 
@@ -821,7 +825,7 @@ eject_pending   신규 작업 금지
 
 1. 파일시스템, UUID, 라벨 확인
 2. 쓰기·읽기 테스트와 체크섬 확인
-3. StorageRegistration 갱신
+3. Storage 갱신
 4. 포맷 CommandRecord와 Event에 실행자, 승인자, 전후 장치 정보를 기록
 
 에이전트에는 포맷 승인 권한을 부여하지 않는다.
@@ -1196,7 +1200,7 @@ Rust 공식 MCP SDK도 존재하지만 초기에는 Go MCP SDK 하나로 통일�
 
 - Worker Device Adapter
 - USB, SD, HDD 인벤토리
-- 안전 제거와 장치 잠금
+- 작업 공간 드라이브 안전 해제와 장치 잠금
 - 포맷 승인 워크플로
 - 복제본 및 무결성 검사 일정
 - DB 재구축과 사이드카 검증
@@ -1237,6 +1241,11 @@ Rust 공식 MCP SDK도 존재하지만 초기에는 Go MCP SDK 하나로 통일�
 19. 인증 모드와 관리 설정 변경은 로컬 설정과 서비스 재시작으로만 수행
 20. 여러 Worker PC는 사전 등록된 Worker로 연결하며 각 Worker의 service credential은 사용자 인증과 별도로 유지
 21. 모든 DB write는 중앙 Control Service가 수행하고 Worker는 heartbeat·lease·result API만 사용
+22. 작업 공간 하나는 PhysicalDevice 하나이며 Storage와 Volume은 해당 드라이브 안의 접근 위치다. 예약·I/O 충돌·metric·안전 해제는 PhysicalDevice ID 단위로 수행
+23. 매체 소유권·대여·반환 이력과 반환 승인은 모델링하지 않으며, 작업 완료 뒤의 안전 해제는 Device 기능으로 유지
+24. Dashboard의 첫 책임은 에이전트 Job의 상태·도구 호출·대기·실패·로그·자원과 사람 개입 필요 여부를 보여주는 것
+25. 도메인 기능은 MCP·HTTP와 무관한 Application Port로 직접 실행할 수 있어야 하며 모든 Adapter는 같은 Command Bus를 사용
+26. 모든 검증 실행은 요구사항 ID, 코드 리비전, 시각, 결과와 산출물 참조를 기계 판독 가능한 증적 묶음으로 남기되 운영 증적과 source control은 분리
 
 ### 추가 측정 후 결정
 

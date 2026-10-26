@@ -48,15 +48,21 @@ func TestFinalEditTemplateRecordsVersionBeforeDerivativesAndDeliveryAfterQC(t *t
 }
 
 // Requirement: PIP-004
-func TestSourceIntakeRequiresTwoVerifiedCopiesAndApprovalBeforeEject(t *testing.T) {
-	template := SourceMediaIntake()
+func TestLargeFileIntakeReleasesWorkspaceDriveWithoutReturnApproval(t *testing.T) {
+	template := LargeFileIntake()
 	if err := template.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	approval := template.Steps["return_approval"]
-	if !approval.ApprovalRequired || !slices.Equal(approval.DependsOn, []string{"verify_first", "verify_second"}) ||
-		!slices.Equal(template.Steps["safe_eject"].DependsOn, []string{"return_approval"}) {
-		t.Fatalf("source return safety chain is invalid: %+v", template.Steps)
+	if template.Name != "large-file-intake" ||
+		!slices.Equal(template.Steps["register_original_assets"].DependsOn, []string{"inspect_inputs"}) ||
+		!slices.Equal(template.Steps["verify_first"].DependsOn, []string{"copy_first"}) ||
+		!slices.Equal(template.Steps["copy_second"].DependsOn, []string{"verify_first"}) ||
+		!slices.Equal(template.Steps["verify_second"].DependsOn, []string{"copy_second"}) ||
+		!slices.Equal(template.Steps["release_workspace_drive"].DependsOn, []string{"verify_second"}) {
+		t.Fatalf("large-file intake verification chain is invalid: %+v", template.Steps)
+	}
+	if _, exists := template.Steps["return_approval"]; exists {
+		t.Fatal("large-file intake contains a custody return approval")
 	}
 }
 
@@ -75,7 +81,7 @@ func TestTemplateRejectsCyclesAndRequiresResourceAndProcessingDeclarations(t *te
 	if err := missingDeclaration.Validate(); err == nil {
 		t.Fatal("heavy step without processing kind accepted")
 	}
-	for _, template := range []Template{OccasionRecording(), VJCompilation(), FinalEdit(), SourceMediaIntake()} {
+	for _, template := range []Template{OccasionRecording(), VJCompilation(), FinalEdit(), LargeFileIntake()} {
 		if err := template.Validate(); err != nil {
 			t.Fatalf("%s is invalid: %v", template.Name, err)
 		}

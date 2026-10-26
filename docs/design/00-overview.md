@@ -75,6 +75,9 @@ Worker가 다른 PC로 이동해도 Domain 계약과 Control API는 바뀌지 �
 | Authorization | 역할과 파괴적 작업 승인 | SEC-001~004 |
 | Boot Configuration | 무관리 UI, 시작 설정, listen·파괴적 기능 정책, Secret reference | CFG-001~005 |
 | Worker Fleet | 사전 등록, service 인증, heartbeat, 배정 | WRK-001~004 |
+| Dashboard Operations | Agent가 관리하는 Job·Step·Tool Call·실패·자원 상태 투영 | DSH-001 |
+| Application Capabilities | Adapter와 무관한 도메인 기능 직접 실행 | APP-001 |
+| Observability | 기능 실행과 모든 테스트의 구조화 증적 | OBS-001, TST-001 |
 
 도메인 명령과 이벤트의 시간 순서, 일관성 경계 후보와 아직 결정되지 않은 핫스팟은 [이벤트 스토밍](08-event-storming.md)에 정리한다. 핫스팟을 결정한 뒤 요구사항 카탈로그로 내린다.
 
@@ -97,10 +100,12 @@ Worker가 다른 PC로 이동해도 Domain 계약과 Control API는 바뀌지 �
 1. `입고 등록 → ffprobe → proxy → QC → 검색` 수직 슬라이스
 2. SQLite repository, migration, backup/restore
 3. Worker lease/heartbeat와 subprocess 복구
-4. HTTP/SSE Dashboard의 작업 목록과 즉시 실행
+4. HTTP/SSE Dashboard의 Agent 작업 현황과 사람 개입
 5. 아카이브 sidecar export/import
 6. VJ와 STT Template
 7. MCP와 Agent Gateway
 8. Windows 장치/포맷 Adapter
+
+모든 수직 슬라이스는 Storage를 PhysicalDevice 작업 공간으로 해석하고, Application Capability를 직접 실행하며, 운영·테스트 증적을 남기는 공통 경계를 함께 구현한다. `DEV-006`, `APP-001`, `OBS-001`, `TST-001`
 
 각 슬라이스도 요구사항과 테스트를 먼저 추가하며, 외부 프로그램이 필요한 검증은 fixture 기반 integration test와 실제 장비 acceptance test를 구분한다.

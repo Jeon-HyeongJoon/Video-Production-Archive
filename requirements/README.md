@@ -38,6 +38,8 @@
 - 실제 장비가 필요한 요구사항도 고유 ID와 단일 acceptance 시나리오를 가진다.
 - 커버리지 수치를 올리거나 우연한 내부 구현을 고정하기 위한 테스트는 추가하지 않는다. 테스트는 카탈로그의 관찰 가능한 결과만 검증한다.
 - 실제 기술 경계의 제한이나 더 나은 설계가 확인되면 Adapter를 억지로 기존 문구에 맞추지 않는다. 근거를 검토한 뒤 소유 설계, 요구사항, semantic lock과 1:1 테스트를 같은 변경에서 함께 수정한다.
+- 테스트 검증은 CI 결과만 완료 판정에 사용한다. CI runner는 코드 리비전·환경·테스트 이름·요구사항 ID·수준·결과·시간과 산출물 참조를 기계 판독 가능한 artifact로 누적한다. `TST-001`
+- Core unit test에 운영 모니터링 의존성을 주입하지 않는다. runner가 모든 테스트 결과를 기록하고, Application Capability integration test가 공통 Evidence Sink의 운영 증적을 별도로 검증한다. `OBS-001`
 
 ## 4. 이벤트 스토밍에서 내려온 계약
 
@@ -53,16 +55,19 @@
 | 알림 | `NTF-001~002` | 저장 이벤트 replay와 일시 metric 분리, SSE 재연결 |
 | Agent | `AGT-001~015` | cooldown 복귀, overload 연속성·health probe 회복, allowlist 도구, 중복 Tool Call 방지, 허용 목록 로그 |
 | 장치와 Worker | `DEV-001~005`, `WRK-001~004` | lock, 포맷 전제조건, 실장비 검증, 설정·heartbeat storage 교집합, pinning |
+| 작업 공간·직접 실행 | `DEV-006`, `APP-001` | Storage를 PhysicalDevice 작업 공간으로 해석, Adapter 없이 Capability 직접 실행 |
+| Dashboard·증적 | `DSH-001`, `OBS-001`, `TST-001` | Agent 업무 현황 투영, 기능 실행 증적, 모든 테스트 실행 증적 묶음 |
 
 실제 DB transaction, sidecar 복원, 파일 게시 장애 조정과 HTTP 재연결은 각각 `PER-001`, `ARC-007`, `EXE-003`, `NTF-002`의 integration test로 검증한다. macOS 개발 환경에서 안전하게 실행할 수 없는 Windows 포맷과 junction은 `DEV-005`, `ARC-008`로 계획 상태를 유지한다.
 
 ## 5. 현재 기준선
 
-- 전체 요구사항: 92개
-- 구현됨: 90개, 주석 테스트 90개와 1:1 연결
-- 구현된 integration 테스트: `ARC-006`, `PER-001`, `ARC-007`, `EXE-003`, `NTF-002`
-- 계획됨: 2개
+- 전체 요구사항: 97개
+- 구현됨: 91개, 주석 테스트 91개와 1:1 연결
+- 구현된 integration 테스트: `ARC-006`, `PER-001`, `ARC-007`, `EXE-003`, `NTF-002`, `TST-001`
+- 계획됨: 6개
 - 계획된 실장비 acceptance 테스트: `DEV-005`, `ARC-008`
+- 계획된 integration 테스트: `DSH-001`, `DEV-006`, `APP-001`, `OBS-001`
 
 정확한 문구와 테스트 이름은 항상 [`catalog.json`](catalog.json)에서 확인한다. 이 문서에는 변경 시 쉽게 낡는 전체 테스트 목록을 복제하지 않는다.
 
@@ -76,7 +81,7 @@ go test ./...
 현재 정상 출력:
 
 ```text
-traceability ok: 92 requirements (90 implemented, 2 planned), 90 one-to-one tests
+traceability ok: 97 requirements (91 implemented, 6 planned), 91 one-to-one tests
 ```
 
 ## 7. 새 요구사항 추가 절차

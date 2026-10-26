@@ -97,7 +97,7 @@
       "definition": "템플릿 하나를 특정 대상(원본 등)에 적용해 만든 실행 인스턴스. 작업함과 작업 상세 화면이 다루는 단위다.",
       "rules": [
         "제품 층에서 '작업'은 Job만 뜻한다.",
-        "Worker가 설치된 PC는 'Worker PC', 처리 중 임시 파일 공간은 'scratch'라고 부른다. '작업 PC', '작업 공간'이라고 쓰지 않는다.",
+        "Worker가 설치된 PC는 'Worker PC', 처리 중 임시 파일 경로는 'scratch'라고 부른다. '작업 PC'라고 쓰지 않는다.",
         "'Workflow'나 'Pipeline'으로 Job을 부르지 않는다.",
         "작업 소유자 개념을 두지 않는다. 누가 했는지는 Actor로 기록한다.",
         "JobState를 별도로 저장하지 않는다. Job의 현재 상태는 소속 StepState에서 계산한 투영이다."
@@ -773,6 +773,23 @@
       "decided": "2026-10-20"
     },
     {
+      "id": "workspace-drive",
+      "layer": "product",
+      "kind": "role",
+      "name": {"ko": "작업 공간 드라이브", "en": "Workspace Drive"},
+      "code_name": "WorkspaceDrive",
+      "definition": "Job이 대용량 파일을 읽거나 쓰기 위해 작업 공간으로 예약한 PhysicalDevice의 역할.",
+      "rules": [
+        "작업 공간 하나의 단위는 USB 메모리, SSD, HDD 같은 PhysicalDevice 하나다. Partition, Volume, mount 경로 또는 Storage root를 작업 공간 단위로 쓰지 않는다.",
+        "Job은 입력과 출력에 여러 작업 공간 드라이브를 참조할 수 있지만 예약, I/O 충돌 판정, metric 집계와 해제는 각 PhysicalDevice ID 단위로 수행한다.",
+        "작업 공간 드라이브 해제는 활성 lock과 파일 handle을 정리한 뒤 OS에서 안전 제거하는 장치 동작이다. 매체 소유권 반환이나 인수인계가 아니다."
+      ],
+      "forbidden": {"words": ["작업 폴더"], "code": []},
+      "relations": [{"type": "refers-to", "target": "physical-device"}],
+      "sources": ["사용자 결정: 작업 공간 단위는 USB·SSD·HDD 드라이브", "사용자 결정: 원본 매체 반환은 작업 공간 드라이브 해제라면 유지"],
+      "decided": "2026-10-26"
+    },
+    {
       "id": "partition",
       "layer": "product",
       "kind": "entity",
@@ -821,7 +838,7 @@
       "code_name": "StorageRole",
       "definition": "저장소가 업무에서 맡는 역할.",
       "values": [
-        {"id": "SOURCE_MEDIA", "description": "원본이 담겨 들어온 매체(카메라 카드 등). 읽기 중심으로만 쓴다."},
+        {"id": "SOURCE_MEDIA", "description": "입력 원본이 있는 Storage의 읽기 중심 역할. 별도 SourceMedia Entity나 반환 수명주기를 만들지 않는다."},
         {"id": "SCRATCH", "description": "처리 중 임시 출력. 지워져도 되며, 확정된 유일 복사본을 두지 않는다."},
         {"id": "WORKING", "description": "아카이브 전 입고 사본과 파생본을 보관한다. 임의로 지우지 않는다."},
         {"id": "TRANSFER_MEDIA", "description": "Mac과 Windows 사이 전달용 매체. 유일한 아카이브로 쓰지 않는다."},
@@ -829,8 +846,11 @@
         {"id": "ARCHIVE_MIRROR", "description": "아카이브 복제본을 둔다. 주본과 다른 물리 장치여야 한다."},
         {"id": "BACKUP_OFFSITE", "description": "평상시 분리하거나 다른 장소에 보관하는 복제본을 둔다."}
       ],
-      "rules": ["SCRATCH와 WORKING은 같은 SSD에 있어도 역할이 다르다."],
-      "forbidden": {"words": ["working_storage"], "code": []},
+      "rules": [
+        "SCRATCH와 WORKING은 같은 SSD에 있어도 역할이 다르다.",
+        "SOURCE_MEDIA는 Storage의 역할일 뿐 별도 Entity가 아니며 매체 소유권·반환 이력을 뜻하지 않는다."
+      ],
+      "forbidden": {"words": ["working_storage"], "code": ["SourceMedia", "SourceMediaIntake"]},
       "relations": [{"type": "part-of", "target": "storage"}],
       "sources": ["사용자 결정: SCRATCH와 WORKING 둘 다 둠", "idea.md §12.2, §13, §15.7", "docs/design/04-data-archive.md §1"],
       "decided": "2026-10-20"
@@ -849,19 +869,6 @@
       ],
       "forbidden": {"words": ["MediaAsset", "미디어 자산", "source_asset_id"], "code": ["MediaAsset"]},
       "sources": ["사용자 결정: 원본 자산(Original Asset), 원본 자산에는 original", "docs/design/04-data-archive.md §4", "requirements ARC-001"],
-      "decided": "2026-10-20"
-    },
-    {
-      "id": "source-media",
-      "layer": "product",
-      "kind": "entity",
-      "name": {"ko": "원본 매체", "en": "Source Media"},
-      "code_name": "SourceMedia",
-      "definition": "원본이 담겨 들어오는 물리 장치(카메라 SD 카드, 외장 하드 등). StorageRole.SOURCE_MEDIA 저장소를 가진다.",
-      "rules": ["영어 'source'는 원본 매체와 출처 IP(source IP)에만 쓴다."],
-      "forbidden": {"words": [], "code": []},
-      "relations": [{"type": "is-a", "target": "physical-device"}],
-      "sources": ["사용자 결정: 원본 매체(Source Media), 'source'는 원본 매체와 출처 IP에만", "idea.md §12.2", "internal/core/pipeline/templates.go SourceMediaIntake"],
       "decided": "2026-10-20"
     },
     {
@@ -954,12 +961,12 @@
       "kind": "entity",
       "name": {"ko": "입고 사본", "en": "Intake Copy"},
       "code_name": "IntakeCopy",
-      "definition": "원본 매체에서 복사해 체크섬을 확인한 원본 자산의 한 벌. 아카이브 패키지가 생기기 전의 사본이다.",
-      "rules": ["원본 매체 입고 템플릿의 단계 이름은 copy_first, verify_first, copy_second, verify_second이며 아카이브 주본·복제본과 구분한다."],
+      "definition": "등록된 입력 Storage의 대용량 원본 파일을 작업 공간 드라이브로 복사해 체크섬을 확인한 원본 자산의 한 벌. 아카이브 패키지가 생기기 전의 사본이다.",
+      "rules": ["대용량 파일 입고 템플릿의 단계 이름은 copy_first, verify_first, copy_second, verify_second이며 아카이브 주본·복제본과 구분한다."],
       "forbidden": {"words": [], "code": []},
       "relations": [
         {"type": "refers-to", "target": "original-asset"},
-        {"type": "refers-to", "target": "source-media"},
+        {"type": "refers-to", "target": "workspace-drive"},
         {"type": "refers-to", "target": "storage"}
       ],
       "sources": ["사용자 결정: 입고 사본 + 단계 이름 변경"],
@@ -1316,21 +1323,6 @@
       "proposal": "Timeline은 리비전을 가진 Entity로 정의하고, NLE 교환 파일은 Timeline을 표현한 Artifact로 구분한다."
     },
     {
-      "id": "source-media-identity",
-      "words": ["SourceMedia", "원본 매체", "PhysicalDevice"],
-      "senses": [
-        {
-          "meaning": "입고 시마다 독립 ID와 수명주기를 갖는 별도 Entity",
-          "where": ["입고 Job", "매체 반환 기록"]
-        },
-        {
-          "meaning": "StorageRole.SOURCE_MEDIA를 가진 PhysicalDevice의 입고 문맥상 역할",
-          "where": ["장치 감지", "Volume과 Storage 연결"]
-        }
-      ],
-      "proposal": "SourceMedia를 별도 Entity로 중복 저장하지 않고 SOURCE_MEDIA Storage가 연결된 PhysicalDevice의 입고 역할로 정의하되 반환 이력의 식별 요구를 먼저 확인한다."
-    },
-    {
       "id": "processing-output-model",
       "words": ["Transcript", "Summary", "MediaInspection", "Thumbnail"],
       "senses": [
@@ -1381,9 +1373,6 @@
     {"term": "step-state", "type": "document", "from": "idea.md §9.1, §10.3의 상태 값(소문자 execution_state, CHECKING_RESOURCES 등)", "to": "StepState 대문자 값"},
     {"term": "host-load-state", "type": "document", "from": "idea.md §15.4 메모리 모드 NORMAL/CONSTRAINED/CRITICAL", "to": "HostLoadState 판정 기준으로 흡수"},
     {"term": "user", "type": "document", "from": "PC를 직접 쓰는 사람을 뜻하는 '사용자'(idea.md §9.1, §15.6, docs/design/05-runtime-deployment.md §4 등)", "to": "PC 사용 부하"},
-    {"term": "storage", "type": "document", "from": "docs/design/04-data-archive.md §2 'Volume 1 ── 0..1 StorageRegistration', idea.md §12.1 StorageRegistration", "to": "Volume 1 ── N Storage"},
-    {"term": "storage-role", "type": "document", "from": "idea.md §12.2 역할 목록(working_storage, scratch 누락)", "to": "StorageRole 값 7개"},
-    {"term": "storage-role", "type": "code", "from": "config.example.yaml storage role 값 scratch, archive_primary", "to": "SCRATCH, ARCHIVE_PRIMARY (enum 값 표기 규칙)"},
     {"term": "archive-copy", "type": "document", "from": "idea.md §11.1 archive_locations, 문서의 '복사본', '복제본', '주본'", "to": "archive_copies, 아카이브 사본(주본·복제본), 입고 사본"},
     {"term": "action-class", "type": "code", "from": "security.Action 값 read, process, commit, destructive, manage_security", "to": "ActionClass 값 READ, PROCESS, GATED, DESTRUCTIVE, MANAGE"},
     {"term": "action-class", "type": "requirement", "from": "SEC-003 '아카이브 commit', SEC-004 'manage_security'", "to": "아카이브 확정(ActionClass.GATED), ActionClass.MANAGE"},

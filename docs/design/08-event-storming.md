@@ -31,7 +31,7 @@
 
 ```mermaid
 flowchart LR
-    A[원본 매체 연결됨] --> B[원본 자산 등록됨]
+    A[작업 공간 드라이브 선택됨] --> B[원본 자산 등록됨]
     B --> C[입고 사본 2벌 검증됨]
     B --> D[작업 생성됨]
     D --> E[단계 실행됨]
@@ -42,7 +42,7 @@ flowchart LR
     I --> J[아카이브 사본 검증됨]
     J --> K[아카이브 확정됨]
     K -. 투영 .-> L[(검색 조회 화면)]
-    C --> M[원본 매체 안전 제거됨]
+    C --> M[작업 공간 드라이브 안전 해제됨]
 ```
 
 행사 기록, VJ 통합, 최종 편집본은 원본 자산 이후 서로 다른 템플릿으로 작업을 만들지만, 단계 실행과 아카이브 확정은 같은 공통 흐름을 사용한다.
@@ -72,28 +72,26 @@ flowchart LR
 - Worker 결과는 현재 실행 리스의 펜싱 토큰과 일치할 때만 받는다.
 - 파일시스템과 subprocess는 DB transaction에 포함할 수 없으므로 임시 출력 → 검증 → 게시 명령 순서로 연결한다.
 
-## 5. 원본 매체 입고
+## 5. 대용량 파일 입고와 작업 공간 해제
 
 | 순서 | 실행자·계기 | 명령 | 일관성 경계 후보 | 이벤트 | 정책·다음 동작 |
 |---:|---|---|---|---|---|
-| 1 | Worker의 장치 어댑터 | `ReportPhysicalDeviceConnected` | PhysicalDevice | `PhysicalDeviceConnected` | 허용된 장치이면 볼륨 조사를 요청 |
-| 2 | 시스템 정책 | `InspectVolume` | Volume | `VolumeInspected` | 파일시스템과 장치 식별이 유효하면 원본 매체로 등록 가능 |
-| 3 | 담당자 | `RegisterSourceMedia` | SourceMedia·Storage | `SourceMediaRegistered` | 등록된 storage_id만 후속 명령에 사용 |
-| 4 | 담당자 또는 시스템 | `RegisterOriginalAssets` | OriginalAsset | `OriginalAssetRegistered` | 파일별 최초 체크섬과 표시용 원래 이름을 고정 |
-| 5 | 시스템 정책 | `CreateAndVerifyIntakeCopy` | IntakeCopy | `IntakeCopyVerified` | 첫 사본과 두 번째 사본을 서로 다른 물리 장치에 배치 |
-| 6 | 시스템 정책 | `WaitForSourceMediaReturnApproval` | Step | `StepWaiting(APPROVAL)` | 두 입고 사본이 모두 검증된 경우에만 승인 Action Card 표시 |
-| 7 | 담당자 | `RecordApproval` | Approval | `ApprovalRecorded` | 승인 대상 리비전이 현재 값과 같을 때만 유효 |
-| 8 | 담당자 | `RequestSafeEject` | Volume | `VolumeEjectPending` | 활성 lock이 없으면 장치 어댑터에 제거 요청 |
-| 9 | Worker의 장치 어댑터 | `ReportVolumeEjected` | Volume | `VolumeEjected` | 원본 매체 입고 작업 완료 |
+| 1 | 담당자 또는 정책 범위의 에이전트 | `SelectWorkspaceDrive` | PhysicalDevice·Storage | `WorkspaceDriveSelected` | 선택한 storage_id를 PhysicalDevice ID로 해석하고 작업 공간을 예약 |
+| 2 | Worker | `InspectInputFiles` | Step | `InputFilesInspected` | 등록 root 안의 파일만 원본 등록 후보로 전달 |
+| 3 | 담당자 또는 시스템 | `RegisterOriginalAssets` | OriginalAsset | `OriginalAssetRegistered` | 파일별 최초 체크섬과 표시용 원래 이름을 고정 |
+| 4 | 시스템 정책 | `CreateAndVerifyIntakeCopy(copy=first)` | IntakeCopy | `IntakeCopyVerified` | 첫 사본의 대상 Storage와 checksum을 기록 |
+| 5 | 시스템 정책 | `CreateAndVerifyIntakeCopy(copy=second)` | IntakeCopy | `IntakeCopyVerified` | 두 번째 사본을 복사·검증 |
+| 6 | 시스템 정책 | `RequestWorkspaceDriveRelease` | PhysicalDevice | `WorkspaceDriveReleaseRequested` | 두 검증 완료, 활성 lock·파일 handle 없음, 후속 Step 사용 없음 확인 |
+| 7 | Worker의 장치 어댑터 | `ReportWorkspaceDriveReleased` | PhysicalDevice | `WorkspaceDriveReleased` | Job의 대용량 파일 입고 단계 완료 |
 
 핵심 예외 흐름:
 
 - 체크섬 불일치: 입고 사본을 등록하지 않고 해당 Step을 실패 또는 입력 대기로 전환한다.
 - 장치 분리: 시도 횟수를 소비하지 않고 WaitReason.DEVICE로 기다린다.
 - 같은 내용의 원본 자산: 자동 덮어쓰지 않고 중복 후보를 조회 화면에 표시한다.
-- 안전 제거 승인 후 대상 리비전이 바뀜: 기존 승인은 유효하지 않으며 새 승인을 기다린다.
+- 작업 공간 해제 요청 전에 새 Step이 같은 PhysicalDevice lock을 획득함: 해제를 거부하고 현재 Job 상태를 다시 평가한다.
 
-연결 요구사항: `PIP-004`, `ARC-001`, `DEV-001~003`, `WFL-006`.
+이 흐름의 안전 해제는 OS 장치 동작이며 매체 소유권 반환이나 사람의 반환 승인이 아니다. 연결 요구사항: `PIP-004`, `ARC-001`, `DEV-001~003`, `DEV-006`.
 
 ## 6. 작업과 단계 실행
 
@@ -264,7 +262,7 @@ CommandRecord는 감사와 멱등성의 영속 기록이지만 업무 Aggregate 
 | 작업 상세 타임라인 | 명령 기록, 이벤트, Approval, Tool Call, process log 위치 | 사람이 중간 개입하고 실패 원인을 확인 |
 | 자산 검색 | OriginalAsset, Artifact, 기술정보, STT·요약 텍스트 | 제목·행사·내용·codec·시간 검색 |
 | 아카이브 상태 | ArchivePackage, ArchiveCopy, manifest 재검증 결과 | 주본·복제본 상태와 복구 필요 여부 확인 |
-| 장치·저장소 | PhysicalDevice, Volume, Storage, lock | 안전 제거·포맷 전 확인 |
+| 작업 공간 드라이브 | PhysicalDevice, Volume, Storage, lock, file handle | Job의 I/O 충돌과 안전 해제 가능 여부 확인 |
 | Worker 상태 | heartbeat, HostLoadState, slot, 접근 Storage | 배정 가능 여부와 자원 병목 확인 |
 | AI 계정 상태 | 계정 상태, cooldown, budget, 최근 실패 | 폴백 순서와 AI 사용 불가 원인 확인 |
 
@@ -278,7 +276,7 @@ CommandRecord는 감사와 멱등성의 영속 기록이지만 업무 Aggregate 
 | ES-02 | Review 결과의 식별자·상태·리비전이 용어집에 없음 | 변경 불가능한 ContentReview 기록과 검수 상태 정의 | `content-review` 용어와 `PIP-006`으로 고정 |
 | ES-03 | Timeline과 cut 선택이 용어집에 없음 | Timeline Entity와 CutSelection Value 정의 | 결정 필요 |
 | ES-04 | STT·요약·기술정보를 모두 일반 Artifact로만 표현할지 | 검색과 검수 규칙이 다르므로 Transcript, Summary, MediaInspection을 Artifact의 종류로 정의 | 결정 필요 |
-| ES-05 | SourceMedia와 PhysicalDevice의 식별자가 중복될 가능성 | SourceMedia를 독립 ID가 아니라 SOURCE_MEDIA Storage를 가진 PhysicalDevice의 문맥상 역할로 정리 | 온톨로지 `source-media-identity` open에 기록 |
+| ES-05 | SourceMedia와 PhysicalDevice의 식별자가 중복될 가능성 | 별도 SourceMedia Entity를 두지 않고 SOURCE_MEDIA는 StorageRole로만 사용하며 작업 공간은 PhysicalDevice ID로 식별 | `workspace-drive`, `storage-role` 용어와 `DEV-006`으로 고정 |
 | ES-06 | Job 자체 상태가 필요한지 | 초기에는 Step 투영으로 계산하고 별도 JobState를 만들지 않음 | `job` 규칙으로 고정 |
 | ES-07 | 저장하지 않는 Notification의 reconnect cursor | 이벤트 기반 알림은 event ID로 재생하고 metric 알림은 재생하지 않음 | `NTF-001`, `NTF-002`로 고정 |
 | ES-08 | DB와 파일 publish 사이 장애 | staging ID와 publish receipt를 두고 재시작 시 파일과 DB를 조정 | `WFL-009`, `EXE-002`, `EXE-003`으로 고정 |
@@ -290,8 +288,8 @@ CommandRecord는 감사와 멱등성의 영속 기록이지만 업무 Aggregate 
 
 ## 15. 요구사항으로 내리는 순서
 
-1. 아직 열린 ES-03~05, ES-09, ES-13의 용어와 상태 집합을 결정한다.
-2. 원본 매체 입고를 첫 Adapter 수직 슬라이스로 연결한다.
+1. 아직 열린 ES-03~04, ES-09, ES-13의 용어와 상태 집합을 결정한다.
+2. 대용량 파일 입고와 작업 공간 드라이브 해제를 첫 Adapter 수직 슬라이스로 연결한다.
 3. SQLite projection·migration·backup/restore 요구사항을 추가하고 기존 `PER-001` Command Store에 연결한다.
 4. 행사 기록, VJ 통합, 최종 편집본 Template을 실제 FFmpeg·STT Adapter에 연결한다.
 5. HTTP Command API와 Dashboard를 기존 `NTF-002` SSE Adapter에 연결한다.

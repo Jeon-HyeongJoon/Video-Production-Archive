@@ -24,6 +24,7 @@ Job 1 ── N Step 1 ── N Event
 ArchivePackage 1 ── N ArchiveCopy ── Storage
 PhysicalDevice 1 ── N Partition 1 ── N Volume
 Volume 1 ── N Storage
+Job N ── N WorkspaceDrive(role of PhysicalDevice)
 ```
 
 Agent 계층은 `AgentSession → AgentTurn → ProviderRequest → AgentToolCall`로 연결하며 Tool Call은 같은 `command_id`를 사용한다.
@@ -37,6 +38,7 @@ Agent 계층은 `AgentSession → AgentTurn → ProviderRequest → AgentToolCal
 - `..`, UNC 우회, symlink와 등록 root 밖의 경로를 거부한다. Windows junction/reparse point는 실제 Windows acceptance test인 `ARC-008`로 검증한다.
 - mount path는 장치 식별자가 아니다. 장치 serial, filesystem UUID, model, capacity, 물리 라벨을 조합한다.
 - path는 저장 시 정규화하되 사용자 표시용 원본 파일명도 별도 보존한다.
+- 대용량 파일 Job의 작업 공간 단위는 PhysicalDevice다. Storage Adapter는 storage_id를 해당 PhysicalDevice ID로 해석하며 같은 장치의 여러 Volume과 root를 별도 작업 공간으로 취급하지 않는다. `DEV-006`
 
 ## 4. 원본과 파생본
 

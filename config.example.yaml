@@ -40,8 +40,10 @@ workers:
 
 storage:
   - id: scratch-main
-    role: scratch
+    role: SCRATCH
+    physical_device_id: internal-nvme-01
     root: D:/VideoArchive/scratch
   - id: archive-primary
-    role: archive_primary
+    role: ARCHIVE_PRIMARY
+    physical_device_id: archive-hdd-01
     root: E:/VideoArchive/archive

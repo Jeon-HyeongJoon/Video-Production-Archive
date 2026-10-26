@@ -115,14 +115,16 @@ intake → duplicate_check → record_edit_version → analyze
 
 요구사항: `PIP-003`
 
-### 원본 매체 입고
+### 대용량 파일 입고
 
 ```text
-detect → inspect → role
+inspect_inputs → register_original_assets
 → copy_first → verify_first
 → copy_second → verify_second
-→ return_approval → safe_eject
+→ release_workspace_drive
 ```
+
+입력은 미리 등록된 Storage와 선택된 파일 ID로 받는다. 작업 공간의 예약·I/O 충돌·해제 단위는 경로나 Volume이 아니라 PhysicalDevice다. 마지막 단계는 모든 사본 검증과 파일 handle 정리 뒤 Device Adapter로 해당 드라이브를 안전 제거한다. Template은 매체 소유권·반환·인수인계를 모델링하지 않으며 별도의 반환 승인을 요구하지 않는다.
 
 요구사항: `PIP-004`
 

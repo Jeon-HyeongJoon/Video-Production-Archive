@@ -29,6 +29,8 @@ Control Service만 운영 DB에 직접 쓴다.
 | Repository Adapter | SQLite transaction과 projection |
 | Sidecar Service | archive export/import |
 
+각 도메인 기능은 protocol과 무관한 Application Capability Port로 먼저 제공한다. CLI, test, Scheduler, HTTP와 MCP는 같은 Capability Registry를 호출하므로 서버 Adapter가 없어도 기능 자체를 직접 실행할 수 있다. 장시간 기능은 동기 HTTP 응답을 붙잡지 않고 Job/Step ID를 반환한다. 세부 계약은 [10. 도메인 기능 실행과 검증 증적](10-capabilities-observability.md)을 따른다. `APP-001`
+
 HTTP와 MCP는 Domain 함수를 직접 호출하지 않고 같은 Command Bus를 사용한다. Handler는 저장 상태를 직접 바꾸지 않고 새 상태와 Event를 반환하며 Store가 상태·CommandRecord·Event·receipt를 한 번에 확정한다. Core 경계는 `CMD-001~010`, 실제 SQLite transaction은 `PER-001` integration test로 검증한다.
 
 ## 3. Media Worker

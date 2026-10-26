@@ -112,9 +112,9 @@ Scheduler는 다음 순서로 후보를 거른다.
 - 임시 결과는 Worker별 scratch namespace에 둔다.
 - 동일 물리 볼륨 lock은 Worker가 달라도 Control에서 전역 관리한다.
 
-## 8. 대시보드
+## 8. Dashboard의 Worker 투영
 
-인증 비활성 개발 모드에서도 Worker 상태는 읽기 화면으로 제공한다.
+Dashboard는 에이전트의 Job 진행과 자원 병목을 설명하기 위해 Worker 상태를 읽기 화면으로 제공한다.
 
 - worker ID와 hostname
 - ONLINE/BUSY/OFFLINE 상태
@@ -123,4 +123,4 @@ Scheduler는 다음 순서로 후보를 거른다.
 - 접근 가능한 storage와 연결 장치
 - 실행 중 Step, 마지막 heartbeat와 오류
 
-Worker 등록·credential 변경·삭제 버튼은 제공하지 않는다. 설정 파일을 바꾸고 Control Service를 재시작한다.
+연결 장치는 Step 실행 가능 여부, PhysicalDevice 작업 공간의 lock 충돌과 안전 해제 가능 여부를 설명하는 정보로 표시한다. 매체 소유권·반환 상태나 반환 승인 기능은 제공하지 않는다. Worker 등록·credential 변경·삭제 버튼도 제공하지 않으며 설정 파일을 바꾸고 Control Service를 재시작한다. 전체 Dashboard 범위는 [09. Dashboard 운영 투영 설계](09-dashboard-operations.md)를 따른다.
