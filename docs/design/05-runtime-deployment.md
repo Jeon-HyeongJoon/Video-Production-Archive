@@ -64,6 +64,8 @@ Publish(evidence) → artifact IDs
 
 명령행은 배열 인수로 만들고 shell 문자열 결합을 사용하지 않는다. 출력은 임시 경로에서 검증한 뒤에만 게시한다. 로그에는 원문 credential이나 민감 경로를 노출하지 않는다. Core 계약은 `EXE-001~002`, DB와 파일 게시 사이 재시작 조정은 `EXE-003` integration test가 검증한다.
 
+ffprobe Adapter는 Storage Adapter가 등록 root 안에서 해석한 실행 입력만 받아 `-show_format`, `-show_streams` JSON을 요청하고 이를 정규화한 `MediaInspection`으로 변환한다. CI에서는 격리 실행 파일로 인수 배열과 변환을 검증하고, 실제 Windows ffprobe와 대표 영상은 운영기기 acceptance에서 검증한다. `MED-002~003`
+
 ## 6. Windows 서비스 배포
 
 - `video-archive-control`과 `video-archive-worker`를 별도 Windows Service로 등록

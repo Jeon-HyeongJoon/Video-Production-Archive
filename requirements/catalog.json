@@ -1176,6 +1176,30 @@
       "test_name": "TestMediaInspectionNormalizesCompleteTechnicalMetadata",
       "status": "implemented",
       "level": "unit"
+    },
+    {
+      "id": "MED-002",
+      "design": "ffprobe-adapter",
+      "statement": "FFprobe Adapter는 Storage Adapter가 해석한 입력을 shell 없이 JSON format·stream 조회 인수로 실행하고 결과를 MediaInspection으로 변환해야 한다.",
+      "given": "공백과 shell 메타문자가 포함된 해석 완료 입력 경로와 실제 subprocess로 동작하는 ffprobe JSON fixture가 있다.",
+      "when": "미디어 기술정보 분석을 실행한다.",
+      "then": "입력 경로가 단일 인수로 그대로 전달되고 컨테이너·길이·크기·bitrate·video/audio stream이 원본 식별 정보에 묶인 MediaInspection으로 반환된다.",
+      "test_file": "internal/adapter/ffprobe/ffprobe_test.go",
+      "test_name": "TestFFprobeAdapterExecutesArgumentArrayAndCreatesMediaInspection",
+      "status": "implemented",
+      "level": "integration"
+    },
+    {
+      "id": "MED-003",
+      "design": "windows-ffprobe-acceptance",
+      "statement": "Windows Worker의 실제 ffprobe는 대표 영상 파일을 분석해 CI fixture와 같은 MediaInspection 필드를 생성해야 한다.",
+      "given": "운영 버전 ffprobe와 H.264/AAC 대표 영상이 설치된 격리 Windows Worker가 있다.",
+      "when": "등록 Storage의 대표 영상을 MediaInspection으로 분석한다.",
+      "then": "실제 container·duration·size·bitrate·video/audio stream 값이 기록되고 원본 파일은 변경되지 않는다.",
+      "test_file": "",
+      "test_name": "",
+      "status": "planned",
+      "level": "acceptance"
     }
   ]
 }
