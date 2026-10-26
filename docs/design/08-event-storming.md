@@ -260,7 +260,7 @@ CommandRecord는 감사와 멱등성의 영속 기록이지만 업무 Aggregate 
 |---|---|---|
 | 작업함 | Job, StepState, Wait Reason, 실행 우선순위 | 대기·실행·실패 작업 확인 |
 | 작업 상세 타임라인 | 명령 기록, 이벤트, Approval, Tool Call, process log 위치 | 사람이 중간 개입하고 실패 원인을 확인 |
-| 자산 검색 | OriginalAsset, Artifact, 기술정보, STT·요약 텍스트 | 제목·행사·내용·codec·시간 검색 |
+| 자산 검색 | OriginalAsset, Artifact, 기술정보, STT·요약 텍스트 | 제목·행사·내용·codec·시간 검색 (`CAT-001~002`) |
 | 아카이브 상태 | ArchivePackage, ArchiveCopy, manifest 재검증 결과 | 주본·복제본 상태와 복구 필요 여부 확인 |
 | 작업 공간 드라이브 | PhysicalDevice, Volume, Storage, lock, file handle | Job의 I/O 충돌과 안전 해제 가능 여부 확인 |
 | Worker 상태 | heartbeat, HostLoadState, slot, 접근 Storage | 배정 가능 여부와 자원 병목 확인 |

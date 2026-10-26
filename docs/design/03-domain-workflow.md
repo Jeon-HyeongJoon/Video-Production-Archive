@@ -26,6 +26,8 @@ Rendering은 versioned Profile만 실행한다. v1 `archive-event-1080p`는 호�
 
 QC는 렌더 요청값을 그대로 신뢰하지 않는다. 게시 파일을 ffprobe와 SHA-256으로 다시 관찰한 `OutputObservation`을 원본 `MediaInspection`, 렌더 Profile 및 Rendition과 비교한다. decodable·checksum·크기·container·video/audio codec·해상도·길이 검사가 모두 통과한 `QCAssessment`만 PASSED이며 각 검사의 기대값과 실제값을 보존한다. 이 평가는 다음 단계에서 provenance를 가진 `QCReport` sidecar로 게시한다. `QCT-001~002`
 
+Catalog는 파일을 이동하거나 경로를 검색 키로 사용하지 않는다. 사람 또는 Agent가 작성한 제목·설명·키워드는 OriginalAsset별 추가 전용 `CatalogRecord` 리비전으로 남긴다. 자산 검색은 최신 CatalogRecord와 최신 MediaInspection을 결합해 text·video codec·길이 조건을 적용하며 OriginalAsset 콘텐츠 정체성을 반환한다. `CAT-001~002`
+
 ## 2. 공통 Command
 
 모든 상태 변경은 다음 의미를 가진다.

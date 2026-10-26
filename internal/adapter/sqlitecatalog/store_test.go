@@ -9,8 +9,10 @@ import (
 	"time"
 
 	"videoarchive/internal/core/asset"
+	"videoarchive/internal/core/catalog"
 	"videoarchive/internal/core/intake"
 	"videoarchive/internal/core/mediaanalysis"
+	"videoarchive/internal/core/vocabulary"
 )
 
 const checksumA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -103,6 +105,58 @@ func TestSQLiteMediaInspectionsRemainAppendOnlyAndQueryable(t *testing.T) {
 	}
 }
 
+// Requirement: CAT-002
+func TestSQLiteCatalogSearchUsesLatestDescriptionCodecAndDurationWithoutPaths(t *testing.T) {
+	ctx := context.Background()
+	store := openCatalog(t)
+	now := time.Date(2026, 10, 26, 15, 0, 0, 0, time.UTC)
+	firstObservation := observedFile("OBSERVATION-1", checksumA, "camera/CLIP001.MOV")
+	secondObservation := observedFile("OBSERVATION-2", checksumB, "camera/CLIP002.MOV")
+	for _, observation := range []intake.InputFileObservation{firstObservation, secondObservation} {
+		if err := store.AppendObservation(ctx, observation); err != nil {
+			t.Fatal(err)
+		}
+	}
+	firstOriginal := registeredOriginal(t, "ASSET-1", firstObservation)
+	secondOriginal := registeredOriginal(t, "ASSET-2", secondObservation)
+	for _, original := range []asset.OriginalAsset{firstOriginal, secondOriginal} {
+		if err := store.AppendOriginal(ctx, original); err != nil {
+			t.Fatal(err)
+		}
+	}
+	oldInspection := inspectedMediaWith("INSPECTION-OLD", firstOriginal.ID, checksumA, now, "hevc", 55_000)
+	latestInspection := inspectedMediaWith("INSPECTION-1", firstOriginal.ID, checksumA, now.Add(time.Minute), "h264", 60_000)
+	otherInspection := inspectedMediaWith("INSPECTION-2", secondOriginal.ID, checksumB, now, "h264", 120_000)
+	for _, inspection := range []mediaanalysis.MediaInspection{oldInspection, latestInspection, otherInspection} {
+		if err := store.AppendInspection(ctx, inspection); err != nil {
+			t.Fatal(err)
+		}
+	}
+	records := []catalog.CatalogRecord{
+		{ID: "RECORD-1", OriginalAssetID: "ASSET-1", Revision: 1, Title: "임시 제목", Description: "초기 설명", AuthorType: vocabulary.ActorHuman, AuthorID: "operator-1", RecordedAt: now},
+		{ID: "RECORD-2", OriginalAssetID: "ASSET-1", Revision: 2, Title: "2026 가을 행사", Description: "전체 행사 기록 영상", Keywords: []string{"강연", "서울"}, AuthorType: vocabulary.ActorHuman, AuthorID: "operator-1", RecordedAt: now.Add(time.Minute)},
+		{ID: "RECORD-3", OriginalAssetID: "ASSET-2", Revision: 1, Title: "2026 봄 행사", Description: "장시간 행사 기록", AuthorType: vocabulary.ActorAgent, AuthorID: "agent-1", RecordedAt: now},
+	}
+	for _, record := range records {
+		if err := store.AppendCatalogRecord(ctx, record); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	results, err := store.Search(ctx, catalog.SearchQuery{
+		Text: " 가을 행사 ", VideoCodec: "H264", MinDurationMillis: 59_000, MaxDurationMillis: 61_000,
+	})
+	if err != nil || len(results) != 1 {
+		t.Fatalf("search results=%+v err=%v", results, err)
+	}
+	result := results[0]
+	if result.Original.ID != "ASSET-1" || result.Metadata.ID != "RECORD-2" || result.Metadata.Revision != 2 ||
+		result.Metadata.Description != "전체 행사 기록 영상" || result.Inspection == nil || result.Inspection.ID != "INSPECTION-1" ||
+		result.Inspection.VideoStreams[0].Codec != "h264" || result.Inspection.DurationMillis != 60_000 {
+		t.Fatalf("search did not use latest searchable records: %+v", result)
+	}
+}
+
 func openCatalog(t *testing.T) *Store {
 	t.Helper()
 	store, err := Open(filepath.Join(t.TempDir(), "catalog.db"))
@@ -131,11 +185,15 @@ func registeredOriginal(t *testing.T, id string, observation intake.InputFileObs
 }
 
 func inspectedMedia(id, originalID, checksum string, inspectedAt time.Time) mediaanalysis.MediaInspection {
+	return inspectedMediaWith(id, originalID, checksum, inspectedAt, "h264", 10_000)
+}
+
+func inspectedMediaWith(id, originalID, checksum string, inspectedAt time.Time, videoCodec string, durationMillis int64) mediaanalysis.MediaInspection {
 	return mediaanalysis.MediaInspection{
 		ID: id, OriginalAssetID: originalID, OriginalChecksum: checksum,
-		Containers: []string{"mov"}, DurationMillis: 10_000, SizeBytes: 1234, BitRate: 1_000_000,
+		Containers: []string{"mov"}, DurationMillis: durationMillis, SizeBytes: 1234, BitRate: 1_000_000,
 		VideoStreams: []mediaanalysis.VideoStream{{
-			Index: 0, Codec: "h264", Width: 1920, Height: 1080,
+			Index: 0, Codec: videoCodec, Width: 1920, Height: 1080,
 			FrameRate: mediaanalysis.Rational{Numerator: 30, Denominator: 1}, PixelFormat: "yuv420p",
 		}},
 		AudioStreams:     []mediaanalysis.AudioStream{{Index: 1, Codec: "aac", SampleRateHz: 48_000, Channels: 2, ChannelLayout: "stereo"}},

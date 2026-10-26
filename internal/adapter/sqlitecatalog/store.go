@@ -13,6 +13,7 @@ import (
 	_ "modernc.org/sqlite"
 
 	"videoarchive/internal/core/asset"
+	"videoarchive/internal/core/catalog"
 	"videoarchive/internal/core/intake"
 	"videoarchive/internal/core/mediaanalysis"
 )
@@ -74,6 +75,18 @@ func (store *Store) migrate(ctx context.Context) error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS media_inspections_original_time
 			ON media_inspections(original_asset_id, inspected_at, inspection_id)`,
+		`CREATE TABLE IF NOT EXISTS catalog_records (
+			record_id TEXT PRIMARY KEY,
+			original_asset_id TEXT NOT NULL REFERENCES original_assets(asset_id),
+			revision INTEGER NOT NULL,
+			title_sort TEXT NOT NULL,
+			payload BLOB NOT NULL,
+			UNIQUE(original_asset_id, revision)
+		)`,
+		`CREATE INDEX IF NOT EXISTS catalog_records_latest
+			ON catalog_records(original_asset_id, revision DESC)`,
+		`CREATE INDEX IF NOT EXISTS catalog_records_title
+			ON catalog_records(title_sort, original_asset_id)`,
 	}
 	for _, statement := range statements {
 		if _, err := store.db.ExecContext(ctx, statement); err != nil {
@@ -220,6 +233,144 @@ func (store *Store) InspectionsByOriginal(ctx context.Context, originalAssetID s
 		inspections = append(inspections, normalized)
 	}
 	return inspections, rows.Err()
+}
+
+func (store *Store) AppendCatalogRecord(ctx context.Context, record catalog.CatalogRecord) error {
+	normalized, err := catalog.NewRecord(record)
+	if err != nil {
+		return err
+	}
+	var exists int
+	err = store.db.QueryRowContext(ctx, `SELECT 1 FROM original_assets WHERE asset_id = ?`, normalized.OriginalAssetID).Scan(&exists)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrRecordNotFound
+	}
+	if err != nil {
+		return err
+	}
+	payload, err := json.Marshal(normalized)
+	if err != nil {
+		return err
+	}
+	var existing []byte
+	err = store.db.QueryRowContext(ctx, `
+		SELECT payload FROM catalog_records WHERE original_asset_id = ? AND revision = ?
+	`, normalized.OriginalAssetID, normalized.Revision).Scan(&existing)
+	if err == nil {
+		if bytes.Equal(existing, payload) {
+			return nil
+		}
+		return ErrRecordConflict
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	return store.appendImmutable(ctx,
+		`INSERT INTO catalog_records(record_id, original_asset_id, revision, title_sort, payload) VALUES (?, ?, ?, ?, ?)`,
+		`SELECT payload FROM catalog_records WHERE record_id = ?`,
+		normalized.ID, payload, normalized.OriginalAssetID, normalized.Revision, strings.ToLower(normalized.Title))
+}
+
+func (store *Store) Search(ctx context.Context, query catalog.SearchQuery) ([]catalog.SearchResult, error) {
+	normalizedQuery, err := catalog.NormalizeQuery(query)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := store.db.QueryContext(ctx, `
+		SELECT catalog_records.payload, original_assets.payload, media_inspections.payload
+		FROM catalog_records
+		JOIN original_assets ON original_assets.asset_id = catalog_records.original_asset_id
+		LEFT JOIN media_inspections ON media_inspections.inspection_id = (
+			SELECT latest_inspection.inspection_id FROM media_inspections AS latest_inspection
+			WHERE latest_inspection.original_asset_id = catalog_records.original_asset_id
+			ORDER BY latest_inspection.inspected_at DESC, latest_inspection.inspection_id DESC LIMIT 1
+		)
+		WHERE catalog_records.revision = (
+			SELECT MAX(latest.revision) FROM catalog_records AS latest
+			WHERE latest.original_asset_id = catalog_records.original_asset_id
+		)
+		ORDER BY catalog_records.title_sort, catalog_records.original_asset_id
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []catalog.SearchResult
+	for rows.Next() {
+		var metadataPayload, originalPayload, inspectionPayload []byte
+		if err := rows.Scan(&metadataPayload, &originalPayload, &inspectionPayload); err != nil {
+			return nil, err
+		}
+		var metadata catalog.CatalogRecord
+		var original asset.OriginalAsset
+		if err := json.Unmarshal(metadataPayload, &metadata); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(originalPayload, &original); err != nil {
+			return nil, err
+		}
+		metadata, err = catalog.NewRecord(metadata)
+		if err != nil || original.Validate() != nil {
+			return nil, ErrRecordConflict
+		}
+		if !matchesText(metadata, normalizedQuery.Text) {
+			continue
+		}
+		var inspection *mediaanalysis.MediaInspection
+		if len(inspectionPayload) > 0 {
+			var observed mediaanalysis.MediaInspection
+			if err := json.Unmarshal(inspectionPayload, &observed); err != nil {
+				return nil, err
+			}
+			normalized, err := mediaanalysis.NewMediaInspection(observed)
+			if err != nil {
+				return nil, err
+			}
+			inspection = &normalized
+		}
+		if !matchesInspection(inspection, normalizedQuery) {
+			continue
+		}
+		results = append(results, catalog.SearchResult{Original: original, Metadata: metadata, Inspection: inspection})
+	}
+	return results, rows.Err()
+}
+
+func matchesText(record catalog.CatalogRecord, text string) bool {
+	if text == "" {
+		return true
+	}
+	haystack := strings.ToLower(record.Title + "\n" + record.Description + "\n" + strings.Join(record.Keywords, "\n"))
+	return strings.Contains(haystack, text)
+}
+
+func matchesInspection(inspection *mediaanalysis.MediaInspection, query catalog.SearchQuery) bool {
+	if query.VideoCodec == "" && query.MinDurationMillis == 0 && query.MaxDurationMillis == 0 {
+		return true
+	}
+	if inspection == nil {
+		return false
+	}
+	if query.VideoCodec != "" {
+		matched := false
+		for _, stream := range inspection.VideoStreams {
+			if stream.Codec == query.VideoCodec {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return false
+		}
+	}
+	if query.MinDurationMillis > 0 && inspection.DurationMillis < query.MinDurationMillis {
+		return false
+	}
+	if query.MaxDurationMillis > 0 && inspection.DurationMillis > query.MaxDurationMillis {
+		return false
+	}
+	return true
 }
 
 func (store *Store) appendImmutable(ctx context.Context, insert, selectPayload, id string, payload []byte, indexedValues ...any) error {

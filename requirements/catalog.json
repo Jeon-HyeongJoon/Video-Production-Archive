@@ -1320,6 +1320,30 @@
       "test_name": "TestFFprobeAdapterObservesPublishedRenditionBytesForQC",
       "status": "implemented",
       "level": "integration"
+    },
+    {
+      "id": "CAT-001",
+      "design": "catalog-record-domain",
+      "statement": "CatalogRecord는 OriginalAsset별 제목·설명·키워드의 버전과 작성자가 사람인지 Agent인지의 출처를 가진 추가 전용 기록이어야 한다.",
+      "given": "공백과 중복 키워드가 있는 완전한 설명 기록 및 설명이 비어 있는 기록이 있다.",
+      "when": "CatalogRecord를 생성한다.",
+      "then": "완전한 기록은 제목·설명·키워드·작성자 출처가 정규화되고 설명 없는 기록은 거부된다.",
+      "test_file": "internal/core/catalog/catalog_test.go",
+      "test_name": "TestCatalogRecordKeepsVersionedDescriptionAndAuthorOrigin",
+      "status": "implemented",
+      "level": "unit"
+    },
+    {
+      "id": "CAT-002",
+      "design": "sqlite-asset-search",
+      "statement": "자산 검색은 파일 경로가 아니라 OriginalAsset의 최신 CatalogRecord와 최신 MediaInspection을 사용해 제목·설명·키워드 text, video codec과 길이 범위로 조회해야 한다.",
+      "given": "설명 리비전과 기술정보 관찰 시각이 서로 다른 두 OriginalAsset이 SQLite 입고 카탈로그에 있다.",
+      "when": "text·video codec·길이 범위를 함께 지정해 검색한다.",
+      "then": "모든 조건에 맞는 자산만 최신 설명과 최신 기술정보로 반환되고 결과 모델에는 Storage root나 상대경로가 포함되지 않는다.",
+      "test_file": "internal/adapter/sqlitecatalog/store_test.go",
+      "test_name": "TestSQLiteCatalogSearchUsesLatestDescriptionCodecAndDurationWithoutPaths",
+      "status": "implemented",
+      "level": "integration"
     }
   ]
 }
