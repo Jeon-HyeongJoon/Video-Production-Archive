@@ -7,6 +7,7 @@ import (
 
 var (
 	ErrInvalidTopology          = errors.New("storage topology is incomplete")
+	ErrStorageUnresolved        = errors.New("storage cannot be resolved")
 	ErrWorkspaceDriveUnresolved = errors.New("workspace drive cannot be resolved")
 )
 
@@ -36,4 +37,16 @@ type WorkspaceDrive struct {
 
 type WorkspaceResolver interface {
 	ResolveWorkspaceDrive(ctx context.Context, storageID string) (WorkspaceDrive, error)
+}
+
+// Access contains the boot-configured root and the PhysicalDevice identity
+// required by a Worker to open and reserve one Storage.
+type Access struct {
+	StorageID        string
+	Root             string
+	WorkspaceDriveID string
+}
+
+type AccessResolver interface {
+	ResolveAccess(ctx context.Context, storageID string) (Access, error)
 }

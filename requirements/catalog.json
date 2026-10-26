@@ -1200,6 +1200,18 @@
       "test_name": "",
       "status": "planned",
       "level": "acceptance"
+    },
+    {
+      "id": "INT-001",
+      "design": "intake-file-inspection",
+      "statement": "입고 검사는 등록 Storage root의 파일을 읽기 전용으로 열어 checksum·크기·원래 이름과 PhysicalDevice 작업공간을 가진 InputFileObservation을 생성해야 한다.",
+      "given": "SQLite에 PhysicalDevice 관계와 root가 등록된 Storage 및 그 root 아래의 원본 파일이 있다.",
+      "when": "Worker가 storage_id와 상대경로로 입력 파일을 검사한다.",
+      "then": "절대 root 없이 정규화 상대경로·원래 이름·크기·SHA-256·workspace_drive_id가 기록되고 원본 내용·크기·수정시각·mode는 바뀌지 않는다.",
+      "test_file": "internal/adapter/intake/inspector_test.go",
+      "test_name": "TestInputInspectionHashesRegisteredStorageFileWithoutChangingIt",
+      "status": "implemented",
+      "level": "integration"
     }
   ]
 }

@@ -872,6 +872,25 @@
       "decided": "2026-10-20"
     },
     {
+      "id": "input-file-observation",
+      "layer": "product",
+      "kind": "record",
+      "name": {"ko": "입력 파일 관찰", "en": "Input File Observation"},
+      "code_name": "InputFileObservation",
+      "definition": "등록 Storage root 안의 파일을 읽기 전용으로 검사해 상대경로, 원래 이름, 크기, checksum과 작업 공간 드라이브를 남긴 추가 전용 기록.",
+      "rules": [
+        "절대 Storage root를 기록에 포함하지 않는다.",
+        "OriginalAsset 등록 전에 생성하며 원본 내용을 변경하지 않는다."
+      ],
+      "forbidden": {"words": [], "code": []},
+      "relations": [
+        {"type": "refers-to", "target": "storage"},
+        {"type": "refers-to", "target": "workspace-drive"}
+      ],
+      "sources": ["docs/design/08-event-storming.md §5", "docs/design/03-domain-workflow.md §1", "requirements INT-001"],
+      "decided": "2026-10-26"
+    },
+    {
       "id": "media-inspection",
       "layer": "product",
       "kind": "record",

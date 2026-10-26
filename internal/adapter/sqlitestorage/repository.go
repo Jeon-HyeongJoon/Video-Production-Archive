@@ -16,6 +16,7 @@ type Repository struct {
 }
 
 var _ storage.WorkspaceResolver = (*Repository)(nil)
+var _ storage.AccessResolver = (*Repository)(nil)
 
 func Open(path string) (*Repository, error) {
 	db, err := sql.Open("sqlite", path)
@@ -92,22 +93,35 @@ func (repository *Repository) Register(ctx context.Context, topology storage.Top
 }
 
 func (repository *Repository) ResolveWorkspaceDrive(ctx context.Context, storageID string) (storage.WorkspaceDrive, error) {
-	var physicalDeviceID string
-	err := repository.db.QueryRowContext(ctx, `
-		SELECT partitions.physical_device_id
-		FROM storages
-		JOIN volumes ON volumes.volume_id = storages.volume_id
-		JOIN partitions ON partitions.partition_id = volumes.partition_id
-		WHERE storages.storage_id = ?
-	`, storageID).Scan(&physicalDeviceID)
-	if errors.Is(err, sql.ErrNoRows) {
+	access, err := repository.ResolveAccess(ctx, storageID)
+	if errors.Is(err, storage.ErrStorageUnresolved) {
 		return storage.WorkspaceDrive{}, storage.ErrWorkspaceDriveUnresolved
 	}
 	if err != nil {
 		return storage.WorkspaceDrive{}, err
 	}
-	if physicalDeviceID == "" {
-		return storage.WorkspaceDrive{}, storage.ErrWorkspaceDriveUnresolved
+	return storage.WorkspaceDrive{ID: access.WorkspaceDriveID}, nil
+}
+
+func (repository *Repository) ResolveAccess(ctx context.Context, storageID string) (storage.Access, error) {
+	var access storage.Access
+	err := repository.db.QueryRowContext(ctx, `
+		SELECT partitions.physical_device_id
+		     , storages.storage_id
+		     , storages.root
+		FROM storages
+		JOIN volumes ON volumes.volume_id = storages.volume_id
+		JOIN partitions ON partitions.partition_id = volumes.partition_id
+		WHERE storages.storage_id = ?
+	`, storageID).Scan(&access.WorkspaceDriveID, &access.StorageID, &access.Root)
+	if errors.Is(err, sql.ErrNoRows) {
+		return storage.Access{}, storage.ErrStorageUnresolved
 	}
-	return storage.WorkspaceDrive{ID: physicalDeviceID}, nil
+	if err != nil {
+		return storage.Access{}, err
+	}
+	if access.StorageID == "" || access.Root == "" || access.WorkspaceDriveID == "" {
+		return storage.Access{}, storage.ErrStorageUnresolved
+	}
+	return access, nil
 }
