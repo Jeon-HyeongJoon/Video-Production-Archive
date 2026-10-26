@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"videoarchive/internal/core/archive"
+	"videoarchive/internal/core/audio"
 	"videoarchive/internal/core/transcription"
 	"videoarchive/internal/core/vocabulary"
 )
@@ -40,19 +41,27 @@ func TestWhisperCPPAdapterExecutesArgumentArrayAndPublishesVerifiedTranscript(t 
 	profile := transcription.Profile{
 		ID: "event-ko", Version: 1, ModelID: "ggml-large-v3-turbo-q5_0", Language: "ko", ThreadCount: 4,
 	}
-	audio := archive.Artifact{
+	audioProfile := audio.Profile{
+		ID: "speech-pcm-16k", Version: 1, Container: audio.ContainerWAV, Codec: audio.CodecPCM16LE,
+		SampleRateHz: audio.SpeechRateHz, Channels: audio.SpeechChannels, ThreadCount: 2,
+	}
+	audioArtifact := archive.Artifact{
 		ID: "AUDIO-1", Path: "audio/event.wav", Size: 1_024, Checksum: audioChecksum,
 		Origin: archive.Provenance{
 			OriginalAssetID: "ASSET-1", InputArtifactIDs: []string{}, ProcessingKind: vocabulary.ProcessingAudioExtract,
-			ProcessorVersion: "ffmpeg-8.0", ProfileVersion: "speech-pcm@v1", CreatedBy: "WORKER-1", CreatedAt: time.Now().UTC(),
+			ProcessorVersion: "ffmpeg-8.0", ProfileVersion: audioProfile.Reference(), CreatedBy: "WORKER-1", CreatedAt: time.Now().UTC(),
 		},
+	}
+	audioInput, err := audio.NewAudioArtifact(audioArtifact, audioProfile)
+	if err != nil {
+		t.Fatal(err)
 	}
 	inputPath := filepath.Join(directory, "audio", "event & keep.wav")
 	modelPath := filepath.Join(directory, "models", "large;keep.bin")
 	temporaryPath := filepath.Join(directory, "output", "event.json.partial")
 	publishedPath := filepath.Join(directory, "output", "event.json")
 	transcript, err := transcriber.Transcribe(context.Background(), Request{
-		TranscriptID: "TRANSCRIPT-1", AudioArtifact: audio, ResolvedAudioPath: inputPath, ResolvedModelPath: modelPath,
+		TranscriptID: "TRANSCRIPT-1", AudioArtifact: audioInput, ResolvedAudioPath: inputPath, ResolvedModelPath: modelPath,
 		TemporaryOutputPath: temporaryPath, PublishedOutputPath: publishedPath, ArtifactPath: "transcript/event.json", Profile: profile,
 	})
 	if err != nil {
@@ -101,7 +110,7 @@ func TestWhisperCPPAdapterExecutesArgumentArrayAndPublishesVerifiedTranscript(t 
 	invalidTemporaryPath := filepath.Join(directory, "output", "invalid.json.partial")
 	invalidPublishedPath := filepath.Join(directory, "output", "invalid.json")
 	_, err = transcriber.Transcribe(context.Background(), Request{
-		TranscriptID: "TRANSCRIPT-2", AudioArtifact: audio, ResolvedAudioPath: inputPath, ResolvedModelPath: modelPath,
+		TranscriptID: "TRANSCRIPT-2", AudioArtifact: audioInput, ResolvedAudioPath: inputPath, ResolvedModelPath: modelPath,
 		TemporaryOutputPath: invalidTemporaryPath, PublishedOutputPath: invalidPublishedPath, ArtifactPath: "transcript/invalid.json", Profile: profile,
 	})
 	if !errors.Is(err, ErrTranscriptionFailed) {

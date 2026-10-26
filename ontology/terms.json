@@ -961,6 +961,26 @@
       "decided": "2026-10-26"
     },
     {
+      "id": "audio-artifact",
+      "layer": "product",
+      "kind": "entity",
+      "name": {"ko": "오디오 아티팩트", "en": "Audio Artifact"},
+      "code_name": "AudioArtifact",
+      "definition": "원본 자산에서 versioned Audio Extraction Profile로 추출해 게시한 STT 입력용 파생 오디오 파일.",
+      "rules": [
+        "v1 speech audio는 WAV/PCM 16-bit little-endian, 16kHz, mono 규격이다.",
+        "원본 자산·Profile·처리기·Worker와 checksum provenance를 가진다.",
+        "Transcript가 참조하는 직접 입력 아티팩트다."
+      ],
+      "forbidden": {"words": [], "code": []},
+      "relations": [
+        {"type": "is-a", "target": "artifact"},
+        {"type": "refers-to", "target": "profile"}
+      ],
+      "sources": ["idea.md §4.2", "docs/design/03-domain-workflow.md §1", "requirements AUD-001, AUD-002"],
+      "decided": "2026-10-26"
+    },
+    {
       "id": "rendition",
       "layer": "product",
       "kind": "entity",
@@ -1229,10 +1249,10 @@
       "name": {"ko": "프로파일", "en": "Profile"},
       "code_name": "Profile",
       "definition": "처리 하나를 어떻게 실행할지 정한, 이름과 버전이 있는 파라미터 묶음. 렌더, STT, 포맷 프로파일이 있다.",
-      "rules": ["'권한 프로파일'은 권한 정책, 'Provider 프로파일'은 Provider 계정이라고 부른다.", "렌더 Profile은 codec과 자원 제한을 포함하며 판이 바뀌면 버전을 올린다.", "STT Profile은 모델 식별자·언어·thread 상한을 포함하고 실제 모델 파일 경로는 Adapter 입력으로 분리한다."],
+      "rules": ["'권한 프로파일'은 권한 정책, 'Provider 프로파일'은 Provider 계정이라고 부른다.", "렌더 Profile은 codec과 자원 제한을 포함하며 판이 바뀌면 버전을 올린다.", "Audio Extraction Profile은 STT 입력 codec·sample rate·channel·thread 상한을 고정한다.", "STT Profile은 모델 식별자·언어·thread 상한을 포함하고 실제 모델 파일 경로는 Adapter 입력으로 분리한다."],
       "forbidden": {"words": ["권한 프로파일", "Provider 프로파일", "제공자 프로파일"], "code": []},
       "relations": [{"type": "refers-to", "target": "processing-kind"}],
-      "sources": ["사용자 결정: 프로파일은 실행 파라미터 묶음만", "idea.md §4.1, §13", "requirements RND-001, TRN-001"],
+      "sources": ["사용자 결정: 프로파일은 실행 파라미터 묶음만", "idea.md §4.1, §13", "requirements RND-001, AUD-001, TRN-001"],
       "decided": "2026-10-20"
     },
     {

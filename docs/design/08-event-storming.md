@@ -145,7 +145,7 @@ ExecutionLeaseExpired
 
 STT 원문은 요약으로 대체하지 않는다. Transcript는 STT Artifact의 provenance와 검색 가능한 언어·시간 구간을 함께 가지며, 요약과 키워드는 Transcript를 입력으로 가진 별도 아티팩트다. 사람이 한 검수는 실행 승인과 구분한다.
 
-연결 요구사항: `PIP-001`, `ARC-002~007`, `RND-001~003`, `TRN-001~003`, `QCT-001~002`.
+연결 요구사항: `PIP-001`, `ARC-002~007`, `RND-001~003`, `AUD-001~003`, `TRN-001~003`, `QCT-001~002`.
 
 ## 8. VJ 통합
 

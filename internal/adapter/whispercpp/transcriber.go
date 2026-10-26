@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"videoarchive/internal/core/archive"
+	"videoarchive/internal/core/audio"
 	"videoarchive/internal/core/execution"
 	"videoarchive/internal/core/transcription"
 	"videoarchive/internal/core/vocabulary"
@@ -46,7 +47,7 @@ func (AtomicPublisher) Publish(temporaryPath, publishedPath string) error {
 
 type Request struct {
 	TranscriptID        string
-	AudioArtifact       archive.Artifact
+	AudioArtifact       audio.AudioArtifact
 	ResolvedAudioPath   string
 	ResolvedModelPath   string
 	TemporaryOutputPath string
@@ -81,9 +82,8 @@ func (transcriber *Transcriber) Transcribe(ctx context.Context, request Request)
 		return transcription.Transcript{}, err
 	}
 	artifactPath, pathOK := normalizeArtifactPath(request.ArtifactPath)
-	audio := request.AudioArtifact
-	if strings.TrimSpace(request.TranscriptID) == "" || audio.ValidateDerived() != nil ||
-		audio.Origin.ProcessingKind != vocabulary.ProcessingAudioExtract ||
+	audioArtifact := request.AudioArtifact
+	if strings.TrimSpace(request.TranscriptID) == "" || audioArtifact.Validate() != nil ||
 		strings.TrimSpace(request.ResolvedAudioPath) == "" || strings.TrimSpace(request.ResolvedModelPath) == "" ||
 		strings.TrimSpace(request.TemporaryOutputPath) == "" || strings.TrimSpace(request.PublishedOutputPath) == "" || !pathOK ||
 		filepath.Clean(filepath.Dir(request.TemporaryOutputPath)) != filepath.Clean(filepath.Dir(request.PublishedOutputPath)) {
@@ -125,7 +125,7 @@ func (transcriber *Transcriber) Transcribe(ctx context.Context, request Request)
 	artifact := archive.Artifact{
 		ID: strings.TrimSpace(request.TranscriptID), Path: artifactPath, Size: int64(len(payload)), Checksum: hex.EncodeToString(digest[:]),
 		Origin: archive.Provenance{
-			OriginalAssetID: audio.Origin.OriginalAssetID, InputArtifactIDs: []string{audio.ID}, ProcessingKind: vocabulary.ProcessingSTT,
+			OriginalAssetID: audioArtifact.Artifact.Origin.OriginalAssetID, InputArtifactIDs: []string{audioArtifact.Artifact.ID}, ProcessingKind: vocabulary.ProcessingSTT,
 			ProcessorVersion: transcriber.processorVersion, ProfileVersion: profile.Reference(), CreatedBy: transcriber.workerID, CreatedAt: transcriber.clock(),
 		},
 	}

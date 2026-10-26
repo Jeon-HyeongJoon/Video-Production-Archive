@@ -1346,6 +1346,42 @@
       "level": "integration"
     },
     {
+      "id": "AUD-001",
+      "design": "speech-audio-domain",
+      "statement": "v1 AudioArtifact는 versioned Profile로 원본 자산에서 추출한 WAV/PCM 16-bit little-endian, 16kHz, mono 게시 Artifact여야 한다.",
+      "given": "speech-pcm-16k Profile, 완전한 AUDIO_EXTRACT provenance의 Artifact와 손실 압축 codec Profile이 있다.",
+      "when": "AudioArtifact를 생성한다.",
+      "then": "지원 규격과 thread 상한이 정규화되고 Profile·원본·처리기·Worker provenance가 완전한 Artifact만 허용된다.",
+      "test_file": "internal/core/audio/audio_test.go",
+      "test_name": "TestSpeechAudioProfileCreatesVersionedPCMArtifact",
+      "status": "implemented",
+      "level": "unit"
+    },
+    {
+      "id": "AUD-002",
+      "design": "ffmpeg-audio-extraction-adapter",
+      "statement": "FFmpeg Adapter는 해석 완료된 원본 입력을 shell 없는 고정 인수 배열로 STT 입력 규격에 변환하고 임시 출력을 검증한 뒤 AudioArtifact를 게시해야 한다.",
+      "given": "공백과 shell 메타문자가 포함된 해석 완료 입력 경로, speech-pcm-16k Profile과 실제 subprocess로 동작하는 FFmpeg fixture가 있다.",
+      "when": "원본 자산에서 speech audio를 추출한다.",
+      "then": "입력은 단일 인수로 전달되고 mono·16kHz·PCM WAV·thread 제한이 적용되며 검증된 출력만 checksum과 처리기·Profile·Worker provenance로 게시된다.",
+      "test_file": "internal/adapter/ffmpeg/audio_test.go",
+      "test_name": "TestFFmpegAdapterExtractsVerifiedSpeechAudioWithoutShell",
+      "status": "implemented",
+      "level": "integration"
+    },
+    {
+      "id": "AUD-003",
+      "design": "windows-ffmpeg-audio-acceptance",
+      "statement": "Windows Worker의 실제 FFmpeg는 대표 영상에서 speech-pcm-16k Profile의 AudioArtifact를 추출하고 실제 ffprobe 검증을 통과해야 한다.",
+      "given": "운영 버전 FFmpeg·ffprobe와 오디오가 있는 대표 영상이 설치된 격리 Windows Worker가 있다.",
+      "when": "background AUDIO_EXTRACT slot 하나로 speech-pcm-16k Profile을 실행한다.",
+      "then": "출력은 mono·16kHz·PCM WAV이고 checksum·처리시간·최대 메모리와 Profile·Worker provenance가 기록되며 원본은 변경되지 않는다.",
+      "test_file": "",
+      "test_name": "",
+      "status": "planned",
+      "level": "acceptance"
+    },
+    {
       "id": "TRN-001",
       "design": "transcript-domain",
       "statement": "Transcript는 versioned STT Profile과 AudioArtifact provenance에 묶이고 검색·타임코드 이동을 위한 순서 있는 비중첩 millisecond 구간을 가진 게시 Artifact여야 한다.",
