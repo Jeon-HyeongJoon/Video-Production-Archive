@@ -43,7 +43,7 @@ jobs:
       - name: Install dashboard golden browser
         run: |
           python -m pip install -r requirements-visual.txt
-          python -m playwright install --with-deps chromium
+          python -m playwright install chromium
 
       - name: Download modules
         run: go mod download
