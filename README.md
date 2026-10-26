@@ -20,8 +20,9 @@
 - 시작 설정 전용 관리 모델과 여러 작업 PC Worker registry·heartbeat·배정 정책
 - 요구사항과 테스트의 자동 1:1 추적 검사
 - 등록 Storage 입고·기술정보 분석·검증된 렌더·통합 QC·메타데이터 검색, timestamp 전사·SRT 자막과 리비전 요약 계약
+- strict YAML boot 설정, 재시작 가능한 SQLite Runtime, CIDR 보호 정적 Dashboard와 조회 API를 제공하는 `video-archive-control`
 
-현재는 SQLite Command Unit of Work, Storage→PhysicalDevice 작업 공간 해석, 아카이브 sidecar export/import, 게시 장애 조정, Notification SSE 재연결, 독립 Capability 실행·증적·Dashboard projection과 CI 테스트 증적의 integration 계약까지 구현되어 있다. 등록 Storage 입고 카탈로그와 ffprobe·FFmpeg·whisper.cpp subprocess Adapter도 격리 fixture로 검증하며 FFmpeg speech audio 추출에서 timestamp Transcript 게시·최신 segment 검색, 검증된 SRT 자막, Agent·사람 작성 리비전 요약 게시와 SQLite 내용 검수 복원까지 연결된다. 전체 Control DB projection·migration·backup, HTTP Command API와 웹 Dashboard, MCP Adapter, Windows Device Adapter, VJ 기능과 Provider API Adapter는 아직 구현하지 않았다. 실제 Windows 장치와 운영 ffprobe·FFmpeg·whisper.cpp 실행은 장비가 제공될 때까지 acceptance 계획 상태다.
+현재는 SQLite Command Unit of Work, Storage→PhysicalDevice 작업 공간 해석, 아카이브 sidecar export/import, 게시 장애 조정, Notification SSE 재연결, 독립 Capability 실행·증적·Dashboard projection과 CI 테스트 증적의 integration 계약까지 구현되어 있다. 등록 Storage 입고 카탈로그와 ffprobe·FFmpeg·whisper.cpp subprocess Adapter도 격리 fixture로 검증하며 FFmpeg speech audio 추출에서 timestamp Transcript 게시·최신 segment 검색, 검증된 SRT 자막, Agent·사람 작성 리비전 요약 게시와 SQLite 내용 검수 복원까지 연결된다. `video-archive-control`은 boot 설정으로 같은 SQLite DB와 Storage topology를 열고 내부망 Dashboard 및 자산·전사·요약·검수·Job 조회 API를 제공한다. HTTP 상태 변경 Command API, 로컬 Worker 실행 loop, MCP Adapter, Windows Device Adapter, VJ 기능과 Provider API Adapter는 아직 구현하지 않았다. 실제 Windows 장치와 운영 ffprobe·FFmpeg·whisper.cpp 실행은 장비가 제공될 때까지 acceptance 계획 상태다.
 
 ## 문서 읽는 순서
 
@@ -50,6 +51,17 @@ go test ./...
 ```
 
 `ontocheck`는 [`ontology/terms.json`](ontology/terms.json)의 용어 정의가 서로 모순되지 않는지, 금지된 코드 식별자가 쓰이지 않는지 검사한다. 한 단어가 두 용어를 가리키거나, 아직 결정되지 않은 다의어(`open`)가 결정된 용어와 겹치면 실패한다. 용어 결정 때문에 코드·요구사항·문서에서 바꿔야 할 것은 `follow_ups`에 기록하고, 코드 이름을 바꾼 뒤에는 옛 이름을 `forbidden.code`로 옮긴다.
+
+## Control Service 실행
+
+[`config.example.yaml`](config.example.yaml)을 `config.yaml`로 복사하고 현재 PC의 listen 주소, 허용 CIDR, Storage identity와 root를 설정한다. credential 원문은 넣지 않고 OS Secret Store reference만 기록한다.
+
+```bash
+go run ./cmd/video-archive-control -config config.yaml -check-config
+go run ./cmd/video-archive-control -config config.yaml
+```
+
+설정된 주소에서 Dashboard와 `/api/v1`을 제공한다. 개발 PC에서 확인할 때도 wildcard listen 대신 loopback 주소와 `127.0.0.0/8`을 명시한다.
 
 `reqcheck`는 다음 조건 중 하나라도 어기면 실패한다.
 

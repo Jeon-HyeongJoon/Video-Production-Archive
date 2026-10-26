@@ -3,6 +3,8 @@ package storage
 import (
 	"context"
 	"errors"
+
+	"videoarchive/internal/core/vocabulary"
 )
 
 var (
@@ -18,12 +20,13 @@ type Topology struct {
 	PartitionID      string
 	VolumeID         string
 	StorageID        string
+	Role             vocabulary.StorageRole
 	Root             string
 }
 
 func (topology Topology) Validate() error {
 	if topology.PhysicalDeviceID == "" || topology.PartitionID == "" || topology.VolumeID == "" ||
-		topology.StorageID == "" || topology.Root == "" {
+		topology.StorageID == "" || !topology.Role.Valid() || topology.Root == "" {
 		return ErrInvalidTopology
 	}
 	return nil
@@ -43,6 +46,7 @@ type WorkspaceResolver interface {
 // required by a Worker to open and reserve one Storage.
 type Access struct {
 	StorageID        string
+	Role             vocabulary.StorageRole
 	Root             string
 	WorkspaceDriveID string
 }

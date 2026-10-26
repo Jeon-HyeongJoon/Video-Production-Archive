@@ -11,6 +11,7 @@ import (
 	intakeadapter "videoarchive/internal/adapter/intake"
 	"videoarchive/internal/adapter/sqlitestorage"
 	"videoarchive/internal/core/storage"
+	"videoarchive/internal/core/vocabulary"
 )
 
 // Requirement: INT-001
@@ -38,7 +39,7 @@ func TestInputInspectionHashesRegisteredStorageFileWithoutChangingIt(t *testing.
 	defer storages.Close()
 	if err := storages.Register(ctx, storage.Topology{
 		PhysicalDeviceID: "DRIVE-USB-1", PartitionID: "PARTITION-1", VolumeID: "VOLUME-1",
-		StorageID: "SOURCE-1", Root: storageRoot,
+		StorageID: "SOURCE-1", Role: vocabulary.StorageSourceMedia, Root: storageRoot,
 	}); err != nil {
 		t.Fatal(err)
 	}

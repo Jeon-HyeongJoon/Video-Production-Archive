@@ -36,6 +36,15 @@ func TestEveryDecidedVocabularyValueIsValid(t *testing.T) {
 			t.Fatalf("ResourceClass %q is not valid", value)
 		}
 	}
+	storageRoles := []StorageRole{
+		StorageSourceMedia, StorageScratch, StorageWorking, StorageTransferMedia,
+		StorageArchivePrimary, StorageArchiveMirror, StorageBackupOffsite,
+	}
+	for _, value := range storageRoles {
+		if !value.Valid() {
+			t.Fatalf("StorageRole %q is not valid", value)
+		}
+	}
 	executorKinds := []ExecutorKind{ExecutorWorker, ExecutorAgentGateway, ExecutorControl, ExecutorHuman}
 	for _, value := range executorKinds {
 		if !value.Valid() {
@@ -56,7 +65,8 @@ func TestEveryDecidedVocabularyValueIsValid(t *testing.T) {
 	}
 
 	if ActorType("UNKNOWN").Valid() || UserRole("UNKNOWN").Valid() || WaitReason("UNKNOWN").Valid() ||
-		ProcessingKind("UNKNOWN").Valid() || ResourceClass("UNKNOWN").Valid() || ExecutorKind("UNKNOWN").Valid() ||
+		ProcessingKind("UNKNOWN").Valid() || ResourceClass("UNKNOWN").Valid() || StorageRole("UNKNOWN").Valid() ||
+		ExecutorKind("UNKNOWN").Valid() ||
 		ApprovalDecision("UNKNOWN").Valid() || ContentReviewDecision("UNKNOWN").Valid() {
 		t.Fatal("unknown vocabulary value was accepted")
 	}

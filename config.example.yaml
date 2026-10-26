@@ -1,5 +1,8 @@
 schema_version: 1
 
+database:
+  path: data/control.db
+
 server:
   listen_address: 192.168.40.8:8080
   allowed_cidrs:
@@ -32,6 +35,9 @@ workers:
       processing_kinds:
         - INSPECT
         - RENDER
+        - AUDIO_EXTRACT
+        - STT
+        - QC
         - CHECKSUM
         - DEVICE
       allowed_storage_ids:
@@ -42,8 +48,12 @@ storage:
   - id: scratch-main
     role: SCRATCH
     physical_device_id: internal-nvme-01
+    partition_id: internal-nvme-01-p1
+    volume_id: scratch-main
     root: D:/VideoArchive/scratch
   - id: archive-primary
     role: ARCHIVE_PRIMARY
     physical_device_id: archive-hdd-01
+    partition_id: archive-hdd-01-p1
+    volume_id: archive-primary
     root: E:/VideoArchive/archive

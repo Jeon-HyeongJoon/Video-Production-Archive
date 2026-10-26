@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"videoarchive/internal/core/storage"
+	"videoarchive/internal/core/vocabulary"
 )
 
 // Requirement: DEV-006
@@ -19,9 +20,9 @@ func TestStorageRootsResolveToPhysicalWorkspaceDrive(t *testing.T) {
 	defer repository.Close()
 
 	topologies := []storage.Topology{
-		{PhysicalDeviceID: "drive-a", PartitionID: "partition-a1", VolumeID: "volume-a1", StorageID: "source-a", Root: "E:/source"},
-		{PhysicalDeviceID: "drive-a", PartitionID: "partition-a2", VolumeID: "volume-a2", StorageID: "working-a", Root: "F:/working"},
-		{PhysicalDeviceID: "drive-b", PartitionID: "partition-b1", VolumeID: "volume-b1", StorageID: "archive-b", Root: "G:/archive"},
+		{PhysicalDeviceID: "drive-a", PartitionID: "partition-a1", VolumeID: "volume-a1", StorageID: "source-a", Role: vocabulary.StorageSourceMedia, Root: "E:/source"},
+		{PhysicalDeviceID: "drive-a", PartitionID: "partition-a2", VolumeID: "volume-a2", StorageID: "working-a", Role: vocabulary.StorageWorking, Root: "F:/working"},
+		{PhysicalDeviceID: "drive-b", PartitionID: "partition-b1", VolumeID: "volume-b1", StorageID: "archive-b", Role: vocabulary.StorageArchivePrimary, Root: "G:/archive"},
 	}
 	for _, topology := range topologies {
 		if err := repository.Register(ctx, topology); err != nil {

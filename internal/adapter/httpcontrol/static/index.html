@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Video Production Archive</title>
+  <link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+  <header>
+    <p class="eyebrow">VIDEO PRODUCTION ARCHIVE</p>
+    <h1>영상 기록 제어실</h1>
+    <p id="health" class="status">서비스 확인 중</p>
+  </header>
+  <main>
+    <section aria-labelledby="jobs-title">
+      <div class="section-heading">
+        <div><p class="eyebrow">OPERATIONS</p><h2 id="jobs-title">작업 현황</h2></div>
+        <button id="refresh-jobs" type="button">새로고침</button>
+      </div>
+      <div id="jobs" class="cards" aria-live="polite"></div>
+    </section>
+    <section aria-labelledby="search-title">
+      <p class="eyebrow">ARCHIVE SEARCH</p>
+      <h2 id="search-title">아카이브 검색</h2>
+      <form id="asset-search">
+        <label>제목·설명·키워드<input name="text" autocomplete="off"></label>
+        <label>Video codec<input name="video_codec" placeholder="h264" autocomplete="off"></label>
+        <button type="submit">검색</button>
+      </form>
+      <div id="assets" class="results" aria-live="polite"></div>
+    </section>
+    <section aria-labelledby="transcript-title">
+      <p class="eyebrow">TIMECODE SEARCH</p>
+      <h2 id="transcript-title">전사문 구간 검색</h2>
+      <form id="transcript-search">
+        <label>전사문<input name="text" required autocomplete="off"></label>
+        <button type="submit">구간 찾기</button>
+      </form>
+      <div id="transcripts" class="results" aria-live="polite"></div>
+    </section>
+  </main>
+  <template id="empty"><p class="empty">표시할 결과가 없습니다.</p></template>
+  <script src="/assets/app.js" defer></script>
+</body>
+</html>

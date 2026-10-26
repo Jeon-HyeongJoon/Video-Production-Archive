@@ -33,6 +33,8 @@ Control Service만 운영 DB에 직접 쓴다.
 
 HTTP와 MCP는 Domain 함수를 직접 호출하지 않고 같은 Command Bus를 사용한다. Handler는 저장 상태를 직접 바꾸지 않고 새 상태와 Event를 반환하며 Store가 상태·CommandRecord·Event·receipt를 한 번에 확정한다. Core 경계는 `CMD-001~010`, 실제 SQLite transaction은 `PER-001` integration test로 검증한다.
 
+v1 Control Service는 strict boot YAML에서 DB·listen·CIDR·Origin·Worker·Storage topology를 읽어 시작하며 `video-archive-control` 실행 파일이 SQLite 카탈로그, Dashboard projection과 Notification SSE를 하나의 HTTP Handler에 조립한다. 정적 Dashboard와 health, 자산·전사·요약·검수·Job 조회 API는 실제 peer CIDR 검사를 공통으로 통과하고 protocol DTO에서 Storage 경로를 제외한다. 같은 boot topology의 재시작은 멱등하지만 기존 Storage ID의 물리 identity나 root 변경은 시작 오류다. `CFG-006`, `CTL-001~002`
+
 ## 3. Media Worker
 
 Worker는 다음 순서로 단계 하나를 처리한다.

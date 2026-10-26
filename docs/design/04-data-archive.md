@@ -80,6 +80,8 @@ size + sha256
 
 SQLite Command Store는 `PER-001` integration test로 transaction rollback을 검증한다. 전체 projection, migration, backup/restore는 다음 수직 슬라이스에서 별도 요구사항으로 내린다.
 
+Control Service 시작 시 boot 설정의 Storage topology를 같은 SQLite DB에 등록한다. 동일한 physical device·partition·volume·Storage ID·root 재등록은 재시작으로 보고 멱등하게 허용하지만 기존 ID의 parent나 root가 달라지면 시작을 중단한다. `CFG-006`, `CTL-002`
+
 입고 카탈로그의 원본 기록은 JSON payload와 조회용 키를 함께 저장한다. `InputFileObservation`과 `OriginalAsset`은 ID 및 checksum으로, `MediaInspection`은 원본 자산 ID와 관찰 시각으로 조회한다. 인덱스 필드는 payload를 대체하는 별도 진실이 아니며 저장 시 도메인 Record와 함께 검증한다. `INT-003~004`, `MED-004`
 
 검색 투영은 OriginalAsset별 가장 큰 CatalogRecord 리비전과 가장 최근 MediaInspection을 결합한다. 제목·설명·키워드 text, video codec과 길이 범위를 검색할 수 있지만 Storage root와 파일 상대경로는 검색 결과 계약에 포함하지 않는다. `CAT-001~002`

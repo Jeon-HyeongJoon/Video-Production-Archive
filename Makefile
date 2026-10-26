@@ -1,4 +1,8 @@
-.PHONY: test requirements requirements-lock ontology verify
+.PHONY: build test requirements requirements-lock ontology verify
+
+build:
+	mkdir -p bin
+	go build -o bin/video-archive-control ./cmd/video-archive-control
 
 test:
 	go test ./...

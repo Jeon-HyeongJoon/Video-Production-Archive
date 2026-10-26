@@ -89,6 +89,28 @@ func (value ResourceClass) Valid() bool {
 	return value == ResourceHeavy || value == ResourceLight || value == ResourceControl
 }
 
+type StorageRole string
+
+const (
+	StorageSourceMedia    StorageRole = "SOURCE_MEDIA"
+	StorageScratch        StorageRole = "SCRATCH"
+	StorageWorking        StorageRole = "WORKING"
+	StorageTransferMedia  StorageRole = "TRANSFER_MEDIA"
+	StorageArchivePrimary StorageRole = "ARCHIVE_PRIMARY"
+	StorageArchiveMirror  StorageRole = "ARCHIVE_MIRROR"
+	StorageBackupOffsite  StorageRole = "BACKUP_OFFSITE"
+)
+
+func (value StorageRole) Valid() bool {
+	switch value {
+	case StorageSourceMedia, StorageScratch, StorageWorking, StorageTransferMedia,
+		StorageArchivePrimary, StorageArchiveMirror, StorageBackupOffsite:
+		return true
+	default:
+		return false
+	}
+}
+
 type ExecutorKind string
 
 const (
