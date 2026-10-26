@@ -65,7 +65,7 @@ size + sha256
 - migration은 단조 증가 버전과 checksum을 가지며 시작 시 적용 상태를 검사한다.
 - backup은 SQLite Online Backup 방식으로 만들고 복원 시험을 운영 절차에 포함한다.
 
-SQLite Adapter가 추가될 때 `PER-001`을 실제 SQLite integration test와 연결하고 구현 상태로 전환한다.
+SQLite Command Store는 `PER-001` integration test로 transaction rollback을 검증한다. 전체 projection, migration, backup/restore는 다음 수직 슬라이스에서 별도 요구사항으로 내린다.
 
 ## 6. 아카이브 패키지
 
@@ -90,7 +90,7 @@ VP-YYYYMMDD-NNNN/
 - `manifest-sha256.txt`: 정렬된 상대경로와 SHA-256
 - `README.md`: 도구가 없어도 읽을 수 있는 설명
 
-Core 메타데이터 round-trip 계약은 `ARC-005`, 실제 sidecar package import 계약은 계획된 `ARC-007`, manifest 계약은 `ARC-003`이다.
+Core 메타데이터 round-trip 계약은 `ARC-005`, 실제 SQLite와 디렉터리를 사용하는 sidecar package import 계약은 `ARC-007`, manifest 계약은 `ARC-003`이다.
 
 ## 7. 아카이브 확정
 

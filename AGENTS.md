@@ -7,6 +7,8 @@ This repository treats requirements, ontology, tests, and Core contracts as one 
 - Read `requirements/catalog.json`, `requirements/README.md`, `ontology/terms.json`, and the owning file under `docs/design/`.
 - Preserve requirement IDs. Add one observable Given/When/Then rule and exactly one annotated test for each new implemented requirement.
 - Keep hardware- or adapter-dependent behavior `planned` until its real integration or acceptance test exists.
+- Tests exist to verify observable requirements, not to raise coverage or freeze incidental implementation details. Do not add behavior outside a requirement merely to satisfy a test.
+- When an integration test exposes a technology constraint or a demonstrably better design, revise the owning design, requirement meaning, semantic lock, and its one test together. Do not preserve an obsolete requirement by distorting the Adapter.
 - If requirement meaning changes, review the change and then run `make requirements-lock`. Do not update the semantic lock only to silence a failure.
 
 ## Core invariants

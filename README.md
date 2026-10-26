@@ -20,7 +20,7 @@
 - 시작 설정 전용 관리 모델과 여러 작업 PC Worker registry·heartbeat·배정 정책
 - 요구사항과 테스트의 자동 1:1 추적 검사
 
-현재 구현하지 않은 것은 SQLite 저장 Adapter, HTTP/SSE Dashboard, MCP Adapter, Windows Device Adapter, 실제 FFmpeg/ffprobe/STT 실행 Adapter와 Provider API Adapter다. `PER-001`, `ARC-007`, `EXE-003`, `NTF-002`, `DEV-005`는 이를 숨기지 않도록 계획된 integration/acceptance 요구사항으로 등록했다.
+현재는 SQLite Command Unit of Work, 아카이브 sidecar export/import, 게시 장애 조정과 Notification SSE 재연결 Adapter의 integration 계약까지 구현되어 있다. 전체 Control DB projection·migration·backup, HTTP Command API와 Dashboard, MCP Adapter, Windows Device Adapter, 실제 FFmpeg/ffprobe/STT 실행 Adapter와 Provider API Adapter는 아직 구현하지 않았다. Windows 실장비가 필요한 `DEV-005`, `ARC-008`은 계획된 acceptance 요구사항으로 남겨 둔다.
 
 ## 문서 읽는 순서
 

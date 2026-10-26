@@ -1052,9 +1052,9 @@
       "given": "네 기록 중 두 번째 이후 INSERT가 실패하도록 주입한 SQLite 저장소가 있다.",
       "when": "상태 변경 transaction을 commit한다.",
       "then": "전체가 rollback되어 네 테이블 어느 곳에도 부분 기록이 남지 않는다.",
-      "test_file": "",
-      "test_name": "",
-      "status": "planned",
+      "test_file": "internal/adapter/sqlitecommand/store_test.go",
+      "test_name": "TestSQLiteCommitRollsBackEveryUnitOfWorkRecord",
+      "status": "implemented",
       "level": "integration"
     },
     {
@@ -1064,9 +1064,9 @@
       "given": "확정된 테스트 아카이브 패키지와 빈 SQLite DB가 있다.",
       "when": "DB 없이 패키지를 export한 뒤 새 DB로 두 번 import한다.",
       "then": "엔티티·관계·이벤트·checksum이 원본 DB와 동일하고 두 번째 import가 과거 Event를 중복 생성하지 않는다.",
-      "test_file": "",
-      "test_name": "",
-      "status": "planned",
+      "test_file": "internal/adapter/archivepackage/package_test.go",
+      "test_name": "TestArchivePackageRestoresSameRecordsIdempotently",
+      "status": "implemented",
       "level": "integration"
     },
     {
@@ -1088,9 +1088,9 @@
       "given": "연결 중 두 Event Notification을 받은 뒤 연결이 끊기고 그 사이 새 Event가 생긴 클라이언트가 있다.",
       "when": "마지막 수신 ID로 다시 연결한다.",
       "then": "누락 이벤트를 중복 없이 순서대로 받고 이어지는 live 이벤트도 같은 연결에서 받는다.",
-      "test_file": "",
-      "test_name": "",
-      "status": "planned",
+      "test_file": "internal/adapter/notificationsse/handler_test.go",
+      "test_name": "TestSSEReconnectReplaysMissedNotificationsThenContinuesLive",
+      "status": "implemented",
       "level": "integration"
     },
     {
@@ -1100,9 +1100,9 @@
       "given": "checksum이 일치하는 게시 파일과 publish receipt는 있지만 Step 완료 transaction 전 프로세스가 중단된 상태가 있다.",
       "when": "서비스 재시작 후 게시 조정을 실행한다.",
       "then": "기존 파일을 새 Artifact로 조정하고 FFmpeg를 다시 실행하지 않으며 Step을 VERIFYING으로 복구한다.",
-      "test_file": "",
-      "test_name": "",
-      "status": "planned",
+      "test_file": "internal/adapter/artifactpublish/reconciler_test.go",
+      "test_name": "TestRestartReconcilesPublishedArtifactWithoutRerunningProcessor",
+      "status": "implemented",
       "level": "integration"
     }
   ]

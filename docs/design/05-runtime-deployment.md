@@ -62,7 +62,7 @@ Verify(temp outputs) → inspection/checksum/QC evidence
 Publish(evidence) → artifact IDs
 ```
 
-명령행은 배열 인수로 만들고 shell 문자열 결합을 사용하지 않는다. 출력은 임시 경로에서 검증한 뒤에만 게시한다. 로그에는 원문 credential이나 민감 경로를 노출하지 않는다. Core 계약은 `EXE-001~002`, DB와 파일 게시 사이 재시작 조정은 계획된 `EXE-003`이 소유한다.
+명령행은 배열 인수로 만들고 shell 문자열 결합을 사용하지 않는다. 출력은 임시 경로에서 검증한 뒤에만 게시한다. 로그에는 원문 credential이나 민감 경로를 노출하지 않는다. Core 계약은 `EXE-001~002`, DB와 파일 게시 사이 재시작 조정은 `EXE-003` integration test가 검증한다.
 
 ## 6. Windows 서비스 배포
 
@@ -114,4 +114,4 @@ Worker 종료:
 - Notification: Event 또는 metric에서 만든 실시간 메시지. Event 기반 알림만 재연결 replay
 - process 원문 로그: 회전 파일, DB에는 위치와 tail만 저장
 
-Provider 관련 필드는 저장 전 `AGT-008` 허용 목록 정책으로 정제한다. feed의 replay 분리는 `NTF-001`, 실제 HTTP/SSE 재연결은 계획된 `NTF-002`가 소유한다.
+Provider 관련 필드는 저장 전 `AGT-008` 허용 목록 정책으로 정제한다. feed의 replay 분리는 `NTF-001`, 실제 HTTP/SSE 재연결은 `NTF-002` integration test가 검증한다.

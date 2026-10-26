@@ -281,21 +281,20 @@ CommandRecord는 감사와 멱등성의 영속 기록이지만 업무 Aggregate 
 | ES-05 | SourceMedia와 PhysicalDevice의 식별자가 중복될 가능성 | SourceMedia를 독립 ID가 아니라 SOURCE_MEDIA Storage를 가진 PhysicalDevice의 문맥상 역할로 정리 | 온톨로지 `source-media-identity` open에 기록 |
 | ES-06 | Job 자체 상태가 필요한지 | 초기에는 Step 투영으로 계산하고 별도 JobState를 만들지 않음 | `job` 규칙으로 고정 |
 | ES-07 | 저장하지 않는 Notification의 reconnect cursor | 이벤트 기반 알림은 event ID로 재생하고 metric 알림은 재생하지 않음 | `NTF-001`, `NTF-002`로 고정 |
-| ES-08 | DB와 파일 publish 사이 장애 | staging ID와 publish receipt를 두고 재시작 시 파일과 DB를 조정 | `WFL-009`, `EXE-002`, 계획 `EXE-003` |
+| ES-08 | DB와 파일 publish 사이 장애 | staging ID와 publish receipt를 두고 재시작 시 파일과 DB를 조정 | `WFL-009`, `EXE-002`, `EXE-003`으로 고정 |
 | ES-09 | Provider 계정·요청·Tool Call 용어가 없음 | Agent Gateway 이벤트를 확정하기 전에 세 용어와 상태 집합 정의 | 결정 필요 |
 | ES-10 | 모든 이벤트가 command_id를 요구함 | heartbeat timeout, 장치 감지, 정책 실행도 ActorType.SYSTEM 명령을 먼저 기록 | `CMD-007`, `CMD-008`로 공통 계약 고정 |
 | ES-11 | 실패 이벤트 이름이 오류 종류마다 폭증할 수 있음 | 상태 이벤트는 StepWaiting/RetryScheduled/Failed로 제한하고 error_class를 payload로 기록 | `WFL-010`으로 분류 규칙 고정 |
-| ES-12 | ArchivePackage import가 과거 Event를 중복 생성할 위험 | import는 원래 ID의 기록을 idempotent하게 복원하고 별도 Import 결과만 현재 명령 기록에 남김 | 계획 `ARC-007`에 포함 |
+| ES-12 | ArchivePackage import가 과거 Event를 중복 생성할 위험 | import는 원래 ID의 기록을 idempotent하게 복원하고 별도 Import 결과만 현재 명령 기록에 남김 | `ARC-007`로 고정 |
 | ES-13 | Volume, Worker, Provider 계정의 생애주기 상태 집합이 없음 | 이벤트 이름을 확정하기 전에 각 상태 집합과 허용 전이를 정의 | 결정 필요 |
 
 ## 15. 요구사항으로 내리는 순서
 
 1. 아직 열린 ES-03~05, ES-09, ES-13의 용어와 상태 집합을 결정한다.
-2. 계획 상태인 `PER-001`로 SQLite의 상태·명령 기록·이벤트 원자성을 통합 테스트한다.
-3. 원본 매체 입고를 첫 Adapter 수직 슬라이스로 연결한다.
-4. `ARC-007`과 `EXE-003`으로 sidecar import 및 파일 게시 장애 조정을 검증한다.
-5. 행사 기록, VJ 통합, 최종 편집본 Template을 실제 FFmpeg·STT Adapter에 연결한다.
-6. `NTF-002`로 Dashboard 재연결을 검증한다.
-7. Agent Gateway는 수동 흐름이 완결된 뒤 같은 Command Bus를 호출하도록 연결한다.
+2. 원본 매체 입고를 첫 Adapter 수직 슬라이스로 연결한다.
+3. SQLite projection·migration·backup/restore 요구사항을 추가하고 기존 `PER-001` Command Store에 연결한다.
+4. 행사 기록, VJ 통합, 최종 편집본 Template을 실제 FFmpeg·STT Adapter에 연결한다.
+5. HTTP Command API와 Dashboard를 기존 `NTF-002` SSE Adapter에 연결한다.
+6. Agent Gateway는 수동 흐름이 완결된 뒤 같은 Command Bus를 호출하도록 연결한다.
 
 각 명령은 정상 흐름 하나와 독립된 거부 이유 하나가 관찰되도록 요구사항을 나눈다. 이벤트 이름만 확인하지 않고 상태, 명령 기록, 이벤트가 같은 transaction으로 보이는지 검증한다.

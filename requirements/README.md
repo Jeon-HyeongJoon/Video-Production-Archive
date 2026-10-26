@@ -36,6 +36,8 @@
 - mock 호출 횟수는 중복 실행 방지처럼 횟수 자체가 업무 결과일 때만 검증한다.
 - 이벤트 이름만 확인하지 않는다. 수락 명령은 감사 문맥과 전후 리비전을, 거부 명령은 오류와 이벤트 부재를 함께 검증한다.
 - 실제 장비가 필요한 요구사항도 고유 ID와 단일 acceptance 시나리오를 가진다.
+- 커버리지 수치를 올리거나 우연한 내부 구현을 고정하기 위한 테스트는 추가하지 않는다. 테스트는 카탈로그의 관찰 가능한 결과만 검증한다.
+- 실제 기술 경계의 제한이나 더 나은 설계가 확인되면 Adapter를 억지로 기존 문구에 맞추지 않는다. 근거를 검토한 뒤 소유 설계, 요구사항, semantic lock과 1:1 테스트를 같은 변경에서 함께 수정한다.
 
 ## 4. 이벤트 스토밍에서 내려온 계약
 
@@ -52,14 +54,14 @@
 | Agent | `AGT-001~015` | cooldown 복귀, overload 연속성·health probe 회복, allowlist 도구, 중복 Tool Call 방지, 허용 목록 로그 |
 | 장치와 Worker | `DEV-001~005`, `WRK-001~004` | lock, 포맷 전제조건, 실장비 검증, 설정·heartbeat storage 교집합, pinning |
 
-Core가 표현할 수 없는 실제 DB transaction, 파일 게시 장애 조정, HTTP 재연결, Windows 포맷과 junction은 각각 `PER-001`, `EXE-003`, `NTF-002`, `DEV-005`, `ARC-008`로 계획 상태를 유지한다.
+실제 DB transaction, sidecar 복원, 파일 게시 장애 조정과 HTTP 재연결은 각각 `PER-001`, `ARC-007`, `EXE-003`, `NTF-002`의 integration test로 검증한다. macOS 개발 환경에서 안전하게 실행할 수 없는 Windows 포맷과 junction은 `DEV-005`, `ARC-008`로 계획 상태를 유지한다.
 
 ## 5. 현재 기준선
 
 - 전체 요구사항: 92개
-- 구현됨: 86개, 주석 테스트 86개와 1:1 연결
-- 계획됨: 6개
-- 계획된 통합 테스트: `PER-001`, `ARC-007`, `EXE-003`, `NTF-002`
+- 구현됨: 90개, 주석 테스트 90개와 1:1 연결
+- 구현된 integration 테스트: `ARC-006`, `PER-001`, `ARC-007`, `EXE-003`, `NTF-002`
+- 계획됨: 2개
 - 계획된 실장비 acceptance 테스트: `DEV-005`, `ARC-008`
 
 정확한 문구와 테스트 이름은 항상 [`catalog.json`](catalog.json)에서 확인한다. 이 문서에는 변경 시 쉽게 낡는 전체 테스트 목록을 복제하지 않는다.
@@ -74,7 +76,7 @@ go test ./...
 현재 정상 출력:
 
 ```text
-traceability ok: 92 requirements (86 implemented, 6 planned), 86 one-to-one tests
+traceability ok: 92 requirements (90 implemented, 2 planned), 90 one-to-one tests
 ```
 
 ## 7. 새 요구사항 추가 절차
@@ -83,6 +85,7 @@ traceability ok: 92 requirements (86 implemented, 6 planned), 86 one-to-one test
 2. 소유 설계 문서와 Prefix를 선택한다.
 3. 카탈로그에 원자적인 Given / When / Then, 상태와 테스트 수준을 기록한다.
 4. Core로 검증할 수 있으면 예정 테스트 파일·함수를 기록하고 같은 ID의 실패 테스트를 작성한다.
-5. Adapter나 실장비가 먼저 필요하면 테스트 참조 없이 `planned`로 둔다.
-6. 최소 구현 후 `reqcheck`와 전체 테스트를 통과시킨다.
-7. Adapter 구현 시 계획 요구사항을 실제 integration 또는 acceptance 테스트와 함께 `implemented`로 바꾼다.
+5. Adapter를 구현할 때는 실제 filesystem, SQLite, HTTP 같은 경계를 사용하는 실패 테스트를 먼저 작성하고 요구사항에 필요한 최소 동작만 구현한다.
+6. Adapter나 실장비가 아직 없으면 테스트를 허위 연결하지 않고 `planned`로 둔다.
+7. 테스트 과정에서 기술 제한이나 더 나은 구조가 발견되면 소유 설계와 요구사항을 검토해 고친 뒤 같은 변경에서 테스트도 고친다.
+8. 최소 구현 후 `reqcheck`와 전체 테스트를 통과시키고 `implemented`로 전환한다.
