@@ -1112,9 +1112,9 @@
       "given": "실행·대기·실패 Step과 Agent Tool Call, Worker metric 및 로그 참조가 기록된 Job들이 있다.",
       "when": "Dashboard 작업함과 작업 상세 읽기 모델을 조회한다.",
       "then": "각 Job의 현재 업무 상태와 사람 개입 필요 여부를 원장 변경 없이 확인할 수 있다.",
-      "test_file": "",
-      "test_name": "",
-      "status": "planned",
+      "test_file": "internal/adapter/sqlitedashboard/store_test.go",
+      "test_name": "TestDashboardProjectsJobStatusInterventionAndOperationalDetailWithoutLedgerMutation",
+      "status": "implemented",
       "level": "integration"
     },
     {

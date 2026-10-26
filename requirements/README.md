@@ -63,11 +63,11 @@
 ## 5. 현재 기준선
 
 - 전체 요구사항: 97개
-- 구현됨: 94개, 주석 테스트 94개와 1:1 연결
-- 구현된 integration 테스트: `ARC-006`, `PER-001`, `ARC-007`, `EXE-003`, `NTF-002`, `TST-001`, `DEV-006`, `APP-001`, `OBS-001`
-- 계획됨: 3개
+- 구현됨: 95개, 주석 테스트 95개와 1:1 연결
+- 구현된 integration 테스트: `ARC-006`, `PER-001`, `ARC-007`, `EXE-003`, `NTF-002`, `TST-001`, `DEV-006`, `APP-001`, `OBS-001`, `DSH-001`
+- 계획됨: 2개
 - 계획된 실장비 acceptance 테스트: `DEV-005`, `ARC-008`
-- 계획된 integration 테스트: `DSH-001`
+- 계획된 integration 테스트: 없음
 
 정확한 문구와 테스트 이름은 항상 [`catalog.json`](catalog.json)에서 확인한다. 이 문서에는 변경 시 쉽게 낡는 전체 테스트 목록을 복제하지 않는다.
 
@@ -81,7 +81,7 @@ go test ./...
 현재 정상 출력:
 
 ```text
-traceability ok: 97 requirements (94 implemented, 3 planned), 94 one-to-one tests
+traceability ok: 97 requirements (95 implemented, 2 planned), 95 one-to-one tests
 ```
 
 ## 7. 새 요구사항 추가 절차
