@@ -62,9 +62,9 @@
 
 ## 5. 현재 기준선
 
-- 전체 요구사항: 108개
-- 구현됨: 104개, 주석 테스트 104개와 1:1 연결
-- 구현된 integration 테스트: `ARC-006`, `PER-001`, `ARC-007`, `EXE-003`, `NTF-002`, `TST-001`, `DEV-006`, `APP-001`, `OBS-001`, `DSH-001`, `MED-002`, `INT-001`, `INT-003~004`, `MED-004`, `RND-002`
+- 전체 요구사항: 110개
+- 구현됨: 106개, 주석 테스트 106개와 1:1 연결
+- 구현된 integration 테스트: `ARC-006`, `PER-001`, `ARC-007`, `EXE-003`, `NTF-002`, `TST-001`, `DEV-006`, `APP-001`, `OBS-001`, `DSH-001`, `MED-002`, `INT-001`, `INT-003~004`, `MED-004`, `RND-002`, `QC-002`
 - 계획됨: 4개
 - 계획된 실장비 acceptance 테스트: `DEV-005`, `ARC-008`, `MED-003`, `RND-003`
 - 계획된 integration 테스트: 없음
@@ -81,7 +81,7 @@ go test ./...
 현재 정상 출력:
 
 ```text
-traceability ok: 108 requirements (104 implemented, 4 planned), 104 one-to-one tests
+traceability ok: 110 requirements (106 implemented, 4 planned), 106 one-to-one tests
 ```
 
 ## 7. 새 요구사항 추가 절차

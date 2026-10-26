@@ -2,17 +2,21 @@ package ffprobe
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"math"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
 	"time"
 
 	"videoarchive/internal/core/mediaanalysis"
+	"videoarchive/internal/core/qc"
 )
 
 var (
@@ -93,6 +97,63 @@ func (inspector *Inspector) Inspect(ctx context.Context, request Request) (media
 		return mediaanalysis.MediaInspection{}, fmt.Errorf("%w: %v", ErrInvalidOutput, err)
 	}
 	return inspection, nil
+}
+
+// InspectPublishedOutput records the independently observed bytes and primary
+// streams used by integrated QC. It does not reuse expected Rendition fields.
+func (inspector *Inspector) InspectPublishedOutput(ctx context.Context, resolvedPath string) (qc.OutputObservation, error) {
+	if strings.TrimSpace(resolvedPath) == "" {
+		return qc.OutputObservation{}, ErrInvalidRequest
+	}
+	arguments := []string{
+		"-v", "error",
+		"-print_format", "json",
+		"-show_format",
+		"-show_streams",
+		"-i", resolvedPath,
+	}
+	payload, err := inspector.runner.Output(ctx, inspector.executable, arguments)
+	if err != nil {
+		return qc.OutputObservation{}, fmt.Errorf("%w: %w", ErrProbeFailed, err)
+	}
+	observed, err := decode(payload)
+	if err != nil {
+		return qc.OutputObservation{}, err
+	}
+	file, err := os.Open(resolvedPath)
+	if err != nil {
+		return qc.OutputObservation{}, err
+	}
+	defer file.Close()
+	hash := sha256.New()
+	size, err := io.Copy(hash, file)
+	if err != nil {
+		return qc.OutputObservation{}, err
+	}
+	output := qc.OutputObservation{
+		Checksum: hex.EncodeToString(hash.Sum(nil)), SizeBytes: size,
+		Containers: append([]string(nil), observed.Containers...), DurationMillis: observed.DurationMillis, Decodable: true,
+	}
+	primaryVideo := int(^uint(0) >> 1)
+	for _, stream := range observed.VideoStreams {
+		if stream.Index < primaryVideo {
+			primaryVideo = stream.Index
+			output.VideoCodec = strings.ToLower(strings.TrimSpace(stream.Codec))
+			output.Width = stream.Width
+			output.Height = stream.Height
+		}
+	}
+	primaryAudio := int(^uint(0) >> 1)
+	for _, stream := range observed.AudioStreams {
+		if stream.Index < primaryAudio {
+			primaryAudio = stream.Index
+			output.AudioCodec = strings.ToLower(strings.TrimSpace(stream.Codec))
+		}
+	}
+	for index := range output.Containers {
+		output.Containers[index] = strings.ToLower(strings.TrimSpace(output.Containers[index]))
+	}
+	return output, nil
 }
 
 type probeDocument struct {

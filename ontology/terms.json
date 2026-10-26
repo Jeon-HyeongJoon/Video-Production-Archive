@@ -960,6 +960,27 @@
       "decided": "2026-10-20"
     },
     {
+      "id": "qc-assessment",
+      "layer": "product",
+      "kind": "record",
+      "name": {"ko": "QC 평가", "en": "QC Assessment"},
+      "code_name": "QCAssessment",
+      "definition": "게시된 렌더 결과를 독립 관찰해 원본 기술정보와 렌더 Profile에 맞는지 필수 검사별로 판정한 추가 전용 기록.",
+      "rules": [
+        "렌더 요청값을 출력 관찰값으로 재사용하지 않는다.",
+        "모든 필수 검사가 통과해야 PASSED이며 실패 검사도 기대값과 실제값을 남긴다.",
+        "QCReport는 QC 평가를 provenance와 함께 게시한 sidecar 아티팩트다."
+      ],
+      "forbidden": {"words": [], "code": []},
+      "relations": [
+        {"type": "refers-to", "target": "rendition"},
+        {"type": "refers-to", "target": "media-inspection"},
+        {"type": "refers-to", "target": "profile"}
+      ],
+      "sources": ["docs/design/03-domain-workflow.md §1", "requirements QC-001, QC-002"],
+      "decided": "2026-10-26"
+    },
+    {
       "id": "qc-report",
       "layer": "product",
       "kind": "entity",
