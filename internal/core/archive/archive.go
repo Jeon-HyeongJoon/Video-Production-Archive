@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path"
 	"path/filepath"
@@ -282,6 +283,95 @@ func (root *StorageRoot) Open(requested string) (*os.File, error) {
 		return nil, ErrUnsafeStoragePath
 	}
 	return file, nil
+}
+
+func (root *StorageRoot) ReadFile(requested string) ([]byte, error) {
+	file, err := root.Open(requested)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	return io.ReadAll(file)
+}
+
+func (root *StorageRoot) WriteFile(requested string, data []byte, permission os.FileMode) error {
+	clean, err := root.safeRelative(requested)
+	if err != nil {
+		return err
+	}
+	file, err := root.root.OpenFile(clean, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, permission)
+	if err != nil {
+		return ErrUnsafeStoragePath
+	}
+	written, writeErr := file.Write(data)
+	closeErr := file.Close()
+	if writeErr != nil || written != len(data) || closeErr != nil {
+		return ErrUnsafeStoragePath
+	}
+	return nil
+}
+
+func (root *StorageRoot) MkdirAll(requested string, permission os.FileMode) error {
+	clean, err := root.safeRelative(requested)
+	if err != nil {
+		return err
+	}
+	current := ""
+	for _, component := range strings.Split(clean, string(filepath.Separator)) {
+		current = filepath.Join(current, component)
+		if err := root.root.Mkdir(current, permission); err != nil {
+			info, statErr := root.root.Stat(current)
+			if statErr != nil || !info.IsDir() {
+				return ErrUnsafeStoragePath
+			}
+		}
+	}
+	return nil
+}
+
+func (root *StorageRoot) Rename(oldPath, newPath string) error {
+	oldClean, err := root.safeRelative(oldPath)
+	if err != nil {
+		return err
+	}
+	newClean, err := root.safeRelative(newPath)
+	if err != nil {
+		return err
+	}
+	if _, err := root.root.Stat(oldClean); err != nil {
+		return ErrUnsafeStoragePath
+	}
+	oldResolved := filepath.Join(root.root.Name(), oldClean)
+	newResolved := filepath.Join(root.root.Name(), newClean)
+	if err := os.Rename(oldResolved, newResolved); err != nil {
+		return ErrUnsafeStoragePath
+	}
+	return nil
+}
+
+func (root *StorageRoot) Remove(requested string) error {
+	clean, err := root.safeRelative(requested)
+	if err != nil {
+		return err
+	}
+	if err := root.root.Remove(clean); err != nil {
+		return ErrUnsafeStoragePath
+	}
+	return nil
+}
+
+func (root *StorageRoot) safeRelative(requested string) (string, error) {
+	if root == nil || root.root == nil {
+		return "", ErrUnsafeStoragePath
+	}
+	_, clean, err := normalizeStoragePath(root.root.Name(), requested)
+	if err != nil {
+		return "", ErrUnsafeStoragePath
+	}
+	if err := rejectLinkLikeComponents(root.root.Name(), clean); err != nil {
+		return "", err
+	}
+	return clean, nil
 }
 
 func normalizeStoragePath(root, requested string) (string, string, error) {

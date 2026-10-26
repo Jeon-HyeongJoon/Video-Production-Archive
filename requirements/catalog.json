@@ -1440,6 +1440,30 @@
       "test_name": "TestSQLiteTranscriptSearchUsesLatestSegmentsAndReturnsTimecodesWithoutPaths",
       "status": "implemented",
       "level": "integration"
+    },
+    {
+      "id": "SUB-001",
+      "design": "subtitle-domain",
+      "statement": "Subtitle은 Transcript의 언어와 순서 있는 시간 구간을 그대로 보존해 versioned SRT Profile로 게시한 Artifact여야 한다.",
+      "given": "시간 구간이 있는 Transcript, event-srt Profile과 Transcript를 입력으로 가리키는 STT provenance의 Subtitle Artifact가 있다.",
+      "when": "Subtitle을 생성하고 SRT를 직렬화한다.",
+      "then": "Transcript ID·언어·구간 순서와 millisecond 경계가 유지되고 SRT timestamp가 결정적으로 생성되며 다른 Transcript를 가리키는 provenance는 거부된다.",
+      "test_file": "internal/core/subtitle/subtitle_test.go",
+      "test_name": "TestSubtitleKeepsTranscriptTimecodesAndVersionedSRTProvenance",
+      "status": "implemented",
+      "level": "unit"
+    },
+    {
+      "id": "SUB-002",
+      "design": "subtitle-file-adapter",
+      "statement": "Subtitle 파일 Adapter는 등록 Storage root 안에서 SRT 임시 출력을 다시 읽어 검증한 뒤 같은 디렉터리의 게시 경로로 원자 이동해야 한다.",
+      "given": "등록 Storage root, Transcript와 versioned SRT Profile 및 임시·게시 상대경로가 있다.",
+      "when": "Subtitle SRT를 게시한다.",
+      "then": "게시 바이트의 checksum·크기와 Transcript·Profile·처리기·Worker provenance가 기록되고 임시 파일은 남지 않으며 Storage root 밖 경로는 거부된다.",
+      "test_file": "internal/adapter/subtitlefile/publisher_test.go",
+      "test_name": "TestSubtitlePublisherVerifiesTemporarySRTInsideStorageRootBeforePublishing",
+      "status": "implemented",
+      "level": "integration"
     }
   ]
 }

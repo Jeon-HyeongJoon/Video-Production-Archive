@@ -19,9 +19,9 @@
 - 내부 CIDR allowlist, 선택형 로그인, 무로그인 권한 축소와 CSRF/Origin 방어
 - 시작 설정 전용 관리 모델과 여러 작업 PC Worker registry·heartbeat·배정 정책
 - 요구사항과 테스트의 자동 1:1 추적 검사
-- 등록 Storage 입고·기술정보 분석·검증된 렌더·통합 QC·메타데이터 검색과 timestamp 전사 계약
+- 등록 Storage 입고·기술정보 분석·검증된 렌더·통합 QC·메타데이터 검색, timestamp 전사와 SRT 자막 계약
 
-현재는 SQLite Command Unit of Work, Storage→PhysicalDevice 작업 공간 해석, 아카이브 sidecar export/import, 게시 장애 조정, Notification SSE 재연결, 독립 Capability 실행·증적·Dashboard projection과 CI 테스트 증적의 integration 계약까지 구현되어 있다. 등록 Storage 입고 카탈로그와 ffprobe·FFmpeg·whisper.cpp subprocess Adapter도 격리 fixture로 검증하며 FFmpeg speech audio 추출에서 timestamp Transcript 게시·최신 segment 검색까지 연결된다. 전체 Control DB projection·migration·backup, HTTP Command API와 웹 Dashboard, MCP Adapter, Windows Device Adapter, VJ·요약 기능과 Provider API Adapter는 아직 구현하지 않았다. 실제 Windows 장치와 운영 ffprobe·FFmpeg·whisper.cpp 실행은 장비가 제공될 때까지 acceptance 계획 상태다.
+현재는 SQLite Command Unit of Work, Storage→PhysicalDevice 작업 공간 해석, 아카이브 sidecar export/import, 게시 장애 조정, Notification SSE 재연결, 독립 Capability 실행·증적·Dashboard projection과 CI 테스트 증적의 integration 계약까지 구현되어 있다. 등록 Storage 입고 카탈로그와 ffprobe·FFmpeg·whisper.cpp subprocess Adapter도 격리 fixture로 검증하며 FFmpeg speech audio 추출에서 timestamp Transcript 게시·최신 segment 검색과 검증된 SRT 자막 게시까지 연결된다. 전체 Control DB projection·migration·backup, HTTP Command API와 웹 Dashboard, MCP Adapter, Windows Device Adapter, VJ·요약 기능과 Provider API Adapter는 아직 구현하지 않았다. 실제 Windows 장치와 운영 ffprobe·FFmpeg·whisper.cpp 실행은 장비가 제공될 때까지 acceptance 계획 상태다.
 
 ## 문서 읽는 순서
 

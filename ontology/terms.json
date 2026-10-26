@@ -962,6 +962,46 @@
       "decided": "2026-10-26"
     },
     {
+      "id": "subtitle",
+      "layer": "product",
+      "kind": "entity",
+      "name": {
+        "ko": "자막",
+        "en": "Subtitle"
+      },
+      "code_name": "Subtitle",
+      "definition": "Transcript의 언어와 시간 구간을 versioned 자막 Profile로 직렬화해 게시한 구조화 아티팩트.",
+      "rules": [
+        "v1 자막 Profile은 SRT 형식을 사용하고 Transcript의 순서와 millisecond 경계를 보존한다.",
+        "공통 파일 생애주기·checksum·provenance는 Artifact가 소유하고 자막은 입력 Transcript를 명시한다.",
+        "등록 Storage root 안의 검증된 임시 출력만 게시한다."
+      ],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "is-a",
+          "target": "artifact"
+        },
+        {
+          "type": "refers-to",
+          "target": "transcript"
+        },
+        {
+          "type": "refers-to",
+          "target": "profile"
+        }
+      ],
+      "sources": [
+        "idea.md §4.2",
+        "docs/design/03-domain-workflow.md §1",
+        "requirements SUB-001, SUB-002"
+      ],
+      "decided": "2026-10-26"
+    },
+    {
       "id": "audio-artifact",
       "layer": "product",
       "kind": "entity",
