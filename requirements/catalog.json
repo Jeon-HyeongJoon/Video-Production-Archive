@@ -1148,9 +1148,9 @@
       "given": "성공하는 실행과 실패하는 실행이 연결된 Evidence Sink가 있다.",
       "when": "두 Capability를 실행한다.",
       "then": "각 실행의 command·job·step·worker·workspace drive 상관관계와 결과·오류·검증 참조를 조회할 수 있다.",
-      "test_file": "",
-      "test_name": "",
-      "status": "planned",
+      "test_file": "internal/adapter/sqliteevidence/store_test.go",
+      "test_name": "TestCapabilityEvidenceCorrelatesSuccessfulAndFailedExecutions",
+      "status": "implemented",
       "level": "integration"
     },
     {

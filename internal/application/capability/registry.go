@@ -37,10 +37,11 @@ type CommandBus interface {
 // returns ResultID. Long-running work returns the Job and Step handles that can
 // be observed after the command has been accepted.
 type Reference struct {
-	ResultID string
-	JobID    string
-	StepID   string
-	TaskID   string
+	ResultID               string
+	JobID                  string
+	StepID                 string
+	TaskID                 string
+	VerificationReferences []string
 }
 
 type ProjectReference func(command.Result) (Reference, error)
@@ -53,9 +54,19 @@ type Definition struct {
 }
 
 type Input struct {
-	Name    string
-	Version uint32
-	Command command.Envelope
+	Name        string
+	Version     uint32
+	Command     command.Envelope
+	Correlation Correlation
+}
+
+type Correlation struct {
+	RunID             string
+	JobID             string
+	StepID            string
+	WorkerID          string
+	WorkspaceDriveIDs []string
+	InputIDs          []string
 }
 
 // Receipt is returned by the direct Application Capability Port. It contains
