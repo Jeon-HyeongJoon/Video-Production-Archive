@@ -13,8 +13,10 @@ import (
 	"videoarchive/internal/core/archive"
 	"videoarchive/internal/core/asset"
 	"videoarchive/internal/core/catalog"
+	"videoarchive/internal/core/contentreview"
 	"videoarchive/internal/core/intake"
 	"videoarchive/internal/core/mediaanalysis"
+	"videoarchive/internal/core/summary"
 	"videoarchive/internal/core/transcription"
 	"videoarchive/internal/core/vocabulary"
 )
@@ -250,6 +252,106 @@ func TestSQLiteTranscriptSearchUsesLatestSegmentsAndReturnsTimecodesWithoutPaths
 	}
 }
 
+// Requirement: SUM-003
+func TestSQLiteSummariesRequireStoredTranscriptAndKeepImmutableRevisions(t *testing.T) {
+	ctx := context.Background()
+	store := openCatalog(t)
+	now := time.Date(2026, 10, 26, 18, 0, 0, 0, time.UTC)
+	observation := observedFile("OBSERVATION-1", checksumA, "camera/CLIP001.MOV")
+	if err := store.AppendObservation(ctx, observation); err != nil {
+		t.Fatal(err)
+	}
+	original := registeredOriginal(t, "ASSET-1", observation)
+	if err := store.AppendOriginal(ctx, original); err != nil {
+		t.Fatal(err)
+	}
+	transcript := storedTranscript("TRANSCRIPT-1", original.ID, "행사 전체 전사문", 0, now)
+	orphanTranscript := storedTranscript("TRANSCRIPT-MISSING", original.ID, "저장하지 않은 전사문", 0, now)
+	orphan := storedSummary(t, "SUMMARY-ORPHAN", "SUMMARY-ARTIFACT-ORPHAN", 1, orphanTranscript, "고립된 요약", now)
+	if err := store.AppendSummary(ctx, orphan); !errors.Is(err, ErrRecordNotFound) {
+		t.Fatalf("summary without a stored transcript was accepted: %v", err)
+	}
+	if err := store.AppendTranscript(ctx, transcript); err != nil {
+		t.Fatal(err)
+	}
+	first := storedSummary(t, "SUMMARY-1", "SUMMARY-ARTIFACT-1", 1, transcript, "첫 요약", now.Add(time.Minute))
+	second := storedSummary(t, "SUMMARY-1", "SUMMARY-ARTIFACT-2", 2, transcript, "수정 요약", now.Add(2*time.Minute))
+	for _, value := range []summary.Summary{first, second, first} {
+		if err := store.AppendSummary(ctx, value); err != nil {
+			t.Fatalf("summary append or idempotent replay failed: %v", err)
+		}
+	}
+	conflict := first
+	conflict.Content.Text = "같은 리비전의 다른 요약"
+	if err := store.AppendSummary(ctx, conflict); !errors.Is(err, ErrRecordConflict) {
+		t.Fatalf("summary revision overwrite was not rejected: %v", err)
+	}
+	stored, err := store.SummariesByOriginal(ctx, original.ID)
+	if err != nil || len(stored) != 2 || stored[0].Revision != 1 || stored[0].Content.Text != "첫 요약" ||
+		stored[1].Revision != 2 || stored[1].Content.Text != "수정 요약" {
+		t.Fatalf("immutable summary revisions were not restored: summaries=%+v err=%v", stored, err)
+	}
+}
+
+// Requirement: REV-002
+func TestSQLiteContentReviewsReferenceSummaryRevisionAndProjectLatestSequence(t *testing.T) {
+	ctx := context.Background()
+	store := openCatalog(t)
+	now := time.Date(2026, 10, 26, 19, 0, 0, 0, time.UTC)
+	observation := observedFile("OBSERVATION-1", checksumA, "camera/CLIP001.MOV")
+	if err := store.AppendObservation(ctx, observation); err != nil {
+		t.Fatal(err)
+	}
+	original := registeredOriginal(t, "ASSET-1", observation)
+	if err := store.AppendOriginal(ctx, original); err != nil {
+		t.Fatal(err)
+	}
+	transcript := storedTranscript("TRANSCRIPT-1", original.ID, "행사 전체 전사문", 0, now)
+	if err := store.AppendTranscript(ctx, transcript); err != nil {
+		t.Fatal(err)
+	}
+	value := storedSummary(t, "SUMMARY-1", "SUMMARY-ARTIFACT-1", 1, transcript, "검수할 요약", now.Add(time.Minute))
+	if err := store.AppendSummary(ctx, value); err != nil {
+		t.Fatal(err)
+	}
+	accepted := contentreview.Record{
+		ID: "REVIEW-1", Sequence: 10, ReviewerID: "operator-1", ActorType: vocabulary.ActorHuman,
+		TargetID: value.ID, TargetRevision: value.Revision, Decision: vocabulary.ContentAccepted,
+		Reason: "전사문과 대조함", Basis: []string{value.Artifact.ID}, OccurredAt: now.Add(2 * time.Minute),
+	}
+	changes := accepted
+	changes.ID = "REVIEW-2"
+	changes.Sequence = 11
+	changes.Decision = vocabulary.ContentChangesRequested
+	changes.Reason = "발표자 이름 수정 필요"
+	for _, review := range []contentreview.Record{accepted, changes, accepted} {
+		if err := store.AppendContentReview(ctx, review); err != nil {
+			t.Fatalf("content review append or idempotent replay failed: %v", err)
+		}
+	}
+	orphan := accepted
+	orphan.ID = "REVIEW-ORPHAN"
+	orphan.Sequence = 12
+	orphan.TargetRevision = 99
+	if err := store.AppendContentReview(ctx, orphan); !errors.Is(err, ErrRecordNotFound) {
+		t.Fatalf("review without a summary revision was accepted: %v", err)
+	}
+	duplicateSequence := accepted
+	duplicateSequence.ID = "REVIEW-DUPLICATE-SEQUENCE"
+	duplicateSequence.Reason = "다른 기록"
+	if err := store.AppendContentReview(ctx, duplicateSequence); !errors.Is(err, ErrRecordConflict) {
+		t.Fatalf("duplicate event sequence was accepted: %v", err)
+	}
+	reviews, err := store.ContentReviews(ctx, value.ID, value.Revision)
+	if err != nil || len(reviews) != 2 || reviews[0].ID != accepted.ID || reviews[1].ID != changes.ID {
+		t.Fatalf("immutable review history was not restored: reviews=%+v err=%v", reviews, err)
+	}
+	latest, err := store.CurrentContentReview(ctx, value.ID, value.Revision)
+	if err != nil || latest.ID != changes.ID || latest.Decision != vocabulary.ContentChangesRequested {
+		t.Fatalf("latest persisted review projection is wrong: latest=%+v err=%v", latest, err)
+	}
+}
+
 func openCatalog(t *testing.T) *Store {
 	t.Helper()
 	store, err := Open(filepath.Join(t.TempDir(), "catalog.db"))
@@ -309,4 +411,30 @@ func storedTranscript(id, originalID, text string, startMillis int64, createdAt 
 			Segments: []transcription.Segment{{Sequence: 1, StartMillis: startMillis, EndMillis: startMillis + 1_000, Text: text}},
 		},
 	}
+}
+
+func storedSummary(t *testing.T, id, artifactID string, revision uint64, transcript transcription.Transcript, text string, createdAt time.Time) summary.Summary {
+	t.Helper()
+	profile := summary.Profile{
+		ID: "event-summary-ko", Version: 1, Language: "ko",
+		MaxKeywords: summary.KeywordLimit, MaxChapters: summary.ChapterLimit,
+	}
+	result, err := summary.NewSummary(id, revision, archive.Artifact{
+		ID: artifactID, Path: "summary/" + artifactID + ".json", Size: int64(len(text)), Checksum: checksumB,
+		Origin: archive.Provenance{
+			OriginalAssetID: transcript.Artifact.Origin.OriginalAssetID, InputArtifactIDs: []string{transcript.Artifact.ID},
+			ProcessingKind: vocabulary.ProcessingSummary, ProcessorVersion: "videoarchive-summary-v1",
+			ProfileVersion: profile.Reference(), CreatedBy: "AGENT-1", CreatedAt: createdAt,
+		},
+	}, profile, transcript, vocabulary.ActorAgent, "AGENT-1", summary.Content{
+		Text: text, Keywords: []string{"행사", "기록"},
+		Chapters: []summary.Chapter{{
+			Sequence: 1, StartMillis: transcript.Content.Segments[0].StartMillis,
+			EndMillis: transcript.Content.Segments[len(transcript.Content.Segments)-1].EndMillis, Title: "전체 행사",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return result
 }

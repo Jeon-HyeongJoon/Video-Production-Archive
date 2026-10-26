@@ -14,8 +14,10 @@ import (
 
 	"videoarchive/internal/core/asset"
 	"videoarchive/internal/core/catalog"
+	"videoarchive/internal/core/contentreview"
 	"videoarchive/internal/core/intake"
 	"videoarchive/internal/core/mediaanalysis"
+	"videoarchive/internal/core/summary"
 	"videoarchive/internal/core/transcription"
 )
 
@@ -96,6 +98,28 @@ func (store *Store) migrate(ctx context.Context) error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS transcripts_original_time
 			ON transcripts(original_asset_id, created_at DESC, transcript_id DESC)`,
+		`CREATE TABLE IF NOT EXISTS summary_revisions (
+			artifact_id TEXT PRIMARY KEY,
+			summary_id TEXT NOT NULL,
+			revision INTEGER NOT NULL,
+			original_asset_id TEXT NOT NULL REFERENCES original_assets(asset_id),
+			transcript_id TEXT NOT NULL REFERENCES transcripts(transcript_id),
+			created_at TEXT NOT NULL,
+			payload BLOB NOT NULL,
+			UNIQUE(summary_id, revision)
+		)`,
+		`CREATE INDEX IF NOT EXISTS summary_revisions_original_time
+			ON summary_revisions(original_asset_id, created_at, summary_id, revision)`,
+		`CREATE TABLE IF NOT EXISTS content_reviews (
+			review_id TEXT PRIMARY KEY,
+			sequence INTEGER NOT NULL UNIQUE,
+			target_id TEXT NOT NULL,
+			target_revision INTEGER NOT NULL,
+			payload BLOB NOT NULL,
+			FOREIGN KEY(target_id, target_revision) REFERENCES summary_revisions(summary_id, revision)
+		)`,
+		`CREATE INDEX IF NOT EXISTS content_reviews_target_sequence
+			ON content_reviews(target_id, target_revision, sequence)`,
 	}
 	for _, statement := range statements {
 		if _, err := store.db.ExecContext(ctx, statement); err != nil {
@@ -430,6 +454,144 @@ func (store *Store) SearchTranscripts(ctx context.Context, text string) ([]trans
 		}
 	}
 	return hits, rows.Err()
+}
+
+func (store *Store) AppendSummary(ctx context.Context, value summary.Summary) error {
+	if err := value.Validate(); err != nil {
+		return err
+	}
+	var transcriptPayload []byte
+	err := store.db.QueryRowContext(ctx, `SELECT payload FROM transcripts WHERE transcript_id = ?`, value.TranscriptID).Scan(&transcriptPayload)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrRecordNotFound
+	}
+	if err != nil {
+		return err
+	}
+	var transcript transcription.Transcript
+	if err := json.Unmarshal(transcriptPayload, &transcript); err != nil || transcript.Validate() != nil ||
+		transcript.Artifact.Origin.OriginalAssetID != value.Artifact.Origin.OriginalAssetID ||
+		transcript.Content.Segments[len(transcript.Content.Segments)-1].EndMillis != value.TranscriptDurationMillis {
+		return ErrReferenceMismatch
+	}
+	payload, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+	var existing []byte
+	err = store.db.QueryRowContext(ctx, `
+		SELECT payload FROM summary_revisions WHERE summary_id = ? AND revision = ?
+	`, value.ID, value.Revision).Scan(&existing)
+	if err == nil {
+		if bytes.Equal(existing, payload) {
+			return nil
+		}
+		return ErrRecordConflict
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	return store.appendImmutable(ctx,
+		`INSERT INTO summary_revisions(artifact_id, summary_id, revision, original_asset_id, transcript_id, created_at, payload)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		`SELECT payload FROM summary_revisions WHERE artifact_id = ?`,
+		value.Artifact.ID, payload, value.ID, value.Revision, value.Artifact.Origin.OriginalAssetID, value.TranscriptID,
+		value.Artifact.Origin.CreatedAt.UTC().Format(time.RFC3339Nano))
+}
+
+func (store *Store) SummariesByOriginal(ctx context.Context, originalAssetID string) ([]summary.Summary, error) {
+	rows, err := store.db.QueryContext(ctx, `
+		SELECT payload FROM summary_revisions WHERE original_asset_id = ?
+		ORDER BY created_at, summary_id, revision
+	`, strings.TrimSpace(originalAssetID))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var summaries []summary.Summary
+	for rows.Next() {
+		var payload []byte
+		if err := rows.Scan(&payload); err != nil {
+			return nil, err
+		}
+		var value summary.Summary
+		if err := json.Unmarshal(payload, &value); err != nil || value.Validate() != nil {
+			return nil, ErrRecordConflict
+		}
+		summaries = append(summaries, value)
+	}
+	return summaries, rows.Err()
+}
+
+func (store *Store) AppendContentReview(ctx context.Context, review contentreview.Record) error {
+	if !review.ValidFor(review.TargetID, review.TargetRevision) {
+		return ErrReferenceMismatch
+	}
+	var exists int
+	err := store.db.QueryRowContext(ctx, `
+		SELECT 1 FROM summary_revisions WHERE summary_id = ? AND revision = ?
+	`, review.TargetID, review.TargetRevision).Scan(&exists)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrRecordNotFound
+	}
+	if err != nil {
+		return err
+	}
+	payload, err := json.Marshal(review)
+	if err != nil {
+		return err
+	}
+	var sequencePayload []byte
+	err = store.db.QueryRowContext(ctx, `SELECT payload FROM content_reviews WHERE sequence = ?`, review.Sequence).Scan(&sequencePayload)
+	if err == nil {
+		if bytes.Equal(sequencePayload, payload) {
+			return nil
+		}
+		return ErrRecordConflict
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	return store.appendImmutable(ctx,
+		`INSERT INTO content_reviews(review_id, sequence, target_id, target_revision, payload) VALUES (?, ?, ?, ?, ?)`,
+		`SELECT payload FROM content_reviews WHERE review_id = ?`,
+		review.ID, payload, review.Sequence, review.TargetID, review.TargetRevision)
+}
+
+func (store *Store) ContentReviews(ctx context.Context, summaryID string, revision uint64) ([]contentreview.Record, error) {
+	summaryID = strings.TrimSpace(summaryID)
+	rows, err := store.db.QueryContext(ctx, `
+		SELECT payload FROM content_reviews WHERE target_id = ? AND target_revision = ? ORDER BY sequence
+	`, summaryID, revision)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var reviews []contentreview.Record
+	for rows.Next() {
+		var payload []byte
+		if err := rows.Scan(&payload); err != nil {
+			return nil, err
+		}
+		var review contentreview.Record
+		if err := json.Unmarshal(payload, &review); err != nil || !review.ValidFor(summaryID, revision) {
+			return nil, ErrRecordConflict
+		}
+		reviews = append(reviews, review)
+	}
+	return reviews, rows.Err()
+}
+
+func (store *Store) CurrentContentReview(ctx context.Context, summaryID string, revision uint64) (contentreview.Record, error) {
+	reviews, err := store.ContentReviews(ctx, summaryID, revision)
+	if err != nil {
+		return contentreview.Record{}, err
+	}
+	latest, ok := contentreview.Latest(reviews, strings.TrimSpace(summaryID), revision)
+	if !ok {
+		return contentreview.Record{}, ErrRecordNotFound
+	}
+	return latest, nil
 }
 
 func matchesText(record catalog.CatalogRecord, text string) bool {

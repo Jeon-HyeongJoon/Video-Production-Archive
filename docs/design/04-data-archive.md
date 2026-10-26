@@ -64,9 +64,9 @@ size + sha256
 
 `Subtitle`은 Transcript의 시간 구간을 versioned SRT Profile로 직렬화한 게시 Artifact다. Subtitle provenance는 입력 Transcript ID를 하나만 가지며 등록 Storage root 안의 임시 파일을 검증한 뒤 게시한다. `SUB-001~002`
 
-`Summary`는 입력 Transcript 하나를 가리키는 게시 JSON Artifact이면서 검수 대상인 ID·리비전, 작성 주체, 요약 text·키워드·시간 챕터를 소유한다. Agent 생성과 사람 폴백은 같은 구조를 사용하고 작성 주체로 구분하며 Transcript 원문을 복제하거나 대체하지 않는다. `SUM-001~002`
+`Summary`는 입력 Transcript 하나를 가리키는 게시 JSON Artifact이면서 검수 대상인 ID·리비전, 작성 주체, 요약 text·키워드·시간 챕터를 소유한다. Agent 생성과 사람 폴백은 같은 구조를 사용하고 작성 주체로 구분하며 Transcript 원문을 복제하거나 대체하지 않는다. SQLite는 저장된 Transcript 참조와 Summary ID·리비전 유일성을 확인해 추가 전용으로 보존한다. `SUM-001~003`
 
-내용 검수는 provenance를 덮어쓰지 않고 대상 아티팩트 리비전을 참조하는 추가 전용 ContentReview로 기록한다. 현재 검수 상태는 가장 큰 Event 저장 순번의 기록에서 투영한다. `REV-001`
+내용 검수는 provenance를 덮어쓰지 않고 존재하는 Summary 리비전을 참조하는 추가 전용 ContentReview로 기록한다. SQLite에서 Event 저장 순번을 고유하게 보존하고 가장 큰 순번의 기록을 현재 검수 상태로 투영한다. `REV-001~002`
 
 ## 5. SQLite 운영 원칙
 
