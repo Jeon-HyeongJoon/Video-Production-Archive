@@ -95,7 +95,7 @@ func (s Settings) Validate() error {
 	}
 	providerIDs := make(map[string]bool, len(s.Providers))
 	for _, provider := range s.Providers {
-		if provider.ID == "" || !validSecretRef(provider.SecretRef) {
+		if provider.ID == "" || !ValidSecretReference(provider.SecretRef) {
 			return fmt.Errorf("provider %q: %w", provider.ID, ErrInvalidSecretReference)
 		}
 		if providerIDs[provider.ID] {
@@ -105,7 +105,7 @@ func (s Settings) Validate() error {
 	}
 	workerIDs := make(map[string]bool, len(s.Workers))
 	for _, worker := range s.Workers {
-		if worker.ID == "" || !validSecretRef(worker.CredentialRef) {
+		if worker.ID == "" || !ValidSecretReference(worker.CredentialRef) {
 			return fmt.Errorf("worker %q: %w", worker.ID, ErrInvalidSecretReference)
 		}
 		if workerIDs[worker.ID] {
@@ -116,6 +116,6 @@ func (s Settings) Validate() error {
 	return nil
 }
 
-func validSecretRef(reference string) bool {
+func ValidSecretReference(reference string) bool {
 	return strings.HasPrefix(reference, "wincred://") || strings.HasPrefix(reference, "dpapi://")
 }

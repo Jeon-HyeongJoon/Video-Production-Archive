@@ -1,0 +1,10 @@
+schema_version: 1
+
+worker:
+  id: worker-main
+  control_url: http://127.0.0.1:8080
+  credential_ref: wincred://video-archive/workers/worker-main
+  heartbeat_interval: 10s
+  accessible_storage_ids:
+    - scratch-main
+    - archive-primary

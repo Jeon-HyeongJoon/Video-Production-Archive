@@ -3,6 +3,7 @@
 build:
 	mkdir -p bin
 	go build -o bin/video-archive-control ./cmd/video-archive-control
+	go build -o bin/video-archive-worker ./cmd/video-archive-worker
 
 test:
 	go test ./...

@@ -123,27 +123,45 @@ func (store *Store) Commit(idempotencyKey string, commit command.Commit) error {
 		if commit.ExpectedRevision == nil {
 			return command.ErrInvalidChange
 		}
-		result, err := tx.Exec(`
-			UPDATE aggregate_states
-			SET revision = ?, state = ?
-			WHERE target_id = ? AND revision = ?
-		`, commit.NextState.Revision, []byte(commit.NextState.State), commit.NextState.TargetID, *commit.ExpectedRevision)
-		if err != nil {
-			return err
-		}
-		updated, err := result.RowsAffected()
-		if err != nil {
-			return err
-		}
-		if updated != 1 {
+		if commit.CreateTarget {
+			if *commit.ExpectedRevision != 0 || commit.NextState.Revision != 1 {
+				return command.ErrInvalidChange
+			}
 			var exists int
 			if err := tx.QueryRow(`SELECT COUNT(*) FROM aggregate_states WHERE target_id = ?`, commit.NextState.TargetID).Scan(&exists); err != nil {
 				return err
 			}
-			if exists == 0 {
-				return command.ErrTargetNotFound
+			if exists != 0 {
+				return command.ErrRevisionConflict
 			}
-			return command.ErrRevisionConflict
+			if _, err := tx.Exec(`
+				INSERT INTO aggregate_states(target_id, revision, state) VALUES (?, ?, ?)
+			`, commit.NextState.TargetID, commit.NextState.Revision, []byte(commit.NextState.State)); err != nil {
+				return err
+			}
+		} else {
+			result, err := tx.Exec(`
+				UPDATE aggregate_states
+				SET revision = ?, state = ?
+				WHERE target_id = ? AND revision = ?
+			`, commit.NextState.Revision, []byte(commit.NextState.State), commit.NextState.TargetID, *commit.ExpectedRevision)
+			if err != nil {
+				return err
+			}
+			updated, err := result.RowsAffected()
+			if err != nil {
+				return err
+			}
+			if updated != 1 {
+				var exists int
+				if err := tx.QueryRow(`SELECT COUNT(*) FROM aggregate_states WHERE target_id = ?`, commit.NextState.TargetID).Scan(&exists); err != nil {
+					return err
+				}
+				if exists == 0 {
+					return command.ErrTargetNotFound
+				}
+				return command.ErrRevisionConflict
+			}
 		}
 	}
 

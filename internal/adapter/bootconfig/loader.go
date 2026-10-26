@@ -177,6 +177,9 @@ func normalize(configurationPath string, source document) (Configuration, error)
 	for _, definition := range source.Workers.Definitions {
 		id := strings.TrimSpace(definition.ID)
 		credentialRef := strings.TrimSpace(definition.CredentialRef)
+		if !strings.HasPrefix(credentialRef, "wincred://") {
+			return Configuration{}, ErrInvalidConfiguration
+		}
 		settings.Workers = append(settings.Workers, config.WorkerDefinition{ID: id, CredentialRef: credentialRef})
 		processingKinds := make(map[vocabulary.ProcessingKind]bool, len(definition.ProcessingKinds))
 		for _, raw := range definition.ProcessingKinds {

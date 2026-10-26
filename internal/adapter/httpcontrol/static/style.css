@@ -19,13 +19,15 @@ section { padding: 1.4rem; border: 1px solid #26313d; border-radius: 1rem; backg
 .section-heading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
 form { display: grid; grid-template-columns: minmax(12rem, 1fr) minmax(10rem, .45fr) auto; gap: .75rem; align-items: end; }
 label { display: grid; gap: .4rem; color: #aab7c4; font-size: .8rem; }
-input, button { min-height: 2.7rem; border: 1px solid #334353; border-radius: .55rem; font: inherit; }
-input { width: 100%; padding: .65rem .75rem; background: #0b1016; color: #eef4fa; }
+input, select, button { min-height: 2.7rem; border: 1px solid #334353; border-radius: .55rem; font: inherit; }
+input, select { width: 100%; padding: .65rem .75rem; background: #0b1016; color: #eef4fa; }
 button { padding: .65rem 1rem; background: #76d7c4; color: #07110f; font-weight: 750; cursor: pointer; }
+#job-create { grid-template-columns: minmax(12rem, 1fr) minmax(9rem, .5fr) minmax(8rem, .4fr) auto; margin-top: 1rem; }
+.secondary { margin-top: .75rem; min-height: 2.2rem; padding: .35rem .7rem; background: transparent; color: #ffbd69; border-color: #755c3d; }
 .cards, .results { display: grid; gap: .7rem; margin-top: 1rem; }
 .cards { grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); }
 .card, .result { padding: 1rem; border: 1px solid #2a3947; border-radius: .75rem; background: #111923; }
 .card.attention { border-color: #ff8b6a; }
 .state { color: #d8e2eb; font-weight: 700; }.detail, .empty { color: #8999a8; }
 code { color: #76d7c4; }.error { color: #ff8b6a; }
-@media (max-width: 700px) { header { padding-top: 2.5rem; } form { grid-template-columns: 1fr; } }
+@media (max-width: 700px) { header { padding-top: 2.5rem; } form, #job-create { grid-template-columns: 1fr; } }

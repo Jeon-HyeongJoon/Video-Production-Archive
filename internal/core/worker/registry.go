@@ -39,6 +39,13 @@ type runtimeState struct {
 	metrics       Metrics
 }
 
+type Status struct {
+	WorkerID      string
+	State         string
+	LastHeartbeat time.Time
+	Metrics       Metrics
+}
+
 type Registry struct {
 	mu           sync.RWMutex
 	definitions  map[string]Definition
@@ -77,6 +84,38 @@ func (r *Registry) Heartbeat(workerID string, now time.Time, metrics Metrics) er
 	}
 	r.states[workerID] = runtimeState{lastHeartbeat: now, metrics: metrics}
 	return nil
+}
+
+func (r *Registry) Statuses(now time.Time) []Status {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	workerIDs := make([]string, 0, len(r.definitions))
+	for workerID := range r.definitions {
+		workerIDs = append(workerIDs, workerID)
+	}
+	sort.Strings(workerIDs)
+	statuses := make([]Status, 0, len(workerIDs))
+	for _, workerID := range workerIDs {
+		definition := r.definitions[workerID]
+		status := Status{WorkerID: workerID, State: "OFFLINE"}
+		if !definition.Enabled {
+			status.State = "DISABLED"
+		}
+		if state, connected := r.states[workerID]; definition.Enabled && connected {
+			status.LastHeartbeat = state.lastHeartbeat
+			status.Metrics = cloneMetrics(state.metrics)
+			if now.Sub(state.lastHeartbeat) <= r.heartbeatTTL {
+				status.State = "ONLINE"
+				if state.metrics.HeavyRunning > 0 {
+					status.State = "BUSY"
+				} else if !state.metrics.AcceptingWork {
+					status.State = "DRAINING"
+				}
+			}
+		}
+		statuses = append(statuses, status)
+	}
+	return statuses
 }
 
 type Requirement struct {
@@ -127,4 +166,15 @@ func supports[T ~string](available map[T]bool, required []T) bool {
 		}
 	}
 	return true
+}
+
+func cloneMetrics(source Metrics) Metrics {
+	accessible := make(map[string]bool, len(source.AccessibleStorageIDs))
+	for storageID, available := range source.AccessibleStorageIDs {
+		accessible[storageID] = available
+	}
+	return Metrics{
+		AcceptingWork: source.AcceptingWork, HeavyRunning: source.HeavyRunning,
+		AccessibleStorageIDs: accessible,
+	}
 }

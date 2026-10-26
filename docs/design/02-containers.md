@@ -33,7 +33,7 @@ Control Service만 운영 DB에 직접 쓴다.
 
 HTTP와 MCP는 Domain 함수를 직접 호출하지 않고 같은 Command Bus를 사용한다. Handler는 저장 상태를 직접 바꾸지 않고 새 상태와 Event를 반환하며 Store가 상태·CommandRecord·Event·receipt를 한 번에 확정한다. Core 경계는 `CMD-001~010`, 실제 SQLite transaction은 `PER-001` integration test로 검증한다.
 
-v1 Control Service는 strict boot YAML에서 DB·listen·CIDR·Origin·Worker·Storage topology를 읽어 시작하며 `video-archive-control` 실행 파일이 SQLite 카탈로그, Dashboard projection과 Notification SSE를 하나의 HTTP Handler에 조립한다. 정적 Dashboard와 health, 자산·전사·요약·검수·Job 조회 API는 실제 peer CIDR 검사를 공통으로 통과하고 protocol DTO에서 Storage 경로를 제외한다. 같은 boot topology의 재시작은 멱등하지만 기존 Storage ID의 물리 identity나 root 변경은 시작 오류다. `CFG-006`, `CTL-001~002`
+v1 Control Service는 strict boot YAML에서 DB·listen·CIDR·Origin·Worker·Storage topology를 읽어 시작하며 `video-archive-control` 실행 파일이 SQLite Command Store·카탈로그, Dashboard projection과 Notification SSE를 하나의 HTTP Handler에 조립한다. 정적 Dashboard와 health, 자산·전사·요약·검수·Job 조회 API는 실제 peer CIDR 검사를 공통으로 통과하고 protocol DTO에서 Storage 경로를 제외한다. 같은 boot topology의 재시작은 멱등하지만 기존 Storage ID의 물리 identity나 root 변경은 시작 오류다. Job 생성·취소는 Origin·JSON·CSRF 검증 뒤 공통 Command Bus를 통과하며 상태·명령·Event·receipt가 SQLite transaction으로 확정된 다음 읽기 투영을 갱신한다. `CFG-006`, `CTL-001~004`
 
 ## 3. Media Worker
 
@@ -53,6 +53,8 @@ lease claim
 Worker는 DB 파일을 직접 열지 않는다. Control API가 내려준 ID와 허용된 storage root만 사용하며, 임의의 사용자 제공 절대경로를 실행 인수로 신뢰하지 않는다.
 
 같은 PC의 local Worker도 원격 Worker와 같은 registry·ExecutionLease 계약을 사용한다. PC를 추가할 때 Worker만 설치하고 boot config에 `worker_id`, credential reference, 처리 종류를 등록한다. 원격 Worker가 Control에 outbound 연결하므로 Worker PC에는 inbound 포트를 열지 않는다.
+
+v1 `video-archive-worker`는 별도 strict YAML의 identity·Control URL·Windows Credential Manager reference·heartbeat 주기·접근 Storage를 읽고 Control로 outbound heartbeat를 보낸다. Control의 `/worker/v1`은 Dashboard 로그인 설정과 무관하게 매 요청의 Worker별 Bearer credential을 Resolver 값과 비교하고, 성공한 상태만 credential 없이 Dashboard Worker 조회에 투영한다. loopback HTTP는 All-in-One 개발 구성에만 허용하고 원격 Control URL은 HTTPS만 허용한다. Resolver·HTTP 계약은 fixture 통합으로 검증하고 실제 Windows Credential Manager 호출은 격리 Windows acceptance 전까지 계획 상태다. `CFG-007`, `WRK-005~007`
 
 ## 4. 프로세스 장애 경계
 

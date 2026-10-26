@@ -48,6 +48,8 @@ Dashboard의 변경 동작은 업무 현황에서 출발한 개입과 Agent 부�
 
 버튼과 폼이 실제 Command를 만들고, 채팅은 현재 Job 문맥의 설명·오류 분석·실행 계획 제안에 사용한다. 채팅의 제안은 자동으로 승인으로 간주하지 않는다.
 
+초기 웹 Command API는 CSRF session을 먼저 발급하고 exact Origin·JSON Content-Type·double-submit token을 검증한다. Template 기반 Job 생성은 revision 0에서 새 Aggregate를 같은 Command Unit of Work로 만들며, 취소는 요청의 expected revision과 StepState 전이표를 모두 통과해야 한다. 성공 뒤 rebuild 가능한 Dashboard projection을 갱신하고 멱등 재전송에서는 최초 명령 결과로 같은 투영을 복구한다. `CTL-003~004`
+
 Provider, Worker registry, 인증, Storage와 파괴적 기능 정책은 인증 비활성 모드의 Dashboard에서 바꾸지 않는다. 로컬 설정 파일과 서비스 재시작이 그 책임을 가진다.
 
 ## 4. 상태 전달

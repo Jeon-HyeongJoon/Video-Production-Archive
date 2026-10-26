@@ -1,10 +1,31 @@
 const byId = (id) => document.getElementById(id);
+let csrfToken = "";
 
 async function api(path) {
   const response = await fetch(path, { headers: { Accept: "application/json" } });
   const payload = await response.json();
   if (!response.ok) throw new Error(payload.error?.code || `HTTP_${response.status}`);
   return payload.data ?? payload;
+}
+
+async function mutation(path, payload) {
+  if (!csrfToken) {
+    const session = await api("/api/v1/session");
+    csrfToken = session.csrf_token;
+  }
+  const response = await fetch(path, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { Accept: "application/json", "Content-Type": "application/json", "X-CSRF-Token": csrfToken },
+    body: JSON.stringify(payload),
+  });
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.error?.code || `HTTP_${response.status}`);
+  return result.data;
+}
+
+function identifier(prefix) {
+  return `${prefix}-${crypto.randomUUID()}`;
 }
 
 function empty(container) {
@@ -40,12 +61,63 @@ async function loadJobs() {
       card.append(text("h3", job.target_title));
       card.append(text("p", `${job.current_step_id} · ${job.step_state}`, "state"));
       card.append(text("p", job.intervention_reason || `${Math.round(job.progress * 100)}%`, "detail"));
+      if (!["COMPLETED", "FAILED", "CANCELLED", "VERIFYING"].includes(job.step_state)) {
+        const cancel = text("button", "취소", "secondary");
+        cancel.type = "button";
+        cancel.addEventListener("click", async () => {
+          try {
+            await mutation(`/api/v1/jobs/${encodeURIComponent(job.job_id)}/cancel`, {
+              command_id: identifier("COMMAND"), idempotency_key: identifier(`${job.job_id}-cancel`),
+              expected_revision: job.revision, reason: "dashboard operator cancelled job",
+            });
+            await loadJobs();
+          } catch (error) {
+            byId("job-command-status").textContent = `취소 실패 · ${error.message}`;
+          }
+        });
+        card.append(cancel);
+      }
       return card;
     }));
   } catch (error) {
     container.replaceChildren(text("p", error.message, "error"));
   }
 }
+
+async function loadWorkers() {
+  const container = byId("workers");
+  try {
+    const workers = await api("/api/v1/workers");
+    if (!workers.length) return empty(container);
+    container.replaceChildren(...workers.map((worker) => {
+      const card = document.createElement("article");
+      card.className = `card ${worker.state === "OFFLINE" ? "attention" : ""}`;
+      card.append(text("p", worker.state, "meta"));
+      card.append(text("h3", worker.worker_id));
+      card.append(text("p", worker.accessible_storage_ids.join(" · ") || "Storage 보고 없음", "detail"));
+      return card;
+    }));
+  } catch (error) {
+    container.replaceChildren(text("p", error.message, "error"));
+  }
+}
+
+byId("job-create").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const values = Object.fromEntries(new FormData(event.currentTarget));
+  const jobId = identifier("JOB");
+  try {
+    await mutation("/api/v1/jobs", {
+      job_id: jobId, command_id: identifier("COMMAND"), idempotency_key: `${jobId}:create`,
+      expected_revision: 0, reason: "dashboard operator created job", ...values,
+    });
+    byId("job-command-status").textContent = `작업 생성됨 · ${jobId}`;
+    event.currentTarget.reset();
+    await loadJobs();
+  } catch (error) {
+    byId("job-command-status").textContent = `생성 실패 · ${error.message}`;
+  }
+});
 
 byId("asset-search").addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -87,5 +159,7 @@ byId("transcript-search").addEventListener("submit", async (event) => {
 });
 
 byId("refresh-jobs").addEventListener("click", loadJobs);
+byId("refresh-workers").addEventListener("click", loadWorkers);
 loadHealth();
 loadJobs();
+loadWorkers();

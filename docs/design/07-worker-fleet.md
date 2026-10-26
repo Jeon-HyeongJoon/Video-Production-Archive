@@ -81,6 +81,8 @@ CONNECTING | ONLINE | BUSY | DRAINING | OFFLINE | DISABLED
 
 `DRAINING`은 새 lease를 받지 않고 현재 작업만 끝내는 운영 상태다. Control 재시작 후 Worker는 다시 연결하고, 기존 Step은 lease 만료·idempotency 규칙으로 복구한다.
 
+초기 실행 파일은 `video-archive-worker`이며 strict boot YAML과 Credential Resolver에서 설정·credential을 각각 읽는다. Worker는 시작 직후와 설정 주기마다 outbound heartbeat를 보내고 Control은 등록 identity·credential이 모두 일치할 때만 ONLINE/BUSY/DRAINING 상태를 갱신한다. credential과 reference는 Dashboard 응답에 포함하지 않는다. 실제 Windows Credential Manager Adapter는 격리 Windows 서비스 계정 acceptance로 별도 검증한다. `CFG-007`, `WRK-005~007`
+
 ## 5. Worker 선택
 
 Scheduler는 다음 순서로 후보를 거른다.

@@ -21,8 +21,9 @@
 - 요구사항과 테스트의 자동 1:1 추적 검사
 - 등록 Storage 입고·기술정보 분석·검증된 렌더·통합 QC·메타데이터 검색, timestamp 전사·SRT 자막과 리비전 요약 계약
 - strict YAML boot 설정, 재시작 가능한 SQLite Runtime, CIDR 보호 정적 Dashboard와 조회 API를 제공하는 `video-archive-control`
+- CSRF 보호 Job 생성·취소 Command API와 credential 인증 heartbeat를 보내는 `video-archive-worker`
 
-현재는 SQLite Command Unit of Work, Storage→PhysicalDevice 작업 공간 해석, 아카이브 sidecar export/import, 게시 장애 조정, Notification SSE 재연결, 독립 Capability 실행·증적·Dashboard projection과 CI 테스트 증적의 integration 계약까지 구현되어 있다. 등록 Storage 입고 카탈로그와 ffprobe·FFmpeg·whisper.cpp subprocess Adapter도 격리 fixture로 검증하며 FFmpeg speech audio 추출에서 timestamp Transcript 게시·최신 segment 검색, 검증된 SRT 자막, Agent·사람 작성 리비전 요약 게시와 SQLite 내용 검수 복원까지 연결된다. `video-archive-control`은 boot 설정으로 같은 SQLite DB와 Storage topology를 열고 내부망 Dashboard 및 자산·전사·요약·검수·Job 조회 API를 제공한다. HTTP 상태 변경 Command API, 로컬 Worker 실행 loop, MCP Adapter, Windows Device Adapter, VJ 기능과 Provider API Adapter는 아직 구현하지 않았다. 실제 Windows 장치와 운영 ffprobe·FFmpeg·whisper.cpp 실행은 장비가 제공될 때까지 acceptance 계획 상태다.
+현재는 SQLite Command Unit of Work, Storage→PhysicalDevice 작업 공간 해석, 아카이브 sidecar export/import, 게시 장애 조정, Notification SSE 재연결, 독립 Capability 실행·증적·Dashboard projection과 CI 테스트 증적의 integration 계약까지 구현되어 있다. 등록 Storage 입고 카탈로그와 ffprobe·FFmpeg·whisper.cpp subprocess Adapter도 격리 fixture로 검증하며 FFmpeg speech audio 추출에서 timestamp Transcript 게시·최신 segment 검색, 검증된 SRT 자막, Agent·사람 작성 리비전 요약 게시와 SQLite 내용 검수 복원까지 연결된다. `video-archive-control`은 boot 설정으로 같은 SQLite DB와 Storage topology를 열고 내부망 Dashboard, 자산·전사·요약·검수·Job·Worker 조회 API와 CSRF 보호 Job 생성·취소를 제공한다. `video-archive-worker`는 별도 boot 설정과 Credential Resolver에서 service credential을 읽어 heartbeat를 전송한다. Worker의 Step lease/result 실행 loop, MCP Adapter, Windows Device Adapter, VJ 편집 기능과 Provider API Adapter는 아직 구현하지 않았다. 실제 Windows Credential Manager·장치와 운영 ffprobe·FFmpeg·whisper.cpp 실행은 장비가 제공될 때까지 acceptance 계획 상태다.
 
 ## 문서 읽는 순서
 
@@ -62,6 +63,17 @@ go run ./cmd/video-archive-control -config config.yaml
 ```
 
 설정된 주소에서 Dashboard와 `/api/v1`을 제공한다. 개발 PC에서 확인할 때도 wildcard listen 대신 loopback 주소와 `127.0.0.0/8`을 명시한다.
+
+## Worker 실행
+
+Control과 Worker PC의 Windows Credential Manager에 `worker.example.yaml`의 `credential_ref`에서 `wincred://`를 뺀 이름으로 같은 generic credential을 저장한다. credential 원문은 YAML이나 명령행에 넣지 않는다. 그 다음 예시를 `worker.yaml`로 복사해 Control URL과 접근 가능한 Storage ID를 맞춘다. 다른 PC의 Control에 연결할 때는 HTTPS URL이 필수다.
+
+```bash
+go run ./cmd/video-archive-worker -config worker.yaml -check-config
+go run ./cmd/video-archive-worker -config worker.yaml
+```
+
+Worker가 연결되면 Dashboard의 “Worker 연결”과 `/api/v1/workers`에서 ONLINE 상태를 확인할 수 있다.
 
 `reqcheck`는 다음 조건 중 하나라도 어기면 실패한다.
 

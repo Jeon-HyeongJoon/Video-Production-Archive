@@ -4,11 +4,11 @@ database:
   path: data/control.db
 
 server:
-  listen_address: 192.168.40.8:8080
+  listen_address: 127.0.0.1:8080
   allowed_cidrs:
-    - 192.168.40.0/24
+    - 127.0.0.0/8
   allowed_origins:
-    - http://192.168.40.8:8080
+    - http://127.0.0.1:8080
   trusted_proxies: []
 
 security:

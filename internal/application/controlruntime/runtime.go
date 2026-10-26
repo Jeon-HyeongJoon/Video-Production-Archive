@@ -2,6 +2,7 @@ package controlruntime
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"net"
@@ -12,23 +13,58 @@ import (
 
 	"videoarchive/internal/adapter/bootconfig"
 	"videoarchive/internal/adapter/httpcontrol"
+	"videoarchive/internal/adapter/httpworker"
 	"videoarchive/internal/adapter/notificationsse"
+	"videoarchive/internal/adapter/ossecret"
 	"videoarchive/internal/adapter/sqlitecatalog"
+	"videoarchive/internal/adapter/sqlitecommand"
 	"videoarchive/internal/adapter/sqlitedashboard"
 	"videoarchive/internal/adapter/sqlitestorage"
 	"videoarchive/internal/application/dashboard"
+	"videoarchive/internal/application/jobcontrol"
+	"videoarchive/internal/core/command"
+	"videoarchive/internal/core/job"
 	"videoarchive/internal/core/notification"
+	"videoarchive/internal/core/security"
+	"videoarchive/internal/core/worker"
 )
+
+type SecretResolver interface {
+	Resolve(reference string) (string, error)
+}
+
+type Dependencies struct {
+	Secrets SecretResolver
+	Now     func() time.Time
+}
+
+type credentialVerifier struct {
+	resolver SecretResolver
+}
+
+func (verifier credentialVerifier) Verify(_ string, credentialReference, presentedCredential string) bool {
+	want, err := verifier.resolver.Resolve(credentialReference)
+	return err == nil && want != "" && len(want) == len(presentedCredential) &&
+		subtle.ConstantTimeCompare([]byte(want), []byte(presentedCredential)) == 1
+}
 
 type Runtime struct {
 	configuration bootconfig.Configuration
 	catalog       *sqlitecatalog.Store
 	dashboard     *sqlitedashboard.Store
+	commands      *sqlitecommand.Store
 	storage       *sqlitestorage.Repository
 	handler       *httpcontrol.Handler
 }
 
 func Open(ctx context.Context, configuration bootconfig.Configuration, version string) (*Runtime, error) {
+	return OpenWithDependencies(ctx, configuration, version, Dependencies{Secrets: ossecret.New(), Now: time.Now})
+}
+
+func OpenWithDependencies(ctx context.Context, configuration bootconfig.Configuration, version string, dependencies Dependencies) (*Runtime, error) {
+	if dependencies.Secrets == nil || dependencies.Now == nil {
+		return nil, errors.New("control runtime dependencies are incomplete")
+	}
 	if err := os.MkdirAll(filepath.Dir(configuration.DatabasePath), 0o750); err != nil {
 		return nil, fmt.Errorf("create database directory: %w", err)
 	}
@@ -46,6 +82,11 @@ func Open(ctx context.Context, configuration bootconfig.Configuration, version s
 		return fail(err)
 	}
 	runtime.dashboard = dashboardStore
+	commandStore, err := sqlitecommand.Open(configuration.DatabasePath)
+	if err != nil {
+		return fail(err)
+	}
+	runtime.commands = commandStore
 	storageRepository, err := sqlitestorage.Open(configuration.DatabasePath)
 	if err != nil {
 		return fail(err)
@@ -60,9 +101,33 @@ func Open(ctx context.Context, configuration bootconfig.Configuration, version s
 	if err != nil {
 		return fail(err)
 	}
+	jobHandler, err := job.NewHandler(dependencies.Now)
+	if err != nil {
+		return fail(err)
+	}
+	executor := command.NewAuthorizedCreatingExecutor(commandStore, func(envelope command.Envelope) error {
+		if !security.Authorize(security.Request{
+			ActorType: envelope.Actor.Type, Role: security.Operator, Action: security.Process,
+			AuthMode: configuration.Access.Mode,
+		}) {
+			return errors.New("job command is not authorized")
+		}
+		return nil
+	}, jobHandler.Handle)
+	jobCommands, err := jobcontrol.New(executor, commandStore, dashboardStore)
+	if err != nil {
+		return fail(err)
+	}
+	workerRegistry := worker.NewRegistry(configuration.Workers, credentialVerifier{resolver: dependencies.Secrets}, configuration.HeartbeatTTL)
+	workerAPI, err := httpworker.New(workerRegistry, dependencies.Now)
+	if err != nil {
+		return fail(err)
+	}
 	handler, err := httpcontrol.New(httpcontrol.Configuration{
 		Access: configuration.Access, TrustedProxies: configuration.TrustedProxies,
-		Catalog: catalogStore, Dashboard: queries, Notifications: notificationsse.New(&notification.Feed{}), Version: version,
+		Catalog: catalogStore, Dashboard: queries, Notifications: notificationsse.New(&notification.Feed{}),
+		Commands: jobCommands, WorkerAPI: workerAPI, Workers: workerAPI,
+		AllowedOrigins: configuration.AllowedOrigins, Version: version,
 	})
 	if err != nil {
 		return fail(err)
@@ -109,6 +174,9 @@ func (runtime *Runtime) Close() error {
 	}
 	if runtime.dashboard != nil {
 		combined = errors.Join(combined, runtime.dashboard.Close())
+	}
+	if runtime.commands != nil {
+		combined = errors.Join(combined, runtime.commands.Close())
 	}
 	if runtime.catalog != nil {
 		combined = errors.Join(combined, runtime.catalog.Close())

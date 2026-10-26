@@ -142,6 +142,7 @@ type Receipt struct {
 
 type Commit struct {
 	ExpectedRevision *uint64
+	CreateTarget     bool
 	NextState        *Snapshot
 	Record           CommandRecord
 	Events           []Event
@@ -199,10 +200,13 @@ func (store *MemoryStore) Commit(key string, commit Commit) error {
 	}
 	if commit.NextState != nil {
 		current, ok := store.states[commit.NextState.TargetID]
-		if !ok {
+		if commit.CreateTarget && ok {
+			return ErrRevisionConflict
+		}
+		if !commit.CreateTarget && !ok {
 			return ErrTargetNotFound
 		}
-		if current.Revision != *commit.ExpectedRevision {
+		if !commit.CreateTarget && current.Revision != *commit.ExpectedRevision {
 			return ErrRevisionConflict
 		}
 	}
@@ -238,6 +242,9 @@ func validateCommit(key string, commit Commit) error {
 		commit.NextState.Revision != *commit.ExpectedRevision+1 || !commit.Record.Accepted {
 		return ErrInvalidChange
 	}
+	if commit.CreateTarget && (commit.NextState == nil || *commit.ExpectedRevision != 0) {
+		return ErrInvalidChange
+	}
 	if commit.Receipt != nil && (key == "" || commit.Receipt.Digest == "") {
 		return ErrInvalidChange
 	}
@@ -259,6 +266,7 @@ type Executor struct {
 	store     Store
 	handler   Handler
 	authorize Authorizer
+	create    bool
 }
 
 func NewExecutor(store Store, handler Handler) *Executor {
@@ -267,6 +275,13 @@ func NewExecutor(store Store, handler Handler) *Executor {
 
 func NewAuthorizedExecutor(store Store, authorize Authorizer, handler Handler) *Executor {
 	return &Executor{store: store, authorize: authorize, handler: handler}
+}
+
+// NewAuthorizedCreatingExecutor allows the Handler to initialize an absent
+// target only when the command expects revision zero. The resulting state,
+// CommandRecord, Event and receipt are still committed as one Store unit.
+func NewAuthorizedCreatingExecutor(store Store, authorize Authorizer, handler Handler) *Executor {
+	return &Executor{store: store, authorize: authorize, handler: handler, create: true}
 }
 
 func (executor *Executor) Execute(envelope Envelope) (Result, error) {
@@ -305,6 +320,11 @@ func (executor *Executor) Execute(envelope Envelope) (Result, error) {
 	}
 
 	current, err := executor.store.Load(envelope.TargetID)
+	creating := errors.Is(err, ErrTargetNotFound) && executor.create && envelope.ExpectedRevision == 0
+	if creating {
+		current = Snapshot{TargetID: envelope.TargetID}
+		err = nil
+	}
 	if err != nil {
 		return Result{}, executor.recordRejection(envelope, err, nil)
 	}
@@ -331,6 +351,7 @@ func (executor *Executor) Execute(envelope Envelope) (Result, error) {
 	expected := envelope.ExpectedRevision
 	commit := Commit{
 		ExpectedRevision: &expected,
+		CreateTarget:     creating,
 		NextState:        &next,
 		Record:           CommandRecord{Envelope: envelope, Accepted: true},
 		Events:           result.Events,

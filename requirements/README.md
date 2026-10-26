@@ -62,11 +62,11 @@
 
 ## 5. 현재 기준선
 
-- 전체 요구사항: 129개
-- 구현됨: 123개, 주석 테스트 123개와 1:1 연결
-- 구현된 integration 테스트: `ARC-006`, `PER-001`, `ARC-007`, `EXE-003`, `NTF-002`, `TST-001`, `DEV-006`, `APP-001`, `OBS-001`, `DSH-001`, `MED-002`, `INT-001`, `INT-003~004`, `MED-004`, `RND-002`, `QCT-002`, `CAT-002~003`, `AUD-002`, `TRN-002`, `TRN-004`, `SUB-002`, `SUM-002~003`, `REV-002`, `CFG-006`, `CTL-001~002`
-- 계획됨: 6개
-- 계획된 실장비 acceptance 테스트: `DEV-005`, `ARC-008`, `MED-003`, `RND-003`, `AUD-003`, `TRN-003`
+- 전체 요구사항: 135개
+- 구현됨: 128개, 주석 테스트 128개와 1:1 연결
+- 구현된 integration 테스트: `ARC-006`, `PER-001`, `ARC-007`, `EXE-003`, `NTF-002`, `TST-001`, `DEV-006`, `APP-001`, `OBS-001`, `DSH-001`, `MED-002`, `INT-001`, `INT-003~004`, `MED-004`, `RND-002`, `QCT-002`, `CAT-002~003`, `AUD-002`, `TRN-002`, `TRN-004`, `SUB-002`, `SUM-002~003`, `REV-002`, `CFG-006~007`, `CTL-001~004`, `WRK-005~006`
+- 계획됨: 7개
+- 계획된 실장비 acceptance 테스트: `DEV-005`, `ARC-008`, `MED-003`, `RND-003`, `AUD-003`, `TRN-003`, `WRK-007`
 - 계획된 integration 테스트: 없음
 
 정확한 문구와 테스트 이름은 항상 [`catalog.json`](catalog.json)에서 확인한다. 이 문서에는 변경 시 쉽게 낡는 전체 테스트 목록을 복제하지 않는다.
@@ -81,7 +81,7 @@ go test ./...
 현재 정상 출력:
 
 ```text
-traceability ok: 129 requirements (123 implemented, 6 planned), 123 one-to-one tests
+traceability ok: 135 requirements (128 implemented, 7 planned), 128 one-to-one tests
 ```
 
 ## 7. 새 요구사항 추가 절차

@@ -2,23 +2,31 @@ package httpcontrol
 
 import (
 	"context"
+	"crypto/rand"
 	"embed"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"io"
 	"io/fs"
 	"net"
 	"net/http"
 	"net/netip"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"videoarchive/internal/application/dashboard"
 	"videoarchive/internal/core/catalog"
+	"videoarchive/internal/core/command"
 	"videoarchive/internal/core/contentreview"
+	"videoarchive/internal/core/job"
 	"videoarchive/internal/core/security"
 	"videoarchive/internal/core/summary"
 	"videoarchive/internal/core/transcription"
+	"videoarchive/internal/core/worker"
+	"videoarchive/internal/core/workflow"
 )
 
 var ErrInvalidConfiguration = errors.New("HTTP control configuration is invalid")
@@ -35,12 +43,24 @@ type DashboardReader interface {
 	Detail(context.Context, string) (dashboard.JobView, error)
 }
 
+type JobCommander interface {
+	Execute(context.Context, command.Envelope) (command.Result, error)
+}
+
+type WorkerReader interface {
+	Statuses(context.Context) ([]worker.Status, error)
+}
+
 type Configuration struct {
 	Access         security.AccessConfig
 	TrustedProxies []netip.Prefix
 	Catalog        CatalogReader
 	Dashboard      DashboardReader
 	Notifications  http.Handler
+	Commands       JobCommander
+	WorkerAPI      http.Handler
+	Workers        WorkerReader
+	AllowedOrigins []string
 	Version        string
 }
 
@@ -50,6 +70,10 @@ type Handler struct {
 	catalog        CatalogReader
 	dashboard      DashboardReader
 	notifications  http.Handler
+	commands       JobCommander
+	workerAPI      http.Handler
+	workers        WorkerReader
+	allowedOrigins []string
 	version        string
 	router         http.Handler
 }
@@ -59,13 +83,18 @@ var staticFiles embed.FS
 
 func New(configuration Configuration) (*Handler, error) {
 	if configuration.Catalog == nil || configuration.Dashboard == nil || configuration.Notifications == nil ||
-		strings.TrimSpace(configuration.Version) == "" || len(configuration.Access.AllowedNetworks) == 0 {
+		strings.TrimSpace(configuration.Version) == "" || len(configuration.Access.AllowedNetworks) == 0 ||
+		(configuration.Commands != nil && len(configuration.AllowedOrigins) == 0) ||
+		(configuration.WorkerAPI == nil) != (configuration.Workers == nil) {
 		return nil, ErrInvalidConfiguration
 	}
 	handler := &Handler{
 		access: configuration.Access, trustedProxies: append([]netip.Prefix(nil), configuration.TrustedProxies...),
 		catalog: configuration.Catalog, dashboard: configuration.Dashboard,
-		notifications: configuration.Notifications, version: strings.TrimSpace(configuration.Version),
+		notifications: configuration.Notifications, commands: configuration.Commands,
+		workerAPI: configuration.WorkerAPI, workers: configuration.Workers,
+		allowedOrigins: append([]string(nil), configuration.AllowedOrigins...),
+		version:        strings.TrimSpace(configuration.Version),
 	}
 	assets, err := fs.Sub(staticFiles, "static")
 	if err != nil {
@@ -81,6 +110,14 @@ func New(configuration Configuration) (*Handler, error) {
 	mux.HandleFunc("GET /api/v1/summaries/{summaryID}/reviews", handler.reviews)
 	mux.HandleFunc("GET /api/v1/jobs", handler.jobs)
 	mux.HandleFunc("GET /api/v1/jobs/{jobID}", handler.job)
+	if handler.workers != nil {
+		mux.HandleFunc("GET /api/v1/workers", handler.workerStatuses)
+	}
+	if handler.commands != nil {
+		mux.HandleFunc("GET /api/v1/session", handler.session)
+		mux.HandleFunc("POST /api/v1/jobs", handler.createJob)
+		mux.HandleFunc("POST /api/v1/jobs/{jobID}/cancel", handler.cancelJob)
+	}
 	mux.Handle("GET /api/v1/notifications", handler.notifications)
 	handler.router = securityHeaders(mux)
 	return handler, nil
@@ -94,7 +131,18 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 	}
 	forwarded := forwardedAddresses(request.Header.Values("X-Forwarded-For"))
 	source := security.EffectiveSourceIP(peer, forwarded, handler.trustedProxies)
-	_, err = security.ResolvePrincipal(handler.access, security.AccessRequest{SourceIP: source})
+	if strings.HasPrefix(request.URL.Path, "/worker/v1/") && handler.workerAPI != nil {
+		_, err := security.ResolvePrincipal(security.AccessConfig{
+			Mode: security.AuthDisabled, AllowedNetworks: handler.access.AllowedNetworks,
+		}, security.AccessRequest{SourceIP: source})
+		if err != nil {
+			writeError(writer, http.StatusForbidden, "NETWORK_DENIED")
+			return
+		}
+		securityHeaders(handler.workerAPI).ServeHTTP(writer, request)
+		return
+	}
+	principal, err := security.ResolvePrincipal(handler.access, security.AccessRequest{SourceIP: source})
 	if errors.Is(err, security.ErrAuthenticationRequired) {
 		writeError(writer, http.StatusUnauthorized, "AUTHENTICATION_REQUIRED")
 		return
@@ -103,8 +151,11 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		writeError(writer, http.StatusForbidden, "NETWORK_DENIED")
 		return
 	}
+	request = request.WithContext(context.WithValue(request.Context(), principalContextKey{}, principal))
 	handler.router.ServeHTTP(writer, request)
 }
+
+type principalContextKey struct{}
 
 func (handler *Handler) index(writer http.ResponseWriter, request *http.Request) {
 	payload, err := staticFiles.ReadFile("static/index.html")
@@ -215,6 +266,171 @@ func (handler *Handler) job(writer http.ResponseWriter, request *http.Request) {
 	writeJSON(writer, http.StatusOK, map[string]any{"data": projectJobDetail(job)})
 }
 
+func (handler *Handler) workerStatuses(writer http.ResponseWriter, request *http.Request) {
+	statuses, err := handler.workers.Statuses(request.Context())
+	if err != nil {
+		writeError(writer, http.StatusInternalServerError, "QUERY_FAILED")
+		return
+	}
+	result := make([]workerStatusView, 0, len(statuses))
+	for _, status := range statuses {
+		storageIDs := make([]string, 0, len(status.Metrics.AccessibleStorageIDs))
+		for storageID, available := range status.Metrics.AccessibleStorageIDs {
+			if available {
+				storageIDs = append(storageIDs, storageID)
+			}
+		}
+		sort.Strings(storageIDs)
+		result = append(result, workerStatusView{
+			WorkerID: status.WorkerID, State: status.State, LastHeartbeat: status.LastHeartbeat,
+			AcceptingWork: status.Metrics.AcceptingWork, HeavyRunning: status.Metrics.HeavyRunning,
+			AccessibleStorageIDs: storageIDs,
+		})
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"data": result})
+}
+
+func (handler *Handler) session(writer http.ResponseWriter, request *http.Request) {
+	csrfToken, err := randomToken()
+	if err != nil {
+		writeError(writer, http.StatusInternalServerError, "SESSION_UNAVAILABLE")
+		return
+	}
+	http.SetCookie(writer, &http.Cookie{
+		Name: "video_archive_csrf", Value: csrfToken, Path: "/", HttpOnly: true,
+		SameSite: http.SameSiteStrictMode, Secure: request.TLS != nil,
+	})
+	writer.Header().Set("Cache-Control", "no-store")
+	writeJSON(writer, http.StatusOK, map[string]any{"data": map[string]string{"csrf_token": csrfToken}})
+}
+
+type createJobRequest struct {
+	JobID            string `json:"job_id"`
+	CommandID        string `json:"command_id"`
+	IdempotencyKey   string `json:"idempotency_key"`
+	Reason           string `json:"reason"`
+	TemplateName     string `json:"template_name"`
+	TargetTitle      string `json:"target_title"`
+	ControlMode      string `json:"control_mode"`
+	ExpectedRevision uint64 `json:"expected_revision"`
+}
+
+type commandRequest struct {
+	CommandID        string `json:"command_id"`
+	IdempotencyKey   string `json:"idempotency_key"`
+	Reason           string `json:"reason"`
+	ExpectedRevision uint64 `json:"expected_revision"`
+}
+
+func (handler *Handler) createJob(writer http.ResponseWriter, request *http.Request) {
+	if !handler.allowMutation(writer, request) {
+		return
+	}
+	var payload createJobRequest
+	if !decodeJSON(writer, request, &payload) {
+		return
+	}
+	result, err := handler.commands.Execute(request.Context(), handler.envelope(request, command.Envelope{
+		CommandID: payload.CommandID, CommandType: job.CreateCommand, TargetID: payload.JobID,
+		ExpectedRevision: payload.ExpectedRevision, IdempotencyKey: payload.IdempotencyKey, Reason: payload.Reason,
+		Parameters: map[string]any{
+			"template_name": payload.TemplateName, "target_title": payload.TargetTitle, "control_mode": payload.ControlMode,
+		},
+	}))
+	if err != nil {
+		writeCommandError(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusCreated, commandResultView(result))
+}
+
+func (handler *Handler) cancelJob(writer http.ResponseWriter, request *http.Request) {
+	if !handler.allowMutation(writer, request) {
+		return
+	}
+	var payload commandRequest
+	if !decodeJSON(writer, request, &payload) {
+		return
+	}
+	result, err := handler.commands.Execute(request.Context(), handler.envelope(request, command.Envelope{
+		CommandID: payload.CommandID, CommandType: job.CancelCommand, TargetID: request.PathValue("jobID"),
+		ExpectedRevision: payload.ExpectedRevision, IdempotencyKey: payload.IdempotencyKey, Reason: payload.Reason,
+	}))
+	if err != nil {
+		writeCommandError(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, commandResultView(result))
+}
+
+func (handler *Handler) envelope(request *http.Request, envelope command.Envelope) command.Envelope {
+	principal, _ := request.Context().Value(principalContextKey{}).(security.Principal)
+	envelope.Actor = command.Actor{Type: principal.ActorType, ID: principal.ID}
+	envelope.RequestedVia = "dashboard"
+	return envelope
+}
+
+func (handler *Handler) allowMutation(writer http.ResponseWriter, request *http.Request) bool {
+	cookie, err := request.Cookie("video_archive_csrf")
+	if err != nil || security.ValidateBrowserMutation(security.BrowserMutation{
+		Method: request.Method, Origin: request.Header.Get("Origin"), AllowedOrigins: handler.allowedOrigins,
+		ContentType: request.Header.Get("Content-Type"), CSRFHeader: request.Header.Get("X-CSRF-Token"),
+		CSRFCookie: cookieValue(cookie),
+	}) != nil {
+		writeError(writer, http.StatusForbidden, "BROWSER_MUTATION_DENIED")
+		return false
+	}
+	return true
+}
+
+func cookieValue(cookie *http.Cookie) string {
+	if cookie == nil {
+		return ""
+	}
+	return cookie.Value
+}
+
+func decodeJSON(writer http.ResponseWriter, request *http.Request, target any) bool {
+	decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 64<<10))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		writeError(writer, http.StatusBadRequest, "INVALID_JSON")
+		return false
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		writeError(writer, http.StatusBadRequest, "INVALID_JSON")
+		return false
+	}
+	return true
+}
+
+func commandResultView(result command.Result) map[string]any {
+	return map[string]any{"data": map[string]any{
+		"command_id": result.CommandID, "target_id": result.TargetID, "revision": result.Revision,
+	}}
+}
+
+func writeCommandError(writer http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, command.ErrRevisionConflict), errors.Is(err, command.ErrIdempotencyConflict),
+		errors.Is(err, workflow.ErrIllegalTransition):
+		writeError(writer, http.StatusConflict, "COMMAND_CONFLICT")
+	case errors.Is(err, command.ErrInvalidEnvelope), errors.Is(err, job.ErrInvalidJob):
+		writeError(writer, http.StatusBadRequest, "INVALID_COMMAND")
+	default:
+		writeError(writer, http.StatusInternalServerError, "COMMAND_FAILED")
+	}
+}
+
+func randomToken() (string, error) {
+	value := make([]byte, 32)
+	if _, err := rand.Read(value); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(value), nil
+}
+
 type summaryView struct {
 	ID               string          `json:"id"`
 	Revision         uint64          `json:"revision"`
@@ -262,6 +478,15 @@ type workerView struct {
 	AcceptingWork        bool      `json:"accepting_work"`
 	AccessibleStorageIDs []string  `json:"accessible_storage_ids"`
 	HeartbeatAt          time.Time `json:"heartbeat_at"`
+}
+
+type workerStatusView struct {
+	WorkerID             string    `json:"worker_id"`
+	State                string    `json:"state"`
+	LastHeartbeat        time.Time `json:"last_heartbeat,omitempty"`
+	AcceptingWork        bool      `json:"accepting_work"`
+	HeavyRunning         int       `json:"heavy_running"`
+	AccessibleStorageIDs []string  `json:"accessible_storage_ids"`
 }
 
 type stepView struct {
