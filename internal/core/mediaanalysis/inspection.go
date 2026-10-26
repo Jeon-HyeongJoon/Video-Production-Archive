@@ -13,42 +13,42 @@ var ErrInvalidInspection = errors.New("media inspection is incomplete or invalid
 var sha256Pattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 type Rational struct {
-	Numerator   int64
-	Denominator int64
+	Numerator   int64 `json:"numerator"`
+	Denominator int64 `json:"denominator"`
 }
 
 type VideoStream struct {
-	Index       int
-	Codec       string
-	Width       int
-	Height      int
-	FrameRate   Rational
-	PixelFormat string
+	Index       int      `json:"index"`
+	Codec       string   `json:"codec"`
+	Width       int      `json:"width"`
+	Height      int      `json:"height"`
+	FrameRate   Rational `json:"frame_rate"`
+	PixelFormat string   `json:"pixel_format,omitempty"`
 }
 
 type AudioStream struct {
-	Index         int
-	Codec         string
-	SampleRateHz  int
-	Channels      int
-	ChannelLayout string
+	Index         int    `json:"index"`
+	Codec         string `json:"codec"`
+	SampleRateHz  int    `json:"sample_rate_hz"`
+	Channels      int    `json:"channels"`
+	ChannelLayout string `json:"channel_layout,omitempty"`
 }
 
 // MediaInspection is an append-only technical record bound to the immutable bytes
 // of an OriginalAsset by both ID and checksum.
 type MediaInspection struct {
-	ID               string
-	OriginalAssetID  string
-	OriginalChecksum string
-	Containers       []string
-	DurationMillis   int64
-	SizeBytes        int64
-	BitRate          int64
-	VideoStreams     []VideoStream
-	AudioStreams     []AudioStream
-	ProcessorVersion string
-	ObservedBy       string
-	InspectedAt      time.Time
+	ID               string        `json:"id"`
+	OriginalAssetID  string        `json:"original_asset_id"`
+	OriginalChecksum string        `json:"original_checksum"`
+	Containers       []string      `json:"containers"`
+	DurationMillis   int64         `json:"duration_millis"`
+	SizeBytes        int64         `json:"size_bytes"`
+	BitRate          int64         `json:"bit_rate"`
+	VideoStreams     []VideoStream `json:"video_streams"`
+	AudioStreams     []AudioStream `json:"audio_streams"`
+	ProcessorVersion string        `json:"processor_version"`
+	ObservedBy       string        `json:"observed_by"`
+	InspectedAt      time.Time     `json:"inspected_at"`
 }
 
 func NewMediaInspection(source MediaInspection) (MediaInspection, error) {

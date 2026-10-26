@@ -16,15 +16,15 @@ var windowsDrivePattern = regexp.MustCompile(`^[a-zA-Z]:/`)
 // InputFileObservation is an append-only fact about a file beneath a
 // registered Storage root. The absolute root is deliberately not retained.
 type InputFileObservation struct {
-	ID               string
-	StorageID        string
-	WorkspaceDriveID string
-	RelativePath     string
-	OriginalName     string
-	SizeBytes        int64
-	Checksum         string
-	ObservedBy       string
-	ObservedAt       time.Time
+	ID               string    `json:"id"`
+	StorageID        string    `json:"storage_id"`
+	WorkspaceDriveID string    `json:"workspace_drive_id"`
+	RelativePath     string    `json:"relative_path"`
+	OriginalName     string    `json:"original_name"`
+	SizeBytes        int64     `json:"size_bytes"`
+	Checksum         string    `json:"checksum"`
+	ObservedBy       string    `json:"observed_by"`
+	ObservedAt       time.Time `json:"observed_at"`
 }
 
 func NewInputFileObservation(value InputFileObservation) (InputFileObservation, error) {
