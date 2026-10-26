@@ -977,7 +977,7 @@
         {"type": "refers-to", "target": "media-inspection"},
         {"type": "refers-to", "target": "profile"}
       ],
-      "sources": ["docs/design/03-domain-workflow.md §1", "requirements QC-001, QC-002"],
+      "sources": ["docs/design/03-domain-workflow.md §1", "requirements QCT-001, QCT-002"],
       "decided": "2026-10-26"
     },
     {

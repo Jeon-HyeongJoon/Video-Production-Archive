@@ -1298,7 +1298,7 @@
       "level": "acceptance"
     },
     {
-      "id": "QC-001",
+      "id": "QCT-001",
       "design": "integrated-qc-domain",
       "statement": "Rendition QC 평가는 원본 기술정보·렌더 Profile·게시 아티팩트와 독립 관찰값을 비교해 모든 필수 검사가 통과할 때만 PASSED가 되어야 한다.",
       "given": "원본 MediaInspection, versioned Profile, 게시 Rendition과 checksum·크기·container·codec·해상도·길이가 일치하거나 길이 허용차를 벗어난 출력 관찰값이 있다.",
@@ -1310,7 +1310,7 @@
       "level": "unit"
     },
     {
-      "id": "QC-002",
+      "id": "QCT-002",
       "design": "ffprobe-qc-adapter",
       "statement": "QC용 FFprobe Adapter는 게시된 Rendition 파일을 shell 없이 다시 읽어 실제 checksum·크기·container·길이와 primary video/audio stream을 독립 관찰해야 한다.",
       "given": "공백과 shell 메타문자가 포함된 게시 경로의 파일과 실제 subprocess로 동작하는 ffprobe JSON fixture가 있다.",

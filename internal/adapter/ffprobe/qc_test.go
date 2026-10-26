@@ -11,7 +11,7 @@ import (
 	"testing"
 )
 
-// Requirement: QC-002
+// Requirement: QCT-002
 func TestFFprobeAdapterObservesPublishedRenditionBytesForQC(t *testing.T) {
 	directory := t.TempDir()
 	argumentsPath := filepath.Join(directory, "qc-arguments.txt")

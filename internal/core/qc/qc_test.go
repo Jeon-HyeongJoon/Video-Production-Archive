@@ -12,7 +12,7 @@ import (
 	"videoarchive/internal/core/vocabulary"
 )
 
-// Requirement: QC-001
+// Requirement: QCT-001
 func TestIntegratedQCOnlyPassesCompleteMatchingRenditionEvidence(t *testing.T) {
 	payload := []byte("verified-rendered-video")
 	digest := sha256.Sum256(payload)
