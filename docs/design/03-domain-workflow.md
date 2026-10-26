@@ -16,6 +16,8 @@
 | Device | PhysicalDevice/Volume | lock, eject, format result | 업무 메타데이터 해석 |
 | Workflow | Template + Command | Job/Step/Event | 영상 처리 자체 |
 
+`MediaInspection`은 파일 자체가 아니라 `OriginalAsset`의 ID와 확정 checksum에 묶이는 추가 전용 기술정보 Record다. 컨테이너, 길이, 크기, bitrate, video/audio stream의 codec과 규격을 정규화해 렌더 프로파일 판정, QC와 검색이 함께 사용한다. 같은 원본을 다른 도구 버전으로 다시 분석하면 기존 기록을 덮어쓰지 않고 새 `MediaInspection`을 추가한다. `MED-001`
+
 ## 2. 공통 Command
 
 모든 상태 변경은 다음 의미를 가진다.

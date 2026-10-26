@@ -1164,6 +1164,18 @@
       "test_name": "TestCIEvidenceBundleRecordsEveryExecutedTestWithRequirementContext",
       "status": "implemented",
       "level": "integration"
+    },
+    {
+      "id": "MED-001",
+      "design": "media-inspection-domain",
+      "statement": "MediaInspection은 OriginalAsset ID와 checksum에 묶여 컨테이너·길이·크기와 video/audio stream 기술정보를 정규화한 추가 전용 Record여야 한다.",
+      "given": "순서와 표기가 다른 컨테이너·stream 관찰값, 완전한 원본 식별 정보와 필수 정보가 빠진 관찰값이 있다.",
+      "when": "MediaInspection을 생성한다.",
+      "then": "완전한 값은 정규화되어 생성되고 원본 checksum, video stream 또는 frame rate가 빠진 값은 거부된다.",
+      "test_file": "internal/core/mediaanalysis/inspection_test.go",
+      "test_name": "TestMediaInspectionNormalizesCompleteTechnicalMetadata",
+      "status": "implemented",
+      "level": "unit"
     }
   ]
 }

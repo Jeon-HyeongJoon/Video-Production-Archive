@@ -15,7 +15,8 @@
 ```text
 Job 1 ── N Step 1 ── N Event
  │          └────── Approval / ExecutionLease / AgentToolCall
- └── N OriginalAsset 1 ── N Artifact
+ └── N OriginalAsset 1 ── N MediaInspection
+                     └── N Artifact
                          ├── Rendition
                          ├── Transcript
                          ├── Thumbnail
@@ -43,6 +44,8 @@ Agent 계층은 `AgentSession → AgentTurn → ProviderRequest → AgentToolCal
 ## 4. 원본과 파생본
 
 원본은 최초 검증 체크섬을 가진 immutable `OriginalAsset`이다. 체크섬이나 위치를 바꾸지 않고 새 OriginalAsset과 대체 관계를 만든다. `ARC-001`
+
+`MediaInspection`은 `OriginalAsset` ID뿐 아니라 확정 checksum에도 묶인 추가 전용 Record다. 파일 경로나 ffprobe 원문을 검색 기준으로 삼지 않고 정규화한 컨테이너, 길이, 크기, bitrate와 stream 기술정보를 저장한다. `MED-001`
 
 파생 `Artifact`는 다음 provenance가 완전해야 한다. `ARC-002`
 

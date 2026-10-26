@@ -872,6 +872,23 @@
       "decided": "2026-10-20"
     },
     {
+      "id": "media-inspection",
+      "layer": "product",
+      "kind": "record",
+      "name": {"ko": "미디어 기술정보", "en": "Media Inspection"},
+      "code_name": "MediaInspection",
+      "definition": "원본 자산의 확정 checksum에 묶여 컨테이너, 길이, 크기와 video/audio stream 규격을 정규화해 남기는 추가 전용 기술정보 기록.",
+      "rules": [
+        "원본 자산 ID와 checksum을 함께 참조한다.",
+        "다른 분석 도구 버전으로 다시 분석하면 기존 기록을 고치지 않고 새 기록을 추가한다.",
+        "파일 경로나 ffprobe 원문을 검색 기준으로 삼지 않는다."
+      ],
+      "forbidden": {"words": [], "code": []},
+      "relations": [{"type": "refers-to", "target": "original-asset"}],
+      "sources": ["docs/design/03-domain-workflow.md §1", "docs/design/04-data-archive.md §4", "requirements MED-001"],
+      "decided": "2026-10-26"
+    },
+    {
       "id": "repository",
       "layer": "dev",
       "kind": "entity",
@@ -1324,7 +1341,7 @@
     },
     {
       "id": "processing-output-model",
-      "words": ["Transcript", "Summary", "MediaInspection", "Thumbnail"],
+      "words": ["Transcript", "Summary", "Thumbnail"],
       "senses": [
         {
           "meaning": "ProcessingKind만 다른 일반 Artifact",
@@ -1332,7 +1349,7 @@
         },
         {
           "meaning": "검색·검수·구조화 필드가 서로 다른 전용 Entity 또는 Artifact subtype",
-          "where": ["전사 검색", "요약 검수", "미디어 기술정보"]
+          "where": ["전사 검색", "요약 검수"]
         }
       ],
       "proposal": "공통 파일 생애주기는 Artifact가 소유하고, 전용 검색·검수 규칙이 있는 출력만 명시적 subtype 또는 연결 Record로 정의한다."
