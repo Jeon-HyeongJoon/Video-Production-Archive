@@ -3,6 +3,7 @@ package transcription
 import (
 	"errors"
 	"fmt"
+	"reflect"
 	"regexp"
 	"strings"
 
@@ -14,6 +15,7 @@ var (
 	ErrInvalidProfile    = errors.New("transcription profile is incomplete or invalid")
 	ErrInvalidContent    = errors.New("transcript content is incomplete or invalid")
 	ErrInvalidTranscript = errors.New("transcript does not match its STT provenance")
+	ErrInvalidSearch     = errors.New("transcript search text is empty")
 )
 
 var (
@@ -106,4 +108,29 @@ func NewTranscript(artifact archive.Artifact, profile Profile, source Content) (
 	return Transcript{
 		Artifact: artifact, ProfileID: normalizedProfile.ID, ProfileVersion: normalizedProfile.Version, Content: content,
 	}, nil
+}
+
+func (transcript Transcript) Validate() error {
+	content, err := NewContent(transcript.Content.Language, transcript.Content.Segments)
+	if err != nil || !profileIDPattern.MatchString(transcript.ProfileID) || transcript.ProfileVersion == 0 ||
+		transcript.Artifact.ValidateDerived() != nil || transcript.Artifact.Origin.ProcessingKind != vocabulary.ProcessingSTT ||
+		transcript.Artifact.Origin.ProfileVersion != fmt.Sprintf("%s@v%d", transcript.ProfileID, transcript.ProfileVersion) ||
+		len(transcript.Artifact.Origin.InputArtifactIDs) != 1 || !reflect.DeepEqual(content, transcript.Content) {
+		return ErrInvalidTranscript
+	}
+	return nil
+}
+
+func NormalizeSearchText(value string) (string, error) {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "" {
+		return "", ErrInvalidSearch
+	}
+	return value, nil
+}
+
+type SearchHit struct {
+	OriginalAssetID string  `json:"original_asset_id"`
+	TranscriptID    string  `json:"transcript_id"`
+	Segment         Segment `json:"segment"`
 }

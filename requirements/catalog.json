@@ -1416,6 +1416,30 @@
       "test_name": "",
       "status": "planned",
       "level": "acceptance"
+    },
+    {
+      "id": "TRN-004",
+      "design": "sqlite-transcript-catalog",
+      "statement": "Transcript는 등록 OriginalAsset을 참조할 때만 SQLite 카탈로그에 추가 전용으로 저장되고 원본별 게시 시각 순서로 조회되어야 한다.",
+      "given": "등록 원본의 게시 시각이 다른 Transcript들, 같은 기록 재전송, 같은 ID지만 segment text가 다른 Transcript와 미등록 원본 참조가 있다.",
+      "when": "Transcript를 저장하고 원본별로 조회한다.",
+      "then": "미등록 참조와 충돌 기록은 거부되고 같은 기록 재전송은 멱등이며 기존 값과 별도 Transcript가 게시 시각 순서로 조회된다.",
+      "test_file": "internal/adapter/sqlitecatalog/store_test.go",
+      "test_name": "TestSQLiteTranscriptsRemainAppendOnlyAndQueryableByOriginal",
+      "status": "implemented",
+      "level": "integration"
+    },
+    {
+      "id": "CAT-003",
+      "design": "sqlite-transcript-search",
+      "statement": "전사문 text 검색은 OriginalAsset별 가장 최근 Transcript의 일치 segment만 찾아 자산·Transcript 식별자와 start/end millisecond를 반환해야 한다.",
+      "given": "같은 OriginalAsset의 게시 시각이 다른 두 Transcript와 다른 OriginalAsset의 Transcript가 SQLite 카탈로그에 있다.",
+      "when": "segment text로 검색한다.",
+      "then": "최신 Transcript에서 일치한 segment만 OriginalAsset ID·Transcript ID·timecode와 함께 반환되고 결과 모델에는 파일 경로가 포함되지 않는다.",
+      "test_file": "internal/adapter/sqlitecatalog/store_test.go",
+      "test_name": "TestSQLiteTranscriptSearchUsesLatestSegmentsAndReturnsTimecodesWithoutPaths",
+      "status": "implemented",
+      "level": "integration"
     }
   ]
 }

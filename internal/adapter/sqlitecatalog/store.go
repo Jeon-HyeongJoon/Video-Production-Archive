@@ -16,6 +16,7 @@ import (
 	"videoarchive/internal/core/catalog"
 	"videoarchive/internal/core/intake"
 	"videoarchive/internal/core/mediaanalysis"
+	"videoarchive/internal/core/transcription"
 )
 
 var (
@@ -87,6 +88,14 @@ func (store *Store) migrate(ctx context.Context) error {
 			ON catalog_records(original_asset_id, revision DESC)`,
 		`CREATE INDEX IF NOT EXISTS catalog_records_title
 			ON catalog_records(title_sort, original_asset_id)`,
+		`CREATE TABLE IF NOT EXISTS transcripts (
+			transcript_id TEXT PRIMARY KEY,
+			original_asset_id TEXT NOT NULL REFERENCES original_assets(asset_id),
+			created_at TEXT NOT NULL,
+			payload BLOB NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS transcripts_original_time
+			ON transcripts(original_asset_id, created_at DESC, transcript_id DESC)`,
 	}
 	for _, statement := range statements {
 		if _, err := store.db.ExecContext(ctx, statement); err != nil {
@@ -335,6 +344,92 @@ func (store *Store) Search(ctx context.Context, query catalog.SearchQuery) ([]ca
 		results = append(results, catalog.SearchResult{Original: original, Metadata: metadata, Inspection: inspection})
 	}
 	return results, rows.Err()
+}
+
+func (store *Store) AppendTranscript(ctx context.Context, transcript transcription.Transcript) error {
+	if err := transcript.Validate(); err != nil {
+		return err
+	}
+	var exists int
+	err := store.db.QueryRowContext(ctx, `SELECT 1 FROM original_assets WHERE asset_id = ?`, transcript.Artifact.Origin.OriginalAssetID).Scan(&exists)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrRecordNotFound
+	}
+	if err != nil {
+		return err
+	}
+	payload, err := json.Marshal(transcript)
+	if err != nil {
+		return err
+	}
+	return store.appendImmutable(ctx,
+		`INSERT INTO transcripts(transcript_id, original_asset_id, created_at, payload) VALUES (?, ?, ?, ?)`,
+		`SELECT payload FROM transcripts WHERE transcript_id = ?`,
+		transcript.Artifact.ID, payload, transcript.Artifact.Origin.OriginalAssetID, transcript.Artifact.Origin.CreatedAt.UTC().Format(time.RFC3339Nano))
+}
+
+func (store *Store) TranscriptsByOriginal(ctx context.Context, originalAssetID string) ([]transcription.Transcript, error) {
+	rows, err := store.db.QueryContext(ctx, `
+		SELECT payload FROM transcripts WHERE original_asset_id = ? ORDER BY created_at, transcript_id
+	`, strings.TrimSpace(originalAssetID))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var transcripts []transcription.Transcript
+	for rows.Next() {
+		var payload []byte
+		if err := rows.Scan(&payload); err != nil {
+			return nil, err
+		}
+		var transcript transcription.Transcript
+		if err := json.Unmarshal(payload, &transcript); err != nil || transcript.Validate() != nil {
+			return nil, ErrRecordConflict
+		}
+		transcripts = append(transcripts, transcript)
+	}
+	return transcripts, rows.Err()
+}
+
+func (store *Store) SearchTranscripts(ctx context.Context, text string) ([]transcription.SearchHit, error) {
+	normalizedText, err := transcription.NormalizeSearchText(text)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := store.db.QueryContext(ctx, `
+		SELECT transcripts.payload FROM transcripts
+		WHERE transcripts.transcript_id = (
+			SELECT latest.transcript_id FROM transcripts AS latest
+			WHERE latest.original_asset_id = transcripts.original_asset_id
+			ORDER BY latest.created_at DESC, latest.transcript_id DESC LIMIT 1
+		)
+		ORDER BY transcripts.original_asset_id, transcripts.transcript_id
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var hits []transcription.SearchHit
+	for rows.Next() {
+		var payload []byte
+		if err := rows.Scan(&payload); err != nil {
+			return nil, err
+		}
+		var transcript transcription.Transcript
+		if err := json.Unmarshal(payload, &transcript); err != nil || transcript.Validate() != nil {
+			return nil, ErrRecordConflict
+		}
+		for _, segment := range transcript.Content.Segments {
+			if strings.Contains(strings.ToLower(segment.Text), normalizedText) {
+				hits = append(hits, transcription.SearchHit{
+					OriginalAssetID: transcript.Artifact.Origin.OriginalAssetID,
+					TranscriptID:    transcript.Artifact.ID,
+					Segment:         segment,
+				})
+			}
+		}
+	}
+	return hits, rows.Err()
 }
 
 func matchesText(record catalog.CatalogRecord, text string) bool {

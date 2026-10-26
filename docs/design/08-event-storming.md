@@ -145,7 +145,7 @@ ExecutionLeaseExpired
 
 STT 원문은 요약으로 대체하지 않는다. Transcript는 STT Artifact의 provenance와 검색 가능한 언어·시간 구간을 함께 가지며, 요약과 키워드는 Transcript를 입력으로 가진 별도 아티팩트다. 사람이 한 검수는 실행 승인과 구분한다.
 
-연결 요구사항: `PIP-001`, `ARC-002~007`, `RND-001~003`, `AUD-001~003`, `TRN-001~003`, `QCT-001~002`.
+연결 요구사항: `PIP-001`, `ARC-002~007`, `RND-001~003`, `AUD-001~003`, `TRN-001~004`, `QCT-001~002`.
 
 ## 8. VJ 통합
 
@@ -260,7 +260,7 @@ CommandRecord는 감사와 멱등성의 영속 기록이지만 업무 Aggregate 
 |---|---|---|
 | 작업함 | Job, StepState, Wait Reason, 실행 우선순위 | 대기·실행·실패 작업 확인 |
 | 작업 상세 타임라인 | 명령 기록, 이벤트, Approval, Tool Call, process log 위치 | 사람이 중간 개입하고 실패 원인을 확인 |
-| 자산 검색 | OriginalAsset, Artifact, 기술정보, STT·요약 텍스트 | 제목·행사·내용·codec·시간 검색 (`CAT-001~002`) |
+| 자산 검색 | OriginalAsset, Artifact, 기술정보, STT·요약 텍스트 | 제목·행사·내용·codec·시간 및 Transcript segment timecode 검색 (`CAT-001~003`) |
 | 아카이브 상태 | ArchivePackage, ArchiveCopy, manifest 재검증 결과 | 주본·복제본 상태와 복구 필요 여부 확인 |
 | 작업 공간 드라이브 | PhysicalDevice, Volume, Storage, lock, file handle | Job의 I/O 충돌과 안전 해제 가능 여부 확인 |
 | Worker 상태 | heartbeat, HostLoadState, slot, 접근 Storage | 배정 가능 여부와 자원 병목 확인 |

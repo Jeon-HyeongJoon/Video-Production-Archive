@@ -950,14 +950,15 @@
         "공통 파일 생애주기·checksum·provenance는 Artifact가 소유하고 언어·시간 구간 의미는 Transcript가 소유한다.",
         "구간은 순서가 있고 서로 겹치지 않으며 비어 있지 않은 text를 가진다.",
         "STT 인식 결과이며 Summary나 사람이 확인한 사실을 대신하지 않는다.",
-        "게시 JSON에 Worker host 정보나 실제 모델 파일 경로를 포함하지 않는다."
+        "게시 JSON에 Worker host 정보나 실제 모델 파일 경로를 포함하지 않는다.",
+        "같은 OriginalAsset의 전사 검색은 가장 최근에 게시한 Transcript segment를 사용하고 파일 경로가 아닌 timecode를 반환한다."
       ],
       "forbidden": {"words": [], "code": []},
       "relations": [
         {"type": "is-a", "target": "artifact"},
         {"type": "refers-to", "target": "profile"}
       ],
-      "sources": ["idea.md §4.2", "docs/design/03-domain-workflow.md §1", "requirements TRN-001, TRN-002"],
+      "sources": ["idea.md §4.2", "docs/design/03-domain-workflow.md §1", "requirements TRN-001, TRN-002, TRN-004, CAT-003"],
       "decided": "2026-10-26"
     },
     {

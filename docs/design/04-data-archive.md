@@ -80,6 +80,8 @@ SQLite Command Store는 `PER-001` integration test로 transaction rollback을 �
 
 검색 투영은 OriginalAsset별 가장 큰 CatalogRecord 리비전과 가장 최근 MediaInspection을 결합한다. 제목·설명·키워드 text, video codec과 길이 범위를 검색할 수 있지만 Storage root와 파일 상대경로는 검색 결과 계약에 포함하지 않는다. `CAT-001~002`
 
+Transcript payload도 OriginalAsset과 게시 시각을 조회 키로 함께 저장하되 JSON payload가 진실이다. 같은 ID와 같은 내용만 멱등하게 허용하며, 전사문 검색은 OriginalAsset별 가장 최근 Transcript의 segment text에서 일치한 millisecond 구간을 반환한다. `TRN-004`, `CAT-003`
+
 ## 6. 아카이브 패키지
 
 ```text

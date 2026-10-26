@@ -2,16 +2,20 @@ package sqlitecatalog
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
+	"videoarchive/internal/core/archive"
 	"videoarchive/internal/core/asset"
 	"videoarchive/internal/core/catalog"
 	"videoarchive/internal/core/intake"
 	"videoarchive/internal/core/mediaanalysis"
+	"videoarchive/internal/core/transcription"
 	"videoarchive/internal/core/vocabulary"
 )
 
@@ -157,6 +161,95 @@ func TestSQLiteCatalogSearchUsesLatestDescriptionCodecAndDurationWithoutPaths(t 
 	}
 }
 
+// Requirement: TRN-004
+func TestSQLiteTranscriptsRemainAppendOnlyAndQueryableByOriginal(t *testing.T) {
+	ctx := context.Background()
+	store := openCatalog(t)
+	now := time.Date(2026, 10, 26, 16, 0, 0, 0, time.UTC)
+	observation := observedFile("OBSERVATION-1", checksumA, "camera/CLIP001.MOV")
+	if err := store.AppendObservation(ctx, observation); err != nil {
+		t.Fatal(err)
+	}
+	original := registeredOriginal(t, "ASSET-1", observation)
+	if err := store.AppendOriginal(ctx, original); err != nil {
+		t.Fatal(err)
+	}
+	first := storedTranscript("TRANSCRIPT-1", original.ID, "첫 전사문", 1_250, now)
+	orphan := storedTranscript("TRANSCRIPT-ORPHAN", "ASSET-MISSING", "참조 없는 전사문", 0, now)
+	if err := store.AppendTranscript(ctx, orphan); !errors.Is(err, ErrRecordNotFound) {
+		t.Fatalf("transcript without a registered original was accepted: %v", err)
+	}
+	if err := store.AppendTranscript(ctx, first); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AppendTranscript(ctx, first); err != nil {
+		t.Fatalf("idempotent transcript replay failed: %v", err)
+	}
+	conflict := first
+	conflict.Content.Segments[0].Text = "같은 ID의 다른 전사문"
+	if err := store.AppendTranscript(ctx, conflict); !errors.Is(err, ErrRecordConflict) {
+		t.Fatalf("conflicting transcript was not rejected: %v", err)
+	}
+	second := storedTranscript("TRANSCRIPT-2", original.ID, "두 번째 전사문", 2_500, now.Add(time.Minute))
+	if err := store.AppendTranscript(ctx, second); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := store.TranscriptsByOriginal(ctx, original.ID)
+	if err != nil || len(stored) != 2 || stored[0].Artifact.ID != first.Artifact.ID || stored[0].Content.Segments[0].Text != "첫 전사문" ||
+		stored[1].Artifact.ID != second.Artifact.ID {
+		t.Fatalf("stored transcripts=%+v err=%v", stored, err)
+	}
+}
+
+// Requirement: CAT-003
+func TestSQLiteTranscriptSearchUsesLatestSegmentsAndReturnsTimecodesWithoutPaths(t *testing.T) {
+	ctx := context.Background()
+	store := openCatalog(t)
+	now := time.Date(2026, 10, 26, 17, 0, 0, 0, time.UTC)
+	observations := []intake.InputFileObservation{
+		observedFile("OBSERVATION-1", checksumA, "camera/CLIP001.MOV"),
+		observedFile("OBSERVATION-2", checksumB, "camera/CLIP002.MOV"),
+	}
+	for _, observation := range observations {
+		if err := store.AppendObservation(ctx, observation); err != nil {
+			t.Fatal(err)
+		}
+	}
+	originals := []asset.OriginalAsset{
+		registeredOriginal(t, "ASSET-1", observations[0]),
+		registeredOriginal(t, "ASSET-2", observations[1]),
+	}
+	for _, original := range originals {
+		if err := store.AppendOriginal(ctx, original); err != nil {
+			t.Fatal(err)
+		}
+	}
+	transcripts := []transcription.Transcript{
+		storedTranscript("TRANSCRIPT-OLD", originals[0].ID, "폐기된 가을 행사 구간", 1_000, now),
+		storedTranscript("TRANSCRIPT-1", originals[0].ID, "최신 가을 행사 인사말", 12_500, now.Add(time.Minute)),
+		storedTranscript("TRANSCRIPT-2", originals[1].ID, "봄 행사 인사말", 25_000, now),
+	}
+	for _, transcript := range transcripts {
+		if err := store.AppendTranscript(ctx, transcript); err != nil {
+			t.Fatal(err)
+		}
+	}
+	hits, err := store.SearchTranscripts(ctx, " 가을 행사 ")
+	if err != nil || len(hits) != 1 {
+		t.Fatalf("transcript hits=%+v err=%v", hits, err)
+	}
+	hit := hits[0]
+	if hit.OriginalAssetID != originals[0].ID || hit.TranscriptID != "TRANSCRIPT-1" ||
+		hit.Segment.Sequence != 1 || hit.Segment.StartMillis != 12_500 || hit.Segment.EndMillis != 13_500 ||
+		hit.Segment.Text != "최신 가을 행사 인사말" {
+		t.Fatalf("search did not return the latest timed segment: %+v", hit)
+	}
+	payload, err := json.Marshal(hits)
+	if err != nil || strings.Contains(string(payload), "path") {
+		t.Fatalf("transcript search exposed an artifact path: payload=%s err=%v", payload, err)
+	}
+}
+
 func openCatalog(t *testing.T) *Store {
 	t.Helper()
 	store, err := Open(filepath.Join(t.TempDir(), "catalog.db"))
@@ -198,5 +291,22 @@ func inspectedMediaWith(id, originalID, checksum string, inspectedAt time.Time, 
 		}},
 		AudioStreams:     []mediaanalysis.AudioStream{{Index: 1, Codec: "aac", SampleRateHz: 48_000, Channels: 2, ChannelLayout: "stereo"}},
 		ProcessorVersion: "ffprobe-8.0", ObservedBy: "WORKER-1", InspectedAt: inspectedAt,
+	}
+}
+
+func storedTranscript(id, originalID, text string, startMillis int64, createdAt time.Time) transcription.Transcript {
+	return transcription.Transcript{
+		Artifact: archive.Artifact{
+			ID: id, Path: "transcript/" + id + ".json", Size: int64(len(text)), Checksum: checksumA,
+			Origin: archive.Provenance{
+				OriginalAssetID: originalID, InputArtifactIDs: []string{"AUDIO-" + originalID}, ProcessingKind: vocabulary.ProcessingSTT,
+				ProcessorVersion: "whisper.cpp-b6250", ProfileVersion: "event-ko@v1", CreatedBy: "WORKER-1", CreatedAt: createdAt,
+			},
+		},
+		ProfileID: "event-ko", ProfileVersion: 1,
+		Content: transcription.Content{
+			Language: "ko",
+			Segments: []transcription.Segment{{Sequence: 1, StartMillis: startMillis, EndMillis: startMillis + 1_000, Text: text}},
+		},
 	}
 }
