@@ -13,47 +13,24 @@ import (
 	"time"
 
 	"videoarchive/internal/core/approval"
+	"videoarchive/internal/core/asset"
 	"videoarchive/internal/core/vocabulary"
 )
 
 var (
-	ErrOriginalImmutable  = errors.New("original asset is immutable")
+	ErrOriginalImmutable  = asset.ErrOriginalImmutable
 	ErrInvalidProvenance  = errors.New("derived artifact provenance is incomplete")
 	ErrCommitPrecondition = errors.New("archive commit precondition failed")
 	ErrUnsafeStoragePath  = errors.New("storage path escapes registered root")
 	ErrInvalidSnapshot    = errors.New("archive snapshot is invalid")
 )
 
-type OriginalAsset struct {
-	ID       string
-	Checksum string
-	Location string
-}
+type OriginalAsset = asset.OriginalAsset
 
-func (a *OriginalAsset) ReplaceLocation(location string) error {
-	if location != a.Location {
-		return ErrOriginalImmutable
-	}
-	return nil
-}
-
-type Supersession struct {
-	PreviousAssetID string
-	NewAssetID      string
-}
+type Supersession = asset.Supersession
 
 func SupersedeOriginal(previous, replacement OriginalAsset) (Supersession, error) {
-	if previous.ID == "" || replacement.ID == "" || previous.ID == replacement.ID || replacement.Checksum == "" || replacement.Location == "" {
-		return Supersession{}, ErrOriginalImmutable
-	}
-	return Supersession{PreviousAssetID: previous.ID, NewAssetID: replacement.ID}, nil
-}
-
-func (a *OriginalAsset) ReplaceChecksum(checksum string) error {
-	if checksum != a.Checksum {
-		return ErrOriginalImmutable
-	}
-	return nil
+	return asset.SupersedeOriginal(previous, replacement)
 }
 
 type Provenance struct {
@@ -238,7 +215,7 @@ func ImportSnapshot(payload []byte) (ArchiveSnapshot, error) {
 func validateSnapshot(snapshot ArchiveSnapshot) error {
 	assetIDs := make(map[string]bool, len(snapshot.OriginalAssets))
 	for _, asset := range snapshot.OriginalAssets {
-		if asset.ID == "" || asset.Checksum == "" || asset.Location == "" || assetIDs[asset.ID] {
+		if asset.Validate() != nil || assetIDs[asset.ID] {
 			return ErrInvalidSnapshot
 		}
 		assetIDs[asset.ID] = true

@@ -91,8 +91,7 @@ func (repository *Repository) migrate(ctx context.Context) error {
 		`CREATE TABLE IF NOT EXISTS archive_original_assets (
 			package_id TEXT NOT NULL REFERENCES archive_packages(package_id) ON DELETE CASCADE,
 			asset_id TEXT NOT NULL,
-			checksum TEXT NOT NULL,
-			location TEXT NOT NULL,
+			payload BLOB NOT NULL,
 			PRIMARY KEY(package_id, asset_id)
 		)`,
 		`CREATE TABLE IF NOT EXISTS archive_artifacts (
@@ -157,9 +156,13 @@ func (repository *Repository) Save(ctx context.Context, value Package) error {
 		return err
 	}
 	for _, asset := range value.Snapshot.OriginalAssets {
+		payload, err := json.Marshal(asset)
+		if err != nil {
+			return err
+		}
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO archive_original_assets(package_id, asset_id, checksum, location) VALUES (?, ?, ?, ?)
-		`, value.ID, asset.ID, asset.Checksum, asset.Location); err != nil {
+			INSERT INTO archive_original_assets(package_id, asset_id, payload) VALUES (?, ?, ?)
+		`, value.ID, asset.ID, payload); err != nil {
 			return err
 		}
 	}
@@ -212,14 +215,19 @@ func (repository *Repository) Load(ctx context.Context, packageID string) (Packa
 	}
 
 	assetRows, err := repository.db.QueryContext(ctx, `
-		SELECT asset_id, checksum, location FROM archive_original_assets WHERE package_id = ? ORDER BY asset_id
+		SELECT payload FROM archive_original_assets WHERE package_id = ? ORDER BY asset_id
 	`, packageID)
 	if err != nil {
 		return Package{}, err
 	}
 	for assetRows.Next() {
+		var payload []byte
 		var asset archive.OriginalAsset
-		if err := assetRows.Scan(&asset.ID, &asset.Checksum, &asset.Location); err != nil {
+		if err := assetRows.Scan(&payload); err != nil {
+			assetRows.Close()
+			return Package{}, err
+		}
+		if err := json.Unmarshal(payload, &asset); err != nil {
 			assetRows.Close()
 			return Package{}, err
 		}

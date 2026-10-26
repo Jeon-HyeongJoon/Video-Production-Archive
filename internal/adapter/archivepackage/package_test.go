@@ -39,7 +39,10 @@ func TestArchivePackageRestoresSameRecordsIdempotently(t *testing.T) {
 	record := Package{
 		ID: "VP-20261026-0001",
 		Snapshot: archive.ArchiveSnapshot{
-			OriginalAssets: []archive.OriginalAsset{{ID: "ASSET-1", Checksum: packageChecksum(originalBytes), Location: "original/camera.mov"}},
+			OriginalAssets: []archive.OriginalAsset{{
+				ID: "ASSET-1", Checksum: packageChecksum(originalBytes), OriginalName: "camera.mov", SizeBytes: int64(len(originalBytes)),
+				RegisteredFromObservationID: "OBSERVATION-1", RegisteredBy: "worker-1", RegisteredAt: now,
+			}},
 			Artifacts: []archive.Artifact{{
 				ID: "ART-1", Path: "proxy/camera.mp4", Size: int64(len(proxyBytes)), Checksum: packageChecksum(proxyBytes),
 				Origin: archive.Provenance{OriginalAssetID: "ASSET-1", InputArtifactIDs: []string{}, ProcessingKind: vocabulary.ProcessingRender,

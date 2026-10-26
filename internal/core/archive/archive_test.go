@@ -15,25 +15,6 @@ import (
 const checksumA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 const checksumB = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 
-// Requirement: ARC-001
-func TestOriginalAssetChecksumCannotBeChangedAfterIntake(t *testing.T) {
-	asset := OriginalAsset{ID: "ASSET-1", Checksum: checksumA, Location: "source/a.mov"}
-	if err := asset.ReplaceChecksum(checksumB); !errors.Is(err, ErrOriginalImmutable) {
-		t.Fatalf("original mutation accepted: %v", err)
-	}
-	if asset.Checksum != checksumA {
-		t.Fatal("original checksum changed")
-	}
-	if err := asset.ReplaceLocation("source/replaced.mov"); !errors.Is(err, ErrOriginalImmutable) {
-		t.Fatalf("original location mutation accepted: %v", err)
-	}
-	replacement := OriginalAsset{ID: "ASSET-2", Checksum: checksumB, Location: "source/replacement.mov"}
-	relation, err := SupersedeOriginal(asset, replacement)
-	if err != nil || relation.PreviousAssetID != asset.ID || relation.NewAssetID != replacement.ID {
-		t.Fatalf("replacement relation was not created: relation=%+v err=%v", relation, err)
-	}
-}
-
 // Requirement: ARC-002
 func TestDerivedArtifactRequiresCompleteVersionedProvenance(t *testing.T) {
 	artifact := Artifact{
@@ -134,7 +115,7 @@ func TestArchiveCommitRequiresQCApprovalAndTwoPhysicalCopies(t *testing.T) {
 func TestArchiveSnapshotRoundTripsWithoutDatabase(t *testing.T) {
 	now := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
 	snapshot := ArchiveSnapshot{
-		OriginalAssets: []OriginalAsset{{ID: "ASSET-1", Checksum: checksumA, Location: "original/a.mov"}},
+		OriginalAssets: []OriginalAsset{archiveOriginal("ASSET-1", checksumA, "a.mov", now)},
 		Artifacts: []Artifact{{
 			ID: "ART-1", Path: "proxy/a.mp4", Size: 10, Checksum: checksumB,
 			Origin: Provenance{OriginalAssetID: "ASSET-1", InputArtifactIDs: []string{}, ProcessingKind: vocabulary.ProcessingRender, ProcessorVersion: "1", ProfileVersion: "proxy-v1", CreatedBy: "worker-1", CreatedAt: now},
@@ -147,6 +128,13 @@ func TestArchiveSnapshotRoundTripsWithoutDatabase(t *testing.T) {
 	restored, err := ImportSnapshot(payload)
 	if err != nil || !reflect.DeepEqual(restored, snapshot) {
 		t.Fatalf("round trip mismatch: restored=%+v err=%v", restored, err)
+	}
+}
+
+func archiveOriginal(id, checksum, name string, registeredAt time.Time) OriginalAsset {
+	return OriginalAsset{
+		ID: id, Checksum: checksum, OriginalName: name, SizeBytes: 10,
+		RegisteredFromObservationID: "OBSERVATION-1", RegisteredBy: "operator-1", RegisteredAt: registeredAt,
 	}
 }
 

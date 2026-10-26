@@ -292,12 +292,12 @@
     {
       "id": "ARC-001",
       "design": "archive-domain",
-      "statement": "입고된 원본의 체크섬과 위치는 바꿀 수 없고 교체는 새 OriginalAsset과 대체 관계로 표현해야 한다.",
-      "given": "체크섬과 위치가 확정된 원본 자산 및 교체 자산이 있다.",
+      "statement": "입고된 원본의 체크섬과 원래 이름은 바꿀 수 없고 교체는 새 OriginalAsset과 대체 관계로 표현해야 한다.",
+      "given": "체크섬과 원래 이름이 확정된 원본 자산 및 교체 자산이 있다.",
       "when": "기존 원본 변경과 대체를 각각 요청한다.",
       "then": "기존 변경은 ORIGINAL_IMMUTABLE로 거부하고 대체는 두 자산 ID를 가진 관계를 만든다.",
-      "test_file": "internal/core/archive/archive_test.go",
-      "test_name": "TestOriginalAssetChecksumCannotBeChangedAfterIntake",
+      "test_file": "internal/core/asset/original_test.go",
+      "test_name": "TestOriginalAssetChecksumAndNameCannotChangeAfterIntake",
       "status": "implemented",
       "level": "unit"
     },
@@ -1204,14 +1204,26 @@
     {
       "id": "INT-001",
       "design": "intake-file-inspection",
-      "statement": "입고 검사는 등록 Storage root의 파일을 읽기 전용으로 열어 checksum·크기·원래 이름과 PhysicalDevice 작업공간을 가진 InputFileObservation을 생성해야 한다.",
+      "statement": "입고 검사는 등록 Storage root의 파일을 읽기 전용으로 열어 식별자·checksum·크기·원래 이름과 PhysicalDevice 작업공간을 가진 InputFileObservation을 생성해야 한다.",
       "given": "SQLite에 PhysicalDevice 관계와 root가 등록된 Storage 및 그 root 아래의 원본 파일이 있다.",
       "when": "Worker가 storage_id와 상대경로로 입력 파일을 검사한다.",
-      "then": "절대 root 없이 정규화 상대경로·원래 이름·크기·SHA-256·workspace_drive_id가 기록되고 원본 내용·크기·수정시각·mode는 바뀌지 않는다.",
+      "then": "고유 observation_id와 함께 절대 root 없이 정규화 상대경로·원래 이름·크기·SHA-256·workspace_drive_id가 기록되고 원본 내용·크기·수정시각·mode는 바뀌지 않는다.",
       "test_file": "internal/adapter/intake/inspector_test.go",
       "test_name": "TestInputInspectionHashesRegisteredStorageFileWithoutChangingIt",
       "status": "implemented",
       "level": "integration"
+    },
+    {
+      "id": "INT-002",
+      "design": "original-asset-registration",
+      "statement": "OriginalAsset 등록은 InputFileObservation의 checksum·원래 이름·크기와 관찰 기록 ID를 콘텐츠 정체성으로 고정하고 Storage 경로를 소유하지 않아야 한다.",
+      "given": "등록 Storage의 파일에서 생성된 완전한 InputFileObservation이 있다.",
+      "when": "관찰 기록으로 OriginalAsset을 등록한다.",
+      "then": "새 자산 ID와 등록 실행자·시각 및 관찰 기록의 checksum·원래 이름·크기·ID가 기록되고 Storage·상대경로·작업 공간은 자산에 복제되지 않는다.",
+      "test_file": "internal/core/asset/original_test.go",
+      "test_name": "TestOriginalRegistrationUsesObservedContentIdentityWithoutStoragePath",
+      "status": "implemented",
+      "level": "unit"
     }
   ]
 }

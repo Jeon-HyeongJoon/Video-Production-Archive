@@ -47,14 +47,14 @@ func TestInputInspectionHashesRegisteredStorageFileWithoutChangingIt(t *testing.
 		t.Fatal(err)
 	}
 	observation, err := inspector.Inspect(ctx, intakeadapter.Request{
-		StorageID: "SOURCE-1", RelativePath: `camera-a\CLIP 001.MOV`, WorkerID: "WORKER-1",
+		ObservationID: "OBSERVATION-1", StorageID: "SOURCE-1", RelativePath: `camera-a\CLIP 001.MOV`, WorkerID: "WORKER-1",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	digest := sha256.Sum256(payload)
-	if observation.StorageID != "SOURCE-1" || observation.WorkspaceDriveID != "DRIVE-USB-1" ||
+	if observation.ID != "OBSERVATION-1" || observation.StorageID != "SOURCE-1" || observation.WorkspaceDriveID != "DRIVE-USB-1" ||
 		observation.RelativePath != "camera-a/CLIP 001.MOV" || observation.OriginalName != "CLIP 001.MOV" ||
 		observation.SizeBytes != int64(len(payload)) || observation.Checksum != hex.EncodeToString(digest[:]) ||
 		observation.ObservedBy != "WORKER-1" || observation.ObservedAt.IsZero() {

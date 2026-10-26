@@ -18,9 +18,10 @@ import (
 var ErrInputFileUnreadable = errors.New("input file cannot be inspected")
 
 type Request struct {
-	StorageID    string
-	RelativePath string
-	WorkerID     string
+	ObservationID string
+	StorageID     string
+	RelativePath  string
+	WorkerID      string
 }
 
 type Inspector struct {
@@ -36,7 +37,7 @@ func NewInspector(storages storage.AccessResolver) (*Inspector, error) {
 }
 
 func (inspector *Inspector) Inspect(ctx context.Context, request Request) (coreintake.InputFileObservation, error) {
-	if strings.TrimSpace(request.StorageID) == "" || strings.TrimSpace(request.RelativePath) == "" || strings.TrimSpace(request.WorkerID) == "" {
+	if strings.TrimSpace(request.ObservationID) == "" || strings.TrimSpace(request.StorageID) == "" || strings.TrimSpace(request.RelativePath) == "" || strings.TrimSpace(request.WorkerID) == "" {
 		return coreintake.InputFileObservation{}, ErrInputFileUnreadable
 	}
 	access, err := inspector.storages.ResolveAccess(ctx, request.StorageID)
@@ -69,6 +70,7 @@ func (inspector *Inspector) Inspect(ctx context.Context, request Request) (corei
 	}
 	normalizedPath := path.Clean(strings.ReplaceAll(request.RelativePath, "\\", "/"))
 	return coreintake.NewInputFileObservation(coreintake.InputFileObservation{
+		ID:        request.ObservationID,
 		StorageID: access.StorageID, WorkspaceDriveID: access.WorkspaceDriveID,
 		RelativePath: normalizedPath, OriginalName: path.Base(normalizedPath),
 		SizeBytes: size, Checksum: hex.EncodeToString(digest.Sum(nil)),

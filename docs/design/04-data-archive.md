@@ -43,7 +43,7 @@ Agent 계층은 `AgentSession → AgentTurn → ProviderRequest → AgentToolCal
 
 ## 4. 원본과 파생본
 
-원본은 최초 검증 체크섬을 가진 immutable `OriginalAsset`이다. 체크섬이나 위치를 바꾸지 않고 새 OriginalAsset과 대체 관계를 만든다. `ARC-001`
+원본은 `InputFileObservation`에서 최초 검증한 checksum·원래 이름·크기와 관찰 기록 ID를 고정한 immutable `OriginalAsset`이다. Storage와 상대경로는 관찰 기록 또는 사본 기록이 소유하며 OriginalAsset에 복제하지 않는다. 체크섬이나 원래 이름을 고쳐야 하면 새 OriginalAsset과 대체 관계를 만든다. `INT-002`, `ARC-001`
 
 `MediaInspection`은 `OriginalAsset` ID뿐 아니라 확정 checksum에도 묶인 추가 전용 Record다. 파일 경로나 ffprobe 원문을 검색 기준으로 삼지 않고 정규화한 컨테이너, 길이, 크기, bitrate와 stream 기술정보를 저장한다. `MED-001`
 
