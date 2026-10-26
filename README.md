@@ -20,7 +20,7 @@
 - 시작 설정 전용 관리 모델과 여러 작업 PC Worker registry·heartbeat·배정 정책
 - 요구사항과 테스트의 자동 1:1 추적 검사
 
-현재는 SQLite Command Unit of Work, 아카이브 sidecar export/import, 게시 장애 조정과 Notification SSE 재연결 Adapter의 integration 계약까지 구현되어 있다. 전체 Control DB projection·migration·backup, HTTP Command API와 Dashboard, MCP Adapter, Windows Device Adapter, 실제 FFmpeg/ffprobe/STT 실행 Adapter와 Provider API Adapter는 아직 구현하지 않았다. 작업 공간 드라이브 해석, 독립 Capability 실행, 기능·테스트 증적 수집과 Dashboard 투영은 `DEV-006`, `APP-001`, `OBS-001`, `TST-001`, `DSH-001`의 계획된 integration 요구사항이며, Windows 실장비가 필요한 `DEV-005`, `ARC-008`도 계획 상태다.
+현재는 SQLite Command Unit of Work, Storage→PhysicalDevice 작업 공간 해석, 아카이브 sidecar export/import, 게시 장애 조정, Notification SSE 재연결과 CI 테스트 증적의 integration 계약까지 구현되어 있다. 전체 Control DB projection·migration·backup, HTTP Command API와 Dashboard, MCP Adapter, Windows Device Adapter, 실제 FFmpeg/ffprobe/STT 실행 Adapter와 Provider API Adapter는 아직 구현하지 않았다. 독립 Capability 실행, 기능 실행 증적과 Dashboard 투영은 `APP-001`, `OBS-001`, `DSH-001`의 계획된 integration 요구사항이며, Windows 실장비가 필요한 `DEV-005`, `ARC-008`도 계획 상태다.
 
 ## 문서 읽는 순서
 

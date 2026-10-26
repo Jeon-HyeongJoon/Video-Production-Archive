@@ -1120,13 +1120,13 @@
     {
       "id": "DEV-006",
       "design": "workspace-drive-adapter",
-      "statement": "대용량 파일 작업의 Storage는 Volume이나 root 경로가 아니라 해당 PhysicalDevice ID의 작업 공간으로 해석하고 예약해야 한다.",
+      "statement": "대용량 파일 작업의 Storage는 Volume이나 root 경로가 아니라 해당 PhysicalDevice ID의 workspace_drive_id로 해석해 예약 입력으로 제공해야 한다.",
       "given": "같은 PhysicalDevice의 서로 다른 Volume·Storage 두 개와 다른 PhysicalDevice의 Storage 하나가 등록되어 있다.",
       "when": "각 storage_id의 작업 공간 드라이브를 해석한다.",
       "then": "같은 장치의 Storage는 같은 workspace_drive_id를, 다른 장치는 다른 ID를 반환하며 관계 미확인 Storage는 거부한다.",
-      "test_file": "",
-      "test_name": "",
-      "status": "planned",
+      "test_file": "internal/adapter/sqlitestorage/repository_test.go",
+      "test_name": "TestStorageRootsResolveToPhysicalWorkspaceDrive",
+      "status": "implemented",
       "level": "integration"
     },
     {
