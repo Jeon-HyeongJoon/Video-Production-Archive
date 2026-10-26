@@ -45,7 +45,18 @@
 
 ## 검증
 
+Dashboard 검증은 실제 Chromium이 고정된 Job·Worker·검색 상태를 렌더링한 운영체제별 PNG golden을 비교한다. 처음 한 번 브라우저 의존성을 설치한 뒤 전체 검증을 실행한다.
+
 ```bash
+make visual-deps
+make verify
+go vet ./...
+```
+
+의도적으로 Dashboard 모양을 바꾼 경우 실제 이미지를 먼저 검토하고 golden을 명시적으로 갱신한다.
+
+```bash
+make dashboard-golden-update
 go run ./cmd/reqcheck
 go run ./cmd/ontocheck
 go test ./...

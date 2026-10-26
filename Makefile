@@ -1,4 +1,4 @@
-.PHONY: build test requirements requirements-lock ontology verify
+.PHONY: build test requirements requirements-lock ontology visual-deps dashboard-golden-update verify
 
 build:
 	mkdir -p bin
@@ -16,5 +16,12 @@ requirements-lock:
 
 ontology:
 	go run ./cmd/ontocheck
+
+visual-deps:
+	python3 -m pip install -r requirements-visual.txt
+	python3 -m playwright install chromium
+
+dashboard-golden-update:
+	UPDATE_DASHBOARD_GOLDEN=1 go test -count=1 ./internal/adapter/httpcontrol -run '^TestControlHTTPServesSQLiteDashboardAndSearchOnlyToAllowedNetwork$$'
 
 verify: requirements ontology test

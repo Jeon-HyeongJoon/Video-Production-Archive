@@ -36,6 +36,8 @@ Worker 상태는 CPU, memory, GPU/VRAM, scratch 여유, heavy slot, 접근 가�
 
 초기 웹 화면은 Control Service에 embed되어 별도 frontend build 없이 제공된다. 작업함과 자산 metadata·전사 timecode 검색을 같은 화면에서 조회하며 모든 응답은 rebuild 가능한 SQLite projection을 읽는다. 네트워크 접근 판정은 정적 파일과 API에 동일하게 적용되고 원본·아티팩트의 Storage 경로는 조회 DTO에 포함하지 않는다. `CTL-001`
 
+화면 계약은 고정된 Job·Worker·검색 fixture를 실제 Chromium에서 고정 viewport로 렌더링한 PNG golden으로 함께 검증한다. 운영체제별 글꼴 rasterization 차이를 UI 변경으로 오인하지 않도록 golden은 운영체제별로 보관하고, 변경이 의도된 경우에만 `make dashboard-golden-update`로 갱신한다. 불일치한 실제 화면과 픽셀 diff는 테스트 증적 디렉터리에 남긴다.
+
 ## 3. 사람 개입
 
 Dashboard의 변경 동작은 업무 현황에서 출발한 개입과 Agent 부재 시 폴백으로 제한한다.

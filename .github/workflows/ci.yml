@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      EVIDENCE_DIR: evidence/${{ github.run_id }}-${{ github.run_attempt }}
+      EVIDENCE_DIR: ${{ github.workspace }}/evidence/${{ github.run_id }}-${{ github.run_attempt }}
 
     steps:
       - name: Check out repository
@@ -29,6 +29,17 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install dashboard golden browser
+        run: |
+          python -m pip install -r requirements-visual.txt
+          python -m playwright install --with-deps chromium
 
       - name: Download modules
         run: go mod download
