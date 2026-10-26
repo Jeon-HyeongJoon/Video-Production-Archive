@@ -948,14 +948,15 @@
       "definition": "렌더 엔진이 원본 자산이나 타임라인을 렌더 프로파일로 처리해 만든 영상 아티팩트.",
       "rules": [
         "프록시, 아카이브 렌더본, VJ 통합본은 모두 렌더 결과이며 프로파일로 구분한다. 별도 아티팩트 종류로 나누지 않는다.",
-        "'프록시'는 proxy 프로파일로 만든 렌더 결과, '아카이브 렌더본'은 archive 프로파일로 만든 렌더 결과를 부르는 말이다."
+        "'프록시'는 proxy 프로파일로 만든 렌더 결과, '아카이브 렌더본'은 archive 프로파일로 만든 렌더 결과를 부르는 말이다.",
+        "검증된 임시 출력만 게시하며 Profile·처리기·Worker와 checksum을 provenance에 남긴다."
       ],
       "forbidden": {"words": [], "code": []},
       "relations": [
         {"type": "is-a", "target": "artifact"},
         {"type": "refers-to", "target": "profile"}
       ],
-      "sources": ["사용자 결정: 모두 렌더 결과 + 프로파일로 구분", "idea.md §4.1"],
+      "sources": ["사용자 결정: 모두 렌더 결과 + 프로파일로 구분", "idea.md §4.1", "requirements RND-002"],
       "decided": "2026-10-20"
     },
     {
@@ -1166,10 +1167,10 @@
       "name": {"ko": "프로파일", "en": "Profile"},
       "code_name": "Profile",
       "definition": "처리 하나를 어떻게 실행할지 정한, 이름과 버전이 있는 파라미터 묶음. 렌더, STT, 포맷 프로파일이 있다.",
-      "rules": ["'권한 프로파일'은 권한 정책, 'Provider 프로파일'은 Provider 계정이라고 부른다."],
+      "rules": ["'권한 프로파일'은 권한 정책, 'Provider 프로파일'은 Provider 계정이라고 부른다.", "렌더 Profile은 codec과 자원 제한을 포함하며 판이 바뀌면 버전을 올린다."],
       "forbidden": {"words": ["권한 프로파일", "Provider 프로파일", "제공자 프로파일"], "code": []},
       "relations": [{"type": "refers-to", "target": "processing-kind"}],
-      "sources": ["사용자 결정: 프로파일은 실행 파라미터 묶음만", "idea.md §4.1, §13"],
+      "sources": ["사용자 결정: 프로파일은 실행 파라미터 묶음만", "idea.md §4.1, §13", "requirements RND-001"],
       "decided": "2026-10-20"
     },
     {

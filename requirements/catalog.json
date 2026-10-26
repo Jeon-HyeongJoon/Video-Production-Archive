@@ -1260,6 +1260,42 @@
       "test_name": "TestSQLiteMediaInspectionsRemainAppendOnlyAndQueryable",
       "status": "implemented",
       "level": "integration"
+    },
+    {
+      "id": "RND-001",
+      "design": "render-profile-domain",
+      "statement": "v1 렌더 Profile은 버전이 있고 승인된 H.264/AAC MP4 codec 조합과 짝수 해상도·CRF·audio bitrate·최대 thread 수를 명시해야 한다.",
+      "given": "archive-event-1080p Profile과 버전·해상도·CRF·thread 또는 encoder가 허용 범위를 벗어난 Profile이 있다.",
+      "when": "렌더 Profile을 정규화하고 검증한다.",
+      "then": "유효 Profile은 안정된 profile@version 참조를 만들고 자원 제한 또는 codec 허용 목록을 벗어난 Profile은 거부된다.",
+      "test_file": "internal/core/rendering/rendering_test.go",
+      "test_name": "TestRenderProfileIsVersionedCodecSafeAndResourceBounded",
+      "status": "implemented",
+      "level": "unit"
+    },
+    {
+      "id": "RND-002",
+      "design": "ffmpeg-render-adapter",
+      "statement": "FFmpeg Adapter는 렌더 Profile을 shell 없는 고정 인수 배열로 실행하고 임시 출력을 검증한 뒤에만 게시하여 완전한 provenance의 Rendition을 생성해야 한다.",
+      "given": "공백과 shell 메타문자가 포함된 해석 완료 입력 경로, versioned Profile과 실제 subprocess로 동작하는 FFmpeg fixture가 있다.",
+      "when": "원본 자산을 proxy Rendition으로 렌더한다.",
+      "then": "입력은 단일 인수로 전달되고 해상도·codec·CRF·audio bitrate·thread 제한이 적용되며 검증된 출력만 게시되어 checksum과 처리기·Profile·Worker provenance가 기록된다.",
+      "test_file": "internal/adapter/ffmpeg/renderer_test.go",
+      "test_name": "TestFFmpegAdapterRendersVerifiedProfileWithoutShellAndPublishesRendition",
+      "status": "implemented",
+      "level": "integration"
+    },
+    {
+      "id": "RND-003",
+      "design": "windows-ffmpeg-render-acceptance",
+      "statement": "Windows Worker의 실제 FFmpeg는 archive-event-1080p Profile로 대표 영상을 렌더하고 실제 ffprobe 검증을 통과한 Rendition을 게시해야 한다.",
+      "given": "운영 버전 FFmpeg·ffprobe와 H.264/AAC 대표 영상이 설치된 격리 Windows Worker가 있다.",
+      "when": "background 렌더 슬롯 하나로 archive-event-1080p Profile을 실행한다.",
+      "then": "출력은 1920x1080 경계 안의 H.264/AAC MP4이고 thread 제한을 사용하며 checksum·실행시간·최대 메모리와 장비 식별자가 acceptance 증적에 남는다.",
+      "test_file": "",
+      "test_name": "",
+      "status": "planned",
+      "level": "acceptance"
     }
   ]
 }
