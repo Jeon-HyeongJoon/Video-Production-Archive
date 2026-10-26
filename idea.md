@@ -151,7 +151,7 @@ Scheduler는 heartbeat가 유효하고 필요한 처리 종류와 Storage 접근
 | Intake | 파일 입고, 복사 세션, 체크섬, 중복 조사 | `OriginalAsset`, `CopySession` |
 | Media Analysis | 코덱, 길이, 프레임레이트, 오디오, 타임코드 분석 | `MediaInspection` |
 | Transcription | 오디오 추출, STT, 자막 | `Transcript`, `Subtitle` |
-| Content Intelligence | 요약, 키워드, 챕터, 인물 언급 | `ContentAnnotation` |
+| Content Intelligence | 요약, 키워드, 챕터, 인물 언급 | `Summary` |
 | VJ Assembly | 클립 선택, 순서, 인·아웃, 컷 마커 | `Timeline` |
 | Rendering | 입력과 프로파일을 이용한 영상 출력 | `Rendition` |
 | Quality Control | 재생, 길이, 싱크, 손상, 무음·블랙 검사 | `QCReport` |

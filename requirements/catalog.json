@@ -1464,6 +1464,30 @@
       "test_name": "TestSubtitlePublisherVerifiesTemporarySRTInsideStorageRootBeforePublishing",
       "status": "implemented",
       "level": "integration"
+    },
+    {
+      "id": "SUM-001",
+      "design": "summary-domain",
+      "statement": "Summary는 Transcript와 분리된 리비전 대상 Artifact subtype으로 작성 주체, 정규화된 요약 text·키워드와 Transcript 범위 안의 순서 있는 챕터를 가져야 한다.",
+      "given": "versioned 요약 Profile, Transcript를 입력으로 가리키는 SUMMARY provenance와 Agent 작성 요약의 중복 키워드·시간 챕터가 있다.",
+      "when": "Summary 리비전을 생성한다.",
+      "then": "Summary ID·리비전·작성 주체·요약 text·정렬된 고유 키워드·비중첩 챕터가 보존되고 Transcript 원문은 바뀌지 않으며 범위를 벗어난 챕터는 거부된다.",
+      "test_file": "internal/core/summary/summary_test.go",
+      "test_name": "TestSummaryKeepsRevisionAuthorKeywordsAndTimedChaptersSeparateFromTranscript",
+      "status": "implemented",
+      "level": "unit"
+    },
+    {
+      "id": "SUM-002",
+      "design": "summary-file-adapter",
+      "statement": "Summary 파일 Adapter는 Agent 또는 사람 폴백이 만든 구조화 결과를 등록 Storage root 안의 임시 JSON으로 검증한 뒤 게시해야 한다.",
+      "given": "등록 Storage root, Transcript, versioned 요약 Profile과 사람이 작성한 요약 결과 및 임시·게시 상대경로가 있다.",
+      "when": "Summary 리비전을 JSON으로 게시한다.",
+      "then": "게시 JSON과 checksum·크기, Transcript·Profile·처리기·작성자 provenance가 일치하고 임시 파일은 남지 않으며 Storage root 밖 경로는 거부된다.",
+      "test_file": "internal/adapter/summaryfile/publisher_test.go",
+      "test_name": "TestSummaryPublisherVerifiesHumanFallbackJSONInsideStorageRootBeforePublishing",
+      "status": "implemented",
+      "level": "integration"
     }
   ]
 }
