@@ -40,12 +40,15 @@ function text(tag, value, className = "") {
 }
 
 async function loadHealth() {
+  const health = byId("health");
+  const label = health.querySelector(".status-label");
   try {
-    const health = await api("/healthz");
-    byId("health").textContent = `정상 · ${health.version}`;
-    byId("health").classList.add("ok");
+    const payload = await api("/healthz");
+    label.textContent = `LIVE · ${payload.version}`;
+    health.classList.add("ok");
   } catch (error) {
-    byId("health").textContent = `연결 실패 · ${error.message}`;
+    label.textContent = `OFFLINE · ${error.message}`;
+    health.classList.remove("ok");
   }
 }
 
@@ -57,10 +60,40 @@ async function loadJobs() {
     container.replaceChildren(...jobs.map((job) => {
       const card = document.createElement("article");
       card.className = `card ${job.needs_human_intervention ? "attention" : ""}`;
-      card.append(text("p", job.template_name, "meta"));
+
+      const top = document.createElement("div");
+      top.className = "card-top";
+      top.append(
+        text("p", `${job.template_name} / ${job.control_mode || "—"}`, "meta"),
+        text("span", job.step_state, "token"),
+      );
+
+      const progress = Math.max(0, Math.min(100, Math.round(job.progress * 100)));
+      const detail = document.createElement("div");
+      detail.className = "job-detail";
+      detail.append(
+        text("span", "STEP", "detail-label"),
+        text("span", job.current_step_id, "detail-value"),
+        text("span", "PROGRESS", "detail-label"),
+        text("span", `${progress}%`, "detail-value"),
+      );
+      const meter = document.createElement("div");
+      meter.className = "meter";
+      meter.role = "progressbar";
+      meter.ariaValueMin = "0";
+      meter.ariaValueMax = "100";
+      meter.ariaValueNow = String(progress);
+      meter.style.setProperty("--progress", `${progress}%`);
+      detail.append(meter);
+
+      card.append(top);
       card.append(text("h3", job.target_title));
-      card.append(text("p", `${job.current_step_id} · ${job.step_state}`, "state"));
-      card.append(text("p", job.intervention_reason || `${Math.round(job.progress * 100)}%`, "detail"));
+      card.append(detail);
+      if (job.intervention_reason) card.append(text("div", job.intervention_reason, "signal"));
+
+      const foot = document.createElement("div");
+      foot.className = "card-foot";
+      foot.append(text("code", job.job_id));
       if (!["COMPLETED", "FAILED", "CANCELLED", "VERIFYING"].includes(job.step_state)) {
         const cancel = text("button", "취소", "secondary");
         cancel.type = "button";
@@ -72,11 +105,12 @@ async function loadJobs() {
             });
             await loadJobs();
           } catch (error) {
-            byId("job-command-status").textContent = `취소 실패 · ${error.message}`;
+            byId("job-command-status").textContent = `CANCEL / ${error.message}`;
           }
         });
-        card.append(cancel);
+        foot.append(cancel);
       }
+      card.append(foot);
       return card;
     }));
   } catch (error) {
@@ -92,9 +126,16 @@ async function loadWorkers() {
     container.replaceChildren(...workers.map((worker) => {
       const card = document.createElement("article");
       card.className = `card ${worker.state === "OFFLINE" ? "attention" : ""}`;
-      card.append(text("p", worker.state, "meta"));
+      const state = document.createElement("div");
+      state.className = "worker-state";
+      state.append(text("span", "", "worker-dot"), text("span", worker.state, "meta"));
+      card.append(state);
       card.append(text("h3", worker.worker_id));
-      card.append(text("p", worker.accessible_storage_ids.join(" · ") || "Storage 보고 없음", "detail"));
+      const storage = document.createElement("div");
+      storage.className = "storage-list";
+      const storageIDs = worker.accessible_storage_ids.length ? worker.accessible_storage_ids : ["STORAGE —"];
+      storage.append(...storageIDs.map((id) => text("span", id, "token")));
+      card.append(storage);
       return card;
     }));
   } catch (error) {
@@ -111,11 +152,11 @@ byId("job-create").addEventListener("submit", async (event) => {
       job_id: jobId, command_id: identifier("COMMAND"), idempotency_key: `${jobId}:create`,
       expected_revision: 0, reason: "dashboard operator created job", ...values,
     });
-    byId("job-command-status").textContent = `작업 생성됨 · ${jobId}`;
+    byId("job-command-status").textContent = jobId;
     event.currentTarget.reset();
     await loadJobs();
   } catch (error) {
-    byId("job-command-status").textContent = `생성 실패 · ${error.message}`;
+    byId("job-command-status").textContent = `CREATE / ${error.message}`;
   }
 });
 
@@ -129,9 +170,15 @@ byId("asset-search").addEventListener("submit", async (event) => {
     container.replaceChildren(...assets.map((item) => {
       const row = document.createElement("article");
       row.className = "result";
-      row.append(text("h3", item.Metadata?.title || item.metadata?.title || "제목 없음"));
-      row.append(text("p", item.Metadata?.description || item.metadata?.description || ""));
-      row.append(text("code", item.Original?.id || item.original?.id || ""));
+      const head = document.createElement("div");
+      head.className = "result-head";
+      head.append(
+        text("h3", item.Metadata?.title || item.metadata?.title || "UNTITLED"),
+        text("code", item.Original?.id || item.original?.id || ""),
+      );
+      row.append(head);
+      const description = item.Metadata?.description || item.metadata?.description || "";
+      if (description) row.append(text("p", description));
       return row;
     }));
   } catch (error) {
@@ -149,8 +196,14 @@ byId("transcript-search").addEventListener("submit", async (event) => {
     container.replaceChildren(...hits.map((hit) => {
       const row = document.createElement("article");
       row.className = "result";
+      const head = document.createElement("div");
+      head.className = "result-head";
+      head.append(
+        text("code", hit.original_asset_id),
+        text("code", `${hit.segment.start_millis}–${hit.segment.end_millis} ms`),
+      );
+      row.append(head);
       row.append(text("p", hit.segment.text));
-      row.append(text("code", `${hit.original_asset_id} · ${hit.segment.start_millis}–${hit.segment.end_millis} ms`));
       return row;
     }));
   } catch (error) {

@@ -38,6 +38,8 @@ Worker 상태는 CPU, memory, GPU/VRAM, scratch 여유, heavy slot, 접근 가�
 
 화면 계약은 고정된 Job·Worker·검색 fixture를 실제 Chromium에서 고정 viewport로 렌더링한 PNG golden으로 함께 검증한다. 운영체제별 글꼴 rasterization 차이를 UI 변경으로 오인하지 않도록 golden은 운영체제별로 보관하고, 변경이 의도된 경우에만 `make dashboard-golden-update`로 갱신한다. 불일치한 실제 화면과 픽셀 diff는 테스트 증적 디렉터리에 남긴다.
 
+화면은 흰색과 아이보리 표면 위에 회색의 명도·경계선·그림자만으로 정보 깊이를 구분한다. 카드 모서리는 2px 이하로 유지하고 상태 전달을 특정 강조색에 의존하지 않는다. 본문에는 기능을 서술하는 안내 문장을 두지 않으며, 짧은 명사형 label·업무 데이터·상태 token·조작 요소의 배치만으로 흐름을 드러낸다. 접근성 이름과 live status는 시각 문구와 별개로 보존한다.
+
 ## 3. 사람 개입
 
 Dashboard의 변경 동작은 업무 현황에서 출발한 개입과 Agent 부재 시 폴백으로 제한한다.

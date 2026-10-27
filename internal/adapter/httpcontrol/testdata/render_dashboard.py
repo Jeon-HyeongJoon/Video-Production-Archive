@@ -18,7 +18,7 @@ def main() -> None:
             timezone_id="Asia/Seoul",
         )
         page.goto(url, wait_until="networkidle")
-        expect(page.locator("#health")).to_have_text("정상 · v1-test")
+        expect(page.locator("#health")).to_have_text("LIVE · v1-test")
         expect(page.locator("#jobs .card")).to_have_count(2)
         expect(page.locator("#workers .card")).to_have_count(2)
 

@@ -7,63 +7,71 @@
   <link rel="stylesheet" href="/assets/style.css">
 </head>
 <body>
-  <header>
-    <p class="eyebrow">VIDEO PRODUCTION ARCHIVE</p>
-    <h1>영상 기록 제어실</h1>
-    <p id="health" class="status">서비스 확인 중</p>
+  <header class="topbar">
+    <div class="brand-lockup">
+      <p class="product-mark">VPA / CONTROL</p>
+      <h1>영상 기록 제어실</h1>
+    </div>
+    <p id="health" class="status" aria-live="polite"><span class="status-dot" aria-hidden="true"></span><span class="status-label">CHECK</span></p>
   </header>
   <main>
-    <section aria-labelledby="jobs-title">
+    <section class="panel jobs-panel" aria-labelledby="jobs-title">
       <div class="section-heading">
-        <div><p class="eyebrow">OPERATIONS</p><h2 id="jobs-title">작업 현황</h2></div>
-        <button id="refresh-jobs" type="button">새로고침</button>
+        <div class="section-title"><span class="section-index">01</span><h2 id="jobs-title">작업</h2></div>
+        <button id="refresh-jobs" class="icon-button" type="button" aria-label="작업 새로고침" title="작업 새로고침">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.34 5.66M20 4v7h-7"/></svg>
+        </button>
       </div>
       <form id="job-create">
-        <label>대상 제목<input name="target_title" required autocomplete="off"></label>
-        <label>Template<select name="template_name">
+        <label><span>제목</span><input name="target_title" required autocomplete="off"></label>
+        <label><span>템플릿</span><select name="template_name">
           <option value="occasion-recording">행사 기록</option>
           <option value="final-edit">최종 편집본</option>
           <option value="large-file-intake">대용량 입고</option>
           <option value="vj-compilation">VJ 컴필레이션</option>
         </select></label>
-        <label>제어 모드<select name="control_mode">
+        <label><span>모드</span><select name="control_mode">
           <option value="ASSISTED">ASSISTED</option>
           <option value="MANUAL">MANUAL</option>
           <option value="AGENT">AGENT</option>
         </select></label>
-        <button type="submit">작업 만들기</button>
+        <button class="primary-action" type="submit">생성</button>
       </form>
       <p id="job-command-status" class="detail" role="status"></p>
       <div id="jobs" class="cards" aria-live="polite"></div>
     </section>
-    <section aria-labelledby="workers-title">
+    <section class="panel workers-panel" aria-labelledby="workers-title">
       <div class="section-heading">
-        <div><p class="eyebrow">WORKERS</p><h2 id="workers-title">Worker 연결</h2></div>
-        <button id="refresh-workers" type="button">새로고침</button>
+        <div class="section-title"><span class="section-index">02</span><h2 id="workers-title">Worker</h2></div>
+        <button id="refresh-workers" class="icon-button" type="button" aria-label="Worker 새로고침" title="Worker 새로고침">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.34 5.66M20 4v7h-7"/></svg>
+        </button>
       </div>
       <div id="workers" class="cards" aria-live="polite"></div>
     </section>
-    <section aria-labelledby="search-title">
-      <p class="eyebrow">ARCHIVE SEARCH</p>
-      <h2 id="search-title">아카이브 검색</h2>
+    <section class="panel archive-panel" aria-labelledby="search-title">
+      <div class="section-heading">
+        <div class="section-title"><span class="section-index">03</span><h2 id="search-title">아카이브</h2></div>
+      </div>
       <form id="asset-search">
-        <label>제목·설명·키워드<input name="text" autocomplete="off"></label>
-        <label>Video codec<input name="video_codec" placeholder="h264" autocomplete="off"></label>
+        <label><span>제목 · 설명 · 키워드</span><input name="text" autocomplete="off"></label>
+        <label><span>Codec</span><input name="video_codec" placeholder="h264" autocomplete="off"></label>
         <button type="submit">검색</button>
       </form>
       <div id="assets" class="results" aria-live="polite"></div>
     </section>
-    <section aria-labelledby="transcript-title">
-      <p class="eyebrow">TIMECODE SEARCH</p>
-      <h2 id="transcript-title">전사문 구간 검색</h2>
+    <section class="panel transcript-panel" aria-labelledby="transcript-title">
+      <div class="section-heading">
+        <div class="section-title"><span class="section-index">04</span><h2 id="transcript-title">타임코드</h2></div>
+      </div>
       <form id="transcript-search">
-        <label>전사문<input name="text" required autocomplete="off"></label>
-        <button type="submit">구간 찾기</button>
+        <label><span>전사문</span><input name="text" required autocomplete="off"></label>
+        <button type="submit">찾기</button>
       </form>
       <div id="transcripts" class="results" aria-live="polite"></div>
     </section>
   </main>
-  <template id="empty"><p class="empty">표시할 결과가 없습니다.</p></template>
+  <template id="empty"><p class="empty" aria-label="결과 없음">—</p></template>
   <script src="/assets/app.js" defer></script>
 </body>
 </html>
