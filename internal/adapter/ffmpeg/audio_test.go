@@ -19,14 +19,8 @@ import (
 func TestFFmpegAdapterExtractsVerifiedSpeechAudioWithoutShell(t *testing.T) {
 	directory := t.TempDir()
 	argumentsPath := filepath.Join(directory, "arguments.txt")
-	executablePath := filepath.Join(directory, "ffmpeg-audio-fixture")
 	payload := []byte("verified-pcm-wave")
-	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$FFMPEG_AUDIO_ARGUMENTS\"\nfor argument in \"$@\"; do output=\"$argument\"; done\nprintf '%s' \"$FFMPEG_AUDIO_PAYLOAD\" > \"$output\"\n"
-	if err := os.WriteFile(executablePath, []byte(script), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("FFMPEG_AUDIO_ARGUMENTS", argumentsPath)
-	t.Setenv("FFMPEG_AUDIO_PAYLOAD", string(payload))
+	executablePath := ffmpegFixtureExecutable(t, argumentsPath, payload)
 
 	extractor, err := NewAudioExtractor(executablePath, "ffmpeg-8.0", "WORKER-1", OSRunner{}, payloadVerifier{expected: payload}, AtomicPublisher{})
 	if err != nil {

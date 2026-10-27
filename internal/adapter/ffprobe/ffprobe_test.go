@@ -2,6 +2,7 @@ package ffprobe
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -9,12 +10,46 @@ import (
 	"testing"
 )
 
+const ffprobeFixtureProcess = "VIDEO_ARCHIVE_FFPROBE_FIXTURE_PROCESS"
+
+func TestMain(m *testing.M) {
+	if os.Getenv(ffprobeFixtureProcess) == "1" {
+		arguments := strings.Join(os.Args[1:], "\n") + "\n"
+		if err := os.WriteFile(os.Getenv("FFPROBE_FIXTURE_ARGUMENTS"), []byte(arguments), 0o600); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		payload, err := os.ReadFile(os.Getenv("FFPROBE_FIXTURE_JSON"))
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		if _, err := os.Stdout.Write(payload); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		os.Exit(0)
+	}
+	os.Exit(m.Run())
+}
+
+func ffprobeFixtureExecutable(t *testing.T, argumentsPath, fixturePath string) string {
+	t.Helper()
+	executablePath, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(ffprobeFixtureProcess, "1")
+	t.Setenv("FFPROBE_FIXTURE_ARGUMENTS", argumentsPath)
+	t.Setenv("FFPROBE_FIXTURE_JSON", fixturePath)
+	return executablePath
+}
+
 // Requirement: MED-002
 func TestFFprobeAdapterExecutesArgumentArrayAndCreatesMediaInspection(t *testing.T) {
 	directory := t.TempDir()
 	fixturePath := filepath.Join(directory, "ffprobe.json")
 	argumentsPath := filepath.Join(directory, "arguments.txt")
-	executablePath := filepath.Join(directory, "ffprobe-fixture")
 	fixture := `{
   "format": {
     "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
@@ -32,12 +67,7 @@ func TestFFprobeAdapterExecutesArgumentArrayAndCreatesMediaInspection(t *testing
 	if err := os.WriteFile(fixturePath, []byte(fixture), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$FFPROBE_ARGUMENTS\"\ncat \"$FFPROBE_FIXTURE\"\n"
-	if err := os.WriteFile(executablePath, []byte(script), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("FFPROBE_ARGUMENTS", argumentsPath)
-	t.Setenv("FFPROBE_FIXTURE", fixturePath)
+	executablePath := ffprobeFixtureExecutable(t, argumentsPath, fixturePath)
 
 	inspector, err := NewInspector(executablePath, "ffprobe-8.0", "WORKER-1", OSRunner{})
 	if err != nil {

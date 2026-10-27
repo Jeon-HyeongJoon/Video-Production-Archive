@@ -16,7 +16,6 @@ func TestFFprobeAdapterObservesPublishedRenditionBytesForQC(t *testing.T) {
 	directory := t.TempDir()
 	argumentsPath := filepath.Join(directory, "qc-arguments.txt")
 	fixturePath := filepath.Join(directory, "qc-ffprobe.json")
-	executablePath := filepath.Join(directory, "ffprobe-qc-fixture")
 	publishedPath := filepath.Join(directory, "proxy & verified.mp4")
 	published := []byte("published-rendition-bytes")
 	if err := os.WriteFile(publishedPath, published, 0o600); err != nil {
@@ -33,12 +32,7 @@ func TestFFprobeAdapterObservesPublishedRenditionBytesForQC(t *testing.T) {
 	if err := os.WriteFile(fixturePath, []byte(fixture), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$FFPROBE_QC_ARGUMENTS\"\ncat \"$FFPROBE_QC_FIXTURE\"\n"
-	if err := os.WriteFile(executablePath, []byte(script), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("FFPROBE_QC_ARGUMENTS", argumentsPath)
-	t.Setenv("FFPROBE_QC_FIXTURE", fixturePath)
+	executablePath := ffprobeFixtureExecutable(t, argumentsPath, fixturePath)
 
 	inspector, err := NewInspector(executablePath, "ffprobe-8.0", "WORKER-1", OSRunner{})
 	if err != nil {

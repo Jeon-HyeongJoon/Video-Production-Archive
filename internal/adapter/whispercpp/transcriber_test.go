@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -20,19 +21,53 @@ import (
 )
 
 const audioChecksum = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+const whisperFixtureProcess = "VIDEO_ARCHIVE_WHISPER_FIXTURE_PROCESS"
+
+func TestMain(m *testing.M) {
+	if os.Getenv(whisperFixtureProcess) == "1" {
+		arguments := os.Args[1:]
+		if err := os.WriteFile(os.Getenv("WHISPER_FIXTURE_ARGUMENTS"), []byte(strings.Join(arguments, "\n")+"\n"), 0o600); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		outputPrefix := ""
+		for index := 0; index+1 < len(arguments); index++ {
+			if arguments[index] == "-of" {
+				outputPrefix = arguments[index+1]
+				break
+			}
+		}
+		if outputPrefix == "" {
+			fmt.Fprintln(os.Stderr, "whisper fixture received no -of argument")
+			os.Exit(2)
+		}
+		if err := os.WriteFile(outputPrefix+".json", []byte(os.Getenv("WHISPER_FIXTURE_JSON")), 0o600); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		os.Exit(0)
+	}
+	os.Exit(m.Run())
+}
+
+func whisperFixtureExecutable(t *testing.T, argumentsPath string) string {
+	t.Helper()
+	executablePath, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(whisperFixtureProcess, "1")
+	t.Setenv("WHISPER_FIXTURE_ARGUMENTS", argumentsPath)
+	return executablePath
+}
 
 // Requirement: TRN-002
 func TestWhisperCPPAdapterExecutesArgumentArrayAndPublishesVerifiedTranscript(t *testing.T) {
 	directory := t.TempDir()
 	argumentsPath := filepath.Join(directory, "arguments.txt")
-	executablePath := filepath.Join(directory, "whisper-fixture")
-	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$WHISPER_ARGUMENTS\"\nprevious=''\noutput_prefix=''\nfor argument in \"$@\"; do\n  if [ \"$previous\" = '-of' ]; then output_prefix=\"$argument\"; fi\n  previous=\"$argument\"\ndone\nprintf '%s' \"$WHISPER_JSON\" > \"${output_prefix}.json\"\n"
-	if err := os.WriteFile(executablePath, []byte(script), 0o700); err != nil {
-		t.Fatal(err)
-	}
+	executablePath := whisperFixtureExecutable(t, argumentsPath)
 	rawJSON := `{"systeminfo":"private-host","params":{"model":"/secret/models/private.bin"},"result":{"language":"ko"},"transcription":[{"timestamps":{"from":"00:00:00,000","to":"00:00:01,250"},"offsets":{"from":0,"to":1250},"text":" 첫 문장 "},{"timestamps":{"from":"00:00:01,400","to":"00:00:02,800"},"offsets":{"from":1400,"to":2800},"text":"두 번째 문장"}]}`
-	t.Setenv("WHISPER_ARGUMENTS", argumentsPath)
-	t.Setenv("WHISPER_JSON", rawJSON)
+	t.Setenv("WHISPER_FIXTURE_JSON", rawJSON)
 
 	transcriber, err := NewTranscriber(executablePath, "whisper.cpp-b6250", "WORKER-1", OSRunner{}, AtomicPublisher{})
 	if err != nil {
@@ -106,7 +141,7 @@ func TestWhisperCPPAdapterExecutesArgumentArrayAndPublishesVerifiedTranscript(t 
 		t.Fatalf("transcript output or provenance is incomplete: document=%+v transcript=%+v", document, transcript)
 	}
 
-	t.Setenv("WHISPER_JSON", `{"result":{"language":"ko"},"transcription":[{"offsets":{"from":0,"to":1500},"text":"first"},{"offsets":{"from":1400,"to":2000},"text":"overlap"}]}`)
+	t.Setenv("WHISPER_FIXTURE_JSON", `{"result":{"language":"ko"},"transcription":[{"offsets":{"from":0,"to":1500},"text":"first"},{"offsets":{"from":1400,"to":2000},"text":"overlap"}]}`)
 	invalidTemporaryPath := filepath.Join(directory, "output", "invalid.json.partial")
 	invalidPublishedPath := filepath.Join(directory, "output", "invalid.json")
 	_, err = transcriber.Transcribe(context.Background(), Request{

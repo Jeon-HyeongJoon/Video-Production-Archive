@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -13,6 +14,40 @@ import (
 
 	"videoarchive/internal/core/rendering"
 )
+
+const ffmpegFixtureProcess = "VIDEO_ARCHIVE_FFMPEG_FIXTURE_PROCESS"
+
+func TestMain(m *testing.M) {
+	if os.Getenv(ffmpegFixtureProcess) == "1" {
+		arguments := os.Args[1:]
+		if err := os.WriteFile(os.Getenv("FFMPEG_FIXTURE_ARGUMENTS"), []byte(strings.Join(arguments, "\n")+"\n"), 0o600); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		if len(arguments) == 0 {
+			fmt.Fprintln(os.Stderr, "ffmpeg fixture received no output argument")
+			os.Exit(2)
+		}
+		if err := os.WriteFile(arguments[len(arguments)-1], []byte(os.Getenv("FFMPEG_FIXTURE_PAYLOAD")), 0o600); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		os.Exit(0)
+	}
+	os.Exit(m.Run())
+}
+
+func ffmpegFixtureExecutable(t *testing.T, argumentsPath string, payload []byte) string {
+	t.Helper()
+	executablePath, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(ffmpegFixtureProcess, "1")
+	t.Setenv("FFMPEG_FIXTURE_ARGUMENTS", argumentsPath)
+	t.Setenv("FFMPEG_FIXTURE_PAYLOAD", string(payload))
+	return executablePath
+}
 
 type payloadVerifier struct {
 	expected []byte
@@ -33,14 +68,8 @@ func (verifier payloadVerifier) Verify(filePath string) error {
 func TestFFmpegAdapterRendersVerifiedProfileWithoutShellAndPublishesRendition(t *testing.T) {
 	directory := t.TempDir()
 	argumentsPath := filepath.Join(directory, "arguments.txt")
-	executablePath := filepath.Join(directory, "ffmpeg-fixture")
 	payload := []byte("verified-rendered-video")
-	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$FFMPEG_ARGUMENTS\"\nfor argument in \"$@\"; do output=\"$argument\"; done\nprintf '%s' \"$FFMPEG_PAYLOAD\" > \"$output\"\n"
-	if err := os.WriteFile(executablePath, []byte(script), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("FFMPEG_ARGUMENTS", argumentsPath)
-	t.Setenv("FFMPEG_PAYLOAD", string(payload))
+	executablePath := ffmpegFixtureExecutable(t, argumentsPath, payload)
 
 	renderer, err := NewRenderer(executablePath, "ffmpeg-8.0", "WORKER-1", OSRunner{}, payloadVerifier{expected: payload}, AtomicPublisher{})
 	if err != nil {
