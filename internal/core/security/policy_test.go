@@ -40,7 +40,7 @@ func TestDestructiveActionUsesBootPolicyWithoutAdminInDisabledMode(t *testing.T)
 		Approvals: []approval.Record{validDestructiveApproval()}, Confirmation: validConfirmation(),
 	}
 	cases := []Request{
-		func() Request { value := valid; value.ActorType = vocabulary.ActorAgent; return value }(),
+		func() Request { value := valid; value.ActorType = vocabulary.ActorArchivist; return value }(),
 		func() Request { value := valid; value.ConfigPolicyAllows = false; return value }(),
 		func() Request { value := valid; value.Approvals = nil; return value }(),
 		func() Request { value := valid; value.Confirmation = nil; return value }(),
@@ -69,14 +69,14 @@ func TestDestructiveActionUsesBootPolicyWithoutAdminInDisabledMode(t *testing.T)
 }
 
 // Requirement: SEC-002
-func TestAgentProcessActionRequiresAutomationPolicy(t *testing.T) {
-	request := Request{ActorType: vocabulary.ActorAgent, Action: Process}
+func TestArchivistProcessRequiresDirectAuthenticatedMCPRoute(t *testing.T) {
+	request := Request{ActorType: vocabulary.ActorArchivist, Action: Process}
 	if Authorize(request) {
-		t.Fatal("agent process action bypassed policy")
+		t.Fatal("archivist process action bypassed the authenticated MCP route")
 	}
-	request.AutomationPolicyAllows = true
+	request.ArchivistMCPDirect = true
 	if !Authorize(request) {
-		t.Fatal("policy-approved agent process action rejected")
+		t.Fatal("direct authenticated MCP process action rejected")
 	}
 }
 
@@ -84,12 +84,12 @@ func TestAgentProcessActionRequiresAutomationPolicy(t *testing.T) {
 func TestCommitRequiresExplicitApprovalFromHumanRole(t *testing.T) {
 	approved := validApproval()
 	for _, request := range []Request{
-		{ActorType: vocabulary.ActorAgent, Role: Operator, Action: Commit, TargetID: "PACKAGE-1", TargetRevision: 3, Approvals: []approval.Record{approved}},
+		{ActorType: vocabulary.ActorArchivist, Role: Operator, Action: Commit, TargetID: "PACKAGE-1", TargetRevision: 3, Approvals: []approval.Record{approved}},
 		{ActorType: vocabulary.ActorHuman, Role: Operator, Action: Commit, TargetID: "PACKAGE-1", TargetRevision: 3},
 		{ActorType: vocabulary.ActorHuman, Role: Admin, Action: Commit, TargetID: "PACKAGE-1", TargetRevision: 4, Approvals: []approval.Record{approved}},
 	} {
 		if Authorize(request) {
-			t.Fatalf("unapproved or agent commit accepted: %+v", request)
+			t.Fatalf("unapproved or archivist commit accepted: %+v", request)
 		}
 	}
 	for _, role := range []UserRole{Operator, Admin} {
@@ -103,17 +103,15 @@ func TestCommitRequiresExplicitApprovalFromHumanRole(t *testing.T) {
 }
 
 // Requirement: SEC-004
-func TestRemoteManagementRequiresLocalAuthAdmin(t *testing.T) {
+func TestV1RejectsRemoteManagementForEveryPrincipal(t *testing.T) {
 	for _, request := range []Request{
-		{ActorType: vocabulary.ActorAgent, AuthMode: AuthLocal, Action: ManageSecurity},
+		{ActorType: vocabulary.ActorHuman, AuthMode: AuthDisabled, Role: Operator, Action: ManageSecurity},
+		{ActorType: vocabulary.ActorArchivist, AuthMode: AuthLocal, Action: ManageSecurity},
 		{ActorType: vocabulary.ActorHuman, AuthMode: AuthLocal, Role: Operator, Action: ManageSecurity},
-		{ActorType: vocabulary.ActorHuman, AuthMode: AuthDisabled, Role: Admin, Action: ManageSecurity},
+		{ActorType: vocabulary.ActorHuman, AuthMode: AuthLocal, Role: Admin, Action: ManageSecurity},
 	} {
 		if Authorize(request) {
 			t.Fatalf("security settings allowed: %+v", request)
 		}
-	}
-	if !Authorize(Request{ActorType: vocabulary.ActorHuman, AuthMode: AuthLocal, Role: Admin, Action: ManageSecurity}) {
-		t.Fatal("security settings rejected for admin")
 	}
 }

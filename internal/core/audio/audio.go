@@ -17,10 +17,12 @@ var (
 )
 
 const (
-	ContainerWAV   = "wav"
-	CodecPCM16LE   = "pcm_s16le"
-	SpeechRateHz   = 16_000
-	SpeechChannels = 1
+	ContainerWAV                     = "wav"
+	CodecPCM16LE                     = "pcm_s16le"
+	SpeechRateHz                     = 16_000
+	SpeechChannels                   = 1
+	KoreanSpeechEnhancementProfileID = "speech-ko-enhanced-16k"
+	KoreanSpeechEnhancementFilterV1  = "highpass=f=80,lowpass=f=7600,afftdn=nr=12:nf=-25,loudnorm=I=-16:LRA=11:TP=-1.5"
 )
 
 var profileIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
@@ -36,6 +38,7 @@ type Profile struct {
 	SampleRateHz int    `json:"sample_rate_hz"`
 	Channels     int    `json:"channels"`
 	ThreadCount  int    `json:"thread_count"`
+	FilterGraph  string `json:"filter_graph,omitempty"`
 }
 
 func NewProfile(source Profile) (Profile, error) {
@@ -43,6 +46,7 @@ func NewProfile(source Profile) (Profile, error) {
 	profile.ID = strings.ToLower(strings.TrimSpace(source.ID))
 	profile.Container = strings.ToLower(strings.TrimSpace(source.Container))
 	profile.Codec = strings.ToLower(strings.TrimSpace(source.Codec))
+	profile.FilterGraph = strings.TrimSpace(source.FilterGraph)
 	if !profileIDPattern.MatchString(profile.ID) || profile.Version == 0 || profile.ThreadCount < 1 || profile.ThreadCount > 4 {
 		return Profile{}, ErrInvalidProfile
 	}
@@ -50,7 +54,19 @@ func NewProfile(source Profile) (Profile, error) {
 		profile.SampleRateHz != SpeechRateHz || profile.Channels != SpeechChannels {
 		return Profile{}, ErrUnsupportedProfile
 	}
+	usesEnhancement := profile.ID == KoreanSpeechEnhancementProfileID || profile.FilterGraph != ""
+	if usesEnhancement && (profile.ID != KoreanSpeechEnhancementProfileID || profile.Version != 1 || profile.FilterGraph != KoreanSpeechEnhancementFilterV1) {
+		return Profile{}, ErrUnsupportedProfile
+	}
 	return profile, nil
+}
+
+func KoreanSpeechEnhancementProfile(threadCount int) (Profile, error) {
+	return NewProfile(Profile{
+		ID: KoreanSpeechEnhancementProfileID, Version: 1, Container: ContainerWAV, Codec: CodecPCM16LE,
+		SampleRateHz: SpeechRateHz, Channels: SpeechChannels, ThreadCount: threadCount,
+		FilterGraph: KoreanSpeechEnhancementFilterV1,
+	})
 }
 
 func (profile Profile) Reference() string {
@@ -65,6 +81,7 @@ type AudioArtifact struct {
 	Codec          string           `json:"codec"`
 	SampleRateHz   int              `json:"sample_rate_hz"`
 	Channels       int              `json:"channels"`
+	FilterGraph    string           `json:"filter_graph,omitempty"`
 }
 
 func NewAudioArtifact(artifact archive.Artifact, source Profile) (AudioArtifact, error) {
@@ -76,13 +93,14 @@ func NewAudioArtifact(artifact archive.Artifact, source Profile) (AudioArtifact,
 	return AudioArtifact{
 		Artifact: artifact, ProfileID: profile.ID, ProfileVersion: profile.Version,
 		Container: profile.Container, Codec: profile.Codec, SampleRateHz: profile.SampleRateHz, Channels: profile.Channels,
+		FilterGraph: profile.FilterGraph,
 	}, nil
 }
 
 func (artifact AudioArtifact) Validate() error {
 	profile := Profile{
 		ID: artifact.ProfileID, Version: artifact.ProfileVersion, Container: artifact.Container, Codec: artifact.Codec,
-		SampleRateHz: artifact.SampleRateHz, Channels: artifact.Channels, ThreadCount: 1,
+		SampleRateHz: artifact.SampleRateHz, Channels: artifact.Channels, ThreadCount: 1, FilterGraph: artifact.FilterGraph,
 	}
 	_, err := NewAudioArtifact(artifact.Artifact, profile)
 	return err

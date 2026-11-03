@@ -93,9 +93,9 @@ func EffectiveSourceIP(peer netip.Addr, forwardedFor []netip.Addr, trustedProxie
 type ModeChangeSource string
 
 const (
-	ModeChangeDashboard   ModeChangeSource = "dashboard"
-	ModeChangeAPI         ModeChangeSource = "api"
-	ModeChangeLocalConfig ModeChangeSource = "local_config"
+	ModeChangeArchiveWorkspace ModeChangeSource = "archive_workspace"
+	ModeChangeAPI              ModeChangeSource = "api"
+	ModeChangeLocalConfig      ModeChangeSource = "local_config"
 )
 
 func ValidateAuthModeChange(source ModeChangeSource, serviceRestart bool) error {

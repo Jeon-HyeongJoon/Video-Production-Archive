@@ -1,44 +1,166 @@
 {
   "version": 1,
-  "global_forbidden_words": ["Device Agent", "Worker Agent"],
+  "global_forbidden_words": [
+    "Device Archivist",
+    "Worker Archivist"
+  ],
   "layers": [
-    {"id": "product", "description": "영상 기록 시스템 자체의 개념. 코드가 모델링하는 대상이다."},
-    {"id": "dev", "description": "이 저장소를 개발하는 과정의 개념. 사람과 에이전트의 개발 루프에서 쓴다."},
-    {"id": "shared", "description": "product와 dev 두 층에서 같은 뜻으로 쓰는 개념."}
+    {
+      "id": "product",
+      "description": "영상 기록 시스템 자체의 개념. 코드가 모델링하는 대상이다."
+    },
+    {
+      "id": "dev",
+      "description": "이 저장소를 개발하는 과정의 개념. 사람과 Archivist의 개발 루프에서 쓴다."
+    },
+    {
+      "id": "shared",
+      "description": "product와 dev 두 층에서 같은 뜻으로 쓰는 개념."
+    }
   ],
   "kinds": [
-    {"id": "entity", "description": "식별자와 수명주기를 가진 개체."},
-    {"id": "value", "description": "식별자 없이 값으로만 비교되는 것."},
-    {"id": "enum", "description": "정해진 값의 집합. 값은 대문자 SNAKE_CASE로 쓴다.", "has_values": true},
-    {"id": "state-set", "description": "대상이 한 시점에 정확히 하나의 값을 갖는 상태 집합. 이름은 '<개념>State', 값은 대문자 SNAKE_CASE로 쓰고, 문서에서는 StepState.RUNNING처럼 집합 이름을 붙여 부른다.", "has_values": true, "code_suffix": "State"},
-    {"id": "role", "description": "주체가 맡는 역할."},
-    {"id": "policy", "description": "허용과 금지를 정하는 규칙."},
-    {"id": "category", "description": "여러 종류를 묶는 상위 개념."},
-    {"id": "activity", "description": "사람이나 에이전트가 수행하는 활동."},
-    {"id": "component", "description": "시스템을 구성하는 실행 요소(프로세스나 모듈)."},
-    {"id": "condition", "description": "시스템이나 구성요소가 놓인 상황 하나. 상태 집합 전체가 아니라 특정 상황을 가리킨다."},
-    {"id": "record", "description": "한 번 기록되면 바뀌지 않는 사실의 기록. 추가만 한다."},
-    {"id": "message", "description": "구성요소 사이에 전달만 되고 기록으로 저장되지 않는 것."},
-    {"id": "relationship", "description": "두 개체 사이의 업무상 관계."}
+    {
+      "id": "entity",
+      "description": "식별자와 수명주기를 가진 개체."
+    },
+    {
+      "id": "value",
+      "description": "식별자 없이 값으로만 비교되는 것."
+    },
+    {
+      "id": "enum",
+      "description": "정해진 값의 집합. 값은 대문자 SNAKE_CASE로 쓴다.",
+      "has_values": true
+    },
+    {
+      "id": "state-set",
+      "description": "대상이 한 시점에 정확히 하나의 값을 갖는 상태 집합. 이름은 '<개념>State', 값은 대문자 SNAKE_CASE로 쓰고, 문서에서는 StepState.RUNNING처럼 집합 이름을 붙여 부른다.",
+      "has_values": true,
+      "code_suffix": "State"
+    },
+    {
+      "id": "role",
+      "description": "주체가 맡는 역할."
+    },
+    {
+      "id": "policy",
+      "description": "허용과 금지를 정하는 규칙."
+    },
+    {
+      "id": "category",
+      "description": "여러 종류를 묶는 상위 개념."
+    },
+    {
+      "id": "activity",
+      "description": "사람이나 Archivist가 수행하는 활동."
+    },
+    {
+      "id": "component",
+      "description": "시스템을 구성하는 실행 요소(프로세스나 모듈)."
+    },
+    {
+      "id": "surface",
+      "description": "사람과 시스템이 조회·대화·명령을 주고받는 제품 상호작용 경계."
+    },
+    {
+      "id": "condition",
+      "description": "시스템이나 구성요소가 놓인 상황 하나. 상태 집합 전체가 아니라 특정 상황을 가리킨다."
+    },
+    {
+      "id": "record",
+      "description": "한 번 기록되면 바뀌지 않는 사실의 기록. 추가만 한다."
+    },
+    {
+      "id": "message",
+      "description": "구성요소 사이에 전달만 되고 기록으로 저장되지 않는 것."
+    },
+    {
+      "id": "relationship",
+      "description": "두 개체 사이의 업무상 관계."
+    }
   ],
   "relation_types": [
-    {"id": "is-a", "description": "대상의 한 종류다."},
-    {"id": "part-of", "description": "대상의 일부다."},
-    {"id": "refers-to", "description": "대상을 식별자로 참조한다."}
+    {
+      "id": "is-a",
+      "description": "대상의 한 종류다."
+    },
+    {
+      "id": "part-of",
+      "description": "대상의 일부다."
+    },
+    {
+      "id": "refers-to",
+      "description": "대상을 식별자로 참조한다."
+    }
   ],
   "follow_up_types": [
-    {"id": "code", "description": "코드의 이름이나 동작을 용어 정의에 맞게 바꾼다. 이름을 바꾼 뒤에는 옛 이름을 forbidden.code로 옮긴다."},
-    {"id": "requirement", "description": "requirements/catalog.json의 문구를 용어 정의에 맞게 바꾼다. 계약 변경이므로 사람이 승인한다."},
-    {"id": "document", "description": "설계 문서와 idea.md의 표현을 용어 정의에 맞게 바꾼다."}
+    {
+      "id": "code",
+      "description": "코드의 이름이나 동작을 용어 정의에 맞게 바꾼다. 이름을 바꾼 뒤에는 옛 이름을 forbidden.code로 옮긴다."
+    },
+    {
+      "id": "requirement",
+      "description": "requirements/catalog.json의 문구를 용어 정의에 맞게 바꾼다. 계약 변경이므로 사람이 승인한다."
+    },
+    {
+      "id": "document",
+      "description": "설계 문서와 idea.md의 표현을 용어 정의에 맞게 바꾼다."
+    }
   ],
   "terms": [
+    {
+      "id": "archive-product",
+      "layer": "product",
+      "kind": "category",
+      "name": {
+        "ko": "Archive",
+        "en": "Archive"
+      },
+      "code_name": "Archive",
+      "definition": "영상 기록의 접수·정리·전사·보관·검색과 사람·Archivist 협업을 제공하는 전체 제품군.",
+      "includes": [
+        "Archive Control: 업무 상태·명령·스케줄·API를 소유하는 중앙 프로그램",
+        "Archive Worker: 미디어 검사·렌더·QC·전사를 실행하는 프로그램",
+        "Archivist Host: 로컬 CLI Archivist 세션을 지속하는 프로그램",
+        "Archive Workspace: 사람과 Archivist가 함께 조작하는 웹 표면"
+      ],
+      "rules": [
+        "제품명은 'Archive'이며 이전 작업명이나 여러 프로그램을 합친 조어를 제품명으로 사용하지 않는다.",
+        "AI 협업 역할의 고유 이름은 'Archivist'다.",
+        "하위 기능은 Archive Intake, Archive Run, Archive Catalog, Archive Package, Archive Search처럼 업무 역할이 드러나는 이름을 사용한다."
+      ],
+      "forbidden": {
+        "words": [
+          "Video Production Archive",
+          "VPA"
+        ],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "archivist"
+        },
+        {
+          "type": "refers-to",
+          "target": "archive-workspace"
+        }
+      ],
+      "sources": [
+        "사용자 결정 2026-11-01: 프로그램은 Archive, 그 안의 협업 AI는 Archivist로 명명"
+      ],
+      "decided": "2026-11-01"
+    },
     {
       "id": "evidence",
       "layer": "shared",
       "kind": "category",
-      "name": {"ko": "증적", "en": "Evidence"},
+      "name": {
+        "ko": "증적",
+        "en": "Evidence"
+      },
       "code_name": "Evidence",
-      "definition": "프로그램이 실제로 동작하면서 남긴 관찰 기록 전체. 사람이나 에이전트가 현재와 과거의 프로그램 상태를 확인할 수 있게 하는 모든 정보를 포함한다.",
+      "definition": "프로그램이 실제로 동작하면서 남긴 관찰 기록 전체. 사람이나 Archivist가 현재와 과거의 프로그램 상태를 확인할 수 있게 하는 모든 정보를 포함한다.",
       "includes": [
         "로그: 프로그램, subprocess, 검증 도구가 출력한 기록",
         "모니터링 값: CPU, GPU, 메모리, 디스크, 대기열 길이 같은 측정값",
@@ -51,11 +173,16 @@
         "추론은 증적이 아니다. 추론은 가설로 분류한다.",
         "완료나 통과를 주장하는 증적은 대상이 틀렸다면 실패했을 검사의 결과여야 한다."
       ],
-      "forbidden": {"words": ["증거"], "code": []},
+      "forbidden": {
+        "words": [
+          "증거"
+        ],
+        "code": []
+      },
       "sources": [
         "사용자 결정: 증적으로 통일, 로그·모니터링 값·성공 실패 여부 등 모든 현재 프로그램 상태 정보 포함",
-        "docs/design/05-runtime-deployment.md §8 관측성",
-        "docs/design/06-agent-security.md §9 로그 정제"
+        "docs/design/05-runtime-deployment.md §9 관측성",
+        "docs/design/06-archivist-security.md §9 로그 정제"
       ],
       "decided": "2026-10-19"
     },
@@ -63,36 +190,73 @@
       "id": "template",
       "layer": "product",
       "kind": "entity",
-      "name": {"ko": "템플릿", "en": "Template"},
+      "name": {
+        "ko": "템플릿",
+        "en": "Template"
+      },
       "code_name": "Template",
       "definition": "영상 유형별로 단계 정의와 그 의존성을 선언한 실행 계획의 원형. 실행 상태를 갖지 않는다.",
-      "rules": ["'Pipeline'이라는 단어로 Template을 부르지 않는다."],
-      "forbidden": {"words": ["파이프라인"], "code": ["Pipeline"]},
-      "sources": ["사용자 결정: Template → Job → Step 구조, Pipeline 금지"],
+      "rules": [
+        "'Pipeline'이라는 단어로 Template을 부르지 않는다."
+      ],
+      "forbidden": {
+        "words": [
+          "파이프라인"
+        ],
+        "code": [
+          "Pipeline"
+        ]
+      },
+      "sources": [
+        "사용자 결정: Template → Job → Step 구조, Pipeline 금지"
+      ],
       "decided": "2026-10-19"
     },
     {
       "id": "step-definition",
       "layer": "product",
       "kind": "value",
-      "name": {"ko": "단계 정의", "en": "Step Definition"},
+      "name": {
+        "ko": "단계 정의",
+        "en": "Step Definition"
+      },
       "code_name": "StepDefinition",
       "definition": "템플릿 안에서 단계 하나의 식별자, 선행 단계, 실행 조건을 선언한 것. 실행 상태를 갖지 않는다.",
-      "forbidden": {"words": [], "code": []},
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
       "relations": [
-        {"type": "part-of", "target": "template"},
-        {"type": "refers-to", "target": "processing-kind"},
-        {"type": "refers-to", "target": "resource-class"},
-        {"type": "refers-to", "target": "executor-kind"}
+        {
+          "type": "part-of",
+          "target": "template"
+        },
+        {
+          "type": "refers-to",
+          "target": "processing-kind"
+        },
+        {
+          "type": "refers-to",
+          "target": "resource-class"
+        },
+        {
+          "type": "refers-to",
+          "target": "executor-kind"
+        }
       ],
-      "sources": ["사용자 결정: 템플릿 쪽은 StepDefinition, 실행 쪽은 Step"],
+      "sources": [
+        "사용자 결정: 템플릿 쪽은 StepDefinition, 실행 쪽은 Step"
+      ],
       "decided": "2026-10-19"
     },
     {
       "id": "job",
       "layer": "product",
       "kind": "entity",
-      "name": {"ko": "작업", "en": "Job"},
+      "name": {
+        "ko": "작업",
+        "en": "Job"
+      },
       "code_name": "Job",
       "definition": "템플릿 하나를 특정 대상(원본 등)에 적용해 만든 실행 인스턴스. 작업함과 작업 상세 화면이 다루는 단위다.",
       "rules": [
@@ -102,483 +266,1857 @@
         "작업 소유자 개념을 두지 않는다. 누가 했는지는 Actor로 기록한다.",
         "JobState를 별도로 저장하지 않는다. Job의 현재 상태는 소속 StepState에서 계산한 투영이다."
       ],
-      "forbidden": {"words": ["워크플로", "파이프라인"], "code": []},
-      "relations": [{"type": "refers-to", "target": "template"}],
-      "sources": ["사용자 결정: 제품 층 작업 = Job", "사용자 결정: 작업 소유자는 지금 두지 않음"],
+      "forbidden": {
+        "words": [
+          "워크플로",
+          "파이프라인"
+        ],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "template"
+        }
+      ],
+      "sources": [
+        "사용자 결정: 제품 층 작업 = Job",
+        "사용자 결정: 작업 소유자는 지금 두지 않음"
+      ],
       "decided": "2026-10-19"
     },
     {
       "id": "step",
       "layer": "product",
       "kind": "entity",
-      "name": {"ko": "단계", "en": "Step"},
+      "name": {
+        "ko": "단계",
+        "en": "Step"
+      },
       "code_name": "Step",
       "definition": "Job 안에서 단계 정의 하나를 실제로 실행하는 단위. 실행 상태와 시도 횟수를 가진다.",
-      "rules": ["자원 분류(heavy/light)는 Step의 속성이다. 'heavy 작업'이 아니라 'heavy 단계'라고 쓴다."],
-      "forbidden": {"words": [], "code": []},
-      "relations": [
-        {"type": "part-of", "target": "job"},
-        {"type": "refers-to", "target": "step-definition"}
+      "rules": [
+        "자원 분류(heavy/light)는 Step의 속성이다. 'heavy 작업'이 아니라 'heavy 단계'라고 쓴다."
       ],
-      "sources": ["사용자 결정: 템플릿 쪽은 StepDefinition, 실행 쪽은 Step, heavy/light는 단계의 분류"],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "part-of",
+          "target": "job"
+        },
+        {
+          "type": "refers-to",
+          "target": "step-definition"
+        }
+      ],
+      "sources": [
+        "사용자 결정: 템플릿 쪽은 StepDefinition, 실행 쪽은 Step, heavy/light는 단계의 분류"
+      ],
       "decided": "2026-10-19"
     },
     {
       "id": "step-state",
       "layer": "product",
       "kind": "state-set",
-      "name": {"ko": "단계 상태", "en": "Step State"},
+      "name": {
+        "ko": "단계 상태",
+        "en": "Step State"
+      },
       "code_name": "StepState",
       "definition": "Step이 생애주기 중 어디에 있는지 나타내는 상태 집합. 기다리는 이유는 담지 않는다.",
       "values": [
-        {"id": "QUEUED", "description": "대기열에 들어가 시작 조건 평가를 기다린다."},
-        {"id": "WAITING", "description": "시작 조건이 충족되지 않아 기다린다. 이유는 Wait Reason이 나타낸다."},
-        {"id": "RESERVED", "description": "실행에 필요한 자원을 예약했다."},
-        {"id": "RUNNING", "description": "Worker가 실행하고 있다."},
-        {"id": "VERIFYING", "description": "출력을 검증하고 있다."},
-        {"id": "PAUSED", "description": "실행이 일시 중지되었다."},
-        {"id": "COMPLETED", "description": "검증까지 끝나 성공했다. 종결 상태다."},
-        {"id": "FAILED", "description": "재시도 한도를 넘었거나 복구할 수 없는 오류로 실패했다. 종결 상태다."},
-        {"id": "CANCELLED", "description": "취소되었다. 종결 상태다."}
+        {
+          "id": "QUEUED",
+          "description": "대기열에 들어가 시작 조건 평가를 기다린다."
+        },
+        {
+          "id": "WAITING",
+          "description": "시작 조건이 충족되지 않아 기다린다. 이유는 Wait Reason이 나타낸다."
+        },
+        {
+          "id": "RESERVED",
+          "description": "실행에 필요한 자원을 예약했다."
+        },
+        {
+          "id": "RUNNING",
+          "description": "Worker가 실행하고 있다."
+        },
+        {
+          "id": "VERIFYING",
+          "description": "출력을 검증하고 있다."
+        },
+        {
+          "id": "PAUSED",
+          "description": "실행이 일시 중지되었다."
+        },
+        {
+          "id": "COMPLETED",
+          "description": "검증까지 끝나 성공했다. 종결 상태다."
+        },
+        {
+          "id": "FAILED",
+          "description": "재시도 한도를 넘었거나 복구할 수 없는 오류로 실패했다. 종결 상태다."
+        },
+        {
+          "id": "CANCELLED",
+          "description": "취소되었다. 종결 상태다."
+        }
       ],
       "rules": [
         "COMPLETED, FAILED, CANCELLED은 종결 상태이며 바뀌지 않는다. 되돌려야 하면 보상 명령으로 새 Step을 만든다.",
         "WAITING인 Step은 Wait Reason을 가진다.",
+        "Projection과 UI는 WAITING의 원인을 상태나 단계 이름에서 추측하지 않고 저장된 Wait Reason을 그대로 전달한다.",
         "자원 확인은 상태가 아니라 QUEUED에서 RESERVED나 WAITING으로 가는 평가 과정이다."
       ],
-      "forbidden": {"words": [], "code": []},
-      "relations": [{"type": "part-of", "target": "step"}],
-      "sources": ["사용자 결정: WAITING 하나 + 이유 분리, '<개념>State' + 대문자 SNAKE_CASE", "docs/design/03-domain-workflow.md §3"],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "part-of",
+          "target": "step"
+        }
+      ],
+      "sources": [
+        "사용자 결정: WAITING 하나 + 이유 분리, '<개념>State' + 대문자 SNAKE_CASE",
+        "docs/design/03-domain-workflow.md §3"
+      ],
       "decided": "2026-10-19"
     },
     {
       "id": "wait-reason",
       "layer": "product",
       "kind": "enum",
-      "name": {"ko": "대기 이유", "en": "Wait Reason"},
+      "name": {
+        "ko": "대기 이유",
+        "en": "Wait Reason"
+      },
       "code_name": "WaitReason",
       "definition": "WAITING인 Step이 무엇 때문에 시작하지 못하는지 나타내는 값.",
       "values": [
-        {"id": "IDLE", "description": "background 단계가 HostLoadState.IDLE_READY를 기다린다."},
-        {"id": "MEMORY", "description": "예상 메모리를 예약하면 안전 여유가 부족하다."},
-        {"id": "SCRATCH", "description": "scratch 여유가 예상량과 안전 여유의 합보다 적다."},
-        {"id": "SLOT", "description": "같은 자원 분류(heavy/light)의 동시 실행 슬롯이 가득 찼다."},
-        {"id": "DISK", "description": "사용할 물리 디스크에 충돌하는 I/O가 있다."},
-        {"id": "APPROVAL", "description": "승인을 기다린다."},
-        {"id": "INPUT", "description": "사람의 입력을 기다린다."},
-        {"id": "DEVICE", "description": "필요한 장치나 볼륨이 연결되어 있지 않다."},
-        {"id": "PRIORITY", "description": "실행 우선순위가 높은 IMMEDIATE 단계에 양보한다."}
+        {
+          "id": "IDLE",
+          "description": "background 단계가 HostLoadState.IDLE_READY를 기다린다."
+        },
+        {
+          "id": "MEMORY",
+          "description": "예상 메모리를 예약하면 안전 여유가 부족하다."
+        },
+        {
+          "id": "SCRATCH",
+          "description": "scratch 여유가 예상량과 안전 여유의 합보다 적다."
+        },
+        {
+          "id": "SLOT",
+          "description": "같은 자원 분류(heavy/light)의 동시 실행 슬롯이 가득 찼다."
+        },
+        {
+          "id": "DISK",
+          "description": "사용할 물리 디스크에 충돌하는 I/O가 있다."
+        },
+        {
+          "id": "APPROVAL",
+          "description": "승인을 기다린다."
+        },
+        {
+          "id": "INPUT",
+          "description": "사람 또는 허용된 Archivist의 명시적 입력을 기다린다."
+        },
+        {
+          "id": "DEVICE",
+          "description": "필요한 물리 장치·볼륨·네트워크 Storage에 접근할 수 없거나 실행 중 아카이브 저장소 용량이 부족하다. 사람이 복구할 때까지 기다리며 실행 시도 횟수를 소비하지 않는다."
+        },
+        {
+          "id": "PRIORITY",
+          "description": "실행 우선순위가 높은 IMMEDIATE 단계에 양보한다."
+        }
       ],
-      "forbidden": {"words": [], "code": []},
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
       "relations": [
-        {"type": "part-of", "target": "step"},
-        {"type": "refers-to", "target": "host-load-state"}
+        {
+          "type": "part-of",
+          "target": "step"
+        },
+        {
+          "type": "refers-to",
+          "target": "host-load-state"
+        }
       ],
-      "sources": ["사용자 결정: WAITING 하나 + 이유 분리(유휴, 메모리, scratch, 슬롯, 디스크, 승인, 입력), DEVICE 추가, PRIORITY 추가", "internal/core/resource/scheduler.go WaitReason", "docs/design/03-domain-workflow.md §5"],
+      "rules": [
+        "StepState가 WAITING이면 비어 있지 않은 WaitReason을 보존하고, WAITING이 아니면 WaitReason을 표시하지 않는다.",
+        "INPUT은 사람 또는 허용된 Archivist의 명시적 입력을 기다리고 APPROVAL·DEVICE는 사람의 명시적 조치를 기다린다. 그 밖의 값은 시스템·자원 조건을 기다리지만 소비자는 값이 없을 때 어느 쪽인지 추론하지 않는다."
+      ],
+      "sources": [
+        "사용자 결정: WAITING 하나 + 이유 분리(유휴, 메모리, scratch, 슬롯, 디스크, 승인, 입력), DEVICE 추가, PRIORITY 추가",
+        "internal/core/resource/scheduler.go WaitReason",
+        "docs/design/03-domain-workflow.md §5"
+      ],
       "decided": "2026-10-19"
     },
     {
       "id": "host-load-state",
       "layer": "product",
       "kind": "state-set",
-      "name": {"ko": "호스트 부하 상태", "en": "Host Load State"},
+      "name": {
+        "ko": "호스트 부하 상태",
+        "en": "Host Load State"
+      },
       "code_name": "HostLoadState",
       "definition": "Worker PC의 현재 부하 수준. 새 Step의 시작 허용 여부를 정한다. 메모리 조건도 이 상태의 판정 기준에 포함된다.",
       "values": [
-        {"id": "IDLE_READY", "description": "유휴 조건이 정해진 시간 이상 유지되었다. heavy 단계를 시작할 수 있다."},
-        {"id": "BUSY", "description": "PC 사용 부하나 시스템 부하가 높다. 새 heavy 단계를 시작하지 않는다. light 단계는 시작할 수 있다."},
-        {"id": "PRESSURED", "description": "메모리나 디스크가 임계치에 가깝다. light 단계도 시작하지 않는다."},
-        {"id": "CRITICAL", "description": "데이터 안전이 위험하다. 실행 중인 단계를 안전하게 멈추거나 재시도로 전환한다."}
+        {
+          "id": "IDLE_READY",
+          "description": "유휴 조건이 정해진 시간 이상 유지되었다. heavy 단계를 시작할 수 있다."
+        },
+        {
+          "id": "BUSY",
+          "description": "PC 사용 부하나 시스템 부하가 높다. 새 heavy 단계를 시작하지 않는다. light 단계는 시작할 수 있다."
+        },
+        {
+          "id": "PRESSURED",
+          "description": "메모리나 디스크가 임계치에 가깝다. light 단계도 시작하지 않는다."
+        },
+        {
+          "id": "CRITICAL",
+          "description": "데이터 안전이 위험하다. 실행 중인 단계를 안전하게 멈추거나 재시도로 전환한다."
+        }
       ],
       "rules": [
         "메모리 모드(NORMAL/CONSTRAINED/CRITICAL)는 쓰지 않는다. 메모리 조건은 PRESSURED와 CRITICAL의 판정 기준이다.",
         "Worker PC 앞에서 사람이 다른 일을 하며 생기는 부하는 'PC 사용 부하'라고 부르고, 이 상태로만 나타낸다."
       ],
-      "forbidden": {"words": ["메모리 모드"], "code": ["MemoryMode"]},
-      "sources": ["사용자 결정: 부하 상태와 메모리 모드를 하나로 합침, BUSY는 heavy만 금지", "idea.md §9.1, §15.4"],
+      "forbidden": {
+        "words": [
+          "메모리 모드"
+        ],
+        "code": [
+          "MemoryMode"
+        ]
+      },
+      "sources": [
+        "사용자 결정: 부하 상태와 메모리 모드를 하나로 합침, BUSY는 heavy만 금지",
+        "idea.md §9.1, §15.4"
+      ],
       "decided": "2026-10-19"
     },
     {
       "id": "execution-lease",
       "layer": "product",
       "kind": "entity",
-      "name": {"ko": "실행 리스", "en": "Execution Lease"},
+      "name": {
+        "ko": "실행 리스",
+        "en": "Execution Lease"
+      },
       "code_name": "ExecutionLease",
       "definition": "Worker 하나가 Step 하나를 정해진 시각까지 실행할 수 있는 권리. heartbeat로 연장하고, 만료되면 다른 Worker에 다시 줄 수 있다.",
-      "includes": ["보유 Worker", "획득 시각", "만료 시각", "마지막 heartbeat 시각", "펜싱 토큰"],
+      "includes": [
+        "보유 Worker",
+        "획득 시각",
+        "만료 시각",
+        "마지막 heartbeat 시각",
+        "펜싱 토큰"
+      ],
       "rules": [
         "Step 하나에는 유효한 실행 리스가 최대 하나 있다.",
         "만료 전에는 같은 Step의 실행 리스를 다른 Worker에 주지 않는다.",
         "제어 모드를 바꿔도 실행 리스는 바뀌지 않는다."
       ],
-      "forbidden": {"words": [], "code": []},
-      "relations": [{"type": "refers-to", "target": "step"}],
-      "sources": ["사용자 결정: 실행 리스 + 제어 모드 분리", "docs/design/03-domain-workflow.md §4", "docs/design/07-worker-fleet.md §7"],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "step"
+        }
+      ],
+      "sources": [
+        "사용자 결정: 실행 리스 + 제어 모드 분리",
+        "docs/design/03-domain-workflow.md §4",
+        "docs/design/07-worker-fleet.md §7"
+      ],
       "decided": "2026-10-19"
     },
     {
       "id": "fencing-token",
       "layer": "product",
       "kind": "value",
-      "name": {"ko": "펜싱 토큰", "en": "Fencing Token"},
+      "name": {
+        "ko": "펜싱 토큰",
+        "en": "Fencing Token"
+      },
       "code_name": "FencingToken",
       "definition": "같은 Step의 실행 리스가 새로 발급될 때마다 증가하는 번호. Worker의 보고가 현재 실행 리스에서 나온 것인지 확인하는 데 쓴다.",
       "rules": [
         "Worker의 결과 보고는 펜싱 토큰을 함께 보낸다. 현재 값과 다르면 거부한다.",
         "heartbeat도 펜싱 토큰을 함께 보낸다. 현재 값과 다르면 거부해, 리스를 잃은 Worker가 새 리스를 연장하지 못하게 한다."
       ],
-      "forbidden": {"words": [], "code": []},
-      "relations": [{"type": "part-of", "target": "execution-lease"}],
-      "sources": ["사용자 결정: 펜싱 토큰을 실행 리스 정의에 포함", "요구사항 검토 '빠진 핵심 규칙' 3번"],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "part-of",
+          "target": "execution-lease"
+        }
+      ],
+      "sources": [
+        "사용자 결정: 펜싱 토큰을 실행 리스 정의에 포함",
+        "요구사항 검토 '빠진 핵심 규칙' 3번"
+      ],
       "decided": "2026-10-19"
     },
     {
       "id": "control-mode",
       "layer": "product",
       "kind": "enum",
-      "name": {"ko": "제어 모드", "en": "Control Mode"},
+      "name": {
+        "ko": "제어 모드",
+        "en": "Control Mode"
+      },
       "code_name": "ControlMode",
       "definition": "누가 Step을 조작하는지 정하는 설정값. 리스가 아니라 Step의 속성이다.",
       "values": [
-        {"id": "AGENT", "description": "에이전트가 Step을 조작한다."},
-        {"id": "ASSISTED", "description": "에이전트가 제안하고 사람이 실행을 결정한다."},
-        {"id": "MANUAL", "description": "사람이 Step을 조작한다."}
+        {
+          "id": "ARCHIVIST",
+          "description": "Archivist가 Step을 조작한다."
+        },
+        {
+          "id": "ASSISTED",
+          "description": "Archivist가 제안하고 사람이 실행을 결정한다."
+        },
+        {
+          "id": "MANUAL",
+          "description": "사람이 Step을 조작한다."
+        }
       ],
       "rules": [
         "제어 모드를 바꿔도 실행 리스와 StepState는 그대로다.",
-        "MANUAL인 Step에 대한 에이전트의 상태 변경 명령은 거부한다.",
+        "MANUAL인 Step에 대한 Archivist의 상태 변경 명령은 거부한다.",
         "한국어 '수동'은 ControlMode.MANUAL만 뜻한다."
       ],
-      "forbidden": {"words": ["제어 리스"], "code": []},
-      "relations": [{"type": "part-of", "target": "step"}],
-      "sources": ["사용자 결정: 제어는 리스가 아니라 Step의 속성(agent/assisted/manual)", "사용자 결정: '수동'은 ControlMode.MANUAL에만", "idea.md §10.3"],
+      "forbidden": {
+        "words": [
+          "제어 리스"
+        ],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "part-of",
+          "target": "step"
+        }
+      ],
+      "sources": [
+        "사용자 결정: 제어는 리스가 아니라 Step의 속성(archivist/assisted/manual)",
+        "사용자 결정: '수동'은 ControlMode.MANUAL에만",
+        "idea.md §10.3"
+      ],
       "decided": "2026-10-19"
     },
     {
       "id": "execution-priority",
       "layer": "product",
       "kind": "enum",
-      "name": {"ko": "실행 우선순위", "en": "Execution Priority"},
+      "name": {
+        "ko": "실행 우선순위",
+        "en": "Execution Priority"
+      },
       "code_name": "ExecutionPriority",
       "definition": "Step을 언제 시작할 수 있는지 정하는 값. 유휴 조건을 기다릴지 여부만 다르고 안전 한계는 같다.",
       "values": [
-        {"id": "BACKGROUND", "description": "HostLoadState.IDLE_READY일 때만 시작한다. 자동으로 등록된 단계의 기본값이다."},
-        {"id": "IMMEDIATE", "description": "사용자가 즉시 실행을 요청한 단계. 유휴 조건을 기다리지 않는다."}
+        {
+          "id": "BACKGROUND",
+          "description": "HostLoadState.IDLE_READY일 때만 시작한다. 자동으로 등록된 단계의 기본값이다."
+        },
+        {
+          "id": "IMMEDIATE",
+          "description": "사용자가 즉시 실행을 요청한 단계. 유휴 조건을 기다리지 않는다."
+        }
       ],
       "rules": [
         "IMMEDIATE도 메모리, scratch, 슬롯, 디스크 안전 한계를 우회하지 않는다.",
-        "IMMEDIATE 단계가 있으면 BACKGROUND 단계는 WaitReason.PRIORITY로 양보한다.",
+        "aging 기준에 도달하지 않은 BACKGROUND 단계는 IMMEDIATE 단계가 있으면 WaitReason.PRIORITY로 양보한다. aging 기준을 넘기면 같은 높은 유효 우선순위에서 Job 공정성 규칙을 적용한다.",
         "'수동 실행'이라고 쓰지 않고 '즉시 실행'이라고 쓴다."
       ],
-      "forbidden": {"words": ["수동 실행"], "code": []},
-      "relations": [{"type": "part-of", "target": "step"}],
-      "sources": ["사용자 결정: 실행 우선순위 BACKGROUND / IMMEDIATE, 양보 이유는 WaitReason.PRIORITY", "idea.md §9.1, §15.6", "requirements RES-003"],
+      "forbidden": {
+        "words": [
+          "수동 실행"
+        ],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "part-of",
+          "target": "step"
+        }
+      ],
+      "sources": [
+        "사용자 결정: 실행 우선순위 BACKGROUND / IMMEDIATE, 양보 이유는 WaitReason.PRIORITY",
+        "idea.md §9.1, §15.6",
+        "requirements RES-003, DSP-001"
+      ],
       "decided": "2026-10-19"
+    },
+    {
+      "id": "dispatch-policy",
+      "layer": "product",
+      "kind": "policy",
+      "name": {
+        "ko": "배정 정책",
+        "en": "Dispatch Policy"
+      },
+      "code_name": "DispatchPolicy",
+      "definition": "실행 준비가 된 Step 가운데 다음 Worker lease를 시도할 후보와 Worker를 결정적으로 선택하는 정책.",
+      "rules": [
+        "Dispatch Queue는 별도 업무 원장이 아니라 저장된 Job·Step에서 다시 만드는 projection이다.",
+        "IMMEDIATE와 aging 기준을 넘긴 BACKGROUND는 같은 높은 유효 우선순위로 평가한다.",
+        "같은 Job의 후보를 연속 선점시키지 않고 저장된 dispatch sequence로 Job 사이의 공정성을 보장한다.",
+        "IMMEDIATE는 기존 ExecutionLease를 선점하지 않고 다음 lease 선택에만 영향을 준다.",
+        "후보 선택과 동률 해소는 Control 재시작 전후에 같은 결과를 내야 한다."
+      ],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "step"
+        },
+        {
+          "type": "refers-to",
+          "target": "execution-priority"
+        },
+        {
+          "type": "refers-to",
+          "target": "execution-lease"
+        }
+      ],
+      "sources": [
+        "docs/design/05-runtime-deployment.md §2",
+        "requirements DSP-001~003"
+      ],
+      "decided": "2026-10-29"
+    },
+    {
+      "id": "resource-reservation",
+      "layer": "product",
+      "kind": "entity",
+      "name": {
+        "ko": "자원 예약",
+        "en": "Resource Reservation"
+      },
+      "code_name": "ResourceReservation",
+      "definition": "Worker의 관측된 가용 자원에서 Step 실행에 필요한 예상 memory·scratch·slot·PhysicalDevice를 중복 배정하지 않도록 확보한 기록.",
+      "includes": [
+        "Worker와 Step ID",
+        "resource snapshot ID",
+        "예상 memory와 scratch",
+        "slot 종류",
+        "PhysicalDevice lock",
+        "ExecutionLease 상관관계"
+      ],
+      "rules": [
+        "StepState.RESERVED, ResourceReservation과 ExecutionLease는 같은 Command Store Unit of Work에서 전부 확정하거나 전부 폐기한다.",
+        "snapshot 뒤에 확정된 예약량은 다음 dispatch의 가용 자원에서 차감한다.",
+        "실행 중 취소에서는 process와 출력 정리가 확인되기 전에 예약을 해제하지 않는다."
+      ],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "step"
+        },
+        {
+          "type": "refers-to",
+          "target": "worker"
+        },
+        {
+          "type": "refers-to",
+          "target": "execution-lease"
+        }
+      ],
+      "sources": [
+        "docs/design/05-runtime-deployment.md §3",
+        "docs/design/12-cancellation-compensation-proposal.md §5",
+        "requirements DSP-003"
+      ],
+      "decided": "2026-10-29"
+    },
+    {
+      "id": "worker-capacity",
+      "layer": "product",
+      "kind": "value",
+      "name": {
+        "ko": "Worker 자원 수용 상태",
+        "en": "Worker Capacity"
+      },
+      "code_name": "WorkerCapacity",
+      "definition": "최신 Worker resource snapshot에서 아직 해제되지 않은 ResourceReservation을 보수적으로 차감해 새 Step의 실행 가능 여부와 정확한 대기 이유를 계산한 값.",
+      "includes": [
+        "snapshot ID와 관측 시각",
+        "CPU·GPU와 유휴 시간",
+        "예약 차감 뒤 memory·scratch",
+        "heavy/light 사용·최대 slot",
+        "ResourceClass별 수용 여부와 WaitReason"
+      ],
+      "rules": [
+        "추가 작업 가능 여부는 전역 bool이 아니라 실제 Step의 ResourceClass·우선순위·예상 memory·scratch·PhysicalDevice 조건으로 판정한다.",
+        "아카이브 작업 공간의 heavy/light 기준 상태는 현재 v1 Step 기본 예상량으로 계산하고 실제 queue admission은 각 Step에 저장된 예상량을 사용한다.",
+        "snapshot 뒤의 활성 예약은 Worker가 활성 lease ID를 보고해 중복을 조정하기 전까지 관측 가용량과 slot에서 다시 차감한다."
+      ],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "worker"
+        },
+        {
+          "type": "refers-to",
+          "target": "resource-reservation"
+        },
+        {
+          "type": "refers-to",
+          "target": "wait-reason"
+        }
+      ],
+      "sources": [
+        "docs/design/05-runtime-deployment.md §3",
+        "docs/design/09-archive-workspace.md §4",
+        "requirements DSP-004, DSH-014"
+      ],
+      "decided": "2026-10-31"
     },
     {
       "id": "ai-unavailable",
       "layer": "product",
       "kind": "condition",
-      "name": {"ko": "AI 사용 불가", "en": "AI Unavailable"},
+      "name": {
+        "ko": "AI 사용 불가",
+        "en": "AI Unavailable"
+      },
       "code_name": "ErrAIUnavailable",
-      "definition": "사용할 수 있는 AI Provider 계정이 하나도 없는 상황. 대시보드 채팅과 에이전트 기능만 멈춘다.",
+      "definition": "사용할 수 있는 AI Provider 계정이 하나도 없는 상황. 아카이브 작업 공간의 Archivist 대화와 Archivist 기능만 멈춘다.",
       "rules": [
-        "AI 사용 불가 상태에서도 입고, 렌더, STT, 검색 같은 도메인 기능과 표준 Template은 계속 동작한다. 사람은 버튼과 폼으로 운영을 계속한다.",
+        "AI 사용 불가 상태에서도 입고, 렌더, STT, 검색 같은 도메인 기능과 표준 Template은 계속 동작한다. 사람은 아카이브 작업 공간의 버튼·폼 또는 API로 운영을 계속한다.",
         "AI 사용 불가를 '수동 모드'라고 부르지 않는다."
       ],
-      "forbidden": {"words": ["수동 모드"], "code": ["ErrManualMode"]},
-      "sources": ["사용자 결정: AI 사용 불가 / AI Unavailable", "idea.md §7.3", "requirements AGT-007"],
+      "forbidden": {
+        "words": [
+          "수동 모드"
+        ],
+        "code": [
+          "ErrManualMode"
+        ]
+      },
+      "sources": [
+        "사용자 결정: AI 사용 불가 / AI Unavailable",
+        "idea.md §7.3",
+        "requirements AGT-007"
+      ],
       "decided": "2026-10-19"
     },
     {
       "id": "principal",
       "layer": "product",
       "kind": "value",
-      "name": {"ko": "접근 주체", "en": "Principal"},
+      "name": {
+        "ko": "접근 주체",
+        "en": "Principal"
+      },
       "code_name": "Principal",
       "definition": "요청 하나를 보낸 주체에 대한 접근 판정 결과. 식별자, ActorType, UserRole, 인증 여부, 출처 IP를 가진다.",
       "rules": [
         "출처 IP와 request ID는 진단용 메타데이터이며 신원으로 쓰지 않는다.",
-        "auth_mode disabled에서 내부 CIDR의 모든 대시보드 요청은 내부 담당자(internal-operator)가 된다."
+        "auth_mode disabled에서 내부 CIDR의 모든 아카이브 작업 공간 요청은 내부 담당자(internal-operator)가 된다."
       ],
-      "forbidden": {"words": [], "code": []},
-      "sources": ["사용자 결정: Principal과 Actor를 둘 다 두고 관계로 연결", "internal/core/security/access.go", "requirements NET-002"],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "sources": [
+        "사용자 결정: Principal과 Actor를 둘 다 두고 관계로 연결",
+        "internal/core/security/access.go",
+        "requirements NET-002"
+      ],
       "decided": "2026-10-19"
     },
     {
       "id": "actor",
       "layer": "product",
       "kind": "value",
-      "name": {"ko": "실행자", "en": "Actor"},
+      "name": {
+        "ko": "실행자",
+        "en": "Actor"
+      },
       "code_name": "Actor",
       "definition": "명령과 증적에 기록되는 '누가 했는가'. 요청의 Principal에서 만들며 ActorType과 식별자를 가진다.",
-      "forbidden": {"words": [], "code": []},
-      "relations": [{"type": "refers-to", "target": "principal"}],
-      "sources": ["사용자 결정: Principal과 Actor를 둘 다 두고 관계로 연결", "internal/core/command/command.go Actor"],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "principal"
+        }
+      ],
+      "sources": [
+        "사용자 결정: Principal과 Actor를 둘 다 두고 관계로 연결",
+        "internal/core/command/command.go Actor"
+      ],
       "decided": "2026-10-19"
     },
     {
       "id": "actor-type",
       "layer": "product",
       "kind": "enum",
-      "name": {"ko": "실행자 종류", "en": "Actor Type"},
+      "name": {
+        "ko": "실행자 종류",
+        "en": "Actor Type"
+      },
       "code_name": "ActorType",
       "definition": "무엇이 실행했는지 나타내는 값.",
       "values": [
-        {"id": "HUMAN", "description": "대시보드, API, CLI를 쓰는 사람."},
-        {"id": "AGENT", "description": "외부 AI 에이전트."},
-        {"id": "WORKER", "description": "사전 등록된 Worker 서비스 주체."},
-        {"id": "SYSTEM", "description": "스케줄러, 리스 복구처럼 Control Service 안에서 자동으로 일어나는 처리."}
+        {
+          "id": "HUMAN",
+          "description": "아카이브 작업 공간, API, CLI를 쓰는 사람."
+        },
+        {
+          "id": "ARCHIVIST",
+          "description": "외부 AI Archivist."
+        },
+        {
+          "id": "WORKER",
+          "description": "사전 등록된 Worker 서비스 주체."
+        },
+        {
+          "id": "SYSTEM",
+          "description": "스케줄러, 리스 복구처럼 Archive Control 안에서 자동으로 일어나는 처리."
+        }
       ],
-      "rules": ["권한 판정은 ActorType과 UserRole을 함께 본다."],
-      "forbidden": {"words": [], "code": []},
-      "relations": [{"type": "part-of", "target": "actor"}, {"type": "part-of", "target": "principal"}],
-      "sources": ["사용자 결정: 두 축 분리(ActorType = HUMAN, AGENT, WORKER, SYSTEM)"],
+      "rules": [
+        "권한 판정은 ActorType과 UserRole을 함께 본다."
+      ],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "part-of",
+          "target": "actor"
+        },
+        {
+          "type": "part-of",
+          "target": "principal"
+        }
+      ],
+      "sources": [
+        "사용자 결정: 두 축 분리(ActorType = HUMAN, ARCHIVIST, WORKER, SYSTEM)"
+      ],
       "decided": "2026-10-19"
     },
     {
       "id": "user-role",
       "layer": "product",
       "kind": "enum",
-      "name": {"ko": "사용자 역할", "en": "User Role"},
+      "name": {
+        "ko": "사용자 역할",
+        "en": "User Role"
+      },
       "code_name": "UserRole",
       "definition": "사람(ActorType.HUMAN)이 가진 권한 등급.",
       "values": [
-        {"id": "OPERATOR", "description": "담당자. 입고, 메타데이터 입력, 검수, 즉시 실행을 한다."},
-        {"id": "ADMIN", "description": "관리자. 정책, 계정, 파괴적 작업의 최종 승인을 한다."}
+        {
+          "id": "OPERATOR",
+          "description": "담당자. 입고, 메타데이터 입력, 검수, 즉시 실행을 한다."
+        },
+        {
+          "id": "ADMIN",
+          "description": "후속 local 인증의 관리자. v1 아카이브 작업 공간에서는 생성되지 않는다."
+        }
       ],
       "rules": [
-        "UserRole은 ActorType.HUMAN만 가진다. 에이전트, Worker, SYSTEM은 UserRole이 없다.",
-        "OPERATOR의 한국어 이름은 '담당자', ADMIN은 '관리자'다."
+        "UserRole은 ActorType.HUMAN만 가진다. Archivist, Worker, SYSTEM은 UserRole이 없다.",
+        "OPERATOR의 한국어 이름은 '담당자', ADMIN은 '관리자'다.",
+        "v1 아카이브 작업 공간의 모든 사람 요청은 internal-operator의 OPERATOR 역할이며 ADMIN Principal을 만들지 않는다."
       ],
-      "forbidden": {"words": ["운영자"], "code": []},
-      "relations": [{"type": "part-of", "target": "principal"}],
-      "sources": ["사용자 결정: 두 축 분리(Role = OPERATOR, ADMIN, HUMAN만 가짐), OPERATOR = 담당자"],
+      "forbidden": {
+        "words": [
+          "운영자"
+        ],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "part-of",
+          "target": "principal"
+        }
+      ],
+      "sources": [
+        "사용자 결정: 두 축 분리(Role = OPERATOR, ADMIN, HUMAN만 가짐), OPERATOR = 담당자"
+      ],
       "decided": "2026-10-19"
     },
     {
       "id": "internal-operator",
       "layer": "product",
       "kind": "value",
-      "name": {"ko": "내부 담당자", "en": "Internal Operator"},
-      "definition": "auth_mode disabled에서 내부 CIDR의 모든 대시보드 요청이 갖는 단일 Principal. 식별자는 internal-operator, ActorType은 HUMAN, UserRole은 OPERATOR다.",
-      "rules": ["사용자별 계정을 만들지 않으며 인증되지 않은 주체로 기록한다."],
-      "forbidden": {"words": ["내부 운영자"], "code": []},
-      "relations": [{"type": "is-a", "target": "principal"}],
-      "sources": ["사용자 결정: OPERATOR = 담당자", "requirements NET-002"],
+      "name": {
+        "ko": "내부 담당자",
+        "en": "Internal Operator"
+      },
+      "definition": "auth_mode disabled에서 내부 CIDR의 모든 아카이브 작업 공간 요청이 갖는 단일 Principal. 식별자는 internal-operator, ActorType은 HUMAN, UserRole은 OPERATOR다.",
+      "rules": [
+        "사용자별 계정을 만들지 않으며 인증되지 않은 주체로 기록한다."
+      ],
+      "forbidden": {
+        "words": [
+          "내부 운영자"
+        ],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "is-a",
+          "target": "principal"
+        }
+      ],
+      "sources": [
+        "사용자 결정: OPERATOR = 담당자",
+        "requirements NET-002"
+      ],
       "decided": "2026-10-19"
+    },
+    {
+      "id": "local-configuration-authority",
+      "layer": "product",
+      "kind": "policy",
+      "name": {
+        "ko": "로컬 설정 권한",
+        "en": "Local Configuration Authority"
+      },
+      "definition": "OS ACL로 보호된 로컬 설정 파일을 수정하고 서비스를 재시작해 v1의 Provider·Worker·Archivist Host·Storage·인증·보안 정책을 적용하는 시스템 관리 경계.",
+      "rules": [
+        "로컬 설정 권한은 Principal이나 UserRole이 아니며 아카이브 작업 공간 요청에 부여되지 않는다.",
+        "설정 파일의 기능 허용은 특정 대상의 Approval이나 Confirmation을 대신하지 않는다.",
+        "v1은 이 설정을 바꾸는 원격 화면이나 API를 제공하지 않는다."
+      ],
+      "forbidden": {
+        "words": [
+          "수퍼관리자",
+          "슈퍼관리자"
+        ],
+        "code": [
+          "SuperAdmin"
+        ]
+      },
+      "relations": [],
+      "sources": [
+        "사용자 결정: v1 로그인 생략과 로컬 설정 파일 관리",
+        "requirements CFG-001~002, SEC-004"
+      ],
+      "decided": "2026-11-02"
     },
     {
       "id": "user",
       "layer": "product",
       "kind": "role",
-      "name": {"ko": "사용자", "en": "User"},
-      "definition": "대시보드나 API를 쓰는 사람. Principal로는 ActorType.HUMAN이다.",
-      "rules": ["Worker PC 앞에서 다른 일을 하는 사람을 '사용자'라고 부르지 않는다. 그 영향은 'PC 사용 부하'라고 부르고 HostLoadState로만 나타낸다."],
-      "forbidden": {"words": [], "code": []},
-      "relations": [{"type": "refers-to", "target": "principal"}],
-      "sources": ["사용자 결정: '사용자'는 대시보드 사람만"],
+      "name": {
+        "ko": "사용자",
+        "en": "User"
+      },
+      "definition": "아카이브 작업 공간이나 API를 쓰는 사람. Principal로는 ActorType.HUMAN이다.",
+      "rules": [
+        "Worker PC 앞에서 다른 일을 하는 사람을 '사용자'라고 부르지 않는다. 그 영향은 'PC 사용 부하'라고 부르고 HostLoadState로만 나타낸다."
+      ],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "principal"
+        }
+      ],
+      "sources": [
+        "사용자 결정: '사용자'는 아카이브 작업 공간과 API를 쓰는 사람"
+      ],
       "decided": "2026-10-19"
+    },
+    {
+      "id": "archive-workspace",
+      "layer": "product",
+      "kind": "surface",
+      "name": {
+        "ko": "아카이브 작업 공간",
+        "en": "Archive Workspace"
+      },
+      "code_name": "ArchiveWorkspace",
+      "definition": "사용자와 Archivist가 같은 Job·Step·자산·명령·이벤트를 보면서 대화, 직접 API 명령, 도구 호출과 승인을 이어가는 제품의 주 사용자 표면.",
+      "includes": [
+        "사람이 버튼·폼 또는 API로 ArchivistSession 없이 Job과 도메인 명령을 직접 시작하는 경로",
+        "사람이 채팅으로 ArchivistTurn을 만들고 Archivist가 허용된 MCP Capability를 호출하는 경로",
+        "Job·Step·ArchivistTurn·Tool Call·ActionCard·Worker 상태의 Archive Workspace 투영",
+        "사람과 Archivist가 만든 Command·Event·결과를 같은 업무 문맥으로 돌려주는 상태 feed"
+      ],
+      "rules": [
+        "Archive Workspace는 조회 전용 화면이 아니라 대화와 직접 명령을 함께 제공하는 Archive의 주 사용자 표면이다.",
+        "상태 시각화만 가리키는 별도 제품 표면 이름을 만들지 않는다.",
+        "사람의 직접 명령과 Archivist의 도구 호출은 같은 Command Bus와 Capability Registry를 사용한다.",
+        "사람의 웹 직접 명령은 requested_via를 archive_workspace로 기록한다.",
+        "채팅 문구는 Archivist에게 주는 지시가 될 수 있지만 Approval 기록을 대신하지 않는다.",
+        "GATED와 DESTRUCTIVE 명령은 대화만으로 실행하지 않고 ActionCard와 유효한 사람 Approval을 요구한다."
+      ],
+      "forbidden": {
+        "words": [],
+        "code": [
+          "Dashboard",
+          "CollaborationWorkspace"
+        ]
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "user"
+        },
+        {
+          "type": "refers-to",
+          "target": "archivist"
+        },
+        {
+          "type": "refers-to",
+          "target": "command"
+        }
+      ],
+      "sources": [
+        "사용자 결정: 시스템 목표는 상태 모니터링이 아니라 사용자·Archivist 협업",
+        "사용자 결정 2026-11-01: 주 사용자 표면은 Archive Workspace",
+        "docs/design/09-archive-workspace.md"
+      ],
+      "decided": "2026-11-01"
     },
     {
       "id": "approval",
       "layer": "product",
       "kind": "record",
-      "name": {"ko": "승인", "en": "Approval"},
+      "name": {
+        "ko": "승인",
+        "en": "Approval"
+      },
       "code_name": "Approval",
       "definition": "권한 있는 사람이 특정 대상의 특정 리비전에 대해 내린 결정의 기록.",
-      "includes": ["승인자 Principal", "시각", "대상", "대상의 리비전", "결정(ApprovalDecision)", "사유", "근거"],
+      "includes": [
+        "승인자 Principal",
+        "시각",
+        "대상",
+        "대상의 리비전",
+        "결정(ApprovalDecision)",
+        "사유",
+        "근거"
+      ],
       "rules": [
         "대상이 바뀌면 이전 승인은 무효가 된다.",
         "같은 대상과 리비전에 여러 결정이 있으면 Event 저장 순번이 가장 큰 결정만 유효하다. 순번이 같은 상충 기록은 손상으로 처리한다.",
         "누가 승인할 수 있는지는 권한 정책이 정한다. '관리자 승인' 같은 별도 개념을 두지 않는다.",
-        "ActorType.AGENT는 승인자가 될 수 없다.",
+        "ActorType.ARCHIVIST는 승인자가 될 수 없다.",
         "대화 텍스트를 승인으로 간주하지 않는다. 승인은 별도 기록으로만 남는다.",
         "승인이 필요한 Step은 유효한 승인 기록이 있어야 시작할 수 있고, 없으면 WaitReason.APPROVAL로 기다린다."
       ],
-      "forbidden": {"words": ["관리자 승인"], "code": []},
-      "relations": [{"type": "refers-to", "target": "principal"}],
-      "sources": ["사용자 결정: 승인 / 재확인 / 검수 세 개, 대상 버전까지 묶음, 관리자 승인은 별도 개념 없음", "docs/design/03-domain-workflow.md §7", "requirements SEC-003"],
+      "forbidden": {
+        "words": [
+          "관리자 승인"
+        ],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "principal"
+        }
+      ],
+      "sources": [
+        "사용자 결정: 승인 / 재확인 / 검수 세 개, 대상 버전까지 묶음, 관리자 승인은 별도 개념 없음",
+        "docs/design/03-domain-workflow.md §7",
+        "requirements SEC-003"
+      ],
       "decided": "2026-10-19"
     },
     {
       "id": "approval-decision",
       "layer": "product",
       "kind": "enum",
-      "name": {"ko": "승인 결정", "en": "Approval Decision"},
+      "name": {
+        "ko": "승인 결정",
+        "en": "Approval Decision"
+      },
       "code_name": "ApprovalDecision",
       "definition": "승인 기록에 담기는 결정.",
       "values": [
-        {"id": "APPROVED", "description": "대상을 승인했다."},
-        {"id": "REJECTED", "description": "대상을 거부했다."}
+        {
+          "id": "APPROVED",
+          "description": "대상을 승인했다."
+        },
+        {
+          "id": "REJECTED",
+          "description": "대상을 거부했다."
+        }
       ],
-      "forbidden": {"words": [], "code": []},
-      "relations": [{"type": "part-of", "target": "approval"}],
-      "sources": ["사용자 결정: 승인 기록에 결정(승인/거부) 포함"],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "part-of",
+          "target": "approval"
+        }
+      ],
+      "sources": [
+        "사용자 결정: 승인 기록에 결정(승인/거부) 포함"
+      ],
       "decided": "2026-10-19"
     },
     {
       "id": "content-review",
       "layer": "product",
       "kind": "record",
-      "name": {"ko": "내용 검수", "en": "Content Review"},
+      "name": {
+        "ko": "내용 검수",
+        "en": "Content Review"
+      },
       "code_name": "ContentReview",
       "definition": "요약·키워드·챕터 같은 콘텐츠 결과의 특정 리비전에 대해 사람이 남기는 변경 불가능한 검수 기록.",
-      "includes": ["기록 ID", "검수자", "대상", "대상 리비전", "판정", "사유", "근거", "시각"],
+      "includes": [
+        "기록 ID",
+        "검수자",
+        "대상",
+        "대상 리비전",
+        "판정",
+        "사유",
+        "근거",
+        "시각"
+      ],
       "rules": [
         "Artifact의 review_status를 원본 사실로 덮어쓰지 않는다. 현재 검수 상태는 ContentReview 기록에서 투영한다.",
         "내용 검수는 Step 실행을 허용하는 Approval과 다른 기록이다.",
         "행사 기록의 Summary는 QC 전에 사람의 ContentReview를 거친다.",
         "존재하는 Summary ID와 리비전만 참조하며 SQLite에서 Event 저장 순번을 고유하게 보존한다."
       ],
-      "forbidden": {"words": [], "code": []},
-      "relations": [{"type": "refers-to", "target": "artifact"}, {"type": "refers-to", "target": "principal"}],
-      "sources": ["docs/design/08-event-storming.md §7", "requirements PIP-006, REV-001~002", "사용자 결정: 이벤트 스토밍에서 내용 검수를 별도 기록으로 표현"],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "artifact"
+        },
+        {
+          "type": "refers-to",
+          "target": "principal"
+        }
+      ],
+      "sources": [
+        "docs/design/08-event-storming.md §7",
+        "requirements PIP-006, REV-001~002",
+        "사용자 결정: 이벤트 스토밍에서 내용 검수를 별도 기록으로 표현"
+      ],
       "decided": "2026-10-22"
     },
     {
       "id": "content-review-decision",
       "layer": "product",
       "kind": "enum",
-      "name": {"ko": "내용 검수 결정", "en": "Content Review Decision"},
+      "name": {
+        "ko": "내용 검수 결정",
+        "en": "Content Review Decision"
+      },
       "code_name": "ContentReviewDecision",
       "definition": "ContentReview 기록에 담기는 사람의 콘텐츠 판정.",
       "values": [
-        {"id": "ACCEPTED", "description": "현재 콘텐츠 리비전을 검수 완료로 받아들였다."},
-        {"id": "CHANGES_REQUESTED", "description": "현재 콘텐츠 리비전에 수정이 필요하다."}
+        {
+          "id": "ACCEPTED",
+          "description": "현재 콘텐츠 리비전을 검수 완료로 받아들였다."
+        },
+        {
+          "id": "CHANGES_REQUESTED",
+          "description": "현재 콘텐츠 리비전에 수정이 필요하다."
+        }
       ],
-      "forbidden": {"words": [], "code": []},
-      "relations": [{"type": "part-of", "target": "content-review"}],
-      "sources": ["requirements REV-001~002", "internal/core/contentreview/contentreview.go"],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "part-of",
+          "target": "content-review"
+        }
+      ],
+      "sources": [
+        "requirements REV-001~002",
+        "internal/core/contentreview/contentreview.go"
+      ],
       "decided": "2026-10-22"
     },
     {
       "id": "confirmation",
       "layer": "product",
       "kind": "record",
-      "name": {"ko": "재확인", "en": "Confirmation"},
+      "name": {
+        "ko": "재확인",
+        "en": "Confirmation"
+      },
       "code_name": "Confirmation",
       "definition": "실행 직전에 사람이 대상을 다시 확인한 사실의 기록. 예를 들어 포맷 대상의 라벨을 직접 입력해 기대 라벨과 맞춘 결과를 남긴다.",
-      "rules": ["재확인은 결정이 아니라 오조작 방지 절차다. 승인을 대신하지 않는다."],
-      "forbidden": {"words": [], "code": []},
-      "relations": [{"type": "refers-to", "target": "approval"}],
-      "sources": ["사용자 결정: 승인 / 재확인 / 검수 세 개", "idea.md §13"],
+      "rules": [
+        "재확인은 결정이 아니라 오조작 방지 절차다. 승인을 대신하지 않는다."
+      ],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "approval"
+        }
+      ],
+      "sources": [
+        "사용자 결정: 승인 / 재확인 / 검수 세 개",
+        "idea.md §13"
+      ],
       "decided": "2026-10-19"
     },
     {
       "id": "review",
       "layer": "product",
       "kind": "activity",
-      "name": {"ko": "검수", "en": "Review"},
+      "name": {
+        "ko": "검수",
+        "en": "Review"
+      },
       "code_name": "Review",
       "definition": "AI가 생성한 콘텐츠(요약, 키워드, 챕터 등)를 사람이 확인하는 것. 결과는 콘텐츠의 검수 상태로 남는다.",
-      "rules": ["검수는 콘텐츠의 내용을 확인하는 것이며 실행을 허가하지 않는다."],
-      "forbidden": {"words": [], "code": []},
-      "sources": ["사용자 결정: 승인 / 재확인 / 검수 세 개", "idea.md §4.2", "docs/design/04-data-archive.md §4 review_status"],
+      "rules": [
+        "검수는 콘텐츠의 내용을 확인하는 것이며 실행을 허가하지 않는다."
+      ],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "sources": [
+        "사용자 결정: 승인 / 재확인 / 검수 세 개",
+        "idea.md §4.2",
+        "docs/design/04-data-archive.md §4 review_status"
+      ],
       "decided": "2026-10-19"
     },
     {
       "id": "workflow-engine",
       "layer": "product",
       "kind": "component",
-      "name": {"ko": "워크플로 엔진", "en": "Workflow Engine"},
+      "name": {
+        "ko": "워크플로 엔진",
+        "en": "Workflow Engine"
+      },
       "definition": "Template으로 Job을 만들고 Step의 실행 순서와 상태 전이를 영속적으로 소유하는 구성요소.",
-      "rules": ["'Workflow'는 이 구성요소의 이름에만 쓴다. Template, Job, Step을 가리키는 말로 쓰지 않는다."],
-      "forbidden": {"words": [], "code": []},
-      "relations": [
-        {"type": "refers-to", "target": "template"},
-        {"type": "refers-to", "target": "job"}
+      "rules": [
+        "'Workflow'는 이 구성요소의 이름에만 쓴다. Template, Job, Step을 가리키는 말로 쓰지 않는다."
       ],
-      "sources": ["사용자 결정: Workflow는 엔진 이름만", "docs/design/00-overview.md §4"],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "template"
+        },
+        {
+          "type": "refers-to",
+          "target": "job"
+        }
+      ],
+      "sources": [
+        "사용자 결정: Workflow는 엔진 이름만",
+        "docs/design/00-overview.md §4"
+      ],
       "decided": "2026-10-19"
     },
     {
       "id": "work-item",
       "layer": "dev",
       "kind": "entity",
-      "name": {"ko": "과제", "en": "Work Item"},
+      "name": {
+        "ko": "과제",
+        "en": "Work Item"
+      },
       "definition": "개발 루프에서 하나의 완료 조건으로 끝나는 변경 단위.",
       "rules": [
         "제품 층의 작업(Job)과 구분하기 위해 개발 층에서는 '작업'이라고 쓰지 않는다.",
         "'Task'는 MCP Task와 겹치므로 쓰지 않는다."
       ],
-      "forbidden": {"words": ["작업", "작업 항목"], "code": []},
-      "sources": ["사용자 결정: 개발 층 변경 단위 = 과제(Work Item)"],
+      "forbidden": {
+        "words": [
+          "작업",
+          "작업 항목"
+        ],
+        "code": []
+      },
+      "sources": [
+        "사용자 결정: 개발 층 변경 단위 = 과제(Work Item)"
+      ],
       "decided": "2026-10-19"
     },
     {
-      "id": "agent",
+      "id": "archivist",
       "layer": "product",
       "kind": "role",
-      "name": {"ko": "에이전트", "en": "Agent"},
-      "definition": "Provider 모델을 통해 조사, 계획, 오류 분석, 도구 호출을 하는 외부 AI 실행자. Principal로는 ActorType.AGENT다.",
+      "name": {
+        "ko": "Archivist",
+        "en": "Archivist"
+      },
+      "definition": "Provider 모델을 통해 조사, 계획, 오류 분석, 도구 호출을 하는 외부 AI 실행자. Principal로는 ActorType.ARCHIVIST다.",
       "rules": [
-        "제품 층에서 '에이전트'는 이 뜻만 가진다. 상주 프로세스나 Worker를 에이전트라고 부르지 않는다.",
-        "'Agent Gateway'는 구성요소 이름으로만 쓴다."
+        "제품 층에서 'Archivist'는 이 뜻만 가진다. 상주 프로세스나 Worker를 Archivist라고 부르지 않는다.",
+        "'Archivist Gateway'는 구성요소 이름으로만 쓴다.",
+        "아카이브 작업 공간 화면 표기는 'Agent'로 한다. 문서·요구사항·API·코드의 이름은 Archivist를 유지한다."
       ],
-      "forbidden": {"words": ["Device Agent", "Worker Agent"], "code": []},
-      "relations": [{"type": "refers-to", "target": "principal"}],
-      "sources": ["사용자 결정: 제품 층 Agent는 외부 AI 실행자만"],
+      "forbidden": {
+        "words": [
+          "Device Archivist",
+          "Worker Archivist"
+        ],
+        "code": [
+          "Agent",
+          "ActorAgent",
+          "AgentMode"
+        ]
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "principal"
+        }
+      ],
+      "sources": [
+        "사용자 결정: 제품 층 Archivist는 외부 AI 실행자만",
+        "사용자 결정 2026-11-03: 화면 표기만 Agent"
+      ],
       "decided": "2026-10-20"
     },
     {
-      "id": "agent-gateway",
+      "id": "archivist-gateway",
       "layer": "product",
       "kind": "component",
-      "name": {"ko": "에이전트 게이트웨이", "en": "Agent Gateway"},
-      "code_name": "AgentGateway",
-      "definition": "대시보드 채팅과 외부 Provider 사이를 중계하는 구성요소. 계정 라우팅, 컨텍스트 구성, 도구 호출 중계, 폴백을 맡는다.",
-      "forbidden": {"words": [], "code": []},
-      "relations": [{"type": "refers-to", "target": "agent"}],
-      "sources": ["사용자 결정: 'Agent Gateway'는 구성요소 이름으로만 허용", "docs/design/06-agent-security.md §2"],
-      "decided": "2026-10-20"
+      "name": {
+        "ko": "Archivist 게이트웨이",
+        "en": "Archivist Gateway"
+      },
+      "code_name": "ArchivistGateway",
+      "definition": "아카이브 작업 공간의 Archivist Session·Turn을 외부 Provider 또는 Archivist Host의 backend로 중계하는 구성요소. 컨텍스트 구성, 실행 경로 선택, 도구 호출 중계와 폴백을 맡는다.",
+      "forbidden": {
+        "words": [],
+        "code": [
+          "AgentGateway",
+          "ExecutorAgentGateway"
+        ]
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "archivist"
+        }
+      ],
+      "sources": [
+        "사용자 결정: 'Archivist Gateway'는 구성요소 이름으로만 허용",
+        "docs/design/06-archivist-security.md §2",
+        "docs/design/11-archivist-host.md §1"
+      ],
+      "decided": "2026-10-27"
+    },
+    {
+      "id": "archivist-host",
+      "layer": "product",
+      "kind": "component",
+      "name": {
+        "ko": "Archivist Host",
+        "en": "Archivist Host"
+      },
+      "code_name": "ArchivistHost",
+      "definition": "특정 PC에서 허용된 로컬 CLI process와 Session을 감독하고 Archive Control로 outbound 연결하는 상주 서비스.",
+      "rules": [
+        "Archivist 역할이나 Worker가 아니다.",
+        "업무 상태·승인 정책·Command 결과를 소유하지 않는다.",
+        "inbound 관리 포트를 열지 않고 Control로 outbound 연결한다.",
+        "아카이브 작업 공간 화면 표기는 'Agent Host'로 한다."
+      ],
+      "forbidden": {
+        "words": [],
+        "code": [
+          "RuntimeHost",
+          "LocalRuntimeHost"
+        ]
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "archivist-session"
+        },
+        {
+          "type": "refers-to",
+          "target": "runtime-backend"
+        }
+      ],
+      "sources": [
+        "사용자 결정: Orca 전체 대신 필요한 코어 기능만 고려",
+        "docs/design/11-archivist-host.md §1",
+        "사용자 결정 2026-11-03: 화면 표기만 Agent"
+      ],
+      "decided": "2026-10-27"
+    },
+    {
+      "id": "runtime-backend",
+      "layer": "product",
+      "kind": "enum",
+      "name": {
+        "ko": "런타임 백엔드",
+        "en": "Runtime Backend"
+      },
+      "code_name": "RuntimeBackend",
+      "definition": "Archivist Host가 CLI process·입출력·event cursor·재개를 구체적으로 연결하는 Adapter 종류.",
+      "values": [
+        {
+          "id": "EMBEDDED_CORE",
+          "description": "필요한 PTY·turn·cursor·재개 기능만 내장한 v1 기본 backend."
+        },
+        {
+          "id": "ORCA_CLI",
+          "description": "공개 Orca CLI를 통해 같은 Port를 구현하는 선택형 compatibility backend."
+        }
+      ],
+      "rules": [
+        "backend 종류가 ArchivistSession identity나 업무 정책을 바꾸지 않는다."
+      ],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "sources": [
+        "docs/design/11-archivist-host.md §3~4"
+      ],
+      "decided": "2026-10-27"
+    },
+    {
+      "id": "archivist-host-state",
+      "layer": "product",
+      "kind": "state-set",
+      "name": {
+        "ko": "Archivist Host 상태",
+        "en": "Archivist Host State"
+      },
+      "code_name": "ArchivistHostState",
+      "definition": "Archivist Host의 연결과 새 Turn 수락 가능 상태.",
+      "values": [
+        {
+          "id": "CONNECTING",
+          "description": "Control과 인증 연결을 설정 중이다."
+        },
+        {
+          "id": "ONLINE",
+          "description": "heartbeat가 유효하고 새 Turn을 받을 수 있다."
+        },
+        {
+          "id": "BUSY",
+          "description": "Turn을 실행 중이다."
+        },
+        {
+          "id": "OFFLINE",
+          "description": "heartbeat TTL이 만료되어 새 Turn을 받을 수 없다."
+        },
+        {
+          "id": "DISABLED",
+          "description": "시작 정책에서 사용하지 않도록 설정됐다."
+        }
+      ],
+      "forbidden": {
+        "words": [],
+        "code": [
+          "RuntimeHostState"
+        ]
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "archivist-host"
+        }
+      ],
+      "sources": [
+        "docs/design/11-archivist-host.md §8~9"
+      ],
+      "decided": "2026-10-27"
+    },
+    {
+      "id": "archivist-session",
+      "layer": "product",
+      "kind": "entity",
+      "name": {
+        "ko": "Archivist 세션",
+        "en": "Archivist Session"
+      },
+      "code_name": "ArchivistSession",
+      "definition": "한 Archivist 대화를 고정된 Archivist Host·backend·CLI·workspace와 연결하는 Control 소유의 영속 개체.",
+      "rules": [
+        "runtime handle과 별개의 durable ID를 가진다.",
+        "Host offline만으로 다른 PC에 자동 재배정하지 않는다."
+      ],
+      "forbidden": {
+        "words": [],
+        "code": [
+          "AgentSession"
+        ]
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "archivist-host"
+        },
+        {
+          "type": "refers-to",
+          "target": "runtime-backend"
+        },
+        {
+          "type": "refers-to",
+          "target": "archivist"
+        }
+      ],
+      "sources": [
+        "docs/design/11-archivist-host.md §2"
+      ],
+      "decided": "2026-10-27"
+    },
+    {
+      "id": "archivist-turn",
+      "layer": "product",
+      "kind": "entity",
+      "name": {
+        "ko": "Archivist 턴",
+        "en": "Archivist Turn"
+      },
+      "code_name": "ArchivistTurn",
+      "definition": "ArchivistSession 안에서 사용자 입력 하나를 구조화된 시작·대기·완료 결과까지 추적하는 영속 실행 단위.",
+      "rules": [
+        "Control에 QUEUED 상태를 확정한 뒤 Archivist Host에 전달한다.",
+        "terminal idle이나 화면 문자열로 완료를 추론하지 않는다.",
+        "중간 화면 표시는 raw terminal이 아니라 정제된 ArchivistTurnEntry만 사용한다."
+      ],
+      "forbidden": {
+        "words": [],
+        "code": [
+          "AgentTurn"
+        ]
+      },
+      "relations": [
+        {
+          "type": "part-of",
+          "target": "archivist-session"
+        },
+        {
+          "type": "refers-to",
+          "target": "archivist-turn-state"
+        }
+      ],
+      "sources": [
+        "docs/design/11-archivist-host.md §5"
+      ],
+      "decided": "2026-10-27"
+    },
+    {
+      "id": "archivist-turn-state",
+      "layer": "product",
+      "kind": "state-set",
+      "name": {
+        "ko": "Archivist 턴 상태",
+        "en": "Archivist Turn State"
+      },
+      "code_name": "ArchivistTurnState",
+      "definition": "ArchivistTurn의 영속 전달·실행 생애주기 상태.",
+      "values": [
+        {
+          "id": "QUEUED",
+          "description": "Control에 저장됐고 Host claim을 기다린다."
+        },
+        {
+          "id": "LEASED",
+          "description": "한 Host가 fencing token을 가진 lease를 획득했다."
+        },
+        {
+          "id": "SUBMITTED",
+          "description": "backend가 입력을 수락했으나 실행 시작은 확인되지 않았다."
+        },
+        {
+          "id": "RUNNING",
+          "description": "backend의 명시적 시작 event가 기록됐다."
+        },
+        {
+          "id": "WAITING",
+          "description": "입력·승인·재연결 같은 조건을 기다린다. v1 ArchivistTurn에는 별도 이유 값이 없으므로 조건 종류를 추론하지 않는다."
+        },
+        {
+          "id": "COMPLETED",
+          "description": "구조화된 완료 event와 최종 응답이 기록됐다."
+        },
+        {
+          "id": "FAILED",
+          "description": "구조화된 실패 event가 기록됐다."
+        },
+        {
+          "id": "CANCELLED",
+          "description": "완료 전에 명시적으로 취소됐다."
+        }
+      ],
+      "rules": [
+        "ArchivistTurn WAITING에는 v1에서 WaitReason을 재사용하지 않으며, 이유 모델이 추가되기 전 UI는 사람 대기와 시스템 대기를 구분하지 않는다."
+      ],
+      "forbidden": {
+        "words": [],
+        "code": [
+          "AgentTurnState"
+        ]
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "archivist-turn"
+        }
+      ],
+      "sources": [
+        "docs/design/11-archivist-host.md §5"
+      ],
+      "decided": "2026-10-27"
+    },
+    {
+      "id": "archivist-turn-lease",
+      "layer": "product",
+      "kind": "entity",
+      "name": {
+        "ko": "Archivist 턴 리스",
+        "en": "Archivist Turn Lease"
+      },
+      "code_name": "ArchivistTurnLease",
+      "definition": "한 ArchivistTurn을 특정 Archivist Host가 제한 시간 동안 전달·실행할 권한과 fencing token을 묶은 개체.",
+      "rules": [
+        "동시에 하나만 유효하며 재발급할 때 fencing token이 증가한다."
+      ],
+      "forbidden": {
+        "words": [],
+        "code": [
+          "AgentTurnLease"
+        ]
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "archivist-turn"
+        },
+        {
+          "type": "refers-to",
+          "target": "archivist-host"
+        }
+      ],
+      "sources": [
+        "docs/design/11-archivist-host.md §5"
+      ],
+      "decided": "2026-10-27"
+    },
+    {
+      "id": "runtime-handle",
+      "layer": "product",
+      "kind": "value",
+      "name": {
+        "ko": "런타임 핸들",
+        "en": "Runtime Handle"
+      },
+      "code_name": "RuntimeHandle",
+      "definition": "PID, PTY 또는 Orca terminal ID처럼 한 runtime process 수명 안에서만 유효한 불투명 참조값.",
+      "rules": [
+        "ArchivistSession의 영속 identity로 저장하거나 외부 업무 API에 노출하지 않는다."
+      ],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "runtime-backend"
+        }
+      ],
+      "sources": [
+        "docs/design/11-archivist-host.md §2~4"
+      ],
+      "decided": "2026-10-27"
+    },
+    {
+      "id": "runtime-event",
+      "layer": "product",
+      "kind": "record",
+      "name": {
+        "ko": "런타임 이벤트",
+        "en": "Runtime Event"
+      },
+      "code_name": "RuntimeEvent",
+      "definition": "Runtime backend가 ArchivistTurn의 입력 수락·시작·대기·완료·실패를 cursor와 함께 보고한 변경 불가능한 기록.",
+      "rules": [
+        "raw terminal 화면과 구분한다.",
+        "현재 ArchivistTurnLease fencing token과 일치할 때만 Control에 반영한다.",
+        "TURN_PROGRESS와 TURN_FAILED는 허용된 구조화 payload만 가지며 raw stdout·stderr 필드를 가지지 않는다."
+      ],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "is-a",
+          "target": "event"
+        },
+        {
+          "type": "refers-to",
+          "target": "archivist-turn"
+        }
+      ],
+      "sources": [
+        "docs/design/11-archivist-host.md §4~5"
+      ],
+      "decided": "2026-10-27"
+    },
+    {
+      "id": "archivist-turn-entry",
+      "layer": "product",
+      "kind": "record",
+      "name": {
+        "ko": "Archivist 턴 항목",
+        "en": "Archivist Turn Entry"
+      },
+      "code_name": "ArchivistTurnEntry",
+      "definition": "ArchivistTurn의 실행 중 사용자에게 보여 줄 진행 요약 또는 정규화 실패를 runtime cursor와 함께 남긴 추가 전용 기록.",
+      "rules": [
+        "ArchivistTurn 상태·cursor와 같은 transaction에서 저장하고 같은 cursor는 한 번만 남긴다.",
+        "PROGRESS와 FAILURE만 허용하며 정제 summary, 정규화 code, 시각 외의 raw terminal·credential·filesystem path 필드를 가지지 않는다.",
+        "Provider의 비공개 추론을 저장하거나 표시하지 않는다."
+      ],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "part-of",
+          "target": "archivist-turn"
+        },
+        {
+          "type": "refers-to",
+          "target": "runtime-event"
+        }
+      ],
+      "sources": [
+        "docs/design/11-archivist-host.md §5~6",
+        "사용자 결정 2026-11-02: 실행 중 작업 표시·완료 후 접기"
+      ],
+      "decided": "2026-11-02"
+    },
+    {
+      "id": "archive-run-work-context",
+      "layer": "product",
+      "kind": "value",
+      "name": {
+        "ko": "아카이브 실행 업무 문맥",
+        "en": "Archive Run Work Context"
+      },
+      "code_name": "ArchiveRunWorkContext",
+      "definition": "긴 아카이브 실행을 시작한 최초 ArchivistTurn과 뒤이은 SYSTEM 재호출 Turn을 하나의 화면 업무로 묶는 구조화된 참조.",
+      "rules": [
+        "work_id는 ArchiveRun ID, origin_turn_id는 최초 사용자 Turn ID를 가리킨다.",
+        "trigger는 ARCHIVE_RUN_STARTED·STAGE_ONE_COMPLETE·NEW_HOLD·ARCHIVE_RUN_COMPLETE 중 하나이며 prompt 문자열에서 추론하지 않는다.",
+        "업무 완료 표시는 ARCHIVE_RUN_COMPLETE 재호출 Turn의 terminal 상태를 사용한다."
+      ],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "archive-run"
+        },
+        {
+          "type": "refers-to",
+          "target": "archivist-turn"
+        }
+      ],
+      "sources": [
+        "docs/design/11-archivist-host.md §8",
+        "사용자 결정 2026-11-02: 최초 지시와 재호출을 하나의 업무로 접기"
+      ],
+      "decided": "2026-11-02"
+    },
+    {
+      "id": "provider-account",
+      "layer": "product",
+      "kind": "entity",
+      "name": {
+        "ko": "Provider 계정",
+        "en": "Provider Account"
+      },
+      "code_name": "ProviderAccount",
+      "definition": "Provider routing에 사용하는 별도 credential reference, 상태, budget, 모델 기능과 데이터 정책을 가진 개체.",
+      "rules": [
+        "credential 원문 대신 OS Secret Store reference만 저장한다.",
+        "인증 실패는 AUTH_FAILED와 재연결 필요 상태로 기록하며 별도 알림 수신 역할을 요구하지 않는다."
+      ],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "model-feature"
+        }
+      ],
+      "sources": [
+        "docs/design/06-archivist-security.md §3~5",
+        "docs/design/08-event-storming.md ES-09"
+      ],
+      "decided": "2026-10-27"
+    },
+    {
+      "id": "provider-request",
+      "layer": "product",
+      "kind": "record",
+      "name": {
+        "ko": "Provider 요청",
+        "en": "Provider Request"
+      },
+      "code_name": "ProviderRequest",
+      "definition": "외부 Provider 호출의 request ID, 계정·model, 허용된 사용량·결과·오류 필드를 남긴 변경 불가능한 기록.",
+      "rules": [
+        "credential과 허용 목록 밖의 원문은 저장하지 않는다."
+      ],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "provider-account"
+        }
+      ],
+      "sources": [
+        "docs/design/06-archivist-security.md §9",
+        "docs/design/08-event-storming.md ES-09"
+      ],
+      "decided": "2026-10-27"
+    },
+    {
+      "id": "archivist-tool-call",
+      "layer": "product",
+      "kind": "record",
+      "name": {
+        "ko": "Archivist 도구 호출",
+        "en": "Archivist Tool Call"
+      },
+      "code_name": "ArchivistToolCall",
+      "definition": "Archivist가 허용된 Capability를 호출한 입력 digest, 멱등 key, 상태와 최초 결과 receipt를 남긴 변경 불가능한 기록.",
+      "rules": [
+        "완료 receipt가 있으면 재실행하지 않고 최초 결과를 반환한다."
+      ],
+      "forbidden": {
+        "words": [],
+        "code": [
+          "AgentToolCall"
+        ]
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "archivist"
+        },
+        {
+          "type": "refers-to",
+          "target": "archivist-turn"
+        }
+      ],
+      "sources": [
+        "docs/design/06-archivist-security.md §6",
+        "docs/design/11-archivist-host.md §7"
+      ],
+      "decided": "2026-10-27"
+    },
+    {
+      "id": "action-card",
+      "layer": "product",
+      "kind": "record",
+      "name": {
+        "ko": "액션 카드",
+        "en": "Action Card"
+      },
+      "code_name": "ActionCard",
+      "definition": "ASSISTED 제어 모드의 Archivist 제안 또는 GATED·DESTRUCTIVE 명령 후보를 대상 ID·expected revision·사유·근거·필요 Approval과 함께 표시하는 변경 불가능한 기록.",
+      "rules": [
+        "채팅 텍스트와 구분한다.",
+        "ActionCard 자체가 Approval이나 Command는 아니다.",
+        "제출할 때 대상의 현재 리비전을 다시 검사한다.",
+        "인증된 MCP Capability가 Session의 ARCHIVIST 제어 모드와 비파괴 PROCESS를 확인한 경우에만 ActionCard 없이 같은 Command Bus로 실행할 수 있다."
+      ],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "archivist-turn"
+        },
+        {
+          "type": "refers-to",
+          "target": "reason"
+        },
+        {
+          "type": "refers-to",
+          "target": "basis"
+        }
+      ],
+      "sources": [
+        "docs/design/09-archive-workspace.md §3",
+        "docs/design/11-archivist-host.md §8"
+      ],
+      "decided": "2026-10-27"
     },
     {
       "id": "worker",
       "layer": "product",
       "kind": "component",
-      "name": {"ko": "Worker", "en": "Worker"},
+      "name": {
+        "ko": "Worker",
+        "en": "Worker"
+      },
       "code_name": "Worker",
-      "definition": "Control Service에 사전 등록되어 실행 리스를 받고 Step을 실행하는 서비스. Worker PC마다 설치되며 Control Service로 outbound 연결한다. Principal로는 ActorType.WORKER다.",
-      "rules": ["'Worker Agent'라고 부르지 않는다."],
-      "forbidden": {"words": ["Worker Agent"], "code": []},
-      "relations": [
-        {"type": "refers-to", "target": "execution-lease"},
-        {"type": "refers-to", "target": "processing-kind"}
+      "definition": "Archive Control에 사전 등록되어 실행 리스를 받고 Step을 실행하는 서비스. Worker PC마다 설치되며 Archive Control로 outbound 연결한다. Principal로는 ActorType.WORKER다.",
+      "rules": [
+        "'Worker Archivist'라고 부르지 않는다."
       ],
-      "sources": ["사용자 결정: Worker Agent는 그냥 Worker", "docs/design/07-worker-fleet.md"],
+      "forbidden": {
+        "words": [
+          "Worker Archivist"
+        ],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "execution-lease"
+        },
+        {
+          "type": "refers-to",
+          "target": "processing-kind"
+        }
+      ],
+      "sources": [
+        "사용자 결정: Worker Archivist는 그냥 Worker",
+        "docs/design/07-worker-fleet.md"
+      ],
       "decided": "2026-10-20"
     },
     {
       "id": "device-adapter",
       "layer": "product",
       "kind": "component",
-      "name": {"ko": "장치 어댑터", "en": "Device Adapter"},
+      "name": {
+        "ko": "장치 어댑터",
+        "en": "Device Adapter"
+      },
       "code_name": "DeviceAdapter",
       "definition": "Worker 안에서 외장 장치의 감지, 조사, 복사, 체크섬 검증, 안전 제거, 승인된 포맷을 수행하는 구성요소. 장치가 연결된 Worker PC의 Worker가 맡는다.",
-      "rules": ["별도 프로세스가 아니라 Worker의 일부다. 'Device Agent'라고 부르지 않는다."],
-      "forbidden": {"words": ["Device Agent"], "code": []},
-      "relations": [{"type": "part-of", "target": "worker"}],
-      "sources": ["사용자 결정: Device Agent는 Worker의 Device Adapter", "idea.md §12.3", "docs/design/00-overview.md §3"],
+      "rules": [
+        "별도 프로세스가 아니라 Worker의 일부다. 'Device Archivist'라고 부르지 않는다."
+      ],
+      "forbidden": {
+        "words": [
+          "Device Archivist"
+        ],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "part-of",
+          "target": "worker"
+        }
+      ],
+      "sources": [
+        "사용자 결정: Device Archivist는 Worker의 Device Adapter",
+        "idea.md §12.3",
+        "docs/design/00-overview.md §3"
+      ],
       "decided": "2026-10-20"
     },
     {
       "id": "dev-agent",
       "layer": "dev",
       "kind": "role",
-      "name": {"ko": "개발 에이전트", "en": "Dev Agent"},
+      "name": {
+        "ko": "개발 에이전트",
+        "en": "Dev Agent"
+      },
       "definition": "이 저장소를 개발하는 AI 도구(Claude Code, Codex 등). 과제를 받아 코드와 문서를 바꾸고 증적을 남긴다.",
-      "rules": ["개발 문서에서도 '에이전트'라고만 쓰지 않는다. 제품의 에이전트와 구분한다."],
-      "forbidden": {"words": ["에이전트"], "code": []},
-      "relations": [{"type": "refers-to", "target": "work-item"}],
-      "sources": ["사용자 결정: 개발 층은 개발 에이전트(Dev Agent)"],
+      "rules": [
+        "개발 문서에서는 '개발 에이전트'라고 써 제품의 Archivist와 구분한다."
+      ],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "work-item"
+        }
+      ],
+      "sources": [
+        "사용자 결정: 개발 층은 개발 에이전트(Dev Agent)"
+      ],
       "decided": "2026-10-20"
     },
     {
       "id": "event",
       "layer": "product",
       "kind": "record",
-      "name": {"ko": "이벤트", "en": "Event"},
+      "name": {
+        "ko": "이벤트",
+        "en": "Event"
+      },
       "code_name": "Event",
       "definition": "이미 일어난 상태 변경 사실의 기록. 추가만 하고 고치지 않는다. events.jsonl과 DB의 events 테이블이 담는 것이 이것이다.",
       "includes": [
@@ -593,19 +2131,33 @@
         "이벤트는 증적의 한 종류다.",
         "모든 이벤트는 그 변경을 일으킨 명령 기록을 command_id로 참조한다."
       ],
-      "forbidden": {"words": [], "code": []},
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
       "relations": [
-        {"type": "is-a", "target": "evidence"},
-        {"type": "refers-to", "target": "command-record"}
+        {
+          "type": "is-a",
+          "target": "evidence"
+        },
+        {
+          "type": "refers-to",
+          "target": "command-record"
+        }
       ],
-      "sources": ["사용자 결정: Event는 도메인 이벤트만, 명령 기록 + 이벤트 분리"],
+      "sources": [
+        "사용자 결정: Event는 도메인 이벤트만, 명령 기록 + 이벤트 분리"
+      ],
       "decided": "2026-10-20"
     },
     {
       "id": "command",
       "layer": "product",
       "kind": "message",
-      "name": {"ko": "명령", "en": "Command"},
+      "name": {
+        "ko": "명령",
+        "en": "Command"
+      },
       "code_name": "Command",
       "definition": "실행자가 시스템의 상태를 바꾸기 위해 보내는 의도 메시지. 처리 시도와 결과는 별도의 명령 기록으로 남는다.",
       "includes": [
@@ -623,8 +2175,16 @@
         "명령을 처리하려는 모든 시도는 수락과 거부를 포함해 명령 기록으로 남긴다.",
         "수락된 명령의 상태 변경과 그 결과 이벤트는 같은 원자 단위로 기록한다."
       ],
-      "forbidden": {"words": [], "code": []},
-      "relations": [{"type": "refers-to", "target": "actor"}],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "actor"
+        }
+      ],
       "sources": [
         "docs/design/03-domain-workflow.md §2 공통 Command",
         "internal/core/command/command.go Envelope",
@@ -636,7 +2196,10 @@
       "id": "command-record",
       "layer": "product",
       "kind": "record",
-      "name": {"ko": "명령 기록", "en": "Command Record"},
+      "name": {
+        "ko": "명령 기록",
+        "en": "Command Record"
+      },
       "code_name": "CommandRecord",
       "definition": "명령 시도 하나와 그 결과의 기록. 거부된 명령도 남는다.",
       "includes": [
@@ -649,61 +2212,131 @@
         "결과(수락 또는 거부와 거부 이유)",
         "요청·완료 시각"
       ],
-      "rules": ["명령 기록은 증적의 한 종류다."],
-      "forbidden": {"words": [], "code": []},
-      "relations": [
-        {"type": "is-a", "target": "evidence"},
-        {"type": "refers-to", "target": "command"},
-        {"type": "refers-to", "target": "actor"}
+      "rules": [
+        "명령 기록은 증적의 한 종류다."
       ],
-      "sources": ["사용자 결정: 명령 기록 = 모든 명령 시도(거부 포함)와 결과"],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "is-a",
+          "target": "evidence"
+        },
+        {
+          "type": "refers-to",
+          "target": "command"
+        },
+        {
+          "type": "refers-to",
+          "target": "actor"
+        }
+      ],
+      "sources": [
+        "사용자 결정: 명령 기록 = 모든 명령 시도(거부 포함)와 결과"
+      ],
       "decided": "2026-10-20"
     },
     {
       "id": "audit",
       "layer": "product",
       "kind": "activity",
-      "name": {"ko": "감사", "en": "Audit"},
+      "name": {
+        "ko": "감사",
+        "en": "Audit"
+      },
       "definition": "명령 기록과 이벤트를 함께 보며 누가 무엇을 하려 했고 무엇이 바뀌었는지 확인하는 활동.",
-      "rules": ["'감사 로그'라는 별도 저장소는 없다. 명령 기록과 이벤트가 그 역할을 한다."],
-      "forbidden": {"words": ["감사 로그"], "code": ["AuditLog"]},
-      "relations": [
-        {"type": "refers-to", "target": "command-record"},
-        {"type": "refers-to", "target": "event"}
+      "rules": [
+        "'감사 로그'라는 별도 저장소는 없다. 명령 기록과 이벤트가 그 역할을 한다."
       ],
-      "sources": ["사용자 결정: '감사'는 명령 기록과 이벤트를 함께 보는 활동 이름"],
+      "forbidden": {
+        "words": [
+          "감사 로그"
+        ],
+        "code": [
+          "AuditLog"
+        ]
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "command-record"
+        },
+        {
+          "type": "refers-to",
+          "target": "event"
+        }
+      ],
+      "sources": [
+        "사용자 결정: '감사'는 명령 기록과 이벤트를 함께 보는 활동 이름"
+      ],
       "decided": "2026-10-20"
     },
     {
       "id": "occasion",
       "layer": "product",
       "kind": "entity",
-      "name": {"ko": "행사", "en": "Occasion"},
+      "name": {
+        "ko": "행사",
+        "en": "Occasion"
+      },
       "code_name": "Occasion",
       "definition": "영상으로 기록하는 대상 행사. 행사 기록 템플릿(occasion-recording)이 다룬다.",
-      "rules": ["행사를 'Event'나 '이벤트'라고 부르지 않는다."],
-      "forbidden": {"words": ["이벤트"], "code": ["EventRecording"]},
-      "sources": ["사용자 결정: 행사 = Occasion"],
+      "rules": [
+        "행사를 'Event'나 '이벤트'라고 부르지 않는다."
+      ],
+      "forbidden": {
+        "words": [
+          "이벤트"
+        ],
+        "code": [
+          "EventRecording"
+        ]
+      },
+      "sources": [
+        "사용자 결정: 행사 = Occasion"
+      ],
       "decided": "2026-10-20"
     },
     {
       "id": "notification",
       "layer": "product",
       "kind": "message",
-      "name": {"ko": "알림", "en": "Notification"},
+      "name": {
+        "ko": "알림",
+        "en": "Notification"
+      },
       "code_name": "Notification",
-      "definition": "이벤트나 모니터링 값을 바탕으로 만들어 대시보드에 실시간으로 보내는 메시지. 저장되는 기록이 아니다.",
-      "rules": ["알림을 '이벤트'라고 부르지 않는다. SSE 경로는 /api/v1/notifications다."],
-      "forbidden": {"words": ["SSE 이벤트"], "code": []},
-      "relations": [{"type": "refers-to", "target": "event"}],
-      "sources": ["사용자 결정: SSE 실시간 메시지 = 알림(Notification)"],
+      "definition": "이벤트나 모니터링 값을 바탕으로 만들어 아카이브 작업 공간에 실시간으로 보내는 메시지. 저장되는 기록이 아니다.",
+      "rules": [
+        "알림을 '이벤트'라고 부르지 않는다. SSE 경로는 /api/v1/notifications다."
+      ],
+      "forbidden": {
+        "words": [
+          "SSE 이벤트"
+        ],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "event"
+        }
+      ],
+      "sources": [
+        "사용자 결정: SSE 실시간 메시지 = 알림(Notification)"
+      ],
       "decided": "2026-10-20"
     },
     {
       "id": "revision",
       "layer": "product",
       "kind": "value",
-      "name": {"ko": "리비전", "en": "Revision"},
+      "name": {
+        "ko": "리비전",
+        "en": "Revision"
+      },
       "code_name": "Revision",
       "definition": "대상이 바뀔 때마다 1씩 증가하는 번호. 동시성 제어와 승인 대상 고정에 쓴다.",
       "rules": [
@@ -711,41 +2344,67 @@
         "승인이 가리키는 대상의 판은 대상의 리비전이다.",
         "리비전을 '버전'이라고 부르지 않는다."
       ],
-      "forbidden": {"words": ["버전"], "code": []},
-      "sources": ["사용자 결정: 동시성 번호 = 리비전(Revision)"],
+      "forbidden": {
+        "words": [
+          "버전"
+        ],
+        "code": []
+      },
+      "sources": [
+        "사용자 결정: 동시성 번호 = 리비전(Revision)"
+      ],
       "decided": "2026-10-20"
     },
     {
       "id": "edit-version",
       "layer": "product",
       "kind": "value",
-      "name": {"ko": "편집본 버전", "en": "Edit Version"},
+      "name": {
+        "ko": "편집본 버전",
+        "en": "Edit Version"
+      },
       "code_name": "EditVersion",
       "definition": "편집자나 납품처가 최종 편집본에 붙인 버전 표기(v1, v2, final 등). 시스템이 만드는 번호가 아니라 기록하는 값이다.",
-      "forbidden": {"words": [], "code": []},
-      "sources": ["사용자 결정: 최종 편집본 버전 = 편집본 버전(Edit Version)"],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "sources": [
+        "사용자 결정: 최종 편집본 버전 = 편집본 버전(Edit Version)"
+      ],
       "decided": "2026-10-20"
     },
     {
       "id": "version",
       "layer": "shared",
       "kind": "value",
-      "name": {"ko": "버전", "en": "Version"},
+      "name": {
+        "ko": "버전",
+        "en": "Version"
+      },
       "code_name": "Version",
       "definition": "소프트웨어 기능, 프로파일, 스키마, 카탈로그 같은 정의물의 판 표기.",
       "rules": [
         "운영 데이터의 변경 번호를 뜻하지 않는다. 그것은 리비전이다.",
         "최종 편집본에 붙은 표기는 편집본 버전이다."
       ],
-      "forbidden": {"words": [], "code": []},
-      "sources": ["사용자 결정: '버전'은 정의물의 판에만"],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "sources": [
+        "사용자 결정: '버전'은 정의물의 판에만"
+      ],
       "decided": "2026-10-20"
     },
     {
       "id": "supersession",
       "layer": "product",
       "kind": "relationship",
-      "name": {"ko": "대체", "en": "Supersession"},
+      "name": {
+        "ko": "대체",
+        "en": "Supersession"
+      },
       "code_name": "Supersedes",
       "definition": "확정된 ArchivePackage나 입고된 OriginalAsset을 같은 ID로 고치지 않고 새 ID를 만들어 이전 ID를 대체한다고 기록하는 관계.",
       "rules": [
@@ -753,114 +2412,399 @@
         "ArchivePackage와 OriginalAsset은 동시성 제어용 리비전을 가질 수 있다.",
         "확정된 내용을 같은 ID의 '개정판'으로 고치지 않는다. 새 ID가 이전 ID를 대체한다."
       ],
-      "forbidden": {"words": ["개정판"], "code": []},
-      "relations": [{"type": "refers-to", "target": "archive-package"}, {"type": "refers-to", "target": "original-asset"}],
-      "sources": ["사용자 결정: 새 ID가 이전 ID를 대체", "docs/design/04-data-archive.md §7", "requirements ARC-001"],
+      "forbidden": {
+        "words": [
+          "개정판"
+        ],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "archive-package"
+        },
+        {
+          "type": "refers-to",
+          "target": "original-asset"
+        }
+      ],
+      "sources": [
+        "사용자 결정: 새 ID가 이전 ID를 대체",
+        "docs/design/04-data-archive.md §7",
+        "requirements ARC-001"
+      ],
       "decided": "2026-10-20"
     },
     {
       "id": "physical-device",
       "layer": "product",
       "kind": "entity",
-      "name": {"ko": "물리 장치", "en": "Physical Device"},
+      "name": {
+        "ko": "물리 장치",
+        "en": "Physical Device"
+      },
       "code_name": "PhysicalDevice",
       "definition": "실제 HDD, SSD, USB 메모리, SD 카드 같은 물리 매체.",
       "rules": [
         "마운트 경로로 식별하지 않는다. 시리얼, 모델, 용량, 물리 라벨을 조합해 식별한다.",
-        "스케줄러의 디스크 충돌 판정(WaitReason.DISK)도 물리 장치 단위다."
+        "Windows 원본 후보는 removable 표기만 보지 않고 USB·SD 같은 외부 data bus로 판별한다.",
+        "스케줄러의 디스크 충돌 판정(WaitReason.DISK)은 물리 장치 단위지만 작업 공간 드라이브 identity는 아니다."
       ],
-      "forbidden": {"words": ["물리 디스크"], "code": ["PhysicalDisk"]},
-      "sources": ["사용자 결정: 저장 계층 4단계, PhysicalDisk는 PhysicalDevice로 통일", "idea.md §12.1", "docs/design/04-data-archive.md §3"],
+      "forbidden": {
+        "words": [
+          "물리 디스크"
+        ],
+        "code": [
+          "PhysicalDisk"
+        ]
+      },
+      "sources": [
+        "사용자 결정: 저장 계층 4단계, PhysicalDisk는 PhysicalDevice로 통일",
+        "idea.md §12.1",
+        "docs/design/04-data-archive.md §3"
+      ],
       "decided": "2026-10-20"
     },
     {
       "id": "workspace-drive",
       "layer": "product",
       "kind": "role",
-      "name": {"ko": "작업 공간 드라이브", "en": "Workspace Drive"},
+      "name": {
+        "ko": "작업 공간 드라이브",
+        "en": "Workspace Drive"
+      },
       "code_name": "WorkspaceDrive",
-      "definition": "Job이 대용량 파일을 읽거나 쓰기 위해 작업 공간으로 예약한 PhysicalDevice의 역할.",
+      "definition": "Job이 대용량 파일을 읽거나 쓰기 위해 사람이 선택한 논리 Volume의 역할. workspace_drive_id는 stable volume_id와 같다.",
       "rules": [
-        "작업 공간 하나의 단위는 USB 메모리, SSD, HDD 같은 PhysicalDevice 하나다. Partition, Volume, mount 경로 또는 Storage root를 작업 공간 단위로 쓰지 않는다.",
-        "Job은 입력과 출력에 여러 작업 공간 드라이브를 참조할 수 있지만 예약, I/O 충돌 판정, metric 집계와 해제는 각 PhysicalDevice ID 단위로 수행한다.",
-        "작업 공간 드라이브 해제는 활성 lock과 파일 handle을 정리한 뒤 OS에서 안전 제거하는 장치 동작이다. 매체 소유권 반환이나 인수인계가 아니다."
+        "작업 공간 하나의 단위는 filesystem을 가진 논리 Volume 하나다. 같은 PhysicalDevice의 서로 다른 Volume은 서로 다른 작업 공간 드라이브다.",
+        "mount 경로·drive letter·Storage root는 identity가 아니며 workspace_drive_id는 stable volume_id다.",
+        "Job은 논리 Volume을 선택·표시 단위로 사용하고 I/O 충돌 판정은 별도 PhysicalDevice ID 보조 키로 수행한다.",
+        "작업 공간 드라이브 해제는 해당 Volume의 활성 handle을 정리한다. 물리 장치 안전 제거가 필요하면 같은 PhysicalDevice의 다른 Volume과 lock도 함께 확인한다."
       ],
-      "forbidden": {"words": ["작업 폴더"], "code": []},
-      "relations": [{"type": "refers-to", "target": "physical-device"}],
-      "sources": ["사용자 결정: 작업 공간 단위는 USB·SSD·HDD 드라이브", "사용자 결정: 원본 매체 반환은 작업 공간 드라이브 해제라면 유지"],
-      "decided": "2026-10-26"
+      "forbidden": {
+        "words": [
+          "작업 폴더"
+        ],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "volume"
+        }
+      ],
+      "sources": [
+        "사용자 결정: 원본 매체 반환은 작업 공간 드라이브 해제라면 유지",
+        "사용자 결정 2026-11-01: 드라이브 단위를 PhysicalDevice에서 논리 Volume으로 변경"
+      ],
+      "decided": "2026-11-01"
+    },
+    {
+      "id": "drive-workstation",
+      "layer": "product",
+      "kind": "surface",
+      "name": {
+        "ko": "드라이브 워크스테이션",
+        "en": "Drive Workstation"
+      },
+      "code_name": "DriveWorkstation",
+      "definition": "아카이브 작업 공간에서 원본 논리 드라이브(Volume) 하나를 작업 단위로 삼아 실행 준비 범위, 아카이브 실행 단계와 진행, 확인 필요 해결과 폴더별 상태를 한 화면에서 조작하고 확인하는 Archive Workspace 표면.",
+      "rules": [
+        "드라이브 워크스테이션은 Worker PC나 Archivist Host를 뜻하지 않으며 선택한 원본 드라이브를 기준으로 한다.",
+        "아카이브 실행은 단계 줄과 보관된 영상 수 기준 진행 한 줄로 조용히 표시한다. 폴더 행은 한 단어 상태·단계 점·보관됨/확정됨만 두고 단계 이름·진행 수·대기 이유는 폴더 세부를 펼칠 때만 보인다. 날짜 이름 폴더는 연간 달력으로도 볼 수 있다.",
+        "정상 진행 중인 폴더 상태는 드라이브 상세 밖에 드러내지 않는다. 실패와 사람 대기는 상태 화면 카드와 알림 목록에 폴더 하나씩 보이고 드라이브 상세의 확인 필요 칸에서 해결한다.",
+        "폴더와 파일 수가 많아도 정상 진행과 자원 대기는 조용히 두며 절대경로와 credential을 표시하지 않는다."
+      ],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "workspace-drive"
+        },
+        {
+          "type": "part-of",
+          "target": "archive-workspace"
+        }
+      ],
+      "sources": [
+        "사용자 결정 D8: 드라이브별 단계 막대 매트릭스 유지",
+        "사용자 결정 2026-10-31: D8 막대 매트릭스를 흐름 그래프와 진행 피드백으로 대체",
+        "docs/design/13-archive-intake.md",
+        "사용자 결정 2026-11-02: 흐름 그래프 대신 영상 수 진행·달력·폴더 세부로 표시",
+        "사용자 결정 2026-11-03: 작업 단위는 드라이브, 폴더 상태는 드라이브 안에서만, 세부 작업은 이상 시에만",
+        "사용자 결정 2026-11-03: 확인 필요는 묶지 않고 하나씩"
+      ],
+      "decided": "2026-11-03"
     },
     {
       "id": "partition",
       "layer": "product",
       "kind": "entity",
-      "name": {"ko": "파티션", "en": "Partition"},
+      "name": {
+        "ko": "파티션",
+        "en": "Partition"
+      },
       "code_name": "Partition",
       "definition": "물리 장치 안에서 나뉜 영역.",
-      "forbidden": {"words": [], "code": []},
-      "relations": [{"type": "part-of", "target": "physical-device"}],
-      "sources": ["사용자 결정: 저장 계층 4단계"],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "part-of",
+          "target": "physical-device"
+        }
+      ],
+      "sources": [
+        "사용자 결정: 저장 계층 4단계"
+      ],
       "decided": "2026-10-20"
     },
     {
       "id": "volume",
       "layer": "product",
       "kind": "entity",
-      "name": {"ko": "볼륨", "en": "Volume"},
+      "name": {
+        "ko": "볼륨",
+        "en": "Volume"
+      },
       "code_name": "Volume",
       "definition": "OS가 마운트한 파일시스템. 파일시스템 UUID로 식별한다.",
-      "rules": ["장치 잠금은 볼륨 단위로 건다."],
-      "forbidden": {"words": [], "code": []},
-      "relations": [{"type": "part-of", "target": "partition"}],
-      "sources": ["사용자 결정: 저장 계층 4단계", "idea.md §12.1, §12.4", "internal/core/device/device.go"],
+      "rules": [
+        "장치 잠금은 볼륨 단위로 건다."
+      ],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "part-of",
+          "target": "partition"
+        }
+      ],
+      "sources": [
+        "사용자 결정: 저장 계층 4단계",
+        "idea.md §12.1, §12.4",
+        "internal/core/device/device.go"
+      ],
       "decided": "2026-10-20"
     },
     {
       "id": "storage",
       "layer": "product",
       "kind": "entity",
-      "name": {"ko": "저장소", "en": "Storage"},
+      "name": {
+        "ko": "저장소",
+        "en": "Storage"
+      },
       "code_name": "Storage",
-      "definition": "storage_id로 식별되는 업무용 저장 위치. 볼륨 하나, 그 안의 루트 경로 하나, 저장소 역할 하나를 가진다.",
+      "definition": "storage_id로 식별되는 업무용 파일 namespace. 로컬·외장 volume root, 연결된 네트워크 공유 root 또는 검증된 원격 파일 서비스 root 하나와 저장소 역할 하나를 가진다.",
       "rules": [
-        "한 볼륨에 여러 저장소를 둘 수 있다.",
-        "API와 MCP는 경로 대신 storage_id를 받는다. 실제 경로는 등록된 루트 아래에서만 해석한다."
+        "한 볼륨에 여러 저장소를 둘 수 있고 원격 파일 서비스 Storage는 volume 없이 endpoint identity를 가진다.",
+        "자동 관찰한 외장 Volume의 SOURCE_MEDIA와 ARCHIVE_PRIMARY는 같은 root를 가리킬 수 있어도 역할별로 서로 다른 stable storage_id를 가진다.",
+        "API와 MCP는 경로 대신 storage_id를 받는다. 실제 경로는 등록된 루트 아래에서만 해석한다.",
+        "외부 data volume의 SOURCE_MEDIA Storage는 Worker 관찰로 후보 identity를 만들 수 있지만 사람이 선택하기 전에는 파일을 읽지 않는다.",
+        "네트워크 공유와 FTP·SFTP도 로컬 Storage와 같은 storage_id 경계를 사용하며 접근 credential 원문을 업무 상태에 저장하지 않는다.",
+        "SMTP는 파일 namespace의 목록·재검증·패키지 리비전 게시 계약을 제공하지 않으므로 StorageAccessKind가 아니며 알림 또는 내보내기 전달 채널로만 다룬다."
       ],
-      "forbidden": {"words": ["저장 등록"], "code": ["StorageRegistration"]},
-      "relations": [{"type": "refers-to", "target": "volume"}],
-      "sources": ["사용자 결정: 저장 계층 4단계, StorageRegistration은 Storage, Storage = 볼륨 안 루트 경로 하나", "docs/design/04-data-archive.md §3"],
-      "decided": "2026-10-20"
+      "forbidden": {
+        "words": [
+          "저장 등록"
+        ],
+        "code": [
+          "StorageRegistration"
+        ]
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "volume"
+        },
+        {
+          "type": "refers-to",
+          "target": "storage-access-kind"
+        }
+      ],
+      "sources": [
+        "사용자 결정: 저장 계층 4단계",
+        "사용자 결정 D3: 로컬·네트워크 아카이브 저장소 지원",
+        "사용자 결정 2026-11-01: 로컬·네트워크·FTP·SMTP 서비스·새 드라이브 선택 요청",
+        "docs/design/04-data-archive.md §3"
+      ],
+      "decided": "2026-11-01"
+    },
+    {
+      "id": "storage-access-kind",
+      "layer": "product",
+      "kind": "enum",
+      "name": {
+        "ko": "저장소 접근 방식",
+        "en": "Storage Access Kind"
+      },
+      "code_name": "StorageAccessKind",
+      "definition": "Worker가 Storage 파일 namespace에 접근하는 Adapter 경계의 종류.",
+      "values": [
+        {
+          "id": "LOCAL",
+          "description": "Worker boot 설정으로 연 로컬 filesystem root."
+        },
+        {
+          "id": "MOUNTED_NETWORK",
+          "description": "Worker가 UNC 또는 OS mount로 접근하는 SMB 등 네트워크 공유 root."
+        },
+        {
+          "id": "ATTACHED_VOLUME",
+          "description": "Worker가 새로 관찰한 외장 data volume root."
+        },
+        {
+          "id": "FTP",
+          "description": "검증된 FTP file-service Adapter의 원격 root."
+        },
+        {
+          "id": "SFTP",
+          "description": "host key와 credential을 검증한 SFTP Adapter의 원격 root."
+        }
+      ],
+      "rules": [
+        "StorageAccessKind는 StorageRole과 독립이며 ARCHIVE_PRIMARY는 다섯 접근 방식 중 검증된 후보를 사용할 수 있다.",
+        "ATTACHED_VOLUME은 원본과 다른 Volume인 경우에만 같은 아카이브 실행의 아카이브 후보가 된다. 같은 PhysicalDevice 여부는 별도 I/O 충돌 키로 보존한다.",
+        "같은 ATTACHED_VOLUME의 SOURCE_MEDIA와 ARCHIVE_PRIMARY는 역할별로 서로 다른 stable Storage ID를 사용한다.",
+        "FTP와 SFTP는 원격 package 게시·다시 읽기·manifest 검증을 지원하는 Adapter만 접근 가능으로 보고한다.",
+        "SMTP는 StorageAccessKind가 아니다."
+      ],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "part-of",
+          "target": "storage"
+        }
+      ],
+      "sources": [
+        "사용자 결정 2026-11-01: 아카이브 대상 접근 방식 확장",
+        "docs/design/04-data-archive.md §3"
+      ],
+      "decided": "2026-11-01"
+    },
+    {
+      "id": "archive-storage",
+      "layer": "product",
+      "kind": "role",
+      "name": {
+        "ko": "아카이브 저장소",
+        "en": "Archive Storage"
+      },
+      "code_name": "ArchiveStorage",
+      "definition": "최적화한 기록물의 ArchivePackage 주본을 두는 StorageRole.ARCHIVE_PRIMARY 저장소. 현장 표현인 '백업 하드'도 이 역할을 가리킨다.",
+      "rules": [
+        "'백업 하드'는 아카이브 저장소의 현장 별칭이다.",
+        "기술적 복제본이나 스냅샷을 뜻하지 않는다.",
+        "담당자가 원본과 다른 접근 가능한 Storage 중 하나를 명시적으로 고른다.",
+        "로컬 root, 연결된 네트워크 공유, 원본과 다른 새 외장 드라이브 및 검증된 FTP·SFTP 원격 root를 허용한다.",
+        "SMTP 전달 대상은 아카이브 저장소가 아니다."
+      ],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "storage"
+        },
+        {
+          "type": "refers-to",
+          "target": "storage-role"
+        }
+      ],
+      "sources": [
+        "사용자 결정 D1~D4: 백업 하드는 사람이 고르는 ARCHIVE_PRIMARY 아카이브 저장소",
+        "사용자 결정 2026-11-01: 아카이브 대상 접근 방식 확장"
+      ],
+      "decided": "2026-11-01"
     },
     {
       "id": "storage-role",
       "layer": "product",
       "kind": "enum",
-      "name": {"ko": "저장소 역할", "en": "Storage Role"},
+      "name": {
+        "ko": "저장소 역할",
+        "en": "Storage Role"
+      },
       "code_name": "StorageRole",
       "definition": "저장소가 업무에서 맡는 역할.",
       "values": [
-        {"id": "SOURCE_MEDIA", "description": "입력 원본이 있는 Storage의 읽기 중심 역할. 별도 SourceMedia Entity나 반환 수명주기를 만들지 않는다."},
-        {"id": "SCRATCH", "description": "처리 중 임시 출력. 지워져도 되며, 확정된 유일 복사본을 두지 않는다."},
-        {"id": "WORKING", "description": "아카이브 전 입고 사본과 파생본을 보관한다. 임의로 지우지 않는다."},
-        {"id": "TRANSFER_MEDIA", "description": "Mac과 Windows 사이 전달용 매체. 유일한 아카이브로 쓰지 않는다."},
-        {"id": "ARCHIVE_PRIMARY", "description": "아카이브 주본을 둔다."},
-        {"id": "ARCHIVE_MIRROR", "description": "아카이브 복제본을 둔다. 주본과 다른 물리 장치여야 한다."},
-        {"id": "BACKUP_OFFSITE", "description": "평상시 분리하거나 다른 장소에 보관하는 복제본을 둔다."}
+        {
+          "id": "SOURCE_MEDIA",
+          "description": "입력 원본이 있는 Storage의 읽기 중심 역할. 별도 SourceMedia Entity나 반환 수명주기를 만들지 않는다."
+        },
+        {
+          "id": "SCRATCH",
+          "description": "처리 중 임시 출력. 지워져도 되며, 확정된 유일 복사본을 두지 않는다."
+        },
+        {
+          "id": "WORKING",
+          "description": "아카이브 전 입고 사본과 파생본을 보관한다. 임의로 지우지 않는다."
+        },
+        {
+          "id": "TRANSFER_MEDIA",
+          "description": "Mac과 Windows 사이 전달용 매체. 유일한 아카이브로 쓰지 않는다."
+        },
+        {
+          "id": "ARCHIVE_PRIMARY",
+          "description": "사람이 관리·추적할 최적화 기록물의 아카이브 주본을 둔다. 현장 표현 '백업 하드'가 가리키는 역할이다."
+        },
+        {
+          "id": "ARCHIVE_MIRROR",
+          "description": "아카이브 복제본을 둔다. 주본과 다른 물리 장치여야 한다."
+        },
+        {
+          "id": "BACKUP_OFFSITE",
+          "description": "평상시 분리하거나 다른 장소에 보관하는 복제본을 둔다."
+        }
       ],
       "rules": [
         "SCRATCH와 WORKING은 같은 SSD에 있어도 역할이 다르다.",
-        "SOURCE_MEDIA는 Storage의 역할일 뿐 별도 Entity가 아니며 매체 소유권·반환 이력을 뜻하지 않는다."
+        "SOURCE_MEDIA는 Storage의 역할일 뿐 별도 Entity가 아니며 매체 소유권·반환 이력을 뜻하지 않는다.",
+        "기술적 복제본이라는 뜻의 backup은 BACKUP_OFFSITE에만 사용하고 ARCHIVE_PRIMARY를 backup replica로 해석하지 않는다."
       ],
-      "forbidden": {"words": ["working_storage"], "code": ["SourceMedia", "SourceMediaIntake"]},
-      "relations": [{"type": "part-of", "target": "storage"}],
-      "sources": ["사용자 결정: SCRATCH와 WORKING 둘 다 둠", "idea.md §12.2, §13, §15.7", "docs/design/04-data-archive.md §1"],
-      "decided": "2026-10-20"
+      "forbidden": {
+        "words": [
+          "working_storage"
+        ],
+        "code": [
+          "SourceMedia",
+          "SourceMediaIntake"
+        ]
+      },
+      "relations": [
+        {
+          "type": "part-of",
+          "target": "storage"
+        }
+      ],
+      "sources": [
+        "사용자 결정: SCRATCH와 WORKING 둘 다 둠",
+        "사용자 결정 D1: 백업 하드는 ARCHIVE_PRIMARY, 기술적 복제본은 BACKUP_OFFSITE",
+        "docs/design/04-data-archive.md §1"
+      ],
+      "decided": "2026-10-31"
     },
     {
       "id": "original-asset",
       "layer": "product",
       "kind": "entity",
-      "name": {"ko": "원본 자산", "en": "Original Asset"},
+      "name": {
+        "ko": "원본 자산",
+        "en": "Original Asset"
+      },
       "code_name": "OriginalAsset",
       "definition": "입고된 뒤 내용이 바뀌지 않는 영상 파일 하나. 외부에서 만들어져 입고된 최종 편집본도 원본 자산이다.",
       "rules": [
@@ -869,15 +2813,31 @@
         "'MediaAsset'이라고 부르지 않는다.",
         "영어 'source'를 원본 자산에 쓰지 않는다. provenance의 원본 참조는 original_asset_id다."
       ],
-      "forbidden": {"words": ["MediaAsset", "미디어 자산", "source_asset_id"], "code": ["MediaAsset"]},
-      "sources": ["사용자 결정: 원본 자산(Original Asset), 원본 자산에는 original", "docs/design/04-data-archive.md §4", "requirements ARC-001"],
+      "forbidden": {
+        "words": [
+          "MediaAsset",
+          "미디어 자산",
+          "source_asset_id"
+        ],
+        "code": [
+          "MediaAsset"
+        ]
+      },
+      "sources": [
+        "사용자 결정: 원본 자산(Original Asset), 원본 자산에는 original",
+        "docs/design/04-data-archive.md §4",
+        "requirements ARC-001"
+      ],
       "decided": "2026-10-20"
     },
     {
       "id": "input-file-observation",
       "layer": "product",
       "kind": "record",
-      "name": {"ko": "입력 파일 관찰", "en": "Input File Observation"},
+      "name": {
+        "ko": "입력 파일 관찰",
+        "en": "Input File Observation"
+      },
       "code_name": "InputFileObservation",
       "definition": "등록 Storage root 안의 파일을 읽기 전용으로 검사해 상대경로, 원래 이름, 크기, checksum과 작업 공간 드라이브를 남긴 추가 전용 기록.",
       "rules": [
@@ -885,19 +2845,35 @@
         "OriginalAsset 등록 전에 생성하며 원본 내용을 변경하지 않는다.",
         "같은 ID의 다른 내용으로 덮어쓰지 않는다."
       ],
-      "forbidden": {"words": [], "code": []},
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
       "relations": [
-        {"type": "refers-to", "target": "storage"},
-        {"type": "refers-to", "target": "workspace-drive"}
+        {
+          "type": "refers-to",
+          "target": "storage"
+        },
+        {
+          "type": "refers-to",
+          "target": "workspace-drive"
+        }
       ],
-      "sources": ["docs/design/08-event-storming.md §5", "docs/design/03-domain-workflow.md §1", "requirements INT-001, INT-003"],
+      "sources": [
+        "docs/design/08-event-storming.md §5",
+        "docs/design/03-domain-workflow.md §1",
+        "requirements INT-001, INT-003"
+      ],
       "decided": "2026-10-26"
     },
     {
       "id": "media-inspection",
       "layer": "product",
       "kind": "record",
-      "name": {"ko": "미디어 기술정보", "en": "Media Inspection"},
+      "name": {
+        "ko": "미디어 기술정보",
+        "en": "Media Inspection"
+      },
       "code_name": "MediaInspection",
       "definition": "원본 자산의 확정 checksum에 묶여 컨테이너, 길이, 크기와 video/audio stream 규격을 정규화해 남기는 추가 전용 기술정보 기록.",
       "rules": [
@@ -905,46 +2881,89 @@
         "다른 분석 도구 버전으로 다시 분석하면 기존 기록을 고치지 않고 새 기록을 추가한다.",
         "파일 경로나 ffprobe 원문을 검색 기준으로 삼지 않는다."
       ],
-      "forbidden": {"words": [], "code": []},
-      "relations": [{"type": "refers-to", "target": "original-asset"}],
-      "sources": ["docs/design/03-domain-workflow.md §1", "docs/design/04-data-archive.md §4", "requirements MED-001, MED-004"],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "original-asset"
+        }
+      ],
+      "sources": [
+        "docs/design/03-domain-workflow.md §1",
+        "docs/design/04-data-archive.md §4",
+        "requirements MED-001, MED-004"
+      ],
       "decided": "2026-10-26"
     },
     {
       "id": "repository",
       "layer": "dev",
       "kind": "entity",
-      "name": {"ko": "리포지토리", "en": "Repository"},
+      "name": {
+        "ko": "리포지토리",
+        "en": "Repository"
+      },
       "definition": "이 시스템의 코드, 설계 문서, 요구사항, 온톨로지를 담은 git 리포지토리.",
-      "rules": ["개발 층에서 '저장소'라고 쓰지 않는다. '저장소'는 제품의 Storage만 뜻한다."],
-      "forbidden": {"words": ["저장소"], "code": []},
-      "sources": ["사용자 결정: 개발 층은 리포지토리"],
+      "rules": [
+        "개발 층에서 '저장소'라고 쓰지 않는다. '저장소'는 제품의 Storage만 뜻한다."
+      ],
+      "forbidden": {
+        "words": [
+          "저장소"
+        ],
+        "code": []
+      },
+      "sources": [
+        "사용자 결정: 개발 층은 리포지토리"
+      ],
       "decided": "2026-10-20"
     },
     {
       "id": "artifact",
       "layer": "product",
       "kind": "entity",
-      "name": {"ko": "아티팩트", "en": "Artifact"},
+      "name": {
+        "ko": "아티팩트",
+        "en": "Artifact"
+      },
       "code_name": "Artifact",
       "definition": "처리로 만들어진 파생 파일. 원본 자산은 아티팩트가 아니다.",
       "rules": [
         "모든 아티팩트는 원본 자산에서 시작하는 provenance를 가진다.",
         "검증을 통과해 게시된 출력만 아티팩트다."
       ],
-      "forbidden": {"words": [], "code": []},
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
       "relations": [
-        {"type": "refers-to", "target": "original-asset"},
-        {"type": "refers-to", "target": "processing-kind"}
+        {
+          "type": "refers-to",
+          "target": "original-asset"
+        },
+        {
+          "type": "refers-to",
+          "target": "processing-kind"
+        }
       ],
-      "sources": ["사용자 결정: 아티팩트는 파생 파일만", "idea.md §5.1, §5.2", "docs/design/04-data-archive.md §2, §4"],
+      "sources": [
+        "사용자 결정: 아티팩트는 파생 파일만",
+        "idea.md §5.1, §5.2",
+        "docs/design/04-data-archive.md §2, §4"
+      ],
       "decided": "2026-10-20"
     },
     {
       "id": "transcript",
       "layer": "product",
       "kind": "entity",
-      "name": {"ko": "전사문", "en": "Transcript"},
+      "name": {
+        "ko": "전사문",
+        "en": "Transcript"
+      },
       "code_name": "Transcript",
       "definition": "STT가 AudioArtifact에서 인식해 게시한, 언어와 순서 있는 millisecond 시간 구간을 가진 구조화 아티팩트.",
       "rules": [
@@ -954,13 +2973,182 @@
         "게시 JSON에 Worker host 정보나 실제 모델 파일 경로를 포함하지 않는다.",
         "같은 OriginalAsset의 전사 검색은 가장 최근에 게시한 Transcript segment를 사용하고 파일 경로가 아닌 timecode를 반환한다."
       ],
-      "forbidden": {"words": [], "code": []},
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
       "relations": [
-        {"type": "is-a", "target": "artifact"},
-        {"type": "refers-to", "target": "profile"}
+        {
+          "type": "is-a",
+          "target": "artifact"
+        },
+        {
+          "type": "refers-to",
+          "target": "profile"
+        }
       ],
-      "sources": ["idea.md §4.2", "docs/design/03-domain-workflow.md §1", "requirements TRN-001, TRN-002, TRN-004, CAT-003"],
+      "sources": [
+        "idea.md §4.2",
+        "docs/design/03-domain-workflow.md §1",
+        "requirements TRN-001, TRN-002, TRN-004, CAT-003"
+      ],
       "decided": "2026-10-26"
+    },
+    {
+      "id": "transcript-quality-state",
+      "layer": "product",
+      "kind": "enum",
+      "name": {
+        "ko": "전사 품질 상태",
+        "en": "Transcript Quality State"
+      },
+      "code_name": "TranscriptQualityState",
+      "definition": "결정 규칙이 게시된 Transcript에 사람 검토를 권하는지 나타내는 값.",
+      "values": [
+        {
+          "id": "PASSED",
+          "description": "결정 규칙에서 검토 권장 사유가 발견되지 않았다."
+        },
+        {
+          "id": "REVIEW_RECOMMENDED",
+          "description": "결정 규칙에서 하나 이상의 검토 권장 사유가 발견됐다."
+        }
+      ],
+      "rules": [
+        "PASSED는 사유가 없고 REVIEW_RECOMMENDED는 하나 이상의 TranscriptQualityReason을 가진다."
+      ],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "part-of",
+          "target": "transcript-quality-assessment"
+        }
+      ],
+      "sources": [
+        "사용자 결정: 사람 검토가 필요한 STT 결과를 아카이브 작업 공간에 피드백",
+        "requirements TRN-007, DSH-018",
+        "docs/design/03-domain-workflow.md §1",
+        "docs/design/09-archive-workspace.md §7"
+      ],
+      "decided": "2026-11-02"
+    },
+    {
+      "id": "transcript-quality-reason",
+      "layer": "product",
+      "kind": "enum",
+      "name": {
+        "ko": "전사 품질 사유",
+        "en": "Transcript Quality Reason"
+      },
+      "code_name": "TranscriptQualityReason",
+      "definition": "TranscriptQualityState.REVIEW_RECOMMENDED가 된 결정적 관찰 사유.",
+      "values": [
+        {
+          "id": "SEGMENT_TOO_LONG",
+          "description": "한 시간 구간이 policy 상한보다 길다."
+        },
+        {
+          "id": "LOW_TEXT_DENSITY",
+          "description": "최소 길이 이상의 결과에서 초당 문자 수가 policy 하한보다 작다."
+        }
+      ],
+      "rules": [
+        "v1 사유는 Transcript 시간 구간과 문자 수만으로 계산하며 파일명이나 문장 의미를 사용하지 않는다."
+      ],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "part-of",
+          "target": "transcript-quality-assessment"
+        }
+      ],
+      "sources": [
+        "requirements TRN-007, DSH-018",
+        "docs/design/03-domain-workflow.md §1"
+      ],
+      "decided": "2026-11-02"
+    },
+    {
+      "id": "transcript-quality-assessment",
+      "layer": "product",
+      "kind": "record",
+      "name": {
+        "ko": "전사 품질 판정",
+        "en": "Transcript Quality Assessment"
+      },
+      "code_name": "TranscriptQualityAssessment",
+      "definition": "게시된 Transcript의 시간 구간과 문자 수를 versioned 결정 규칙으로 평가해 사람 검토 권장 여부를 남기는 Worker 출력 기록.",
+      "rules": [
+        "전사 품질 판정은 STT 성공·실패나 Job 완료 상태를 바꾸지 않고 확인 필요 신호만 만든다.",
+        "전사 품질 판정은 사람의 ContentReview가 아니며 사람이 확인한 사실을 뜻하지 않는다.",
+        "화면은 저장된 상태·사유·길이·구간 수·문자 수만 표시하고 전사문이나 파일명에서 품질을 다시 추론하지 않는다."
+      ],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "transcript"
+        },
+        {
+          "type": "refers-to",
+          "target": "transcript-quality-state"
+        },
+        {
+          "type": "refers-to",
+          "target": "transcript-quality-reason"
+        }
+      ],
+      "sources": [
+        "사용자 결정: 사람 검토가 필요한 STT 결과를 아카이브 작업 공간에 피드백",
+        "requirements TRN-007, DSH-018",
+        "docs/design/03-domain-workflow.md §1",
+        "docs/design/09-archive-workspace.md §7"
+      ],
+      "decided": "2026-11-02"
+    },
+    {
+      "id": "transcript-text",
+      "layer": "product",
+      "kind": "entity",
+      "name": {
+        "ko": "전사 텍스트",
+        "en": "Transcript Text"
+      },
+      "code_name": "TranscriptText",
+      "definition": "구조화 Transcript의 시간순 segment text를 사람이 일반 편집기로 읽을 수 있게 UTF-8 plain text로 직렬화한 파생 아티팩트.",
+      "rules": [
+        "원본 STT 결과나 시간 구간을 대신하지 않고 같은 Transcript를 provenance로 참조한다.",
+        "ArchivePackage의 2단계 리비전에 transcript.txt 이름으로 포함한다.",
+        "segment text를 시간순으로 기록하며 모델 경로·Host 정보·credential을 넣지 않는다."
+      ],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "is-a",
+          "target": "artifact"
+        },
+        {
+          "type": "refers-to",
+          "target": "transcript"
+        }
+      ],
+      "sources": [
+        "사용자 플로우: 내용 텍스트파일까지 함께 저장",
+        "사용자 결정 Q9: 권장안으로 테스트 버전 진행"
+      ],
+      "decided": "2026-10-31"
     },
     {
       "id": "subtitle",
@@ -1015,7 +3203,7 @@
       "rules": [
         "공통 파일 생애주기·checksum·provenance는 Artifact가 소유하고 요약 구조와 리비전은 Summary가 소유한다.",
         "Summary provenance는 입력 Transcript 하나를 명시하고 Transcript 원문을 덮어쓰지 않는다.",
-        "작성 주체는 Agent 또는 사람이며 AI 사용 불가 시 사람 폴백으로 같은 구조를 게시할 수 있다.",
+        "작성 주체는 Archivist 또는 사람이며 AI 사용 불가 시 사람 폴백으로 같은 구조를 게시할 수 있다.",
         "챕터는 Transcript 시간 범위 안에서 순서가 있고 겹치지 않는다.",
         "사람의 ContentReview는 Summary ID와 리비전을 참조하는 별도 추가 전용 기록이며 Summary와 함께 SQLite에서 복원된다."
       ],
@@ -1052,7 +3240,10 @@
       "id": "audio-artifact",
       "layer": "product",
       "kind": "entity",
-      "name": {"ko": "오디오 아티팩트", "en": "Audio Artifact"},
+      "name": {
+        "ko": "오디오 아티팩트",
+        "en": "Audio Artifact"
+      },
       "code_name": "AudioArtifact",
       "definition": "원본 자산에서 versioned Audio Extraction Profile로 추출해 게시한 STT 입력용 파생 오디오 파일.",
       "rules": [
@@ -1060,19 +3251,35 @@
         "원본 자산·Profile·처리기·Worker와 checksum provenance를 가진다.",
         "Transcript가 참조하는 직접 입력 아티팩트다."
       ],
-      "forbidden": {"words": [], "code": []},
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
       "relations": [
-        {"type": "is-a", "target": "artifact"},
-        {"type": "refers-to", "target": "profile"}
+        {
+          "type": "is-a",
+          "target": "artifact"
+        },
+        {
+          "type": "refers-to",
+          "target": "profile"
+        }
       ],
-      "sources": ["idea.md §4.2", "docs/design/03-domain-workflow.md §1", "requirements AUD-001, AUD-002"],
+      "sources": [
+        "idea.md §4.2",
+        "docs/design/03-domain-workflow.md §1",
+        "requirements AUD-001, AUD-002"
+      ],
       "decided": "2026-10-26"
     },
     {
       "id": "rendition",
       "layer": "product",
       "kind": "entity",
-      "name": {"ko": "렌더 결과", "en": "Rendition"},
+      "name": {
+        "ko": "렌더 결과",
+        "en": "Rendition"
+      },
       "code_name": "Rendition",
       "definition": "렌더 엔진이 원본 자산이나 타임라인을 렌더 프로파일로 처리해 만든 영상 아티팩트.",
       "rules": [
@@ -1080,39 +3287,71 @@
         "'프록시'는 proxy 프로파일로 만든 렌더 결과, '아카이브 렌더본'은 archive 프로파일로 만든 렌더 결과를 부르는 말이다.",
         "검증된 임시 출력만 게시하며 Profile·처리기·Worker와 checksum을 provenance에 남긴다."
       ],
-      "forbidden": {"words": [], "code": []},
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
       "relations": [
-        {"type": "is-a", "target": "artifact"},
-        {"type": "refers-to", "target": "profile"}
+        {
+          "type": "is-a",
+          "target": "artifact"
+        },
+        {
+          "type": "refers-to",
+          "target": "profile"
+        }
       ],
-      "sources": ["사용자 결정: 모두 렌더 결과 + 프로파일로 구분", "idea.md §4.1", "requirements RND-002"],
+      "sources": [
+        "사용자 결정: 모두 렌더 결과 + 프로파일로 구분",
+        "idea.md §4.1",
+        "requirements RND-002"
+      ],
       "decided": "2026-10-20"
     },
     {
       "id": "catalog-record",
       "layer": "product",
       "kind": "record",
-      "name": {"ko": "카탈로그 기록", "en": "Catalog Record"},
+      "name": {
+        "ko": "카탈로그 기록",
+        "en": "Catalog Record"
+      },
       "code_name": "CatalogRecord",
-      "definition": "OriginalAsset의 제목, 설명과 검색 키워드를 리비전별로 남긴 사람 또는 Agent 작성의 추가 전용 기록.",
+      "definition": "OriginalAsset의 제목, 설명과 검색 키워드를 리비전별로 남긴 사람 또는 Archivist 작성의 추가 전용 기록.",
       "rules": [
         "파일 위치를 소유하거나 바꾸지 않는다.",
-        "작성자 유형과 식별자를 남기며 Agent 작성 설명을 사람 작성 사실과 구분한다.",
+        "작성자 유형과 식별자를 남기며 Archivist 작성 설명을 사람 작성 사실과 구분한다.",
         "검색은 가장 큰 리비전의 기록을 현재 설명으로 투영한다."
       ],
-      "forbidden": {"words": [], "code": []},
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
       "relations": [
-        {"type": "refers-to", "target": "original-asset"},
-        {"type": "refers-to", "target": "actor-type"}
+        {
+          "type": "refers-to",
+          "target": "original-asset"
+        },
+        {
+          "type": "refers-to",
+          "target": "actor-type"
+        }
       ],
-      "sources": ["idea.md §4", "docs/design/03-domain-workflow.md §1", "requirements CAT-001, CAT-002"],
+      "sources": [
+        "idea.md §4",
+        "docs/design/03-domain-workflow.md §1",
+        "requirements CAT-001, CAT-002"
+      ],
       "decided": "2026-10-26"
     },
     {
       "id": "qc-assessment",
       "layer": "product",
       "kind": "record",
-      "name": {"ko": "QC 평가", "en": "QC Assessment"},
+      "name": {
+        "ko": "QC 평가",
+        "en": "QC Assessment"
+      },
       "code_name": "QCAssessment",
       "definition": "게시된 렌더 결과를 독립 관찰해 원본 기술정보와 렌더 Profile에 맞는지 필수 검사별로 판정한 추가 전용 기록.",
       "rules": [
@@ -1120,149 +3359,368 @@
         "모든 필수 검사가 통과해야 PASSED이며 실패 검사도 기대값과 실제값을 남긴다.",
         "QCReport는 QC 평가를 provenance와 함께 게시한 sidecar 아티팩트다."
       ],
-      "forbidden": {"words": [], "code": []},
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
       "relations": [
-        {"type": "refers-to", "target": "rendition"},
-        {"type": "refers-to", "target": "media-inspection"},
-        {"type": "refers-to", "target": "profile"}
+        {
+          "type": "refers-to",
+          "target": "rendition"
+        },
+        {
+          "type": "refers-to",
+          "target": "media-inspection"
+        },
+        {
+          "type": "refers-to",
+          "target": "profile"
+        }
       ],
-      "sources": ["docs/design/03-domain-workflow.md §1", "requirements QCT-001, QCT-002"],
+      "sources": [
+        "docs/design/03-domain-workflow.md §1",
+        "requirements QCT-001, QCT-002"
+      ],
       "decided": "2026-10-26"
     },
     {
       "id": "qc-report",
       "layer": "product",
       "kind": "entity",
-      "name": {"ko": "QC 보고서", "en": "QC Report"},
+      "name": {
+        "ko": "QC 보고서",
+        "en": "QC Report"
+      },
       "code_name": "QCReport",
       "definition": "통합 QC 단계가 만든 검증 결과 파일. 아카이브 패키지에 들어가며 아카이브 확정 판단에 쓰인다.",
-      "rules": ["QC 보고서는 provenance를 가진 아티팩트이면서 증적이다."],
-      "forbidden": {"words": [], "code": []},
-      "relations": [
-        {"type": "is-a", "target": "artifact"},
-        {"type": "is-a", "target": "evidence"}
+      "rules": [
+        "QC 보고서는 provenance를 가진 아티팩트이면서 증적이다."
       ],
-      "sources": ["사용자 결정: QC 보고서는 아티팩트이자 증적", "requirements ARC-004"],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "is-a",
+          "target": "artifact"
+        },
+        {
+          "type": "is-a",
+          "target": "evidence"
+        }
+      ],
+      "sources": [
+        "사용자 결정: QC 보고서는 아티팩트이자 증적",
+        "requirements ARC-004"
+      ],
       "decided": "2026-10-20"
     },
     {
       "id": "archive-copy",
       "layer": "product",
       "kind": "entity",
-      "name": {"ko": "아카이브 사본", "en": "Archive Copy"},
+      "name": {
+        "ko": "아카이브 사본",
+        "en": "Archive Copy"
+      },
       "code_name": "ArchiveCopy",
       "definition": "아카이브 패키지 하나가 저장소 하나에 놓인 한 벌.",
       "rules": [
         "주본은 StorageRole.ARCHIVE_PRIMARY 저장소에 놓인 사본, 복제본은 ARCHIVE_MIRROR나 BACKUP_OFFSITE 저장소에 놓인 사본이다. Copy Role을 따로 두지 않는다.",
         "사본이 놓인 곳은 storage_id로 나타낸다. '위치(Location)'라는 개념을 두지 않는다."
       ],
-      "forbidden": {"words": ["Copy Role", "Archive Location", "아카이브 위치"], "code": ["ArchiveLocation"]},
+      "forbidden": {
+        "words": [
+          "Copy Role",
+          "Archive Location",
+          "아카이브 위치"
+        ],
+        "code": [
+          "ArchiveLocation"
+        ]
+      },
       "relations": [
-        {"type": "refers-to", "target": "archive-package"},
-        {"type": "refers-to", "target": "storage"}
+        {
+          "type": "refers-to",
+          "target": "archive-package"
+        },
+        {
+          "type": "refers-to",
+          "target": "storage"
+        }
       ],
-      "sources": ["사용자 결정: 사본 + 저장소 역할로 구분, Location 두지 않음"],
+      "sources": [
+        "사용자 결정: 사본 + 저장소 역할로 구분, Location 두지 않음"
+      ],
       "decided": "2026-10-20"
     },
     {
       "id": "intake-copy",
       "layer": "product",
       "kind": "entity",
-      "name": {"ko": "입고 사본", "en": "Intake Copy"},
+      "name": {
+        "ko": "입고 사본",
+        "en": "Intake Copy"
+      },
       "code_name": "IntakeCopy",
       "definition": "등록된 입력 Storage의 대용량 원본 파일을 작업 공간 드라이브로 복사해 체크섬을 확인한 원본 자산의 한 벌. 아카이브 패키지가 생기기 전의 사본이다.",
-      "rules": ["대용량 파일 입고 템플릿의 단계 이름은 copy_first, verify_first, copy_second, verify_second이며 아카이브 주본·복제본과 구분한다."],
-      "forbidden": {"words": [], "code": []},
-      "relations": [
-        {"type": "refers-to", "target": "original-asset"},
-        {"type": "refers-to", "target": "workspace-drive"},
-        {"type": "refers-to", "target": "storage"}
+      "rules": [
+        "대용량 파일 입고 템플릿의 단계 이름은 copy_first, verify_first, copy_second, verify_second이며 아카이브 주본·복제본과 구분한다."
       ],
-      "sources": ["사용자 결정: 입고 사본 + 단계 이름 변경"],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "original-asset"
+        },
+        {
+          "type": "refers-to",
+          "target": "workspace-drive"
+        },
+        {
+          "type": "refers-to",
+          "target": "storage"
+        }
+      ],
+      "sources": [
+        "사용자 결정: 입고 사본 + 단계 이름 변경"
+      ],
       "decided": "2026-10-20"
     },
     {
       "id": "archive-package",
       "layer": "product",
       "kind": "entity",
-      "name": {"ko": "아카이브 패키지", "en": "Archive Package"},
+      "name": {
+        "ko": "아카이브 패키지",
+        "en": "Archive Package"
+      },
       "code_name": "ArchivePackage",
-      "definition": "원본 자산, 아티팩트, sidecar를 묶은 보존 단위. 식별자는 VP-YYYYMMDD-NNNN 형식이다.",
+      "definition": "중앙 DB 없이도 metadata·파일 목록·event·manifest로 복원할 수 있는 기록물 보관 단위. 식별자는 VP-YYYYMMDD-NNNN 형식이다.",
       "rules": [
-        "확정 후에는 고치지 않는다. 고쳐야 하면 새 패키지가 이전 패키지를 대체한다.",
-        "패키지 안 archive/ 폴더는 archive 프로파일 렌더 결과, proxy/ 폴더는 proxy 프로파일 렌더 결과를 담는다."
+        "ARCHIVE_PRIMARY의 한 벌이 검증되면 보관됨이며 확정 전 파일 추가는 manifest가 다른 새 리비전으로 남긴다.",
+        "아카이브 확정 후에는 고치지 않는다. 고쳐야 하면 새 패키지가 이전 패키지를 대체한다.",
+        "Archive Intake에서는 결과 영상 하나당 패키지 하나를 만들고 SOURCE_MEDIA 원본 파일은 넣지 않으며 원본 추적 metadata만 포함한다."
       ],
-      "forbidden": {"words": ["보존 패키지"], "code": []},
+      "forbidden": {
+        "words": [
+          "보존 패키지"
+        ],
+        "code": []
+      },
       "relations": [
-        {"type": "refers-to", "target": "original-asset"},
-        {"type": "refers-to", "target": "artifact"}
+        {
+          "type": "refers-to",
+          "target": "original-asset"
+        },
+        {
+          "type": "refers-to",
+          "target": "artifact"
+        }
       ],
-      "sources": ["사용자 결정: 아카이브 패키지 + 아카이브 확정, 폴더 archive/는 유지", "docs/design/04-data-archive.md §6"],
-      "decided": "2026-10-20"
+      "sources": [
+        "사용자 결정 D5~D6: 한 벌 보관과 확정을 분리하고 DB 독립 패키지 사용",
+        "docs/design/04-data-archive.md §6"
+      ],
+      "decided": "2026-10-31"
+    },
+    {
+      "id": "archive-package-state",
+      "layer": "product",
+      "kind": "state-set",
+      "name": {
+        "ko": "아카이브 패키지 상태",
+        "en": "Archive Package State"
+      },
+      "code_name": "ArchivePackageState",
+      "definition": "ArchivePackage 한 벌의 검증 게시와 보존 확정 단계를 구분하는 상태 집합.",
+      "values": [
+        {
+          "id": "STORED",
+          "description": "ARCHIVE_PRIMARY에 패키지 한 벌이 검증되어 보관됨. 확정 전에는 새 리비전으로 파일을 추가할 수 있다."
+        },
+        {
+          "id": "COMMITTED",
+          "description": "ARC-004의 복제본 검증과 사람 승인을 충족해 확정됨. 이후 같은 패키지 리비전을 고치지 않는다."
+        }
+      ],
+      "rules": [
+        "보관됨을 확정됨이나 복제 완료로 표시하지 않는다."
+      ],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "archive-package"
+        }
+      ],
+      "sources": [
+        "사용자 결정 D5: 한 벌 보관과 아카이브 확정 분리"
+      ],
+      "decided": "2026-10-31"
     },
     {
       "id": "archive-commit",
       "layer": "product",
       "kind": "activity",
-      "name": {"ko": "아카이브 확정", "en": "Archive Commit"},
+      "name": {
+        "ko": "아카이브 확정",
+        "en": "Archive Commit"
+      },
       "code_name": "ArchiveCommit",
       "definition": "아카이브 패키지를 보존 완료로 표시하는 것. 확정 후에는 패키지를 고치지 않는다.",
       "rules": [
         "영어 'commit'은 아카이브 확정과 git 커밋에만 쓴다.",
         "템플릿의 확정 단계 이름은 commit_archive다."
       ],
-      "forbidden": {"words": ["커밋"], "code": []},
-      "relations": [{"type": "refers-to", "target": "archive-package"}],
-      "sources": ["사용자 결정: 아카이브 패키지 + 아카이브 확정, 단계 이름 commit_archive"],
+      "forbidden": {
+        "words": [
+          "커밋"
+        ],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "archive-package"
+        }
+      ],
+      "sources": [
+        "사용자 결정: 아카이브 패키지 + 아카이브 확정, 단계 이름 commit_archive"
+      ],
       "decided": "2026-10-20"
     },
     {
       "id": "git-commit",
       "layer": "dev",
       "kind": "activity",
-      "name": {"ko": "커밋", "en": "Git Commit"},
+      "name": {
+        "ko": "커밋",
+        "en": "Git Commit"
+      },
       "definition": "리포지토리에 변경을 기록하는 git commit.",
-      "forbidden": {"words": ["확정"], "code": []},
-      "relations": [{"type": "refers-to", "target": "repository"}],
-      "sources": ["사용자 결정: git commit은 한국어로 '커밋'"],
+      "forbidden": {
+        "words": [
+          "확정"
+        ],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "repository"
+        }
+      ],
+      "sources": [
+        "사용자 결정: git commit은 한국어로 '커밋'"
+      ],
       "decided": "2026-10-20"
     },
     {
       "id": "action-class",
       "layer": "product",
       "kind": "enum",
-      "name": {"ko": "권한 등급", "en": "Action Class"},
+      "name": {
+        "ko": "권한 등급",
+        "en": "Action Class"
+      },
       "code_name": "ActionClass",
       "definition": "명령이 권한 판정에서 속하는 등급.",
       "values": [
-        {"id": "READ", "description": "상태, 로그, 기술정보, 검색 같은 조회."},
-        {"id": "PROCESS", "description": "프록시, STT, 썸네일, 재검증 같은 처리."},
-        {"id": "GATED", "description": "사람의 승인이 있어야 실행되는 변경. 아카이브 확정과 계획 변경이 여기에 속한다."},
-        {"id": "DESTRUCTIVE", "description": "포맷, 원본 삭제, 기존 아카이브 대체."},
-        {"id": "MANAGE", "description": "Provider 계정, Worker, 보안 설정 관리."}
+        {
+          "id": "READ",
+          "description": "상태, 로그, 기술정보, 검색 같은 조회."
+        },
+        {
+          "id": "PROCESS",
+          "description": "프록시, STT, 썸네일, 재검증 같은 처리."
+        },
+        {
+          "id": "GATED",
+          "description": "사람의 승인이 있어야 실행되는 변경. 아카이브 확정과 계획 변경이 여기에 속한다."
+        },
+        {
+          "id": "DESTRUCTIVE",
+          "description": "포맷, 원본 삭제, 기존 아카이브 대체."
+        },
+        {
+          "id": "MANAGE",
+          "description": "Provider 계정, Worker, 보안 설정 관리. v1에서는 원격 Action으로 허용하지 않고 로컬 설정 권한이 소유한다."
+        }
       ],
-      "rules": ["'commit'이라는 등급 이름을 쓰지 않는다."],
-      "forbidden": {"words": [], "code": []},
-      "sources": ["사용자 결정: ActionClass.GATED", "idea.md §7.2", "internal/core/security/policy.go Action"],
+      "rules": [
+        "'commit'이라는 등급 이름을 쓰지 않는다.",
+        "v1의 MANAGE 요청은 모든 Principal에 대해 거부한다."
+      ],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "sources": [
+        "사용자 결정: ActionClass.GATED",
+        "idea.md §7.2",
+        "internal/core/security/policy.go Action"
+      ],
       "decided": "2026-10-20"
     },
     {
       "id": "processing-kind",
       "layer": "product",
       "kind": "enum",
-      "name": {"ko": "처리 종류", "en": "Processing Kind"},
+      "name": {
+        "ko": "처리 종류",
+        "en": "Processing Kind"
+      },
       "code_name": "ProcessingKind",
       "definition": "시스템이 수행하는 처리의 종류. Worker가 지원하는 것, StepDefinition이 필요로 하는 것, 아티팩트를 만든 것을 같은 어휘로 나타낸다.",
       "values": [
-        {"id": "INSPECT", "description": "미디어 기술정보를 추출한다. ffprobe는 이를 구현하는 도구다."},
-        {"id": "RENDER", "description": "렌더 프로파일로 렌더 결과를 만든다."},
-        {"id": "THUMBNAIL", "description": "썸네일과 대표 이미지를 만든다."},
-        {"id": "AUDIO_EXTRACT", "description": "STT를 위해 오디오를 추출한다."},
-        {"id": "STT", "description": "음성을 전사한다."},
-        {"id": "SUMMARY", "description": "전사문을 요약하고 키워드를 뽑는다. Worker가 아니라 Agent Gateway가 수행한다."},
-        {"id": "QC", "description": "재생, 길이, 싱크, 손상, 무음과 블랙 구간을 검사한다."},
-        {"id": "CHECKSUM", "description": "파일 체크섬을 계산하고 검증한다."},
-        {"id": "DEVICE", "description": "장치 어댑터로 외장 장치를 다룬다."}
+        {
+          "id": "INSPECT",
+          "description": "미디어 기술정보를 추출한다. ffprobe는 이를 구현하는 도구다."
+        },
+        {
+          "id": "RENDER",
+          "description": "렌더 프로파일로 렌더 결과를 만든다."
+        },
+        {
+          "id": "THUMBNAIL",
+          "description": "썸네일과 대표 이미지를 만든다."
+        },
+        {
+          "id": "AUDIO_EXTRACT",
+          "description": "STT를 위해 오디오를 추출한다."
+        },
+        {
+          "id": "STT",
+          "description": "음성을 전사한다."
+        },
+        {
+          "id": "SUMMARY",
+          "description": "전사문을 요약하고 키워드를 뽑는다. Worker가 아니라 Archivist Gateway가 수행한다."
+        },
+        {
+          "id": "QC",
+          "description": "재생, 길이, 싱크, 손상, 무음과 블랙 구간을 검사한다."
+        },
+        {
+          "id": "CHECKSUM",
+          "description": "파일 체크섬을 계산하고 검증한다."
+        },
+        {
+          "id": "DEVICE",
+          "description": "장치 어댑터로 외장 장치를 다룬다."
+        },
+        {
+          "id": "ORGANIZE",
+          "description": "검증된 영상을 정리 묶음으로 복사·게시하고 ArchiveCatalog를 만든다."
+        }
       ],
       "rules": [
         "Worker는 지원하는 처리 종류 목록을 가진다. 'capability'라는 말을 Worker에 쓰지 않는다.",
@@ -1270,132 +3728,274 @@
         "아티팩트의 provenance는 그것을 만든 처리 종류와 처리기 버전을 기록한다.",
         "처리 종류는 도구 이름이 아니라 처리 이름이다. 도구를 바꿔도 처리 종류는 유지된다."
       ],
-      "forbidden": {"words": ["Worker Capability", "실행 기능"], "code": []},
-      "sources": ["사용자 결정: 처리 종류(Processing Kind), provenance도 처리 종류로 통일, FFPROBE는 INSPECT로, THUMBNAIL·AUDIO_EXTRACT·QC·SUMMARY 추가", "config.example.yaml workers.capabilities", "internal/core/archive/archive.go Provenance"],
+      "forbidden": {
+        "words": [
+          "Worker Capability",
+          "실행 기능"
+        ],
+        "code": []
+      },
+      "sources": [
+        "사용자 결정: 처리 종류(Processing Kind), provenance도 처리 종류로 통일, FFPROBE는 INSPECT로, THUMBNAIL·AUDIO_EXTRACT·QC·SUMMARY 추가",
+        "config.example.yaml workers.capabilities",
+        "internal/core/archive/archive.go Provenance"
+      ],
       "decided": "2026-10-20"
     },
     {
       "id": "resource-class",
       "layer": "product",
       "kind": "enum",
-      "name": {"ko": "자원 분류", "en": "Resource Class"},
+      "name": {
+        "ko": "자원 분류",
+        "en": "Resource Class"
+      },
       "code_name": "ResourceClass",
       "definition": "Step이 Worker PC의 자원을 얼마나 점유하는지 나타내며 스케줄러의 동시 실행과 유휴 정책을 선택하는 값.",
       "values": [
-        {"id": "HEAVY", "description": "렌더·STT·대용량 checksum처럼 CPU·GPU·디스크를 크게 사용하는 단계."},
-        {"id": "LIGHT", "description": "inspect·thumbnail처럼 제한된 자원으로 병렬 실행 가능한 단계."},
-        {"id": "CONTROL", "description": "상태 기록·사람 입력·gate처럼 미디어 subprocess를 실행하지 않는 단계."}
+        {
+          "id": "HEAVY",
+          "description": "렌더·STT·대용량 checksum처럼 CPU·GPU·디스크를 크게 사용하는 단계."
+        },
+        {
+          "id": "LIGHT",
+          "description": "inspect·thumbnail처럼 제한된 자원으로 병렬 실행 가능한 단계."
+        },
+        {
+          "id": "CONTROL",
+          "description": "상태 기록·명시적 입력·gate처럼 미디어 subprocess를 실행하지 않는 단계."
+        }
       ],
-      "rules": ["자원 분류는 실행 주체와 다른 축이다. Agent Gateway 단계도 LIGHT일 수 있다."],
-      "forbidden": {"words": [], "code": []},
-      "relations": [{"type": "part-of", "target": "step-definition"}],
-      "sources": ["docs/design/05-runtime-deployment.md §1", "requirements PIP-005", "internal/core/vocabulary/vocabulary.go"],
+      "rules": [
+        "자원 분류는 실행 주체와 다른 축이다. Archivist Gateway 단계도 LIGHT일 수 있다."
+      ],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "part-of",
+          "target": "step-definition"
+        }
+      ],
+      "sources": [
+        "docs/design/05-runtime-deployment.md §1",
+        "requirements PIP-005",
+        "internal/core/vocabulary/vocabulary.go"
+      ],
       "decided": "2026-10-22"
     },
     {
       "id": "executor-kind",
       "layer": "product",
       "kind": "enum",
-      "name": {"ko": "실행 주체 종류", "en": "Executor Kind"},
+      "name": {
+        "ko": "실행 주체 종류",
+        "en": "Executor Kind"
+      },
       "code_name": "ExecutorKind",
       "definition": "StepDefinition을 실제로 수행하거나 완료시키는 시스템 경계를 나타내는 값.",
       "values": [
-        {"id": "WORKER", "description": "등록된 Worker가 처리 종류에 해당하는 도메인 기능을 실행한다."},
-        {"id": "AGENT_GATEWAY", "description": "외부 AI Provider를 Agent Gateway 경유로 사용한다."},
-        {"id": "CONTROL", "description": "Control Service가 상태·기록·조정을 수행한다."},
-        {"id": "HUMAN", "description": "담당자가 대시보드에서 검수·선택·승인을 기록한다."}
+        {
+          "id": "WORKER",
+          "description": "등록된 Worker가 처리 종류에 해당하는 도메인 기능을 실행한다."
+        },
+        {
+          "id": "ARCHIVIST_GATEWAY",
+          "description": "외부 AI Provider를 Archivist Gateway 경유로 사용한다."
+        },
+        {
+          "id": "CONTROL",
+          "description": "Archive Control가 상태·기록·조정을 수행한다."
+        },
+        {
+          "id": "HUMAN",
+          "description": "담당자가 아카이브 작업 공간이나 API에서 검수·선택·승인을 기록한다."
+        }
       ],
       "rules": [
         "ResourceClass와 ProcessingKind로 실행 주체를 추론하지 않는다.",
-        "AGENT_GATEWAY 단계는 AI 사용 불가 시 HUMAN 또는 CONTROL 폴백 정책을 선언한다.",
-        "ProcessingKind.SUMMARY의 기본 실행 주체는 AGENT_GATEWAY다."
+        "ARCHIVIST_GATEWAY 단계는 AI 사용 불가 시 HUMAN 또는 CONTROL 폴백 정책을 선언한다.",
+        "ProcessingKind.SUMMARY의 기본 실행 주체는 ARCHIVIST_GATEWAY다."
       ],
-      "forbidden": {"words": [], "code": []},
-      "relations": [{"type": "part-of", "target": "step-definition"}],
-      "sources": ["requirements PIP-006", "internal/core/pipeline/templates.go", "internal/core/vocabulary/vocabulary.go"],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "part-of",
+          "target": "step-definition"
+        }
+      ],
+      "sources": [
+        "requirements PIP-006",
+        "internal/core/pipeline/templates.go",
+        "internal/core/vocabulary/vocabulary.go"
+      ],
       "decided": "2026-10-22"
     },
     {
       "id": "model-feature",
       "layer": "product",
       "kind": "enum",
-      "name": {"ko": "모델 기능", "en": "Model Feature"},
+      "name": {
+        "ko": "모델 기능",
+        "en": "Model Feature"
+      },
       "code_name": "ModelFeature",
-      "definition": "Provider 모델이 지원하는 기능. Agent Router가 계정을 고를 때 본다.",
+      "definition": "Provider 모델이 지원하는 기능. Archivist Router가 계정을 고를 때 본다.",
       "values": [
-        {"id": "TOOLS", "description": "도구 호출을 지원한다."},
-        {"id": "VISION", "description": "이미지 입력을 지원한다."}
+        {
+          "id": "TOOLS",
+          "description": "도구 호출을 지원한다."
+        },
+        {
+          "id": "VISION",
+          "description": "이미지 입력을 지원한다."
+        }
       ],
-      "forbidden": {"words": ["Model Capability"], "code": []},
-      "sources": ["사용자 결정: 모델 기능(Model Feature)", "internal/core/agent/agent.go Account.Capabilities"],
+      "forbidden": {
+        "words": [
+          "Model Capability"
+        ],
+        "code": []
+      },
+      "sources": [
+        "사용자 결정: 모델 기능(Model Feature)",
+        "internal/core/archivist/archivist.go Account.Capabilities"
+      ],
       "decided": "2026-10-20"
     },
     {
       "id": "profile",
       "layer": "product",
       "kind": "entity",
-      "name": {"ko": "프로파일", "en": "Profile"},
+      "name": {
+        "ko": "프로파일",
+        "en": "Profile"
+      },
       "code_name": "Profile",
       "definition": "처리 하나를 어떻게 실행할지 정한, 이름과 버전이 있는 파라미터 묶음. 렌더, STT, 포맷 프로파일이 있다.",
-      "rules": ["'권한 프로파일'은 권한 정책, 'Provider 프로파일'은 Provider 계정이라고 부른다.", "렌더 Profile은 codec과 자원 제한을 포함하며 판이 바뀌면 버전을 올린다.", "Audio Extraction Profile은 STT 입력 codec·sample rate·channel·thread 상한을 고정한다.", "STT Profile은 모델 식별자·언어·thread 상한을 포함하고 실제 모델 파일 경로는 Adapter 입력으로 분리한다."],
-      "forbidden": {"words": ["권한 프로파일", "Provider 프로파일", "제공자 프로파일"], "code": []},
-      "relations": [{"type": "refers-to", "target": "processing-kind"}],
-      "sources": ["사용자 결정: 프로파일은 실행 파라미터 묶음만", "idea.md §4.1, §13", "requirements RND-001, AUD-001, TRN-001"],
+      "rules": [
+        "'권한 프로파일'은 권한 정책, 'Provider 프로파일'은 Provider 계정이라고 부른다.",
+        "렌더 Profile은 codec과 자원 제한을 포함하며 판이 바뀌면 버전을 올린다.",
+        "Audio Extraction Profile은 STT 입력 codec·sample rate·channel·thread 상한을 고정한다.",
+        "STT Profile은 모델 식별자·언어·thread 상한을 포함하고 실제 모델 파일 경로는 Adapter 입력으로 분리한다."
+      ],
+      "forbidden": {
+        "words": [
+          "권한 프로파일",
+          "Provider 프로파일",
+          "제공자 프로파일"
+        ],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "processing-kind"
+        }
+      ],
+      "sources": [
+        "사용자 결정: 프로파일은 실행 파라미터 묶음만",
+        "idea.md §4.1, §13",
+        "requirements RND-001, AUD-001, TRN-001"
+      ],
       "decided": "2026-10-20"
     },
     {
       "id": "policy",
       "layer": "product",
       "kind": "policy",
-      "name": {"ko": "정책", "en": "Policy"},
+      "name": {
+        "ko": "정책",
+        "en": "Policy"
+      },
       "code_name": "Policy",
       "definition": "무엇이 허용되고 금지되는지 정한 규칙. 프로파일과 달리 '어떻게 실행할지'가 아니라 '해도 되는가'를 정한다.",
       "includes": [
         "boot 정책: 시작 설정으로만 켜고 끄는 기능 허용(포맷, 원본 삭제, 기존 아카이브 대체)",
-        "자동화 정책: 에이전트가 승인 없이 요청할 수 있는 처리의 범위",
+        "Archivist 직접 실행 정책: 설정값이 아니라 Session에 저장된 제어 모드, ActionClass와 인증된 MCP allowlist 경로를 조합한 판정",
         "라우팅 정책: Provider 계정을 고르는 규칙",
         "데이터 반출 정책: Provider로 보낼 수 있는 데이터 등급",
         "보존 정책: 원본과 사본의 보존 기간과 필요한 사본 수"
       ],
-      "forbidden": {"words": [], "code": []},
-      "sources": ["사용자 결정: 정책은 허용·금지 규칙", "idea.md §7.3, §14", "docs/design/06-agent-security.md"],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "sources": [
+        "사용자 결정: 정책은 허용·금지 규칙",
+        "idea.md §7.3, §14",
+        "docs/design/06-archivist-security.md"
+      ],
       "decided": "2026-10-20"
     },
     {
       "id": "reason",
       "layer": "shared",
       "kind": "value",
-      "name": {"ko": "사유", "en": "Reason"},
+      "name": {
+        "ko": "사유",
+        "en": "Reason"
+      },
       "code_name": "Reason",
       "definition": "명령이나 승인에 붙는 '왜 하는가'의 설명. 사람이 읽기 위한 자유 텍스트이며 증적이 아니다.",
-      "rules": ["에이전트가 쓴 사유도 같은 사유지만 신뢰하지 않는 텍스트로 다룬다. 판단의 근거로 쓰지 않으며 화면에는 '에이전트가 쓴 설명'으로 표시한다."],
-      "forbidden": {"words": [], "code": []},
-      "sources": ["사용자 결정: 사유(Reason), 에이전트 사유는 신뢰하지 않는 텍스트", "internal/core/command/command.go Reason", "docs/design/06-agent-security.md §6"],
+      "rules": [
+        "Archivist가 쓴 사유도 같은 사유지만 신뢰하지 않는 텍스트로 다룬다. 판단의 근거로 쓰지 않으며 화면에는 'Archivist가 쓴 설명'으로 표시한다."
+      ],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "sources": [
+        "사용자 결정: 사유(Reason), Archivist 사유는 신뢰하지 않는 텍스트",
+        "internal/core/command/command.go Reason",
+        "docs/design/06-archivist-security.md §6"
+      ],
       "decided": "2026-10-20"
     },
     {
       "id": "basis",
       "layer": "shared",
       "kind": "value",
-      "name": {"ko": "근거", "en": "Basis"},
+      "name": {
+        "ko": "근거",
+        "en": "Basis"
+      },
       "code_name": "Basis",
       "definition": "판단, 제안, 승인이 기대는 증적의 ID 목록.",
       "rules": [
         "사유는 설명이고 근거는 증적 참조다.",
         "승인자는 사유가 아니라 첨부된 근거를 보고 판단한다."
       ],
-      "forbidden": {"words": [], "code": []},
-      "relations": [{"type": "refers-to", "target": "evidence"}],
-      "sources": ["사용자 결정: 근거 = 판단이 기대는 증적 목록"],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "evidence"
+        }
+      ],
+      "sources": [
+        "사용자 결정: 근거 = 판단이 기대는 증적 목록"
+      ],
       "decided": "2026-10-20"
     },
     {
       "id": "hypothesis",
       "layer": "shared",
       "kind": "entity",
-      "name": {"ko": "가설", "en": "Hypothesis"},
+      "name": {
+        "ko": "가설",
+        "en": "Hypothesis"
+      },
       "code_name": "Hypothesis",
-      "definition": "아직 확인되지 않은 인과 주장. 에이전트의 실패 원인 분석 결과와 개발 루프의 수정 가설이 모두 가설이다.",
+      "definition": "아직 확인되지 않은 인과 주장. Archivist의 실패 원인 분석 결과와 개발 루프의 수정 가설이 모두 가설이다.",
       "includes": [
         "주장: 무엇이 원인인가",
         "예측: 맞다면 관찰될 증적",
@@ -1407,190 +4007,1004 @@
         "예측이 없는 주장은 반증할 수 없으므로 가설이 아니다.",
         "반박된 가설도 지우지 않고 남긴다."
       ],
-      "forbidden": {"words": ["진단 가설"], "code": []},
-      "relations": [{"type": "refers-to", "target": "basis"}],
-      "sources": ["사용자 결정: 가설은 공통 개념 하나, 주장·예측·확인 방법·근거", "idea.md §10.4", "Agent Cluster Engineering Principles Continuous Learning Loop"],
+      "forbidden": {
+        "words": [
+          "진단 가설"
+        ],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "basis"
+        }
+      ],
+      "sources": [
+        "사용자 결정: 가설은 공통 개념 하나, 주장·예측·확인 방법·근거",
+        "idea.md §10.4",
+        "Archivist Cluster Engineering Principles Continuous Learning Loop"
+      ],
       "decided": "2026-10-20"
     },
     {
       "id": "hypothesis-state",
       "layer": "shared",
       "kind": "state-set",
-      "name": {"ko": "가설 상태", "en": "Hypothesis State"},
+      "name": {
+        "ko": "가설 상태",
+        "en": "Hypothesis State"
+      },
       "code_name": "HypothesisState",
       "definition": "가설이 확인 과정 중 어디에 있는지 나타내는 상태 집합.",
       "values": [
-        {"id": "OPEN", "description": "아직 확인하지 않았다."},
-        {"id": "SUPPORTED", "description": "예측한 증적이 관찰되었다."},
-        {"id": "REFUTED", "description": "예측과 다른 증적이 관찰되었다."}
+        {
+          "id": "OPEN",
+          "description": "아직 확인하지 않았다."
+        },
+        {
+          "id": "SUPPORTED",
+          "description": "예측한 증적이 관찰되었다."
+        },
+        {
+          "id": "REFUTED",
+          "description": "예측과 다른 증적이 관찰되었다."
+        }
       ],
-      "rules": ["SUPPORTED나 REFUTED로 바꿀 때는 그 판단의 근거를 남긴다."],
-      "forbidden": {"words": [], "code": []},
-      "relations": [{"type": "part-of", "target": "hypothesis"}],
-      "sources": ["사용자 결정: 가설 상태 OPEN / SUPPORTED / REFUTED"],
+      "rules": [
+        "SUPPORTED나 REFUTED로 바꿀 때는 그 판단의 근거를 남긴다."
+      ],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "part-of",
+          "target": "hypothesis"
+        }
+      ],
+      "sources": [
+        "사용자 결정: 가설 상태 OPEN / SUPPORTED / REFUTED"
+      ],
       "decided": "2026-10-20"
     },
     {
       "id": "assumption",
       "layer": "shared",
       "kind": "value",
-      "name": {"ko": "가정", "en": "Assumption"},
+      "name": {
+        "ko": "가정",
+        "en": "Assumption"
+      },
       "code_name": "Assumption",
       "definition": "확인하지 않고 받아들이기로 한 전제. 가설과 달리 확인하지 않고 진행하기로 한 것이다.",
       "rules": [
         "가정은 반드시 목록으로 드러낸다.",
         "사용자가 결정할 사항이면 가정하지 않고 질문으로 바꾼다."
       ],
-      "forbidden": {"words": [], "code": []},
-      "sources": ["사용자 결정: 가정은 별도 개념"],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "sources": [
+        "사용자 결정: 가정은 별도 개념"
+      ],
       "decided": "2026-10-20"
     },
     {
       "id": "merge",
       "layer": "dev",
       "kind": "activity",
-      "name": {"ko": "병합", "en": "Merge"},
+      "name": {
+        "ko": "병합",
+        "en": "Merge"
+      },
       "definition": "커밋을 main 브랜치에 합치는 것.",
-      "forbidden": {"words": [], "code": []},
-      "relations": [{"type": "refers-to", "target": "git-commit"}],
-      "sources": ["사용자 결정: 개발 층 단계 커밋 → 병합 → 릴리스 → 배포"],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "git-commit"
+        }
+      ],
+      "sources": [
+        "사용자 결정: 개발 층 단계 커밋 → 병합 → 릴리스 → 배포"
+      ],
       "decided": "2026-10-20"
     },
     {
       "id": "release",
       "layer": "dev",
       "kind": "entity",
-      "name": {"ko": "릴리스", "en": "Release"},
+      "name": {
+        "ko": "릴리스",
+        "en": "Release"
+      },
       "definition": "배포할 수 있게 빌드하고 버전을 붙인 묶음.",
-      "forbidden": {"words": [], "code": []},
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
       "relations": [
-        {"type": "refers-to", "target": "merge"},
-        {"type": "refers-to", "target": "version"}
+        {
+          "type": "refers-to",
+          "target": "merge"
+        },
+        {
+          "type": "refers-to",
+          "target": "version"
+        }
       ],
-      "sources": ["사용자 결정: 개발 층 단계 커밋 → 병합 → 릴리스 → 배포"],
+      "sources": [
+        "사용자 결정: 개발 층 단계 커밋 → 병합 → 릴리스 → 배포"
+      ],
       "decided": "2026-10-20"
     },
     {
       "id": "deployment",
       "layer": "shared",
       "kind": "activity",
-      "name": {"ko": "배포", "en": "Deployment"},
-      "definition": "릴리스를 사내 운영 PC에 설치하거나 기존 설치를 교체하는 것. 대상은 Control Service와 Worker다.",
+      "name": {
+        "ko": "배포",
+        "en": "Deployment"
+      },
+      "definition": "릴리스를 사내 운영 PC에 설치하거나 기존 설치를 교체하는 것. 대상은 Archive Control와 Worker다.",
       "rules": [
         "영상 결과물을 내보내는 것을 배포라고 부르지 않는다. 그것은 납품이다.",
         "이 소프트웨어는 사내에서 운영하며 외부에 납품하지 않는다. 배포 대상은 사내 운영 PC뿐이다."
       ],
-      "forbidden": {"words": [], "code": []},
-      "relations": [{"type": "refers-to", "target": "release"}],
-      "sources": ["사용자 결정: 배포는 소프트웨어 설치·교체만", "사용자 결정: 배포할 수는 있지만 납품 소프트웨어는 아님", "docs/design/05-runtime-deployment.md §6"],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "release"
+        }
+      ],
+      "sources": [
+        "사용자 결정: 배포는 소프트웨어 설치·교체만",
+        "사용자 결정: 배포할 수는 있지만 납품 소프트웨어는 아님",
+        "docs/design/05-runtime-deployment.md §7"
+      ],
       "decided": "2026-10-20"
     },
     {
       "id": "delivery",
       "layer": "product",
       "kind": "activity",
-      "name": {"ko": "납품", "en": "Delivery"},
+      "name": {
+        "ko": "납품",
+        "en": "Delivery"
+      },
       "code_name": "Delivery",
       "definition": "최종 편집본 같은 결과물을 외부(고객, 발주처)에 전달하고 그 사실을 기록하는 것. 받는 곳, 시각, 편집본 버전을 기록한다.",
-      "rules": ["납품 대상은 영상 결과물뿐이다. 이 소프트웨어 자체는 납품 대상이 아니다."],
-      "forbidden": {"words": [], "code": []},
-      "relations": [{"type": "refers-to", "target": "edit-version"}],
-      "sources": ["사용자 결정: 납품(Delivery)", "사용자 결정: 납품 소프트웨어는 아님", "idea.md §8.3", "internal/core/pipeline/templates.go record_delivery"],
+      "rules": [
+        "납품 대상은 영상 결과물뿐이다. 이 소프트웨어 자체는 납품 대상이 아니다."
+      ],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "edit-version"
+        }
+      ],
+      "sources": [
+        "사용자 결정: 납품(Delivery)",
+        "사용자 결정: 납품 소프트웨어는 아님",
+        "idea.md §8.3",
+        "internal/core/pipeline/templates.go record_delivery"
+      ],
       "decided": "2026-10-20"
     },
     {
       "id": "publish",
       "layer": "product",
       "kind": "activity",
-      "name": {"ko": "게시", "en": "Publish"},
+      "name": {
+        "ko": "게시",
+        "en": "Publish"
+      },
       "code_name": "Publish",
       "definition": "검증을 통과한 임시 출력을 아티팩트로 등록하는 것.",
       "rules": [
         "검증 전 임시 출력은 아티팩트가 아니다.",
         "'공개'라고 쓰지 않는다. 외부 공개나 Provider로의 데이터 반출로 오해될 수 있다."
       ],
-      "forbidden": {"words": ["공개"], "code": []},
-      "relations": [{"type": "refers-to", "target": "artifact"}],
-      "sources": ["사용자 결정: 게시(Publish)", "docs/design/05-runtime-deployment.md §5", "docs/design/02-containers.md §4"],
+      "forbidden": {
+        "words": [
+          "공개"
+        ],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "artifact"
+        }
+      ],
+      "sources": [
+        "사용자 결정: 게시(Publish)",
+        "docs/design/05-runtime-deployment.md §6",
+        "docs/design/02-containers.md §4"
+      ],
       "decided": "2026-10-20"
+    },
+    {
+      "id": "archive-intake-session",
+      "layer": "product",
+      "kind": "entity",
+      "name": {
+        "ko": "아카이브 접수 세션",
+        "en": "Archive Intake Session"
+      },
+      "code_name": "ArchiveIntakeSession",
+      "definition": "사람이 연결된 논리 Volume 하나를 선택해 특정 Worker에 고정한 읽기 전용 영상 입고 작업 공간.",
+      "rules": [
+        "장치 연결 관찰만으로 만들지 않고 사람의 명시적 선택을 요구한다.",
+        "workspace_drive_id로 stable volume identity를 소유하고 PhysicalDevice identity는 I/O 충돌 방지 보조 키로 따로 보존한다.",
+        "Control에는 stable identity만 저장하고 원격 mount root는 선택된 Worker process 안에서 ReadOnlyStorageRoot로 연다.",
+        "SOURCE_MEDIA 원본을 이동하거나 이름을 바꾸지 않는다."
+      ],
+      "forbidden": {
+        "words": [],
+        "code": [
+          "DriveIntakeSession"
+        ]
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "physical-device"
+        },
+        {
+          "type": "refers-to",
+          "target": "volume"
+        },
+        {
+          "type": "refers-to",
+          "target": "worker"
+        }
+      ],
+      "sources": [
+        "사용자 플로우: 새로운 드라이브를 연결하면 영상 폴더 확인",
+        "docs/design/13-archive-intake.md §2"
+      ],
+      "decided": "2026-11-01"
+    },
+    {
+      "id": "archive-run",
+      "layer": "product",
+      "kind": "entity",
+      "name": {
+        "ko": "아카이브 실행",
+        "en": "Archive Run"
+      },
+      "code_name": "ArchiveRun",
+      "definition": "담당자가 고른 Worker·원본 Storage·아카이브 Storage와 한 탐색 revision에서 고정한 폴더 범위 및 1·2단계 소유권을 함께 보존하는 영속 aggregate.",
+      "rules": [
+        "기존 run은 시작 Command의 영수증이며 ArchiveRun의 identity나 상태를 대신하지 않는다.",
+        "Worker·원본 Storage·아카이브 Storage·폴더 범위는 생성할 때 고정하고 Archivist나 자동 정책이 선택하지 않는다.",
+        "완료된 같은 원본 범위를 새 ArchiveRun으로 다시 선택할 수 있으며 원본 Observation·OriginalAsset identity는 재사용하고 검사·판정·Folder Job identity는 새 ArchiveRun에 분리한다.",
+        "ArchiveRun의 전사 게이트는 자신의 1단계 실행 가능 작업만 보며 2단계는 별도 STT Job으로 실행한다.",
+        "실행 가능한 작업이 없으면 완료로 보고하되 HOLD 수와 명시적 분류 필요 상태를 별도로 보존한다."
+      ],
+      "forbidden": {
+        "words": [],
+        "code": [
+          "DriveBatch"
+        ]
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "worker"
+        },
+        {
+          "type": "refers-to",
+          "target": "storage"
+        },
+        {
+          "type": "refers-to",
+          "target": "media-folder"
+        }
+      ],
+      "sources": [
+        "사용자 결정 Q1: 아카이브 실행은 기존 run과 분리한 영속 ArchiveRun",
+        "docs/design/13-archive-intake.md §11"
+      ],
+      "decided": "2026-10-31"
+    },
+    {
+      "id": "media-folder",
+      "layer": "product",
+      "kind": "value",
+      "name": {
+        "ko": "미디어 폴더",
+        "en": "Media Folder"
+      },
+      "code_name": "MediaFolder",
+      "definition": "선택된 StorageRoot 안에서 즉시 상위 정규화 상대경로가 같은 영상 입력 묶음.",
+      "rules": [
+        "filesystem 폴더 자체를 업무 Entity로 만들지 않는다.",
+        "절대 root와 mount path를 포함하지 않는다.",
+        "분류 입력의 grouping 단위일 뿐 영상 종류를 뜻하지 않는다."
+      ],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "storage"
+        }
+      ],
+      "sources": [
+        "사용자 플로우: 영상이 있는 폴더를 확인",
+        "docs/design/13-archive-intake.md §3"
+      ],
+      "decided": "2026-10-30"
+    },
+    {
+      "id": "organization-disposition",
+      "layer": "product",
+      "kind": "enum",
+      "name": {
+        "ko": "정리 판정",
+        "en": "Organization Disposition"
+      },
+      "code_name": "OrganizationDisposition",
+      "definition": "MediaFolder의 입력 영상을 어떤 정리 흐름으로 보낼지 나타내는 판정.",
+      "values": [
+        {
+          "id": "ORGANIZE_AS_IS",
+          "description": "허용된 1080p 6Mbps 또는 20Mbps 영상으로 확인되어 다시 렌더하지 않는다."
+        },
+        {
+          "id": "RENDER_RECORDINGS",
+          "description": "독립된 녹화영상을 선택 Profile로 각각 렌더한다."
+        },
+        {
+          "id": "COMPILE_SOURCE_SEQUENCE",
+          "description": "여러 짧은 소스 Clip을 SourceTimeline 순서로 하나의 영상으로 렌더한다."
+        },
+        {
+          "id": "HOLD",
+          "description": "규칙으로 하나의 흐름을 확정하지 못해 사람 또는 허용된 Archivist의 명시적 분류를 기다린다."
+        }
+      ],
+      "rules": [
+        "자동 판정은 Archivist 결과나 자유 텍스트를 입력으로 사용하지 않는다.",
+        "Archivist 추론은 자동 판정과 섞지 않고 현재 HOLD에 대한 별도 추가 전용 OrganizationDecision으로만 기록한다.",
+        "구조화된 근거로도 하나의 흐름을 정하지 못하면 HOLD를 유지한다."
+      ],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "part-of",
+          "target": "organization-decision"
+        }
+      ],
+      "sources": [
+        "사용자 플로우: 자동 분류, 불가능하면 보류",
+        "docs/design/13-archive-intake.md §4"
+      ],
+      "decided": "2026-10-30"
+    },
+    {
+      "id": "organization-hold-reason",
+      "layer": "product",
+      "kind": "enum",
+      "name": {
+        "ko": "정리 보류 사유",
+        "en": "Organization Hold Reason"
+      },
+      "code_name": "OrganizationHoldReason",
+      "definition": "OrganizationDisposition.HOLD가 된 관찰 가능한 이유.",
+      "values": [
+        {
+          "id": "NO_MEDIA",
+          "description": "지원 영상이 없다."
+        },
+        {
+          "id": "MISSING_INSPECTION",
+          "description": "필수 MediaInspection 값이 없다."
+        },
+        {
+          "id": "AMBIGUOUS_MULTIPLE_VIDEOS",
+          "description": "여러 영상의 독립 처리와 통합 처리를 하나로 확정할 수 없다."
+        },
+        {
+          "id": "MIXED_READY_STATE",
+          "description": "그대로 정리할 파일과 렌더가 필요한 파일이 섞여 있다."
+        },
+        {
+          "id": "NONCONSECUTIVE_SEQUENCE",
+          "description": "소스 후보 파일명의 숫자 순서가 연속되지 않는다."
+        },
+        {
+          "id": "INCOMPATIBLE_SEQUENCE",
+          "description": "소스 후보의 video 또는 audio 기술 규격이 서로 다르다."
+        },
+        {
+          "id": "INVALID_OVERRIDE",
+          "description": "명시적 분류가 허용된 선택이나 최신 revision과 맞지 않는다."
+        }
+      ],
+      "rules": [
+        "자유 텍스트 오류 대신 고정 값으로 기록하고 필요하면 별도 상세 증적을 참조한다."
+      ],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "part-of",
+          "target": "organization-decision"
+        }
+      ],
+      "sources": [
+        "사용자 플로우: 분류가 안되면 보류",
+        "docs/design/13-archive-intake.md §4"
+      ],
+      "decided": "2026-10-30"
+    },
+    {
+      "id": "organization-decision",
+      "layer": "product",
+      "kind": "record",
+      "name": {
+        "ko": "정리 결정",
+        "en": "Organization Decision"
+      },
+      "code_name": "OrganizationDecision",
+      "definition": "MediaFolder의 고정된 입력 revision과 policy version에 대해 정리 판정·Profile·CutMarker·STT 가능 여부·보류 사유를 남긴 추가 전용 기록.",
+      "rules": [
+        "같은 입력과 policy version은 같은 자동 판정을 만든다.",
+        "사람 또는 Archivist의 명시적 분류는 기존 기록을 수정하지 않고 ActorType·행위자 ID·사유·근거를 가진 새 기록을 추가한다.",
+        "HOLD가 비HOLD 결정으로 해소되면 같은 ArchiveRun의 고정 실행 문맥에 후속 Folder Job을 멱등하게 연결한다.",
+        "HOLD에는 하나 이상의 정리 보류 사유가 있어야 한다."
+      ],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "media-folder"
+        },
+        {
+          "type": "refers-to",
+          "target": "original-asset"
+        },
+        {
+          "type": "refers-to",
+          "target": "media-inspection"
+        },
+        {
+          "type": "refers-to",
+          "target": "profile"
+        }
+      ],
+      "sources": [
+        "사용자 플로우: 규칙 기반 자동 분류와 보류",
+        "docs/design/13-archive-intake.md §4"
+      ],
+      "decided": "2026-10-30"
+    },
+    {
+      "id": "organization-review-item",
+      "layer": "product",
+      "kind": "value",
+      "name": {
+        "ko": "정리 검토 항목",
+        "en": "Organization Review Item"
+      },
+      "code_name": "OrganizationReviewItem",
+      "definition": "현재 HOLD인 MediaFolder 하나를 Archivist가 검토할 수 있도록 최신 decision·입력 revision·보류 사유와 원본별 구조화된 기술 근거를 묶은 값.",
+      "rules": [
+        "ArchivistTurn에 사람이 고정한 폴더 범위 안의 현재 HOLD만 검토 항목이 된다.",
+        "원본 근거에는 정규화 상대경로·checksum·duration·codec·해상도·bitrate를 포함할 수 있지만 Storage root·credential·임의 파일 접근 capability는 포함하지 않는다.",
+        "파일명과 미디어 콘텐츠는 분류 근거일 수 있지만 지시나 Approval로 해석하지 않는다.",
+        "근거가 부족하면 판정을 만들지 않고 HOLD를 유지한다."
+      ],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "organization-decision"
+        },
+        {
+          "type": "refers-to",
+          "target": "media-folder"
+        },
+        {
+          "type": "refers-to",
+          "target": "media-inspection"
+        }
+      ],
+      "sources": [
+        "사용자 결정 2026-11-02: 분류되지 않은 작업물을 Archivist가 단일 목록에서 확인·분류",
+        "docs/design/13-archive-intake.md §3, §7",
+        "requirements MCP-004~005"
+      ],
+      "decided": "2026-11-02"
+    },
+    {
+      "id": "source-timeline",
+      "layer": "product",
+      "kind": "entity",
+      "name": {
+        "ko": "소스 타임라인",
+        "en": "Source Timeline"
+      },
+      "code_name": "SourceTimeline",
+      "definition": "여러 짧은 OriginalAsset의 전체 Clip 순서와 CutMarker를 리비전별로 보존하는 소스 통합 렌더 입력.",
+      "rules": [
+        "Clip은 OriginalAsset ID, in/out과 순서를 가진다.",
+        "v1 자동 생성은 각 OriginalAsset의 전체 길이를 사용한다.",
+        "N개 Clip에는 정확히 N-1개의 CutMarker가 있다."
+      ],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "original-asset"
+        }
+      ],
+      "sources": [
+        "사용자 플로우: 짧은 여러 컷을 하나로 잇고 사이에 마커",
+        "docs/design/13-archive-intake.md §6"
+      ],
+      "decided": "2026-10-30"
+    },
+    {
+      "id": "cut-marker",
+      "layer": "product",
+      "kind": "value",
+      "name": {
+        "ko": "컷 마커",
+        "en": "Cut Marker"
+      },
+      "code_name": "CutMarker",
+      "definition": "SourceTimeline에서 인접한 두 Clip 사이의 경계를 누적 millisecond와 앞뒤 Clip ID로 나타내는 값.",
+      "rules": [
+        "첫 Clip 시작과 마지막 Clip 종료는 사이 경계가 아니므로 CutMarker로 만들지 않는다."
+      ],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "part-of",
+          "target": "source-timeline"
+        }
+      ],
+      "sources": [
+        "사용자 플로우: 컷 사이에 마커",
+        "docs/design/13-archive-intake.md §6"
+      ],
+      "decided": "2026-10-30"
+    },
+    {
+      "id": "organized-media-bundle",
+      "layer": "product",
+      "kind": "entity",
+      "name": {
+        "ko": "정리 미디어 묶음",
+        "en": "Organized Media Bundle"
+      },
+      "code_name": "OrganizedMediaBundle",
+      "definition": "WORKING Storage의 한 디렉터리에서 영상과 그 영상의 Transcript·Subtitle·metadata를 함께 보존하는 정리 결과 단위.",
+      "rules": [
+        "stable media ID로 디렉터리를 식별한다.",
+        "소스 시퀀스에는 Transcript와 Subtitle을 넣지 않는다.",
+        "SOURCE_MEDIA 원본을 이동해서 만들지 않는다."
+      ],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "original-asset"
+        },
+        {
+          "type": "refers-to",
+          "target": "rendition"
+        },
+        {
+          "type": "refers-to",
+          "target": "transcript"
+        },
+        {
+          "type": "refers-to",
+          "target": "subtitle"
+        }
+      ],
+      "sources": [
+        "사용자 플로우: 영상과 텍스트를 한 폴더로 정리",
+        "docs/design/13-archive-intake.md §8"
+      ],
+      "decided": "2026-10-30"
+    },
+    {
+      "id": "archive-catalog",
+      "layer": "product",
+      "kind": "record",
+      "name": {
+        "ko": "아카이브 카탈로그",
+        "en": "Archive Catalog"
+      },
+      "code_name": "ArchiveCatalog",
+      "definition": "원본 드라이브의 OriginalAsset 기술정보·추가 전용 판정·ArchivePackage ID·결과 상대경로·상태를 원본 영상 한 개당 한 행으로 아카이브 저장소에 내보낸 CSV 기록.",
+      "rules": [
+        "보류 입력과 소스 시퀀스 Clip도 누락하지 않는다.",
+        "Storage 절대 root와 mount path를 포함하지 않는다.",
+        "ArchivePackage files.csv와 다른 범위를 가진다.",
+        "판정이 추가되거나 1·2단계 결과가 보관될 때 현재 행 투영을 다시 게시한다."
+      ],
+      "forbidden": {
+        "words": [],
+        "code": [
+          "DriveCatalog"
+        ]
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "workspace-drive"
+        },
+        {
+          "type": "refers-to",
+          "target": "organization-decision"
+        },
+        {
+          "type": "refers-to",
+          "target": "archive-package"
+        },
+        {
+          "type": "refers-to",
+          "target": "archive-storage"
+        }
+      ],
+      "sources": [
+        "사용자 플로우: 메타데이터 포함 영상 정보를 드라이브 기준 CSV로 생성",
+        "사용자 결정 2026-10-31: catalog/<원본 드라이브 ID>.csv",
+        "docs/design/13-archive-intake.md"
+      ],
+      "decided": "2026-10-31"
+    },
+    {
+      "id": "step-execution-spec",
+      "layer": "product",
+      "kind": "record",
+      "name": {
+        "ko": "단계 실행 명세",
+        "en": "Step Execution Spec"
+      },
+      "code_name": "StepExecutionSpec",
+      "definition": "Worker가 Step 하나를 추측 없이 실행하도록 Control이 확정하는 versioned typed 입력·출력 명세.",
+      "rules": [
+        "Job·Step·Template·operation과 입력·예상 출력의 업무 ID를 고정한다.",
+        "파일 위치는 Storage ID와 정규화 상대경로로만 표현하고 절대경로·mount path·credential을 포함하지 않는다.",
+        "같은 입력 revision의 재시도는 같은 spec digest를 사용한다.",
+        "선행 출력이 필요한 명세는 해당 StepOutputRecord가 확정된 뒤에만 만든다."
+      ],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "step"
+        },
+        {
+          "type": "refers-to",
+          "target": "storage"
+        },
+        {
+          "type": "refers-to",
+          "target": "artifact"
+        },
+        {
+          "type": "refers-to",
+          "target": "profile"
+        }
+      ],
+      "sources": [
+        "docs/design/07-worker-fleet.md §4.1",
+        "requirements WRK-010"
+      ],
+      "decided": "2026-10-30"
+    },
+    {
+      "id": "step-output-record",
+      "layer": "product",
+      "kind": "record",
+      "name": {
+        "ko": "단계 출력 기록",
+        "en": "Step Output Record"
+      },
+      "code_name": "StepOutputRecord",
+      "definition": "현재 실행 리스의 StepExecutionSpec에 따라 검증·게시된 출력과 그 식별자·checksum·증적 참조를 남기는 immutable 기록.",
+      "rules": [
+        "spec digest와 fencing token에 묶는다.",
+        "명세에 없는 출력이나 절대경로를 기록하지 않는다.",
+        "Step 완료와 같은 transaction에서 한 번만 확정한다."
+      ],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "step-execution-spec"
+        },
+        {
+          "type": "refers-to",
+          "target": "artifact"
+        },
+        {
+          "type": "refers-to",
+          "target": "evidence"
+        }
+      ],
+      "sources": [
+        "docs/design/07-worker-fleet.md §4.1",
+        "requirements WRK-011"
+      ],
+      "decided": "2026-10-30"
     }
   ],
   "open": [
     {
       "id": "timeline",
-      "words": ["타임라인", "Timeline"],
+      "words": [
+        "타임라인",
+        "Timeline"
+      ],
       "senses": [
         {
           "meaning": "clip ID, in/out, 순서와 cut marker를 가진 리비전 대상 업무 Entity",
-          "where": ["VJ 통합", "preview 승인", "최종 렌더 입력"]
+          "where": [
+            "VJ 통합",
+            "preview 승인",
+            "최종 렌더 입력"
+          ]
         },
         {
           "meaning": "NLE가 내보낸 교환 파일 또는 렌더 입력 파일인 Artifact",
-          "where": ["편집 도구 Adapter", "파일 저장"]
+          "where": [
+            "편집 도구 Adapter",
+            "파일 저장"
+          ]
         }
       ],
       "proposal": "Timeline은 리비전을 가진 Entity로 정의하고, NLE 교환 파일은 Timeline을 표현한 Artifact로 구분한다."
     },
     {
       "id": "processing-output-model",
-      "words": ["Thumbnail"],
+      "words": [
+        "Thumbnail"
+      ],
       "senses": [
         {
           "meaning": "ProcessingKind만 다른 일반 Artifact",
-          "where": ["공통 provenance", "파일 게시"]
+          "where": [
+            "공통 provenance",
+            "파일 게시"
+          ]
         },
         {
           "meaning": "검색·검수·구조화 필드가 서로 다른 전용 Entity 또는 Artifact subtype",
-          "where": ["대표 이미지 표시", "이미지 규격 검색"]
+          "where": [
+            "대표 이미지 표시",
+            "이미지 규격 검색"
+          ]
         }
       ],
       "proposal": "공통 파일 생애주기는 Artifact가 소유하고, 전용 검색·검수 규칙이 있는 출력만 명시적 subtype 또는 연결 Record로 정의한다."
     },
     {
-      "id": "provider-runtime-model",
-      "words": ["Provider Account", "Provider Request", "Agent Tool Call"],
-      "senses": [
-        {
-          "meaning": "구조화 로그와 증적으로만 저장하는 외부 호출 정보",
-          "where": ["Provider Adapter", "관측성"]
-        },
-        {
-          "meaning": "상태, cooldown, 폴백과 멱등성 생애주기를 가진 Entity와 Record",
-          "where": ["Agent Gateway", "계정 라우팅", "Tool Call 복구"]
-        }
-      ],
-      "proposal": "ProviderAccount는 Entity, ProviderRequest와 AgentToolCall은 추가 전용 Record로 정의한다."
-    },
-    {
       "id": "operational-state-sets",
-      "words": ["VolumeState", "WorkerState", "ProviderAccountState"],
+      "words": [
+        "VolumeState",
+        "WorkerState",
+        "ProviderAccountState"
+      ],
       "senses": [
         {
           "meaning": "여러 bool과 시각 필드에서 현재 상황을 매번 추론",
-          "where": ["현재 Core 구조", "heartbeat와 cooldown"]
+          "where": [
+            "현재 Core 구조",
+            "heartbeat와 cooldown"
+          ]
         },
         {
           "meaning": "허용 전이가 정의된 명시적 상태 집합",
-          "where": ["장치 생애주기", "Worker 연결", "Provider 오류와 회복"]
+          "where": [
+            "장치 생애주기",
+            "Worker 연결",
+            "Provider 오류와 회복"
+          ]
         }
       ],
       "proposal": "업무 규칙과 복구가 상태 전이에 의존하는 대상은 명시적 상태 집합을 정의하고 측정값은 별도 증적으로 둔다."
+    },
+    {
+      "id": "cancellation-compensation",
+      "words": [
+        "취소",
+        "롤백",
+        "되돌리기",
+        "보상",
+        "Cancellation",
+        "Rollback",
+        "Compensation"
+      ],
+      "senses": [
+        {
+          "meaning": "아직 끝나지 않은 실행과 후속 Step을 중단하고 임시 출력을 정리하는 취소",
+          "where": [
+            "Job·Step·ArchivistTurn 실행 중단",
+            "Worker subprocess 정지"
+          ]
+        },
+        {
+          "meaning": "DB transaction 실패로 아무 업무 상태도 확정되지 않게 하는 기술적 rollback",
+          "where": [
+            "Command Store Unit of Work"
+          ]
+        },
+        {
+          "meaning": "이미 확정된 Command·Event·아티팩트의 효과를 새 Command와 Event로 상쇄하는 업무 보상",
+          "where": [
+            "완료된 Step",
+            "게시된 Artifact",
+            "외부 장치 동작"
+          ]
+        }
+      ],
+      "proposal": "제품 명령에서는 취소와 보상을 분리한다. 취소는 미래 실행만 멈추고, 완료된 기록은 고치지 않으며 새 보상 Job·Step으로 상쇄한다. 'rollback'은 DB transaction 실패에만 사용한다."
+    },
+    {
+      "id": "smtp-archive-target",
+      "words": [
+        "SMTP",
+        "SMTP 서비스"
+      ],
+      "senses": [
+        {
+          "meaning": "대용량 ArchivePackage를 저장·목록화·다시 읽고 manifest를 재검증하는 파일 저장 서비스",
+          "where": [
+            "아카이브 저장소 선택"
+          ]
+        },
+        {
+          "meaning": "완료 보고서·카탈로그·아카이브 참조를 메일로 보내는 알림 또는 내보내기 전달 채널",
+          "where": [
+            "작업 완료 알림",
+            "외부 전달"
+          ]
+        },
+        {
+          "meaning": "SMB 또는 SFTP의 입력 오기",
+          "where": [
+            "네트워크 저장소 선택"
+          ]
+        }
+      ],
+      "proposal": "SMTP 자체는 StorageAccessKind에서 제외하고 알림·내보내기 채널로 둔다. 사용자가 SMB 또는 SFTP를 뜻했는지 확인한 뒤 용어를 닫는다."
     }
   ],
   "follow_ups": [
-    {"term": "template", "type": "code", "from": "internal/core/pipeline 패키지", "to": "internal/core/template 패키지"},
-    {"term": "step-state", "type": "document", "from": "idea.md §9.1, §10.3의 상태 값(소문자 execution_state, CHECKING_RESOURCES 등)", "to": "StepState 대문자 값"},
-    {"term": "host-load-state", "type": "document", "from": "idea.md §15.4 메모리 모드 NORMAL/CONSTRAINED/CRITICAL", "to": "HostLoadState 판정 기준으로 흡수"},
-    {"term": "user", "type": "document", "from": "PC를 직접 쓰는 사람을 뜻하는 '사용자'(idea.md §9.1, §15.6, docs/design/05-runtime-deployment.md §4 등)", "to": "PC 사용 부하"},
-    {"term": "archive-copy", "type": "document", "from": "idea.md §11.1 archive_locations, 문서의 '복사본', '복제본', '주본'", "to": "archive_copies, 아카이브 사본(주본·복제본), 입고 사본"},
-    {"term": "action-class", "type": "code", "from": "security.Action 값 read, process, commit, destructive, manage_security", "to": "ActionClass 값 READ, PROCESS, GATED, DESTRUCTIVE, MANAGE"},
-    {"term": "action-class", "type": "requirement", "from": "SEC-003 '아카이브 commit', SEC-004 'manage_security'", "to": "아카이브 확정(ActionClass.GATED), ActionClass.MANAGE"},
-    {"term": "action-class", "type": "document", "from": "idea.md §7.2, docs/design/06-agent-security.md §7 권한 표의 commit", "to": "GATED"},
-    {"term": "profile", "type": "document", "from": "idea.md §10.2 '정책: 렌더, STT, 저장, 포맷, 권한 프로파일', §7.3 '여러 제공자 프로파일'", "to": "프로파일(렌더, STT, 포맷)과 정책(저장, 권한), 여러 Provider 계정"},
-    {"term": "model-feature", "type": "code", "from": "agent.Account.Capabilities, RouteRequest.RequiredCapabilities", "to": "ModelFeatures, RequiredFeatures (값 TOOLS, VISION)"},
-    {"term": "model-feature", "type": "document", "from": "docs/design/06-agent-security.md §3 allowed_capabilities, §4 'tool/vision/context capability'", "to": "모델 기능(Model Feature)"},
-    {"term": "basis", "type": "code", "from": "에이전트 제안(Action Card)에 근거 필드 없음", "to": "Basis(증적 ID 목록) 추가"},
-    {"term": "reason", "type": "document", "from": "idea.md §6 'reason: 감사 및 에이전트 판단 근거'", "to": "사유: 사람이 읽기 위한 설명. 판단의 근거는 증적 참조로 따로 남김"},
-    {"term": "hypothesis", "type": "document", "from": "idea.md §10.4 에이전트의 실패 원인 분석과 해결 계획 제안", "to": "원인 분석 결과를 가설(주장, 예측, 확인 방법, 근거)로 표시"}
+    {
+      "term": "template",
+      "type": "code",
+      "from": "internal/core/pipeline 패키지",
+      "to": "internal/core/template 패키지"
+    },
+    {
+      "term": "step-state",
+      "type": "document",
+      "from": "idea.md §9.1, §10.3의 상태 값(소문자 execution_state, CHECKING_RESOURCES 등)",
+      "to": "StepState 대문자 값"
+    },
+    {
+      "term": "host-load-state",
+      "type": "document",
+      "from": "idea.md §15.4 메모리 모드 NORMAL/CONSTRAINED/CRITICAL",
+      "to": "HostLoadState 판정 기준으로 흡수"
+    },
+    {
+      "term": "user",
+      "type": "document",
+      "from": "PC를 직접 쓰는 사람을 뜻하는 '사용자'(idea.md §9.1, §15.6, docs/design/05-runtime-deployment.md §5 등)",
+      "to": "PC 사용 부하"
+    },
+    {
+      "term": "archive-copy",
+      "type": "document",
+      "from": "idea.md §11.1 archive_locations, 문서의 '복사본', '복제본', '주본'",
+      "to": "archive_copies, 아카이브 사본(주본·복제본), 입고 사본"
+    },
+    {
+      "term": "action-class",
+      "type": "code",
+      "from": "security.Action 값 read, process, commit, destructive, manage_security",
+      "to": "ActionClass 값 READ, PROCESS, GATED, DESTRUCTIVE, MANAGE"
+    },
+    {
+      "term": "action-class",
+      "type": "requirement",
+      "from": "SEC-003 '아카이브 commit', SEC-004 'manage_security'",
+      "to": "아카이브 확정(ActionClass.GATED), ActionClass.MANAGE"
+    },
+    {
+      "term": "action-class",
+      "type": "document",
+      "from": "idea.md §7.2, docs/design/06-archivist-security.md §7 권한 표의 commit",
+      "to": "GATED"
+    },
+    {
+      "term": "profile",
+      "type": "document",
+      "from": "idea.md §10.2 '정책: 렌더, STT, 저장, 포맷, 권한 프로파일', §7.3 '여러 제공자 프로파일'",
+      "to": "프로파일(렌더, STT, 포맷)과 정책(저장, 권한), 여러 Provider 계정"
+    },
+    {
+      "term": "model-feature",
+      "type": "code",
+      "from": "archivist.Account.Capabilities, RouteRequest.RequiredCapabilities",
+      "to": "ModelFeatures, RequiredFeatures (값 TOOLS, VISION)"
+    },
+    {
+      "term": "model-feature",
+      "type": "document",
+      "from": "docs/design/06-archivist-security.md §3 allowed_capabilities, §4 'tool/vision/context capability'",
+      "to": "모델 기능(Model Feature)"
+    },
+    {
+      "term": "basis",
+      "type": "code",
+      "from": "Archivist 제안(Action Card)에 근거 필드 없음",
+      "to": "Basis(증적 ID 목록) 추가"
+    },
+    {
+      "term": "reason",
+      "type": "document",
+      "from": "idea.md §6 'reason: 감사 및 Archivist 판단 근거'",
+      "to": "사유: 사람이 읽기 위한 설명. 판단의 근거는 증적 참조로 따로 남김"
+    },
+    {
+      "term": "hypothesis",
+      "type": "document",
+      "from": "idea.md §10.4 Archivist의 실패 원인 분석과 해결 계획 제안",
+      "to": "원인 분석 결과를 가설(주장, 예측, 확인 방법, 근거)로 표시"
+    }
   ]
 }

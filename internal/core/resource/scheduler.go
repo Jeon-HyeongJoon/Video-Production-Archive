@@ -42,6 +42,26 @@ type Request struct {
 	PhysicalDeviceIDs  []string
 }
 
+const (
+	DefaultHeavyMemoryBytes  = uint64(4 << 30)
+	DefaultHeavyScratchBytes = uint64(25 << 30)
+	DefaultLightMemoryBytes  = uint64(1 << 30)
+	DefaultLightScratchBytes = uint64(1 << 30)
+)
+
+func DefaultRequest(class Class) Request {
+	request := Request{Class: class, Priority: Background}
+	switch class {
+	case Heavy:
+		request.EstimatedMemoryGB = float64(DefaultHeavyMemoryBytes) / float64(1<<30)
+		request.ScratchRequiredGB = float64(DefaultHeavyScratchBytes) / float64(1<<30)
+	case Light:
+		request.EstimatedMemoryGB = float64(DefaultLightMemoryBytes) / float64(1<<30)
+		request.ScratchRequiredGB = float64(DefaultLightScratchBytes) / float64(1<<30)
+	}
+	return request
+}
+
 type Snapshot struct {
 	AverageCPU5m          float64
 	AverageGPU5m          float64

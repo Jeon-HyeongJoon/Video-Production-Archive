@@ -47,7 +47,7 @@ func TestWorkflowAllowsOnlyDeclaredTransitionsAndFreezesTerminalState(t *testing
 // Requirement: WFL-003
 func TestManualTakeoverPreservesWorkerExecutionLeaseAndState(t *testing.T) {
 	lease := &ExecutionLease{OwnerWorkerID: "worker-1", ExpiresAt: time.Now().Add(time.Minute), FencingToken: 7}
-	s := Step{State: Running, ControlMode: AgentMode, ExecutionLease: lease}
+	s := Step{State: Running, ControlMode: ArchivistMode, ExecutionLease: lease}
 	if err := s.TakeManualControl(); err != nil {
 		t.Fatal(err)
 	}

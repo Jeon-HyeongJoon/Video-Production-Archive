@@ -98,16 +98,65 @@ func TestTemplateRejectsCyclesAndRequiresResourceAndProcessingDeclarations(t *te
 }
 
 // Requirement: PIP-006
-func TestSummaryUsesAgentGatewayWithHumanFallbackAndContentReview(t *testing.T) {
+func TestSummaryUsesArchivistGatewayWithHumanFallbackAndContentReview(t *testing.T) {
 	template := OccasionRecording()
 	summary := template.Steps["summary"]
 	review := template.Steps["content_review"]
-	if summary.ExecutorKind != vocabulary.ExecutorAgentGateway || summary.FallbackExecutorKind != vocabulary.ExecutorHuman ||
+	if summary.ExecutorKind != vocabulary.ExecutorArchivistGateway || summary.FallbackExecutorKind != vocabulary.ExecutorHuman ||
 		!slices.Equal(summary.RequiredProcessingKinds, []vocabulary.ProcessingKind{vocabulary.ProcessingSummary}) {
 		t.Fatalf("summary routing is unsafe: %+v", summary)
 	}
 	if review.ExecutorKind != vocabulary.ExecutorHuman || !slices.Equal(review.DependsOn, []string{"summary"}) ||
 		!slices.Contains(template.Steps["qc"].DependsOn, "content_review") {
 		t.Fatalf("content review is not an explicit QC input: review=%+v qc=%+v", review, template.Steps["qc"])
+	}
+}
+
+// Requirement: PIP-007
+func TestArchiveOrganizationTemplatesKeepTranscriptionOutOfStageOneAndHoldForInput(t *testing.T) {
+	asIs, err := ArchiveOrganization(vocabulary.OrganizationAsIs)
+	if err != nil || asIs.Validate() != nil || len(asIs.Steps["qc"].DependsOn) != 0 ||
+		!slices.Equal(asIs.Steps["organize"].DependsOn, []string{"qc"}) ||
+		!slices.Equal(asIs.Steps["archive_catalog"].DependsOn, []string{"organize"}) {
+		t.Fatalf("as-is template is disconnected: steps=%+v err=%v", asIs.Steps, err)
+	}
+	render, err := ArchiveOrganization(vocabulary.OrganizationRenderRecordings)
+	if err != nil || render.Validate() != nil || !slices.Equal(render.Steps["qc"].DependsOn, []string{"render"}) ||
+		!slices.Equal(render.Steps["organize"].DependsOn, []string{"qc"}) {
+		t.Fatalf("recording render template is disconnected: steps=%+v err=%v", render.Steps, err)
+	}
+	source, err := ArchiveOrganization(vocabulary.OrganizationCompileSourceSequence)
+	if err != nil || source.Validate() != nil || !slices.Equal(source.Steps["qc"].DependsOn, []string{"sequence_render"}) ||
+		!slices.Equal(source.Steps["archive_catalog"].DependsOn, []string{"organize"}) {
+		t.Fatalf("source template is disconnected: steps=%+v err=%v", source.Steps, err)
+	}
+	for name, template := range map[string]Template{"as-is": asIs, "render": render, "source": source} {
+		for _, forbidden := range []string{"audio", "transcript", "subtitle", "transcript_text"} {
+			if _, exists := template.Steps[forbidden]; exists {
+				t.Fatalf("%s stage-one template contains %s", name, forbidden)
+			}
+		}
+	}
+	hold, err := ArchiveOrganization(vocabulary.OrganizationHold)
+	if err != nil || hold.Validate() != nil || len(hold.Steps) != 1 ||
+		hold.Steps["resolve_classification"].ExecutorKind != vocabulary.ExecutorHuman ||
+		hold.Steps["resolve_classification"].InitialWaitReason != vocabulary.WaitInput {
+		t.Fatalf("hold template does not wait only for human input: steps=%+v err=%v", hold.Steps, err)
+	}
+}
+
+// Requirement: PIP-009
+func TestArchiveTranscriptionTemplateUsesSeparateJobAndRevisesPackageBeforeCatalog(t *testing.T) {
+	template := ArchiveTranscription()
+	if err := template.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if template.Name != "archive-transcription" ||
+		!slices.Equal(template.Steps["transcript"].DependsOn, []string{"audio"}) ||
+		!slices.Equal(template.Steps["subtitle"].DependsOn, []string{"transcript"}) ||
+		!slices.Equal(template.Steps["transcript_text"].DependsOn, []string{"transcript"}) ||
+		!slices.Equal(template.Steps["archive_package_revision"].DependsOn, []string{"subtitle", "transcript_text"}) ||
+		!slices.Equal(template.Steps["archive_catalog"].DependsOn, []string{"archive_package_revision"}) {
+		t.Fatalf("stage-two transcription ordering is invalid: %+v", template.Steps)
 	}
 }

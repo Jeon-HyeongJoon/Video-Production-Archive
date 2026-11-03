@@ -11,7 +11,7 @@ import (
 )
 
 // Requirement: DEV-006
-func TestStorageRootsResolveToPhysicalWorkspaceDrive(t *testing.T) {
+func TestStorageRootsResolveToLogicalVolumeWorkspaceDrive(t *testing.T) {
 	ctx := context.Background()
 	repository, err := Open(filepath.Join(t.TempDir(), "control.db"))
 	if err != nil {
@@ -31,9 +31,9 @@ func TestStorageRootsResolveToPhysicalWorkspaceDrive(t *testing.T) {
 	}
 
 	want := map[string]string{
-		"source-a":  "drive-a",
-		"working-a": "drive-a",
-		"archive-b": "drive-b",
+		"source-a":  "volume-a1",
+		"working-a": "volume-a2",
+		"archive-b": "volume-b1",
 	}
 	for storageID, workspaceDriveID := range want {
 		workspaceDrive, err := repository.ResolveWorkspaceDrive(ctx, storageID)
@@ -42,6 +42,10 @@ func TestStorageRootsResolveToPhysicalWorkspaceDrive(t *testing.T) {
 		}
 		if workspaceDrive.ID != workspaceDriveID {
 			t.Fatalf("storage %s resolved to %s, want %s", storageID, workspaceDrive.ID, workspaceDriveID)
+		}
+		access, err := repository.ResolveAccess(ctx, storageID)
+		if err != nil || access.PhysicalDeviceID == "" {
+			t.Fatalf("storage %s lost its auxiliary physical I/O guard: access=%+v err=%v", storageID, access, err)
 		}
 	}
 

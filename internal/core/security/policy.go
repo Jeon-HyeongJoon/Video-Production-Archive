@@ -24,16 +24,16 @@ const (
 )
 
 type Request struct {
-	ActorType              vocabulary.ActorType
-	Role                   UserRole
-	Action                 Action
-	TargetID               string
-	TargetRevision         uint64
-	AuthMode               AuthMode
-	AutomationPolicyAllows bool
-	ConfigPolicyAllows     bool
-	Approvals              []approval.Record
-	Confirmation           *confirmation.Record
+	ActorType          vocabulary.ActorType
+	Role               UserRole
+	Action             Action
+	TargetID           string
+	TargetRevision     uint64
+	AuthMode           AuthMode
+	ArchivistMCPDirect bool
+	ConfigPolicyAllows bool
+	Approvals          []approval.Record
+	Confirmation       *confirmation.Record
 }
 
 func Authorize(request Request) bool {
@@ -41,8 +41,8 @@ func Authorize(request Request) bool {
 	case Read:
 		return request.ActorType.Valid()
 	case Process:
-		if request.ActorType == vocabulary.ActorAgent {
-			return request.AutomationPolicyAllows
+		if request.ActorType == vocabulary.ActorArchivist {
+			return request.ArchivistMCPDirect
 		}
 		return request.ActorType == vocabulary.ActorHuman && request.Role.Valid()
 	case Commit:
@@ -57,7 +57,7 @@ func Authorize(request Request) bool {
 		}
 		return request.AuthMode == AuthLocal && request.Role == Admin && approved && confirmed
 	case ManageSecurity:
-		return request.ActorType == vocabulary.ActorHuman && request.AuthMode == AuthLocal && request.Role == Admin
+		return false
 	default:
 		return false
 	}

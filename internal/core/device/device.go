@@ -1,11 +1,57 @@
 package device
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"strings"
 	"sync"
+	"time"
 
 	"videoarchive/internal/core/confirmation"
 )
+
+type VolumeAttachmentKind string
+
+const (
+	VolumeAttached VolumeAttachmentKind = "ATTACHED"
+	VolumeDetached VolumeAttachmentKind = "DETACHED"
+)
+
+type ConnectedVolume struct {
+	PhysicalDeviceID      string
+	VolumeID              string
+	StorageID             string
+	ArchiveStorageID      string
+	Serial                string
+	Model                 string
+	PhysicalCapacityBytes uint64
+	CapacityBytes         uint64
+	FreeBytes             uint64
+	FileSystem            string
+	Label                 string
+	Root                  string
+	WorkerID              string
+	ObservedAt            time.Time
+}
+
+// AttachedArchiveStorageID returns the stable ARCHIVE_PRIMARY namespace for
+// one attached logical Volume. It is deliberately different from the
+// SOURCE_MEDIA Storage ID observed for the same Volume: Storage role is part
+// of the capability boundary even when both namespaces resolve to one mount.
+func AttachedArchiveStorageID(volumeID string) string {
+	volumeID = strings.TrimSpace(volumeID)
+	if volumeID == "" {
+		return ""
+	}
+	digest := sha256.Sum256([]byte("attached-archive\x00" + volumeID))
+	return "archive-" + hex.EncodeToString(digest[:12])
+}
+
+type VolumeAttachmentEvent struct {
+	Kind VolumeAttachmentKind
+	ConnectedVolume
+}
 
 type LockMode string
 

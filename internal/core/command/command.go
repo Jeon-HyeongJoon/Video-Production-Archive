@@ -6,9 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"sync"
 
+	"videoarchive/internal/core/dispatch"
 	"videoarchive/internal/core/vocabulary"
+	"videoarchive/internal/core/workflow"
 )
 
 var (
@@ -23,10 +26,10 @@ var (
 type ActorType = vocabulary.ActorType
 
 const (
-	HumanActor  = vocabulary.ActorHuman
-	AgentActor  = vocabulary.ActorAgent
-	WorkerActor = vocabulary.ActorWorker
-	SystemActor = vocabulary.ActorSystem
+	HumanActor     = vocabulary.ActorHuman
+	ArchivistActor = vocabulary.ActorArchivist
+	WorkerActor    = vocabulary.ActorWorker
+	SystemActor    = vocabulary.ActorSystem
 )
 
 type Actor struct {
@@ -149,6 +152,28 @@ type Commit struct {
 	Receipt          *Receipt
 }
 
+type DispatchCommit struct {
+	Commit
+	Reservation      dispatch.ResourceReservation
+	Lease            workflow.ExecutionLease
+	Capacity         dispatch.Capacity
+	DispatchSequence uint64
+}
+
+func (commit DispatchCommit) Validate(idempotencyKey string) error {
+	if err := validateCommit(idempotencyKey, commit.Commit); err != nil {
+		return err
+	}
+	if err := commit.Reservation.Validate(); err != nil || commit.NextState == nil ||
+		commit.Reservation.JobID != commit.NextState.TargetID || commit.Lease.OwnerWorkerID != commit.Reservation.WorkerID ||
+		commit.Lease.FencingToken == 0 || commit.Lease.AcquiredAt.IsZero() || commit.Lease.HeartbeatAt.IsZero() ||
+		!commit.Lease.ExpiresAt.After(commit.Lease.AcquiredAt) || commit.DispatchSequence == 0 ||
+		commit.Capacity.MaxHeavy < 0 || commit.Capacity.MaxLight < 0 {
+		return ErrInvalidChange
+	}
+	return nil
+}
+
 // Store is the Unit of Work boundary. Commit implementations must atomically
 // persist all non-nil fields and compare ExpectedRevision in that transaction.
 type Store interface {
@@ -157,13 +182,59 @@ type Store interface {
 	Commit(idempotencyKey string, commit Commit) error
 }
 
+type DispatchStore interface {
+	Store
+	ListSnapshots() ([]Snapshot, error)
+	ListActiveReservations() ([]dispatch.ResourceReservation, error)
+	NextFencingToken(stepID string) (uint64, error)
+	NextDispatchSequence() (uint64, error)
+	CommitDispatch(idempotencyKey string, commit DispatchCommit) error
+}
+
+func (store *MemoryStore) ListSnapshots() ([]Snapshot, error) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	ids := make([]string, 0, len(store.states))
+	for id := range store.states {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	result := make([]Snapshot, 0, len(ids))
+	for _, id := range ids {
+		result = append(result, cloneSnapshot(store.states[id]))
+	}
+	return result, nil
+}
+
+func (store *MemoryStore) ListActiveReservations() ([]dispatch.ResourceReservation, error) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	ids := make([]string, 0, len(store.reservations))
+	for id := range store.reservations {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	result := make([]dispatch.ResourceReservation, 0, len(ids))
+	for _, id := range ids {
+		reservation := store.reservations[id]
+		reservation.PhysicalDeviceIDs = append([]string(nil), reservation.PhysicalDeviceIDs...)
+		result = append(result, reservation)
+	}
+	return result, nil
+}
+
 // MemoryStore is the executable reference implementation of Store atomicity.
 type MemoryStore struct {
-	mu       sync.Mutex
-	states   map[string]Snapshot
-	records  []CommandRecord
-	events   []Event
-	receipts map[string]Receipt
+	mu                   sync.Mutex
+	states               map[string]Snapshot
+	records              []CommandRecord
+	events               []Event
+	receipts             map[string]Receipt
+	reservations         map[string]dispatch.ResourceReservation
+	leases               map[string]workflow.ExecutionLease
+	fencingTokens        map[string]uint64
+	jobDispatchSequences map[string]uint64
+	dispatchSequence     uint64
 }
 
 func NewMemoryStore(states map[string]Snapshot) *MemoryStore {
@@ -171,7 +242,76 @@ func NewMemoryStore(states map[string]Snapshot) *MemoryStore {
 	for id, snapshot := range states {
 		cloned[id] = cloneSnapshot(snapshot)
 	}
-	return &MemoryStore{states: cloned, receipts: make(map[string]Receipt)}
+	return &MemoryStore{
+		states: cloned, receipts: make(map[string]Receipt), reservations: make(map[string]dispatch.ResourceReservation),
+		leases: make(map[string]workflow.ExecutionLease), fencingTokens: make(map[string]uint64),
+		jobDispatchSequences: make(map[string]uint64),
+	}
+}
+
+func (store *MemoryStore) NextFencingToken(stepID string) (uint64, error) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if stepID == "" {
+		return 0, ErrInvalidChange
+	}
+	return store.fencingTokens[stepID] + 1, nil
+}
+
+func (store *MemoryStore) NextDispatchSequence() (uint64, error) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	return store.dispatchSequence + 1, nil
+}
+
+func (store *MemoryStore) CommitDispatch(key string, commit DispatchCommit) error {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if err := commit.Validate(key); err != nil {
+		return err
+	}
+	if current, exists := store.leases[commit.Reservation.StepID]; exists && commit.Reservation.CreatedAt.Before(current.ExpiresAt) {
+		return dispatch.ErrExecutionLeaseHeld
+	}
+	if commit.Lease.FencingToken != store.fencingTokens[commit.Reservation.StepID]+1 {
+		return dispatch.ErrFencingTokenConflict
+	}
+	if commit.DispatchSequence != store.dispatchSequence+1 {
+		return ErrRevisionConflict
+	}
+	var memoryBytes, scratchBytes uint64
+	var slots int
+	for _, reservation := range store.reservations {
+		if reservation.WorkerID != commit.Reservation.WorkerID {
+			continue
+		}
+		memoryBytes += reservation.MemoryBytes
+		scratchBytes += reservation.ScratchBytes
+		if reservation.ResourceClass == commit.Reservation.ResourceClass {
+			slots++
+		}
+	}
+	if exceedsCapacity(commit, memoryBytes, scratchBytes, slots) {
+		return dispatch.ErrCapacityUnavailable
+	}
+	for _, deviceID := range commit.Reservation.PhysicalDeviceIDs {
+		for _, existing := range store.reservations {
+			for _, reservedID := range existing.PhysicalDeviceIDs {
+				if deviceID == reservedID {
+					return dispatch.ErrPhysicalDeviceReserved
+				}
+			}
+		}
+	}
+	if err := store.commitLocked(key, commit.Commit); err != nil {
+		return err
+	}
+	store.reservations[commit.Reservation.ID] = commit.Reservation
+	store.leases[commit.Reservation.StepID] = commit.Lease
+	store.fencingTokens[commit.Reservation.StepID] = commit.Lease.FencingToken
+	store.jobDispatchSequences[commit.Reservation.JobID] = commit.DispatchSequence
+	store.dispatchSequence = commit.DispatchSequence
+	return nil
 }
 
 func (store *MemoryStore) Load(targetID string) (Snapshot, error) {
@@ -194,7 +334,10 @@ func (store *MemoryStore) FindReceipt(key string) (Receipt, bool, error) {
 func (store *MemoryStore) Commit(key string, commit Commit) error {
 	store.mu.Lock()
 	defer store.mu.Unlock()
+	return store.commitLocked(key, commit)
+}
 
+func (store *MemoryStore) commitLocked(key string, commit Commit) error {
 	if err := validateCommit(key, commit); err != nil {
 		return err
 	}
@@ -226,6 +369,23 @@ func (store *MemoryStore) Commit(key string, commit Commit) error {
 		store.receipts[key] = *commit.Receipt
 	}
 	return nil
+}
+
+func exceedsCapacity(commit DispatchCommit, memoryReserved, scratchReserved uint64, slotReservations int) bool {
+	if memoryReserved > commit.Capacity.AvailableMemoryBytes ||
+		commit.Reservation.MemoryBytes > commit.Capacity.AvailableMemoryBytes-memoryReserved ||
+		scratchReserved > commit.Capacity.ScratchFreeBytes ||
+		commit.Reservation.ScratchBytes > commit.Capacity.ScratchFreeBytes-scratchReserved {
+		return true
+	}
+	switch commit.Reservation.ResourceClass {
+	case vocabulary.ResourceHeavy:
+		return commit.Capacity.HeavyRunning+slotReservations >= commit.Capacity.MaxHeavy
+	case vocabulary.ResourceLight:
+		return commit.Capacity.LightRunning+slotReservations >= commit.Capacity.MaxLight
+	default:
+		return false
+	}
 }
 
 func validateCommit(key string, commit Commit) error {

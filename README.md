@@ -1,4 +1,4 @@
-# Video Production Archive
+# Archive
 
 촬영 원본의 입고부터 파생 영상, 전사, 메타데이터, 아카이브와 검색 기록까지 관리하는 사무실용 영상 기록 시스템이다.
 
@@ -15,15 +15,19 @@
 - Provider 계정 분리 저장, cooldown 복구·overload 격리, 안전한 Tool Call, 중복 없는 폴백과 허용 목록 로그
 - shell을 쓰지 않는 subprocess 인수 계약과 검증 전 임시 출력 비공개
 - 저장 Domain Event와 일시적 진행률·자원 알림을 분리한 재연결 feed
-- 사람·에이전트 권한 정책
-- 내부 CIDR allowlist, 선택형 로그인, 무로그인 권한 축소와 CSRF/Origin 방어
+- 사람·Archivist 권한 정책
+- 내부 CIDR allowlist, v1 무로그인 내부망 접근, 후속 인증 경계와 CSRF/Origin 방어
 - 시작 설정 전용 관리 모델과 여러 작업 PC Worker registry·heartbeat·배정 정책
 - 요구사항과 테스트의 자동 1:1 추적 검사
 - 등록 Storage 입고·기술정보 분석·검증된 렌더·통합 QC·메타데이터 검색, timestamp 전사·SRT 자막과 리비전 요약 계약
-- strict YAML boot 설정, 재시작 가능한 SQLite Runtime, CIDR 보호 정적 Dashboard와 조회 API를 제공하는 `video-archive-control`
-- CSRF 보호 Job 생성·취소 Command API와 credential 인증 heartbeat를 보내는 `video-archive-worker`
+- strict YAML boot 설정, 재시작 가능한 SQLite Runtime, CIDR 보호 아카이브 작업 공간과 조회 API를 제공하는 `archive-control`
+- CSRF 보호 Job 생성·취소 Command API와 credential 인증 heartbeat를 보내는 `archive-worker`
+- Worker·원본·아카이브·폴더 범위를 고정하는 ArchiveRun, 1단계 분류·렌더·QC·보관과 별도 2단계 STT·자막·텍스트·패키지 리비전·ArchiveCatalog
+- 세션 제어 모드, 구조화된 드라이브 선택 참조, MCP 업무 도구, ActionCard와 단계 완료 SYSTEM 재호출을 잇는 Archivist 협업 흐름
 
-현재는 SQLite Command Unit of Work, Storage→PhysicalDevice 작업 공간 해석, 아카이브 sidecar export/import, 게시 장애 조정, Notification SSE 재연결, 독립 Capability 실행·증적·Dashboard projection과 CI 테스트 증적의 integration 계약까지 구현되어 있다. 등록 Storage 입고 카탈로그와 ffprobe·FFmpeg·whisper.cpp subprocess Adapter도 격리 fixture로 검증하며 FFmpeg speech audio 추출에서 timestamp Transcript 게시·최신 segment 검색, 검증된 SRT 자막, Agent·사람 작성 리비전 요약 게시와 SQLite 내용 검수 복원까지 연결된다. `video-archive-control`은 boot 설정으로 같은 SQLite DB와 Storage topology를 열고 내부망 Dashboard, 자산·전사·요약·검수·Job·Worker 조회 API와 CSRF 보호 Job 생성·취소를 제공한다. `video-archive-worker`는 별도 boot 설정과 Credential Resolver에서 service credential을 읽어 heartbeat를 전송한다. Worker의 Step lease/result 실행 loop, MCP Adapter, Windows Device Adapter, VJ 편집 기능과 Provider API Adapter는 아직 구현하지 않았다. 실제 Windows Credential Manager·장치와 운영 ffprobe·FFmpeg·whisper.cpp 실행은 장비가 제공될 때까지 acceptance 계획 상태다.
+현재는 SQLite Command Unit of Work, Storage→논리 Volume 작업 공간 해석과 별도 PhysicalDevice I/O 충돌 키, 아카이브 sidecar export/import, 게시 장애 조정, Notification SSE 재연결, 독립 Capability 실행·증적·Archive Workspace 상태 투영과 CI 테스트 증적의 integration 계약까지 구현되어 있다. 등록 Storage 입고 카탈로그와 ffprobe·FFmpeg·whisper.cpp subprocess Adapter도 격리 fixture로 검증하며 FFmpeg speech audio 추출에서 timestamp Transcript 게시·최신 segment 검색, 검증된 SRT 자막, Archivist·사람 작성 리비전 요약 게시와 SQLite 내용 검수 복원까지 연결된다. `archive-control`은 boot 설정으로 같은 SQLite DB와 Storage topology를 열고 내부망 아카이브 작업 공간, 자산·전사·요약·검수·Job·Worker·Archivist Runtime 조회 API와 CSRF 보호 Job·Session·Turn 명령을 제공한다. `archive-worker`는 별도 boot 설정과 Credential Resolver에서 service credential을 읽어 heartbeat, Step claim·결과, 실행 중 취소 stop·정리 결과를 전송한다. `archivist-host`는 허용된 로컬 CLI와 workspace만 실행하고 Control에 outbound heartbeat·Turn claim·event를 보내며 loopback MCP proxy를 제공한다. Control MCP Adapter는 versioned 업무 Capability만 같은 Command Bus에 연결한다. Archivist Host native resume, Windows Device Adapter, VJ 편집 기능과 Provider API Adapter는 아직 남아 있다. 로컬 CLI 경로는 전체 Orca 앱 대신 최소 Embedded Core를 기본으로 하고 Orca CLI는 선택형 backend로 둔다. 실제 Windows Credential Manager·장치·CLI와 운영 ffprobe·FFmpeg·whisper.cpp 실행은 장비 acceptance로 검증한다.
+
+영속 Dispatch Queue의 aging·Job 공정성, 전체 자원 snapshot heartbeat와 ResourceReservation·ExecutionLease·fencing token의 SQLite 원자 확정이 구현되어 있다. Control은 heartbeat 직후 ready Step을 평가해 Worker 자원을 예약한다. Worker는 lease를 claim해 실행하고 결과를 정산하며, 실행 중 취소는 lease를 먼저 fence한 뒤 process 종료와 임시 출력 정리를 확인해야 예약을 해제한다.
 
 ## 문서 읽는 순서
 
@@ -33,19 +37,23 @@
 4. [도메인과 워크플로](docs/design/03-domain-workflow.md)
 5. [데이터와 아카이브](docs/design/04-data-archive.md)
 6. [실행·자원·배포](docs/design/05-runtime-deployment.md)
-7. [에이전트와 보안](docs/design/06-agent-security.md)
+7. [Archivist와 보안](docs/design/06-archivist-security.md)
 8. [다중 Worker 운영](docs/design/07-worker-fleet.md)
 9. [이벤트 스토밍](docs/design/08-event-storming.md)
-10. [Dashboard 운영 투영](docs/design/09-dashboard-operations.md)
+10. [아카이브 작업 공간](docs/design/09-archive-workspace.md)
 11. [도메인 기능 실행과 검증 증적](docs/design/10-capabilities-observability.md)
-12. [요구사항 운영 규칙](requirements/README.md)
-13. [기계 판독 요구사항 카탈로그](requirements/catalog.json)
+12. [로컬 CLI Archivist Host](docs/design/11-archivist-host.md)
+13. [취소와 보상 설계 제안](docs/design/12-cancellation-compensation-proposal.md)
+14. [Archive Intake](docs/design/13-archive-intake.md)
+15. [아카이브 작업 공간 UX·UI 설계 기준](docs/design/14-archive-workspace-ux.md)
+16. [요구사항 운영 규칙](requirements/README.md)
+17. [기계 판독 요구사항 카탈로그](requirements/catalog.json)
 
 초기 설정 예시는 [config.example.yaml](config.example.yaml)에 있다. 실제 credential은 이 파일에 쓰지 않고 Windows Credential Manager 또는 DPAPI reference만 기록한다.
 
 ## 검증
 
-Dashboard 검증은 실제 Chromium이 고정된 Job·Worker·검색 상태를 렌더링한 운영체제별 PNG golden을 비교한다. 처음 한 번 브라우저 의존성을 설치한 뒤 전체 검증을 실행한다.
+아카이브 작업 공간의 시각 계약은 실제 Chromium이 실행 전·1단계 진행·STT 가능·완료 네 장면의 고정 fixture를 렌더링한 장면별·운영체제별 PNG golden으로 검증한다. 처음 한 번 브라우저 의존성을 설치한 뒤 전체 검증을 실행한다.
 
 ```bash
 make visual-deps
@@ -53,10 +61,10 @@ make verify
 go vet ./...
 ```
 
-의도적으로 Dashboard 모양을 바꾼 경우 실제 이미지를 먼저 검토하고 golden을 명시적으로 갱신한다.
+의도적으로 화면 모양을 바꾼 경우 실제 이미지를 먼저 검토하고 golden을 명시적으로 갱신한다. 갱신 명령은 지금 실행 중인 운영체제의 `archive_workspace_<장면>_<OS>.golden.png`만 쓴다. Linux·Windows golden은 해당 운영체제에서 실행하거나 CI가 남긴 `<장면>_<OS>.actual.png`를 검토한 뒤 반영한다.
 
 ```bash
-make dashboard-golden-update
+make archive-workspace-golden-update
 go run ./cmd/reqcheck
 go run ./cmd/ontocheck
 go test ./...
@@ -64,27 +72,27 @@ go test ./...
 
 `ontocheck`는 [`ontology/terms.json`](ontology/terms.json)의 용어 정의가 서로 모순되지 않는지, 금지된 코드 식별자가 쓰이지 않는지 검사한다. 한 단어가 두 용어를 가리키거나, 아직 결정되지 않은 다의어(`open`)가 결정된 용어와 겹치면 실패한다. 용어 결정 때문에 코드·요구사항·문서에서 바꿔야 할 것은 `follow_ups`에 기록하고, 코드 이름을 바꾼 뒤에는 옛 이름을 `forbidden.code`로 옮긴다.
 
-## Control Service 실행
+## Archive Control 실행
 
 [`config.example.yaml`](config.example.yaml)을 `config.yaml`로 복사하고 현재 PC의 listen 주소, 허용 CIDR, Storage identity와 root를 설정한다. credential 원문은 넣지 않고 OS Secret Store reference만 기록한다.
 
 ```bash
-go run ./cmd/video-archive-control -config config.yaml -check-config
-go run ./cmd/video-archive-control -config config.yaml
+go run ./cmd/archive-control -config config.yaml -check-config
+go run ./cmd/archive-control -config config.yaml
 ```
 
-설정된 주소에서 Dashboard와 `/api/v1`을 제공한다. 개발 PC에서 확인할 때도 wildcard listen 대신 loopback 주소와 `127.0.0.0/8`을 명시한다.
+설정된 주소에서 아카이브 작업 공간과 `/api/v1`을 제공한다. 개발 PC에서 확인할 때도 wildcard listen 대신 loopback 주소와 `127.0.0.0/8`을 명시한다.
 
 ## Worker 실행
 
-Control과 Worker PC의 Windows Credential Manager에 `worker.example.yaml`의 `credential_ref`에서 `wincred://`를 뺀 이름으로 같은 generic credential을 저장한다. credential 원문은 YAML이나 명령행에 넣지 않는다. 그 다음 예시를 `worker.yaml`로 복사해 Control URL과 접근 가능한 Storage ID를 맞춘다. 다른 PC의 Control에 연결할 때는 HTTPS URL이 필수다.
+Control과 Worker PC의 OS Secret Store에 같은 service credential을 저장한다. 사용자 profile이 적재된 서비스 계정은 `wincred://` generic credential을 사용할 수 있다. profile 없는 Windows Service나 OpenSSH 배포는 `archive-secret -dpapi-reference dpapi://C:/절대/경로.dpapi`에 credential을 표준 입력으로 전달하고, blob 경로 ACL을 해당 서비스 계정과 `SYSTEM`으로 제한한다. credential 원문은 YAML이나 명령행에 넣지 않는다. 그 다음 예시를 `worker.yaml`로 복사해 Control URL과 접근 가능한 Storage ID를 맞춘다. 다른 PC의 Control에 연결할 때는 HTTPS URL이 필수다.
 
 ```bash
-go run ./cmd/video-archive-worker -config worker.yaml -check-config
-go run ./cmd/video-archive-worker -config worker.yaml
+go run ./cmd/archive-worker -config worker.yaml -check-config
+go run ./cmd/archive-worker -config worker.yaml
 ```
 
-Worker가 연결되면 Dashboard의 “Worker 연결”과 `/api/v1/workers`에서 ONLINE 상태를 확인할 수 있다.
+Worker가 연결되면 아카이브 작업 공간의 “Worker 연결” 상태 영역과 `/api/v1/workers`에서 ONLINE 상태를 확인할 수 있다.
 
 `reqcheck`는 다음 조건 중 하나라도 어기면 실패한다.
 

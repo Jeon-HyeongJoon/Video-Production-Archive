@@ -10,7 +10,9 @@ import (
 	"time"
 
 	"videoarchive/internal/core/command"
+	"videoarchive/internal/core/execution"
 	"videoarchive/internal/core/pipeline"
+	"videoarchive/internal/core/resource"
 	"videoarchive/internal/core/vocabulary"
 	"videoarchive/internal/core/workflow"
 )
@@ -26,33 +28,49 @@ var (
 )
 
 type Step struct {
-	Workflow                workflow.Step               `json:"workflow"`
-	ResourceClass           vocabulary.ResourceClass    `json:"resource_class"`
-	ExecutorKind            vocabulary.ExecutorKind     `json:"executor_kind"`
-	FallbackExecutorKind    vocabulary.ExecutorKind     `json:"fallback_executor_kind,omitempty"`
-	RequiredProcessingKinds []vocabulary.ProcessingKind `json:"required_processing_kinds,omitempty"`
-	Progress                float64                     `json:"progress"`
-	ActorID                 string                      `json:"actor_id,omitempty"`
-	WorkerID                string                      `json:"worker_id,omitempty"`
-	ErrorClass              string                      `json:"error_class,omitempty"`
-	LogReference            string                      `json:"log_reference,omitempty"`
-	LastEventAt             time.Time                   `json:"last_event_at"`
+	Workflow                workflow.Step                `json:"workflow"`
+	ResourceClass           vocabulary.ResourceClass     `json:"resource_class"`
+	ExecutorKind            vocabulary.ExecutorKind      `json:"executor_kind"`
+	FallbackExecutorKind    vocabulary.ExecutorKind      `json:"fallback_executor_kind,omitempty"`
+	RequiredProcessingKinds []vocabulary.ProcessingKind  `json:"required_processing_kinds,omitempty"`
+	Progress                float64                      `json:"progress"`
+	ActorID                 string                       `json:"actor_id,omitempty"`
+	WorkerID                string                       `json:"worker_id,omitempty"`
+	ErrorClass              string                       `json:"error_class,omitempty"`
+	WaitTargetStorageID     string                       `json:"wait_target_storage_id,omitempty"`
+	LogReference            string                       `json:"log_reference,omitempty"`
+	LastEventAt             time.Time                    `json:"last_event_at"`
+	ReadyAt                 time.Time                    `json:"ready_at,omitempty"`
+	NextEligibleAt          time.Time                    `json:"next_eligible_at,omitempty"`
+	ExecutionPriority       resource.ExecutionPriority   `json:"execution_priority"`
+	EstimatedMemoryBytes    uint64                       `json:"estimated_memory_bytes"`
+	EstimatedScratchBytes   uint64                       `json:"estimated_scratch_bytes"`
+	RequiredStorageIDs      []string                     `json:"required_storage_ids,omitempty"`
+	PhysicalDeviceIDs       []string                     `json:"physical_device_ids,omitempty"`
+	ExecutionSpec           *execution.StepExecutionSpec `json:"execution_spec,omitempty"`
+	OutputRecord            *execution.StepOutputRecord  `json:"output_record,omitempty"`
 }
 
 type State struct {
-	ID            string               `json:"id"`
-	Revision      uint64               `json:"revision"`
-	TemplateName  string               `json:"template_name"`
-	TargetTitle   string               `json:"target_title"`
-	ControlMode   workflow.ControlMode `json:"control_mode"`
-	CurrentStepID string               `json:"current_step_id"`
-	Steps         []Step               `json:"steps"`
+	ID                   string               `json:"id"`
+	Revision             uint64               `json:"revision"`
+	TemplateName         string               `json:"template_name"`
+	TargetTitle          string               `json:"target_title"`
+	ControlMode          workflow.ControlMode `json:"control_mode"`
+	CurrentStepID        string               `json:"current_step_id"`
+	Steps                []Step               `json:"steps"`
+	LastDispatchSequence uint64               `json:"last_dispatch_sequence"`
 }
 
 type CreateParameters struct {
-	TemplateName string               `json:"template_name"`
-	TargetTitle  string               `json:"target_title"`
-	ControlMode  workflow.ControlMode `json:"control_mode"`
+	TemplateName            string                                 `json:"template_name"`
+	TargetTitle             string                                 `json:"target_title"`
+	ControlMode             workflow.ControlMode                   `json:"control_mode"`
+	ExecutionPriority       resource.ExecutionPriority             `json:"execution_priority,omitempty"`
+	RequiredStorageIDs      []string                               `json:"required_storage_ids,omitempty"`
+	PhysicalDeviceIDs       []string                               `json:"physical_device_ids,omitempty"`
+	StepExecutionSpecs      map[string]execution.StepExecutionSpec `json:"step_execution_specs,omitempty"`
+	CompletedControlStepIDs []string                               `json:"completed_control_step_ids,omitempty"`
 }
 
 type Handler struct {
@@ -92,6 +110,13 @@ func (handler *Handler) create(envelope command.Envelope, snapshot command.Snaps
 	if err := template.Validate(); err != nil {
 		return command.Change{}, fmt.Errorf("validate template: %w", err)
 	}
+	priority := parameters.ExecutionPriority
+	if priority == "" {
+		priority = resource.Background
+	}
+	if priority != resource.Background && priority != resource.Immediate {
+		return command.Change{}, command.DeterministicFailure("INVALID_JOB", ErrInvalidJob)
+	}
 
 	now := handler.now().UTC()
 	stepIDs := make([]string, 0, len(template.Steps))
@@ -106,7 +131,7 @@ func (handler *Handler) create(envelope command.Envelope, snapshot command.Snaps
 		if currentStepID == "" && len(definition.DependsOn) == 0 {
 			currentStepID = id
 		}
-		steps = append(steps, Step{
+		step := Step{
 			Workflow: workflow.Step{
 				ID: definition.ID, Dependencies: append([]string(nil), definition.DependsOn...), State: workflow.Queued,
 				ControlMode: parameters.ControlMode, MaxAttempts: 3, ApprovalRequired: definition.ApprovalRequired,
@@ -115,7 +140,73 @@ func (handler *Handler) create(envelope command.Envelope, snapshot command.Snaps
 			FallbackExecutorKind:    definition.FallbackExecutorKind,
 			RequiredProcessingKinds: append([]vocabulary.ProcessingKind(nil), definition.RequiredProcessingKinds...),
 			LastEventAt:             now,
-		})
+			ExecutionPriority:       priority,
+			RequiredStorageIDs:      append([]string(nil), parameters.RequiredStorageIDs...),
+			PhysicalDeviceIDs:       append([]string(nil), parameters.PhysicalDeviceIDs...),
+		}
+		if spec, exists := parameters.StepExecutionSpecs[id]; exists {
+			if spec.Validate() != nil || spec.JobID != envelope.TargetID || spec.StepID != id || spec.TemplateName != template.Name ||
+				definition.ExecutorKind != vocabulary.ExecutorWorker {
+				return command.Change{}, command.DeterministicFailure("INVALID_JOB", ErrInvalidJob)
+			}
+			copy := spec
+			step.ExecutionSpec = &copy
+		}
+		if len(definition.DependsOn) == 0 {
+			step.ReadyAt = now
+		}
+		switch definition.ResourceClass {
+		case vocabulary.ResourceHeavy:
+			step.EstimatedMemoryBytes = resource.DefaultHeavyMemoryBytes
+			step.EstimatedScratchBytes = resource.DefaultHeavyScratchBytes
+		case vocabulary.ResourceLight:
+			step.EstimatedMemoryBytes = resource.DefaultLightMemoryBytes
+			step.EstimatedScratchBytes = resource.DefaultLightScratchBytes
+		}
+		steps = append(steps, step)
+	}
+	for stepID := range parameters.StepExecutionSpecs {
+		if _, exists := template.Steps[stepID]; !exists {
+			return command.Change{}, command.DeterministicFailure("INVALID_JOB", ErrInvalidJob)
+		}
+	}
+	completedControls := make(map[string]bool, len(parameters.CompletedControlStepIDs))
+	for _, raw := range parameters.CompletedControlStepIDs {
+		stepID := strings.TrimSpace(raw)
+		definition, exists := template.Steps[stepID]
+		if stepID == "" || completedControls[stepID] || !exists || definition.ExecutorKind != vocabulary.ExecutorControl || len(definition.DependsOn) != 0 {
+			return command.Change{}, command.DeterministicFailure("INVALID_JOB", ErrInvalidJob)
+		}
+		completedControls[stepID] = true
+	}
+	if len(completedControls) > 0 {
+		workflowSteps := make(map[string]*workflow.Step, len(steps))
+		for index := range steps {
+			workflowSteps[steps[index].Workflow.ID] = &steps[index].Workflow
+		}
+		for index := range steps {
+			step := &steps[index]
+			if !completedControls[step.Workflow.ID] {
+				continue
+			}
+			for _, target := range []workflow.StepState{workflow.Reserved, workflow.Running, workflow.Verifying, workflow.Completed} {
+				if step.Workflow.Transition(target) != nil {
+					return command.Change{}, command.DeterministicFailure("INVALID_JOB", ErrInvalidJob)
+				}
+			}
+			step.Progress = 1
+			step.ReadyAt = time.Time{}
+			step.LastEventAt = now
+		}
+		currentStepID = ""
+		for index := range steps {
+			step := &steps[index]
+			if step.Workflow.State == workflow.Queued && step.Workflow.Ready(workflowSteps) {
+				step.ReadyAt = now
+				currentStepID = step.Workflow.ID
+				break
+			}
+		}
 	}
 	if currentStepID == "" {
 		return command.Change{}, fmt.Errorf("template %s has no initial step", template.Name)
@@ -127,6 +218,7 @@ func (handler *Handler) create(envelope command.Envelope, snapshot command.Snaps
 	}
 	return stateChange(envelope, state, "JobCreated", map[string]any{
 		"template_name": state.TemplateName, "target_title": state.TargetTitle,
+		"completed_control_step_ids": parameters.CompletedControlStepIDs,
 	})
 }
 
@@ -135,13 +227,55 @@ func (handler *Handler) cancel(envelope command.Envelope, snapshot command.Snaps
 	if err != nil {
 		return command.Change{}, err
 	}
-	step := state.currentStep()
-	if step == nil || step.Workflow.Transition(workflow.Cancelled) != nil {
+	now := handler.now().UTC()
+	pendingStops := make([]string, 0)
+	cancelledSteps := make([]string, 0)
+	for index := range state.Steps {
+		step := &state.Steps[index]
+		switch step.Workflow.State {
+		case workflow.Completed, workflow.Failed, workflow.Cancelled:
+			continue
+		case workflow.Running, workflow.Verifying:
+			pendingStops = append(pendingStops, step.Workflow.ID)
+			step.Workflow.ExecutionLease = nil
+			step.LastEventAt = now
+			state.CurrentStepID = step.Workflow.ID
+		case workflow.Paused:
+			if step.Workflow.ExecutionLease != nil {
+				pendingStops = append(pendingStops, step.Workflow.ID)
+				step.Workflow.ExecutionLease = nil
+				step.LastEventAt = now
+				state.CurrentStepID = step.Workflow.ID
+				continue
+			}
+			if step.Workflow.Transition(workflow.Cancelled) != nil {
+				return command.Change{}, command.DeterministicFailure("JOB_CANNOT_CANCEL", workflow.ErrIllegalTransition)
+			}
+			step.LastEventAt = now
+			cancelledSteps = append(cancelledSteps, step.Workflow.ID)
+		case workflow.Queued, workflow.Waiting, workflow.Reserved:
+			if step.Workflow.Transition(workflow.Cancelled) != nil {
+				return command.Change{}, command.DeterministicFailure("JOB_CANNOT_CANCEL", workflow.ErrIllegalTransition)
+			}
+			step.Workflow.ExecutionLease = nil
+			step.LastEventAt = now
+			cancelledSteps = append(cancelledSteps, step.Workflow.ID)
+		default:
+			return command.Change{}, command.DeterministicFailure("JOB_CANNOT_CANCEL", workflow.ErrIllegalTransition)
+		}
+	}
+	if len(pendingStops) == 0 && len(cancelledSteps) == 0 {
 		return command.Change{}, command.DeterministicFailure("JOB_CANNOT_CANCEL", workflow.ErrIllegalTransition)
 	}
-	step.LastEventAt = handler.now().UTC()
 	state.Revision = snapshot.Revision + 1
-	return stateChange(envelope, state, "JobCancelled", map[string]any{"step_id": step.Workflow.ID})
+	eventType := "JobCancelled"
+	if len(pendingStops) > 0 {
+		eventType = "JobCancellationRequested"
+	}
+	return stateChange(envelope, state, eventType, map[string]any{
+		"pending_stop_step_ids": pendingStops,
+		"cancelled_step_ids":    cancelledSteps,
+	})
 }
 
 func Decode(snapshot command.Snapshot) (State, error) {
@@ -187,7 +321,7 @@ func decodeParameters(source map[string]any, target any) error {
 }
 
 func validControlMode(mode workflow.ControlMode) bool {
-	return mode == workflow.AgentMode || mode == workflow.AssistedMode || mode == workflow.ManualMode
+	return mode == workflow.ArchivistMode || mode == workflow.AssistedMode || mode == workflow.ManualMode
 }
 
 func templateByName(name string) (pipeline.Template, bool) {
@@ -200,7 +334,17 @@ func templateByName(name string) (pipeline.Template, bool) {
 		return pipeline.FinalEdit(), true
 	case pipeline.LargeFileIntake().Name:
 		return pipeline.LargeFileIntake(), true
+	case pipeline.ArchiveTranscription().Name:
+		return pipeline.ArchiveTranscription(), true
 	default:
+		for _, disposition := range []vocabulary.OrganizationDisposition{
+			vocabulary.OrganizationAsIs, vocabulary.OrganizationRenderRecordings, vocabulary.OrganizationCompileSourceSequence,
+		} {
+			template, err := pipeline.ArchiveOrganization(disposition)
+			if err == nil && template.Name == name {
+				return template, true
+			}
+		}
 		return pipeline.Template{}, false
 	}
 }

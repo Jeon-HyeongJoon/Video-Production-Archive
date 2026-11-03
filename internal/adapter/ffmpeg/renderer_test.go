@@ -15,7 +15,7 @@ import (
 	"videoarchive/internal/core/rendering"
 )
 
-const ffmpegFixtureProcess = "VIDEO_ARCHIVE_FFMPEG_FIXTURE_PROCESS"
+const ffmpegFixtureProcess = "ARCHIVE_FFMPEG_FIXTURE_PROCESS"
 
 func TestMain(m *testing.M) {
 	if os.Getenv(ffmpegFixtureProcess) == "1" {
@@ -123,5 +123,57 @@ func TestFFmpegAdapterRendersVerifiedProfileWithoutShellAndPublishesRendition(t 
 		artifact.Origin.OriginalAssetID != "ASSET-1" || artifact.Origin.ProfileVersion != "archive-event-1080p@v1" ||
 		artifact.Origin.ProcessorVersion != "ffmpeg-8.0" || artifact.Origin.CreatedBy != "WORKER-1" || artifact.Origin.CreatedAt.IsZero() {
 		t.Fatalf("rendition provenance is incomplete: %+v", rendition)
+	}
+}
+
+// Requirement: RND-005
+func TestFFmpegAdapterUsesFixedTargetBitrateArgumentsForOrganizationProfiles(t *testing.T) {
+	for _, target := range []int{6_000, 20_000} {
+		t.Run(fmt.Sprintf("%dkbps", target), func(t *testing.T) {
+			directory := t.TempDir()
+			argumentsPath := filepath.Join(directory, "arguments.txt")
+			payload := []byte(fmt.Sprintf("verified-%d", target))
+			executablePath := ffmpegFixtureExecutable(t, argumentsPath, payload)
+			renderer, err := NewRenderer(executablePath, "ffmpeg-8.0", "WORKER-1", OSRunner{}, payloadVerifier{expected: payload}, AtomicPublisher{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			profile, err := rendering.OrganizationProfile(target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			temporaryPath := filepath.Join(directory, "output.mp4.partial")
+			publishedPath := filepath.Join(directory, "output.mp4")
+			result, err := renderer.Render(context.Background(), Request{
+				RenditionID: fmt.Sprintf("RENDITION-%d", target), OriginalAssetID: "ASSET-1",
+				ResolvedInputPath: filepath.Join(directory, "input.mov"), TemporaryOutputPath: temporaryPath,
+				PublishedOutputPath: publishedPath, ArtifactPath: "organized/MEDIA-1/video.mp4", Profile: profile,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			argumentPayload, err := os.ReadFile(argumentsPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			arguments := strings.Split(strings.TrimSuffix(string(argumentPayload), "\n"), "\n")
+			bitrate := fmt.Sprintf("%dk", target)
+			bufsize := fmt.Sprintf("%dk", target*2)
+			for _, pair := range [][2]string{{"-b:v", bitrate}, {"-maxrate", bitrate}, {"-bufsize", bufsize}} {
+				found := false
+				for index := 0; index+1 < len(arguments); index++ {
+					if arguments[index] == pair[0] && arguments[index+1] == pair[1] {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Fatalf("missing fixed rate control %q in %q", pair, arguments)
+				}
+			}
+			if result.Artifact.Origin.ProfileVersion != profile.Reference() {
+				t.Fatalf("published rendition lost profile provenance: %+v", result)
+			}
+		})
 	}
 }

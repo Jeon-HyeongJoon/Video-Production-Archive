@@ -4,7 +4,7 @@
 
 이 문서는 [`ontology/terms.json`](../../ontology/terms.json)의 결정된 용어로 시스템의 업무 흐름을 시간순으로 펼친 결과다. 구현 구조를 먼저 정하지 않고 다음을 찾는 데 목적이 있다.
 
-1. 담당자, 에이전트, Worker와 시스템 정책이 어떤 명령을 만드는가
+1. 담당자, Archivist, Worker와 시스템 정책이 어떤 명령을 만드는가
 2. 명령이 성공했을 때 어떤 상태 변경 사실을 이벤트로 남기는가
 3. 이벤트 뒤에 어떤 정책과 다음 명령이 이어지는가
 4. 한 원자 단위로 지켜야 하는 불변식의 소유자가 무엇인가
@@ -47,6 +47,10 @@ flowchart LR
 
 행사 기록, VJ 통합, 최종 편집본은 원본 자산 이후 서로 다른 템플릿으로 작업을 만들지만, 단계 실행과 아카이브 확정은 같은 공통 흐름을 사용한다.
 
+Archive Intake에서는 담당자가 Worker·원본 드라이브·아카이브 저장소·탐색 revision의 폴더 범위를 고른 뒤 1단계를 시작한다. Worker가 탐색·검사하고 `OrganizationDecisionRecorded`를 남긴다. `HOLD`는 `WaitReason.INPUT`으로 사람 또는 허용된 Archivist의 명시적 분류를 기다리며 다른 폴더를 막지 않는다. 비보류 Folder Job은 렌더·QC·ARCHIVE_PRIMARY 보관까지만 수행하고 STT는 별도 2단계 Command로 시작한다. `DEV-010`, `ORG-001~011`, `PIP-007~009`, `APP-002`, `APP-006`
+
+완료된 같은 원본 범위를 다시 시작하면 새 ArchiveRun이 독립된 검사·판정·Folder Job을 소유한다. 동일한 Observation과 OriginalAsset identity는 중복 등록하지 않고 재사용하며, 같은 ArchiveRun의 멱등 재전송과 새 ArchiveRun 시작을 구분한다. `APP-002`
+
 ## 4. 모든 상태 변경에 공통인 흐름
 
 ```mermaid
@@ -76,7 +80,7 @@ flowchart LR
 
 | 순서 | 실행자·계기 | 명령 | 일관성 경계 후보 | 이벤트 | 정책·다음 동작 |
 |---:|---|---|---|---|---|
-| 1 | 담당자 또는 정책 범위의 에이전트 | `SelectWorkspaceDrive` | PhysicalDevice·Storage | `WorkspaceDriveSelected` | 선택한 storage_id를 PhysicalDevice ID로 해석하고 작업 공간을 예약 |
+| 1 | 담당자 또는 정책 범위의 Archivist | `SelectWorkspaceDrive` | Volume·Storage | `WorkspaceDriveSelected` | 선택한 storage_id를 stable Volume ID로 해석하고 PhysicalDevice I/O 충돌 키를 별도 보존 |
 | 2 | Worker | `InspectInputFiles` | Step | `InputFilesInspected` | 등록 root 안의 파일만 원본 등록 후보로 전달 |
 | 3 | 담당자 또는 시스템 | `RegisterOriginalAssets` | OriginalAsset | `OriginalAssetRegistered` | 파일별 최초 체크섬과 표시용 원래 이름을 고정 |
 | 4 | 시스템 정책 | `CreateAndVerifyIntakeCopy(copy=first)` | IntakeCopy | `IntakeCopyVerified` | 첫 사본의 대상 Storage와 checksum을 기록 |
@@ -93,11 +97,32 @@ flowchart LR
 
 이 흐름의 안전 해제는 OS 장치 동작이며 매체 소유권 반환이나 사람의 반환 승인이 아니다. 연결 요구사항: `PIP-004`, `ARC-001`, `DEV-001~003`, `DEV-006`.
 
+### 5.1 Archive Intake
+
+아카이브 실행의 영속 개체는 기존 run 명령 영수증과 분리된 `ArchiveRun`다. ArchiveRun는 담당자가 고른 Worker·원본 Storage·아카이브 Storage·FolderScope와 1·2단계 소유권을 고정한다. `ORG-012`
+
+| 순서 | 실행자·계기 | 명령 | 결과 이벤트 후보 | 다음 동작 |
+|---:|---|---|---|---|
+| 1 | 담당자 | `SelectWorkerView` | 없음 | 해당 Worker의 드라이브·Storage만 투영 |
+| 2 | 담당자 | `SelectSourceAndArchiveStorage` | `DriveSelectionPinned` | 사람 선택 ID와 탐색 revision 고정 |
+| 3 | 담당자 | `FixFolderScope` | `FolderScopeFixed` | 일부·전체를 폴더 ID 집합으로 저장 |
+| 4 | 담당자 또는 허용된 Archivist | `StartOrganizationStage` | `ArchiveRunStarted` 후보 | Archive Storage 쓰기 예약, Worker 탐색·검사 시작 |
+| 5 | Worker | `RecordOrganizationDecision` | `OrganizationDecisionRecorded` | HOLD는 INPUT, 나머지는 1단계 Folder Job |
+| 6 | Worker | `PublishArchivePackage` | `ArchivePackageStored` | 한 벌 검증, ArchiveCatalog 갱신 |
+| 7 | 1단계 실행 작업 없음 | `EnableTranscriptionStage` | projection만 갱신 | HOLD는 gate와 대상에서 제외 |
+| 8 | 담당자 또는 허용된 Archivist | `StartTranscriptionStage` | `TranscriptionStageStarted` | 대상 녹화영상에 2단계 작업 생성 |
+| 9 | Worker | `ReviseArchivePackage` | `ArchivePackageRevisionStored` | Transcript·Subtitle 추가, ArchiveCatalog 갱신 |
+| 10 | 단계 완료 또는 새 HOLD | `RecallArchivistSession` | `SystemArchivistTurnQueued` | 같은 Session에 계기별 한 번만 제출 |
+
+Storage와 폴더 범위 선택은 담당자만 실행한다. Archivist는 고정 참조 안에서 1·2단계 시작과 현재 HOLD 목록·단일 근거 조회를 수행하고, 허용된 제어 모드에서는 최신 HOLD 하나에 명시적 분류를 추가할 수 있다. 선택 밖 분류와 파괴적 작업은 거부한다. Archivist Host가 offline이어도 Worker 실행은 계속되고 재호출 Turn만 기다린다. `ARC-010~011`, `COL-003`, `LRH-012`, `MCP-003~005`
+
+예외는 항목별로 격리한다. 손상 입력·지원하지 않는 codec은 해당 영상 실패, 일시 process 오류는 재시도, 원본 또는 네트워크 Storage 단절은 시도 횟수를 소비하지 않는 `WAITING/DEVICE`다. 실행 중 용량 부족의 의미는 Q6, HOLD가 남은 완료 의미는 Q10에서 결정한다.
+
 ## 6. 작업과 단계 실행
 
 | 순서 | 실행자·계기 | 명령 | 일관성 경계 후보 | 이벤트 | 정책·다음 동작 |
 |---:|---|---|---|---|---|
-| 1 | 담당자 또는 정책 범위의 에이전트 | `CreateJob` | Job | `JobCreated`, `StepQueued` | Template의 StepDefinition을 실행 Step으로 고정 |
+| 1 | 담당자 또는 정책 범위의 Archivist | `CreateJob` | Job | `JobCreated`, `StepQueued` | Template의 StepDefinition을 실행 Step으로 고정 |
 | 2 | Step이 QUEUED가 됨 | `EvaluateStepStart` | Step | `StepWaiting` 또는 `StepReserved` | Wait Reason 또는 Worker 선택으로 분기 |
 | 3 | 자원 예약 완료 | `GrantExecutionLease` | Step·ExecutionLease | `ExecutionLeaseGranted` | Worker에 실행 계획 전달 |
 | 4 | Worker | `StartStep` | Step | `StepStarted` | 실행 리스 heartbeat 시작 |
@@ -126,7 +151,21 @@ ExecutionLeaseExpired
 → 이전 펜싱 토큰의 늦은 결과: 명령 거부, 이벤트 없음
 ```
 
-연결 요구사항: `WFL-001~011`, `RES-001~008`, `WRK-002~004`, `EXE-001~003`.
+Dispatch 흐름:
+
+```text
+선행 조건 완료 또는 wait 조건 해제
+→ RequeueStep / StepQueued(ready_at 보존)
+→ SelectDispatchCandidate(priority, aging, job dispatch sequence)
+→ SelectWorker(등록·heartbeat·처리 종류·Storage·pinning·resource snapshot)
+→ ReserveStepResources
+→ 같은 Unit of Work에서 StepReserved + ResourceReservationCreated + ExecutionLeaseGranted
+→ Worker claim과 실행
+```
+
+예약이나 lease commit이 충돌하면 queue 순번을 소비하지 않고 새 projection으로 다시 선택한다. 실행 중 취소는 lease를 fence하되 process와 출력 정리가 끝날 때까지 ResourceReservation을 유지한다.
+
+연결 요구사항: `WFL-001~011`, `RES-001~008`, `DSP-001~003`, `WRK-002~004`, `WRK-008`, `EXE-001~003`.
 
 ## 7. 행사 기록
 
@@ -196,25 +235,41 @@ Timeline은 clip ID, in/out, 순서, cut marker를 가진다. Timeline 리비전
 
 연결 요구사항: `ARC-003~007`, `SEC-003`, `PER-001`.
 
-## 11. 사람 개입, 에이전트와 파괴적 명령
+## 11. 사람 개입, Archivist와 파괴적 명령
 
 ### 11.1 제어 모드 변경
 
 | 실행자 | 명령 | 이벤트 | 불변식 |
 |---|---|---|---|
 | 담당자 | `ChangeControlMode(MANUAL)` | `ControlModeChanged` | 실행 리스와 StepState를 바꾸지 않음 |
-| 담당자 | 도메인별 수동 명령 | 해당 도메인 이벤트 | 에이전트와 같은 Command Bus 사용 |
-| 담당자 | `ChangeControlMode(ASSISTED/AGENT)` | `ControlModeChanged` | 최신 이벤트와 현재 상태를 다시 읽은 뒤 에이전트가 계획 |
+| 담당자 | 도메인별 수동 명령 | 해당 도메인 이벤트 | Archivist와 같은 Command Bus 사용 |
+| 담당자 | `ChangeControlMode(ASSISTED/ARCHIVIST)` | `ControlModeChanged` | 최신 이벤트와 현재 상태를 다시 읽은 뒤 Archivist가 계획 |
 
-### 11.2 에이전트와 Provider 폴백
+### 11.2 Archivist 세션, 로컬 CLI와 Provider 폴백
 
 ```text
-사용자 질문
-→ 에이전트 게이트웨이가 Provider 계정 선택
-→ 에이전트가 조회하거나 명령 제안
-→ 승인·자동화 정책이 허용하면 ActorType.AGENT 명령 제출
-→ 명령 기록과 이벤트는 사람 명령과 동일하게 처리
+사람 직접 경로: 버튼·폼·API → ActorType.HUMAN Command
+Archivist 경로: 사용자 지시 → ArchivistTurn → MCP 조회·Tool Call → ActorType.ARCHIVIST Command 또는 ActionCard
+공통 경로: Command Bus → 상태·CommandRecord·Event·receipt → 같은 작업 상세와 다음 ArchivistTurn 문맥
 ```
+
+사람 직접 경로는 ArchivistSession 없이 빈 작업함에서 Job을 시작할 수 있다. Archivist 경로는 고정된 Archivist Host가 ArchivistTurnLease를 claim하고 runtime backend가 같은 request ID를 한 번 전달한다. 두 경로는 별도 업무 상태를 만들지 않는다.
+
+| 순서 | 실행자·계기 | 명령 | 일관성 경계 후보 | 이벤트 | 정책·다음 동작 |
+|---:|---|---|---|---|---|
+| 1 | 담당자 | `CreateArchivistSession` | ArchivistSession | `ArchivistSessionCreated` | Host·backend·CLI·workspace를 고정 |
+| 2 | 담당자 | `SubmitArchivistTurn` | ArchivistTurn | `ArchivistTurnQueued` | DB 확정 뒤에만 Host에 전달 |
+| 3 | Archivist Host | `ClaimArchivistTurn` | ArchivistTurn | `ArchivistTurnLeased` | 새 fencing token 발급 |
+| 4 | Runtime backend | `AcceptArchivistTurnInput` | ArchivistTurn | `ArchivistTurnSubmitted` | 수락을 실행 시작으로 보지 않음 |
+| 5 | Runtime backend | `StartArchivistTurn` | ArchivistTurn | `ArchivistTurnStarted` | 명시적 시작 event만 RUNNING으로 전이 |
+| 6 | Archivist | `RecordArchivistToolCall` | ArchivistToolCall | `ArchivistToolCallRecorded` | receipt가 있으면 최초 결과 replay |
+| 7 | Archivist | 허용된 Command 또는 `ProposeActionCard` | 대상 Aggregate·ActionCard | 도메인 Event 또는 `ActionCardProposed` | 저장된 제어 모드·ActionClass·인증된 MCP Capability로 분기 |
+| 8 | 담당자 | `RecordApproval` 또는 제안 Command 제출 | Approval·대상 Aggregate | `ApprovalRecorded` 또는 도메인 Event | 최신 expected revision 재검사 |
+| 9 | Runtime backend | `CompleteArchivistTurn` | ArchivistTurn | `ArchivistTurnCompleted` | idle·화면 문자열이 아닌 구조화 event 요구 |
+
+인증된 MCP Capability는 Session에 저장된 제어 모드를 사용한다. `MANUAL`에서는 Archivist 상태 변경을 거부하고, `ASSISTED`에서는 ActionCard만 만들며, `ARCHIVIST`에서는 allowlist의 비파괴 `PROCESS`를 직접 실행한다. `GATED`와 `DESTRUCTIVE`는 직접 실행하지 않으며 `ASSISTED`·`ARCHIVIST`에서 사람 Approval 경계로 보낸다. 채팅 문구와 요청 본문의 제어 모드는 Approval이나 권한 입력이 아니다. `COL-001~002`, `DSH-003`
+
+Host나 CLI가 끊기면 durable ArchivistSession은 유지하고 runtime handle만 폐기한다. native resume token 또는 정제된 checkpoint로 재개하며, 완료 Tool Call 결과는 다시 실행하지 않는다. 만료된 lease 뒤 이전 fencing token의 event와 Tool Call은 거부한다. `LRH-003~008`, `MCP-002`
 
 Provider 실패가 계정 상태를 바꾸면 `ProviderAccountCooldownStarted`, `ProviderAccountQuotaExhausted`, `ProviderAccountAuthenticationFailed` 같은 이벤트 후보를 남긴다. 다음 계정으로 폴백하기 전 완료된 Tool Call과 실제 Job 상태를 읽고, 완료된 명령은 다시 실행하지 않는다. 모든 계정이 제외되면 AI 사용 불가 상태가 되지만 버튼·폼을 통한 도메인 명령은 계속 사용할 수 있다.
 
@@ -251,6 +306,10 @@ RecordApproval(target=Volume revision)
 | Volume | mount 상태, lock, eject pending, format 진행 상태 | 업무 메타데이터 해석 |
 | Worker | 연결·heartbeat·수락 상태와 보고한 자원 | Step의 업무 상태 |
 | Provider 계정 | 상태, cooldown, budget, 기능·데이터 정책 | Job과 Step 상태 |
+| ArchivistSession | 고정 Host·backend·CLI·workspace, resume reference, 마지막 Turn | CLI process/PTY handle |
+| ArchivistTurn | 상태, request ID, lease·fencing, runtime event cursor | raw terminal screen |
+| ArchivistToolCall | tool input digest, 멱등 key, 결과 receipt와 Command 상관관계 | Capability가 소유하는 업무 상태 |
+| ActionCard | 제안 Command, 대상·expected revision, 사유·근거 | Approval과 대상 Aggregate 상태 |
 
 CommandRecord는 감사와 멱등성의 영속 기록이지만 업무 Aggregate 후보로 보지 않는다. 모든 일관성 경계 앞에 놓이는 애플리케이션 계층 계약이다.
 
@@ -262,9 +321,10 @@ CommandRecord는 감사와 멱등성의 영속 기록이지만 업무 Aggregate 
 | 작업 상세 타임라인 | 명령 기록, 이벤트, Approval, Tool Call, process log 위치 | 사람이 중간 개입하고 실패 원인을 확인 |
 | 자산 검색 | OriginalAsset, Artifact, 기술정보, STT·요약 텍스트 | 제목·행사·내용·codec·시간 및 Transcript segment timecode 검색 (`CAT-001~003`) |
 | 아카이브 상태 | ArchivePackage, ArchiveCopy, manifest 재검증 결과 | 주본·복제본 상태와 복구 필요 여부 확인 |
-| 작업 공간 드라이브 | PhysicalDevice, Volume, Storage, lock, file handle | Job의 I/O 충돌과 안전 해제 가능 여부 확인 |
+| 작업 공간 드라이브 | Volume, Storage, PhysicalDevice I/O lock, file handle | 논리 작업 범위와 물리 I/O 충돌·안전 제거 가능 여부 확인 |
 | Worker 상태 | heartbeat, HostLoadState, slot, 접근 Storage | 배정 가능 여부와 자원 병목 확인 |
 | AI 계정 상태 | 계정 상태, cooldown, budget, 최근 실패 | 폴백 순서와 AI 사용 불가 원인 확인 |
+| Archivist 세션 | Host, backend, CLI, Turn 상태, Tool Call, ActionCard | 로컬 CLI 연결·재개와 사람 개입 확인 |
 
 이 조회 화면은 원본 업무 기록이 아니다. SQLite를 잃었을 때 sidecar와 이벤트로 재구축하거나 필요하면 다시 투영할 수 있어야 한다.
 
@@ -276,23 +336,25 @@ CommandRecord는 감사와 멱등성의 영속 기록이지만 업무 Aggregate 
 | ES-02 | Review 결과의 식별자·상태·리비전이 용어집에 없음 | 변경 불가능한 ContentReview 기록과 검수 상태 정의 | `content-review` 용어와 `PIP-006`으로 고정 |
 | ES-03 | Timeline과 cut 선택이 용어집에 없음 | Timeline Entity와 CutSelection Value 정의 | 결정 필요 |
 | ES-04 | STT·요약·기술정보를 모두 일반 Artifact로만 표현할지 | 공통 파일 생애주기는 Artifact가 소유하고 전용 구조는 별도 모델로 둠 | Transcript와 Summary는 Artifact subtype(`TRN-001`, `SUM-001`), MediaInspection은 Record(`MED-001`)로 고정 |
-| ES-05 | SourceMedia와 PhysicalDevice의 식별자가 중복될 가능성 | 별도 SourceMedia Entity를 두지 않고 SOURCE_MEDIA는 StorageRole로만 사용하며 작업 공간은 PhysicalDevice ID로 식별 | `workspace-drive`, `storage-role` 용어와 `DEV-006`으로 고정 |
+| ES-05 | SOURCE_MEDIA Storage와 논리 드라이브·물리 장치 식별자가 섞일 가능성 | SOURCE_MEDIA는 StorageRole, workspace_drive_id는 stable Volume ID, PhysicalDevice ID는 I/O 충돌 키로 분리 | `workspace-drive`, `storage-role` 용어와 `DEV-006`으로 고정 |
 | ES-06 | Job 자체 상태가 필요한지 | 초기에는 Step 투영으로 계산하고 별도 JobState를 만들지 않음 | `job` 규칙으로 고정 |
 | ES-07 | 저장하지 않는 Notification의 reconnect cursor | 이벤트 기반 알림은 event ID로 재생하고 metric 알림은 재생하지 않음 | `NTF-001`, `NTF-002`로 고정 |
 | ES-08 | DB와 파일 publish 사이 장애 | staging ID와 publish receipt를 두고 재시작 시 파일과 DB를 조정 | `WFL-009`, `EXE-002`, `EXE-003`으로 고정 |
-| ES-09 | Provider 계정·요청·Tool Call 용어가 없음 | Agent Gateway 이벤트를 확정하기 전에 세 용어와 상태 집합 정의 | 결정 필요 |
+| ES-09 | Provider 계정·요청·Tool Call 용어가 없음 | ProviderAccount Entity와 ProviderRequest·ArchivistToolCall Record를 분리 | 용어집과 로컬 Runtime 설계로 고정 |
 | ES-10 | 모든 이벤트가 command_id를 요구함 | heartbeat timeout, 장치 감지, 정책 실행도 ActorType.SYSTEM 명령을 먼저 기록 | `CMD-007`, `CMD-008`로 공통 계약 고정 |
 | ES-11 | 실패 이벤트 이름이 오류 종류마다 폭증할 수 있음 | 상태 이벤트는 StepWaiting/RetryScheduled/Failed로 제한하고 error_class를 payload로 기록 | `WFL-010`으로 분류 규칙 고정 |
 | ES-12 | ArchivePackage import가 과거 Event를 중복 생성할 위험 | import는 원래 ID의 기록을 idempotent하게 복원하고 별도 Import 결과만 현재 명령 기록에 남김 | `ARC-007`로 고정 |
 | ES-13 | Volume, Worker, Provider 계정의 생애주기 상태 집합이 없음 | 이벤트 이름을 확정하기 전에 각 상태 집합과 허용 전이를 정의 | 결정 필요 |
+| ES-14 | ready Step이 여러 Job·Worker에 걸쳐 있을 때 순서와 자원 예약 원자성이 없음 | 영속 ready_at·aging·Job dispatch sequence로 후보를 고르고 StepReserved·ResourceReservation·ExecutionLease를 한 Unit of Work로 확정 | `dispatch-policy`, `resource-reservation`, `DSP-001~003`으로 고정 |
 
 ## 15. 요구사항으로 내리는 순서
 
-1. 아직 열린 ES-03, ES-09, ES-13의 용어와 상태 집합을 결정한다.
+1. 아직 열린 ES-03, ES-13과 Archive Intake Q2~Q12의 용어·상태·일관성 경계를 결정한다.
 2. 대용량 파일 입고와 작업 공간 드라이브 해제를 첫 Adapter 수직 슬라이스로 연결한다.
-3. SQLite projection·migration·backup/restore 요구사항을 추가하고 기존 `PER-001` Command Store에 연결한다.
-4. 행사 기록, VJ 통합, 최종 편집본 Template을 실제 FFmpeg·STT Adapter에 연결한다.
-5. HTTP Command API와 Dashboard를 기존 `NTF-002` SSE Adapter에 연결한다.
-6. Agent Gateway는 수동 흐름이 완결된 뒤 같은 Command Bus를 호출하도록 연결한다.
+3. 영속 Dispatch Queue, Worker resource snapshot과 ResourceReservation·ExecutionLease Unit of Work를 연결한다.
+4. SQLite projection·migration·backup/restore 요구사항을 추가하고 기존 `PER-001` Command Store에 연결한다.
+5. 행사 기록, VJ 통합, 최종 편집본 Template을 실제 FFmpeg·STT Adapter에 연결한다.
+6. HTTP Command API와 아카이브 작업 공간을 기존 `NTF-002` SSE Adapter에 연결한다.
+7. ArchivistSession·ArchivistTurn과 Archivist Host를 연결한 뒤 MCP Adapter가 같은 Capability Registry와 Command Bus를 호출하도록 연결한다.
 
 각 명령은 정상 흐름 하나와 독립된 거부 이유 하나가 관찰되도록 요구사항을 나눈다. 이벤트 이름만 확인하지 않고 상태, 명령 기록, 이벤트가 같은 transaction으로 보이는지 검증한다.

@@ -17,14 +17,23 @@ import (
 	"strings"
 	"time"
 
-	"videoarchive/internal/application/dashboard"
+	appdriveintake "videoarchive/internal/application/archiveintake"
+	"videoarchive/internal/application/archiveintakeworkspace"
+	"videoarchive/internal/application/archiveorganization"
+	"videoarchive/internal/application/archivetranscription"
+	"videoarchive/internal/application/archiveworkspace"
+	"videoarchive/internal/application/archivistcontrol"
+	coreintake "videoarchive/internal/core/archiveintake"
+	"videoarchive/internal/core/archivistruntime"
 	"videoarchive/internal/core/catalog"
 	"videoarchive/internal/core/command"
 	"videoarchive/internal/core/contentreview"
 	"videoarchive/internal/core/job"
+	"videoarchive/internal/core/organization"
 	"videoarchive/internal/core/security"
 	"videoarchive/internal/core/summary"
 	"videoarchive/internal/core/transcription"
+	"videoarchive/internal/core/vocabulary"
 	"videoarchive/internal/core/worker"
 	"videoarchive/internal/core/workflow"
 )
@@ -38,9 +47,9 @@ type CatalogReader interface {
 	ContentReviews(context.Context, string, uint64) ([]contentreview.Record, error)
 }
 
-type DashboardReader interface {
-	Inbox(context.Context) ([]dashboard.JobSummary, error)
-	Detail(context.Context, string) (dashboard.JobView, error)
+type ArchiveWorkspaceReader interface {
+	Inbox(context.Context) ([]archiveworkspace.JobSummary, error)
+	Detail(context.Context, string) (archiveworkspace.JobView, error)
 }
 
 type JobCommander interface {
@@ -51,48 +60,84 @@ type WorkerReader interface {
 	Statuses(context.Context) ([]worker.Status, error)
 }
 
+type ArchiveTranscriptionStarter interface {
+	Start(context.Context, archivetranscription.StartRequest) (archivetranscription.Result, error)
+}
+
+type ArchiveIntakeSelector interface {
+	Select(context.Context, appdriveintake.SelectRequest) (*appdriveintake.SessionAccess, error)
+}
+
+type ArchivistWorkspace interface {
+	CreateSession(context.Context, archivistruntime.SessionSpec, string) (archivistcontrol.SessionRecord, error)
+	CreateArchivist(context.Context, string, string, string, string, workflow.ControlMode) (archivistcontrol.SessionRecord, error)
+	SubmitTurnWithDriveSelection(context.Context, string, string, string, string, *archivistruntime.DriveSelection) (archivistcontrol.TurnRecord, error)
+	Projection(context.Context) ([]archivistcontrol.SessionProjection, error)
+	HostStatuses() []archivistruntime.HostStatus
+	HostProfiles() []archivistruntime.HostProfile
+	PrepareActionCard(context.Context, string, string) (command.Envelope, error)
+	CompleteActionCard(context.Context, string) error
+	RejectActionCard(context.Context, string, string, string) error
+}
+
 type Configuration struct {
-	Access         security.AccessConfig
-	TrustedProxies []netip.Prefix
-	Catalog        CatalogReader
-	Dashboard      DashboardReader
-	Notifications  http.Handler
-	Commands       JobCommander
-	WorkerAPI      http.Handler
-	Workers        WorkerReader
-	AllowedOrigins []string
-	Version        string
+	Access                security.AccessConfig
+	TrustedProxies        []netip.Prefix
+	Catalog               CatalogReader
+	ArchiveWorkspace      ArchiveWorkspaceReader
+	Notifications         http.Handler
+	Commands              JobCommander
+	WorkerAPI             http.Handler
+	Workers               WorkerReader
+	ArchivistAPI          http.Handler
+	Archivists            ArchivistWorkspace
+	Drives                archiveintakeworkspace.Workspace
+	ArchiveIntake         ArchiveIntakeSelector
+	ArchiveRuns           archiveorganization.Starter
+	ArchiveTranscriptions ArchiveTranscriptionStarter
+	AllowedOrigins        []string
+	Version               string
 }
 
 type Handler struct {
-	access         security.AccessConfig
-	trustedProxies []netip.Prefix
-	catalog        CatalogReader
-	dashboard      DashboardReader
-	notifications  http.Handler
-	commands       JobCommander
-	workerAPI      http.Handler
-	workers        WorkerReader
-	allowedOrigins []string
-	version        string
-	router         http.Handler
+	access                security.AccessConfig
+	trustedProxies        []netip.Prefix
+	catalog               CatalogReader
+	archiveWorkspace      ArchiveWorkspaceReader
+	notifications         http.Handler
+	commands              JobCommander
+	workerAPI             http.Handler
+	workers               WorkerReader
+	archivistAPI          http.Handler
+	archivists            ArchivistWorkspace
+	drives                archiveintakeworkspace.Workspace
+	archiveIntake         ArchiveIntakeSelector
+	archiveRuns           archiveorganization.Starter
+	archiveTranscriptions ArchiveTranscriptionStarter
+	allowedOrigins        []string
+	version               string
+	router                http.Handler
 }
 
 //go:embed static/*
 var staticFiles embed.FS
 
 func New(configuration Configuration) (*Handler, error) {
-	if configuration.Catalog == nil || configuration.Dashboard == nil || configuration.Notifications == nil ||
+	if configuration.Catalog == nil || configuration.ArchiveWorkspace == nil || configuration.Notifications == nil ||
 		strings.TrimSpace(configuration.Version) == "" || len(configuration.Access.AllowedNetworks) == 0 ||
-		(configuration.Commands != nil && len(configuration.AllowedOrigins) == 0) ||
-		(configuration.WorkerAPI == nil) != (configuration.Workers == nil) {
+		((configuration.Commands != nil || configuration.ArchiveIntake != nil || configuration.ArchiveRuns != nil || configuration.ArchiveTranscriptions != nil) && len(configuration.AllowedOrigins) == 0) ||
+		(configuration.WorkerAPI == nil) != (configuration.Workers == nil) ||
+		(configuration.ArchivistAPI == nil) != (configuration.Archivists == nil) {
 		return nil, ErrInvalidConfiguration
 	}
 	handler := &Handler{
 		access: configuration.Access, trustedProxies: append([]netip.Prefix(nil), configuration.TrustedProxies...),
-		catalog: configuration.Catalog, dashboard: configuration.Dashboard,
+		catalog: configuration.Catalog, archiveWorkspace: configuration.ArchiveWorkspace,
 		notifications: configuration.Notifications, commands: configuration.Commands,
 		workerAPI: configuration.WorkerAPI, workers: configuration.Workers,
+		archivistAPI: configuration.ArchivistAPI, archivists: configuration.Archivists,
+		drives: configuration.Drives, archiveIntake: configuration.ArchiveIntake,
+		archiveRuns: configuration.ArchiveRuns, archiveTranscriptions: configuration.ArchiveTranscriptions,
 		allowedOrigins: append([]string(nil), configuration.AllowedOrigins...),
 		version:        strings.TrimSpace(configuration.Version),
 	}
@@ -113,10 +158,33 @@ func New(configuration Configuration) (*Handler, error) {
 	if handler.workers != nil {
 		mux.HandleFunc("GET /api/v1/workers", handler.workerStatuses)
 	}
-	if handler.commands != nil {
+	if handler.commands != nil || handler.archivists != nil || handler.drives != nil || handler.archiveIntake != nil || handler.archiveRuns != nil || handler.archiveTranscriptions != nil {
 		mux.HandleFunc("GET /api/v1/session", handler.session)
+	}
+	if handler.commands != nil {
 		mux.HandleFunc("POST /api/v1/jobs", handler.createJob)
 		mux.HandleFunc("POST /api/v1/jobs/{jobID}/cancel", handler.cancelJob)
+	}
+	if handler.archivists != nil {
+		mux.HandleFunc("GET /api/v1/archivist-hosts", handler.archivistHostStatuses)
+		mux.HandleFunc("GET /api/v1/archivist-sessions", handler.archivistSessions)
+		mux.HandleFunc("POST /api/v1/archivist-sessions", handler.createArchivistSession)
+		mux.HandleFunc("POST /api/v1/archivist-sessions/{sessionID}/turns", handler.createArchivistTurn)
+		mux.HandleFunc("POST /api/v1/action-cards/{cardID}/execute", handler.executeActionCard)
+		mux.HandleFunc("POST /api/v1/action-cards/{cardID}/reject", handler.rejectActionCard)
+	}
+	if handler.drives != nil {
+		mux.HandleFunc("GET /api/v1/archive-intake", handler.archiveIntakeProjection)
+		mux.HandleFunc("POST /api/v1/archive-intake/{workspaceDriveID}/override", handler.overrideArchiveIntakeDecision)
+	}
+	if handler.archiveIntake != nil {
+		mux.HandleFunc("POST /api/v1/archive-intake-sessions", handler.selectArchiveIntake)
+	}
+	if handler.archiveRuns != nil {
+		mux.HandleFunc("POST /api/v1/archive-intake/runs", handler.startArchiveRun)
+	}
+	if handler.archiveTranscriptions != nil {
+		mux.HandleFunc("POST /api/v1/archive-runs/{archiveRunID}/transcription", handler.startArchiveTranscription)
 	}
 	mux.Handle("GET /api/v1/notifications", handler.notifications)
 	handler.router = securityHeaders(mux)
@@ -142,6 +210,17 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		securityHeaders(handler.workerAPI).ServeHTTP(writer, request)
 		return
 	}
+	if strings.HasPrefix(request.URL.Path, "/archivist/v1/") && handler.archivistAPI != nil {
+		_, err := security.ResolvePrincipal(security.AccessConfig{
+			Mode: security.AuthDisabled, AllowedNetworks: handler.access.AllowedNetworks,
+		}, security.AccessRequest{SourceIP: source})
+		if err != nil {
+			writeError(writer, http.StatusForbidden, "NETWORK_DENIED")
+			return
+		}
+		securityHeaders(handler.archivistAPI).ServeHTTP(writer, request)
+		return
+	}
 	principal, err := security.ResolvePrincipal(handler.access, security.AccessRequest{SourceIP: source})
 	if errors.Is(err, security.ErrAuthenticationRequired) {
 		writeError(writer, http.StatusUnauthorized, "AUTHENTICATION_REQUIRED")
@@ -160,7 +239,7 @@ type principalContextKey struct{}
 func (handler *Handler) index(writer http.ResponseWriter, request *http.Request) {
 	payload, err := staticFiles.ReadFile("static/index.html")
 	if err != nil {
-		writeError(writer, http.StatusInternalServerError, "DASHBOARD_UNAVAILABLE")
+		writeError(writer, http.StatusInternalServerError, "ARCHIVE_WORKSPACE_UNAVAILABLE")
 		return
 	}
 	writer.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -241,7 +320,7 @@ func (handler *Handler) reviews(writer http.ResponseWriter, request *http.Reques
 }
 
 func (handler *Handler) jobs(writer http.ResponseWriter, request *http.Request) {
-	jobs, err := handler.dashboard.Inbox(request.Context())
+	jobs, err := handler.archiveWorkspace.Inbox(request.Context())
 	if err != nil {
 		writeError(writer, http.StatusInternalServerError, "QUERY_FAILED")
 		return
@@ -254,8 +333,8 @@ func (handler *Handler) jobs(writer http.ResponseWriter, request *http.Request) 
 }
 
 func (handler *Handler) job(writer http.ResponseWriter, request *http.Request) {
-	job, err := handler.dashboard.Detail(request.Context(), request.PathValue("jobID"))
-	if errors.Is(err, dashboard.ErrJobNotFound) {
+	job, err := handler.archiveWorkspace.Detail(request.Context(), request.PathValue("jobID"))
+	if errors.Is(err, archiveworkspace.ErrJobNotFound) {
 		writeError(writer, http.StatusNotFound, "JOB_NOT_FOUND")
 		return
 	}
@@ -283,11 +362,616 @@ func (handler *Handler) workerStatuses(writer http.ResponseWriter, request *http
 		sort.Strings(storageIDs)
 		result = append(result, workerStatusView{
 			WorkerID: status.WorkerID, State: status.State, LastHeartbeat: status.LastHeartbeat,
+			SnapshotID: status.Metrics.SnapshotID, ObservedAt: status.Metrics.ObservedAt,
+			CPUAverage5m: status.Metrics.AverageCPU5m, GPUAverage5m: status.Metrics.AverageGPU5m,
+			IdleStableMillis:     status.Metrics.IdleStableFor.Milliseconds(),
+			AvailableMemoryBytes: status.Metrics.AvailableMemoryBytes,
+			AvailableVRAMBytes:   status.Metrics.AvailableVRAMBytes, ScratchFreeBytes: status.Metrics.ScratchFreeBytes,
 			AcceptingWork: status.Metrics.AcceptingWork, HeavyRunning: status.Metrics.HeavyRunning,
-			AccessibleStorageIDs: storageIDs,
+			LightRunning: status.Metrics.LightRunning, AccessibleStorageIDs: storageIDs,
+			ReservedMemoryBytes: status.Capacity.ReservedMemoryBytes, ReservedScratchBytes: status.Capacity.ReservedScratchBytes,
+			CapacityAvailableMemoryBytes: status.Capacity.AvailableMemoryBytes, CapacityScratchFreeBytes: status.Capacity.ScratchFreeBytes,
+			HeavySlotsUsed: status.Capacity.HeavySlotsUsed, HeavySlotsMaximum: status.Capacity.HeavySlotsMaximum,
+			LightSlotsUsed: status.Capacity.LightSlotsUsed, LightSlotsMaximum: status.Capacity.LightSlotsMaximum,
+			AdditionalWorkPossible: status.Capacity.AdditionalWorkPossible,
+			HeavyAdmission:         projectAdmission(status.Capacity.HeavyAdmission), LightAdmission: projectAdmission(status.Capacity.LightAdmission),
 		})
 	}
 	writeJSON(writer, http.StatusOK, map[string]any{"data": result})
+}
+
+func (handler *Handler) archivistHostStatuses(writer http.ResponseWriter, _ *http.Request) {
+	profiles := handler.archivists.HostProfiles()
+	result := make([]archivistHostStatusView, 0, len(profiles))
+	for _, profile := range profiles {
+		status := profile.HostStatus
+		result = append(result, archivistHostStatusView{
+			ArchivistHostID: status.ArchivistHostID, State: string(status.State), LastHeartbeat: status.LastHeartbeat,
+			DetectedCLIIDs: append([]string(nil), profile.DetectedCLIIDs...),
+		})
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"data": result})
+}
+
+func (handler *Handler) archivistSessions(writer http.ResponseWriter, request *http.Request) {
+	projections, err := handler.archivists.Projection(request.Context())
+	if err != nil {
+		writeError(writer, http.StatusInternalServerError, "QUERY_FAILED")
+		return
+	}
+	result := make([]archivistSessionView, 0, len(projections))
+	for _, projection := range projections {
+		view := archivistSessionView{
+			SessionID: projection.Session.ID, Name: projection.Session.Name, ArchivistHostID: projection.Session.ArchivistHostID,
+			Backend: string(projection.Session.Backend), CLIID: projection.Session.CLIID,
+			WorkspaceRootID: projection.Session.WorkspaceRootID, ControlMode: string(projection.Session.ControlMode),
+			JobID: projection.JobID, CreatedAt: projection.CreatedAt,
+		}
+		for _, turn := range projection.Turns {
+			turnView := archivistTurnView{
+				TurnID: turn.ID, RequestID: turn.RequestID, State: turn.State,
+				Prompt: safeArchivistPrompt(turn.Prompt), SubmittedBy: string(turn.SubmittedBy),
+				CreatedAt: turn.CreatedAt, UpdatedAt: turn.UpdatedAt, FinalResponse: turn.FinalResponse,
+				Entries: turn.Entries, DriveSelection: turn.DriveSelection, WorkContext: turn.WorkContext,
+			}
+			for _, call := range turn.ToolCalls {
+				turnView.ToolCalls = append(turnView.ToolCalls, archivistToolCallView{
+					ToolCallID: call.ID, ToolName: call.ToolName, TargetID: call.TargetID,
+					State: call.State, UpdatedAt: call.UpdatedAt,
+				})
+			}
+			view.Turns = append(view.Turns, turnView)
+		}
+		for _, card := range projection.ActionCards {
+			view.ActionCards = append(view.ActionCards, actionCardView{
+				ActionCardID: card.ID, ArchivistTurnID: card.ArchivistTurnID, CommandType: card.CommandType,
+				TargetID: card.TargetID, ExpectedRevision: card.ExpectedRevision,
+				State: card.State, ApprovalRequired: card.ApprovalRequired, Scope: actionCardScopeOf(card.Parameters),
+				RejectedBy: card.RejectedBy, RejectedAt: card.RejectedAt, RejectionReason: card.RejectionReason,
+			})
+		}
+		result = append(result, view)
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"data": result})
+}
+
+func actionCardScopeOf(parameters map[string]any) *actionCardScope {
+	scope := actionCardScope{}
+	scope.WorkspaceDriveID, _ = parameters["expected_workspace_drive_id"].(string)
+	scope.ArchiveStorageID, _ = parameters["archive_storage_id"].(string)
+	switch folders := parameters["folder_ids"].(type) {
+	case []string:
+		scope.FolderCount = len(folders)
+	case []any:
+		scope.FolderCount = len(folders)
+	}
+	if scope == (actionCardScope{}) {
+		return nil
+	}
+	return &scope
+}
+
+func safeArchivistPrompt(prompt string) string {
+	trimmed := strings.TrimSpace(prompt)
+	lower := strings.ToLower(trimmed)
+	for _, unsafe := range []string{"raw terminal", "resume-token", "credential", "secret"} {
+		if strings.Contains(lower, unsafe) {
+			return "REDACTED"
+		}
+	}
+	return trimmed
+}
+
+type createArchivistSessionRequest struct {
+	SessionID       string `json:"session_id"`
+	Name            string `json:"name"`
+	ArchivistHostID string `json:"archivist_host_id"`
+	Backend         string `json:"backend"`
+	CLIID           string `json:"cli_id"`
+	WorkspaceRootID string `json:"workspace_root_id"`
+	JobID           string `json:"job_id"`
+	ControlMode     string `json:"control_mode"`
+}
+
+func (handler *Handler) createArchivistSession(writer http.ResponseWriter, request *http.Request) {
+	if !handler.allowMutation(writer, request) {
+		return
+	}
+	var payload createArchivistSessionRequest
+	if !decodeJSON(writer, request, &payload) {
+		return
+	}
+	var record archivistcontrol.SessionRecord
+	var err error
+	if strings.TrimSpace(payload.Name) != "" || strings.TrimSpace(payload.ControlMode) != "" {
+		if strings.TrimSpace(payload.Backend) != "" || strings.TrimSpace(payload.WorkspaceRootID) != "" || strings.TrimSpace(payload.JobID) != "" {
+			writeArchivistError(writer, archivistcontrol.ErrInvalidRequest)
+			return
+		}
+		record, err = handler.archivists.CreateArchivist(request.Context(), payload.SessionID, payload.Name, payload.ArchivistHostID, payload.CLIID, workflow.ControlMode(payload.ControlMode))
+	} else {
+		record, err = handler.archivists.CreateSession(request.Context(), archivistruntime.SessionSpec{
+			ID: payload.SessionID, ArchivistHostID: payload.ArchivistHostID,
+			Backend: vocabulary.RuntimeBackend(payload.Backend), CLIID: payload.CLIID, WorkspaceRootID: payload.WorkspaceRootID,
+		}, payload.JobID)
+	}
+	if err != nil {
+		writeArchivistError(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusCreated, map[string]any{"data": map[string]any{
+		"session_id": record.Session.ID, "archivist_host_id": record.Session.ArchivistHostID,
+		"name": record.Session.Name, "control_mode": record.Session.ControlMode,
+		"backend": record.Session.Backend, "cli_id": record.Session.CLIID,
+		"workspace_root_id": record.Session.WorkspaceRootID, "job_id": record.JobID,
+	}})
+}
+
+type createArchivistTurnRequest struct {
+	TurnID         string                           `json:"turn_id"`
+	RequestID      string                           `json:"request_id"`
+	Prompt         string                           `json:"prompt"`
+	DriveSelection *archivistruntime.DriveSelection `json:"drive_selection,omitempty"`
+}
+
+func (handler *Handler) createArchivistTurn(writer http.ResponseWriter, request *http.Request) {
+	if !handler.allowMutation(writer, request) {
+		return
+	}
+	var payload createArchivistTurnRequest
+	if !decodeJSON(writer, request, &payload) {
+		return
+	}
+	if payload.DriveSelection != nil {
+		principal, _ := request.Context().Value(principalContextKey{}).(security.Principal)
+		copy := *payload.DriveSelection
+		copy.SelectedBy = principal.ID
+		payload.DriveSelection = &copy
+	}
+	record, err := handler.archivists.SubmitTurnWithDriveSelection(
+		request.Context(), request.PathValue("sessionID"), payload.TurnID, payload.RequestID, payload.Prompt, payload.DriveSelection,
+	)
+	if err != nil {
+		writeArchivistError(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusCreated, map[string]any{"data": map[string]any{
+		"session_id": record.Turn.SessionID, "turn_id": record.Turn.ID,
+		"request_id": record.Turn.RequestID, "state": record.Turn.State,
+	}})
+}
+
+func (handler *Handler) executeActionCard(writer http.ResponseWriter, request *http.Request) {
+	if !handler.allowMutation(writer, request) {
+		return
+	}
+	var payload struct{}
+	if !decodeJSON(writer, request, &payload) {
+		return
+	}
+	principal, _ := request.Context().Value(principalContextKey{}).(security.Principal)
+	envelope, err := handler.archivists.PrepareActionCard(request.Context(), request.PathValue("cardID"), principal.ID)
+	if err != nil {
+		writeArchivistError(writer, err)
+		return
+	}
+	var response map[string]any
+	switch envelope.CommandType {
+	case archiveintakeworkspace.ClassifyHoldCommand:
+		if handler.drives == nil {
+			writeError(writer, http.StatusConflict, "ARCHIVE_INTAKE_UNAVAILABLE")
+			return
+		}
+		decision, classifyErr := handler.drives.Override(request.Context(), archiveintakeworkspace.OverrideCommand{
+			CommandID: envelope.CommandID, DecisionID: parameterString(envelope.Parameters, "decision_id"),
+			IdempotencyKey: envelope.IdempotencyKey, WorkspaceDriveID: parameterString(envelope.Parameters, "workspace_drive_id"),
+			Folder: envelope.TargetID, ExpectedInputRevision: envelope.ExpectedRevision,
+			Disposition:            vocabulary.OrganizationDisposition(parameterString(envelope.Parameters, "disposition")),
+			TargetVideoBitRateKbps: parameterInt(envelope.Parameters, "target_video_bitrate_kbps"),
+			Actor:                  envelope.Actor, Reason: envelope.Reason, Basis: parameterStrings(envelope.Parameters, "basis"),
+			OccurredAt: time.Now().UTC(),
+		})
+		if classifyErr != nil {
+			writeError(writer, http.StatusConflict, "ARCHIVE_HOLD_CLASSIFICATION_FAILED")
+			return
+		}
+		response = map[string]any{"data": map[string]any{
+			"decision_id": decision.ID, "decision_sequence": decision.Sequence,
+			"input_revision": decision.InputRevision, "disposition": decision.Disposition,
+		}}
+	case archiveorganization.StartActionCardCommand:
+		if handler.archiveRuns == nil {
+			writeError(writer, http.StatusConflict, "ARCHIVE_RUN_UNAVAILABLE")
+			return
+		}
+		result, startErr := handler.archiveRuns.Start(request.Context(), archiveorganization.StartRequest{
+			ArchiveRunID: envelope.TargetID, IdempotencyKey: envelope.IdempotencyKey,
+			SessionID:                 parameterString(envelope.Parameters, "session_id"),
+			SourceVolumeID:            parameterString(envelope.Parameters, "source_volume_id"),
+			ExpectedCandidateRevision: parameterUint64(envelope.Parameters, "expected_candidate_revision"),
+			ArchiveStorageID:          parameterString(envelope.Parameters, "archive_storage_id"),
+			InputRevision:             parameterUint64(envelope.Parameters, "input_revision"),
+			FolderIDs:                 parameterStrings(envelope.Parameters, "folder_ids"),
+			ExpectedWorkerID:          parameterString(envelope.Parameters, "expected_worker_id"),
+			ExpectedSourceStorageID:   parameterString(envelope.Parameters, "expected_source_storage_id"),
+			ExpectedWorkspaceDriveID:  parameterString(envelope.Parameters, "expected_workspace_drive_id"),
+			Actor:                     envelope.Actor,
+			SelectedBy:                command.Actor{Type: vocabulary.ActorHuman, ID: parameterString(envelope.Parameters, "selected_by")},
+			StartedAt:                 time.Now().UTC(),
+		})
+		if startErr != nil {
+			writeError(writer, http.StatusConflict, "ARCHIVE_RUN_START_FAILED")
+			return
+		}
+		response = map[string]any{"data": map[string]any{
+			"archive_run_id": result.Receipt.ID, "folder_count": len(result.Receipt.Folders), "replayed": result.Replayed,
+		}}
+	case archivetranscription.StartActionCardCommand:
+		if handler.archiveTranscriptions == nil {
+			writeError(writer, http.StatusConflict, "ARCHIVE_TRANSCRIPTION_UNAVAILABLE")
+			return
+		}
+		result, startErr := handler.archiveTranscriptions.Start(request.Context(), archivetranscription.StartRequest{
+			ArchiveRunID: envelope.TargetID, ExpectedArchiveRunRevision: envelope.ExpectedRevision,
+			IdempotencyKey: envelope.IdempotencyKey, Actor: envelope.Actor, StartedAt: time.Now().UTC(),
+		})
+		if startErr != nil {
+			writeError(writer, http.StatusConflict, "ARCHIVE_TRANSCRIPTION_START_FAILED")
+			return
+		}
+		response = map[string]any{"data": map[string]any{
+			"archive_run_id": result.ArchiveRunID, "job_ids": result.JobIDs,
+			"eligible_count": result.EligibleCount, "hold_count": result.HoldCount,
+		}}
+	default:
+		if handler.commands == nil {
+			writeError(writer, http.StatusConflict, "COMMAND_UNAVAILABLE")
+			return
+		}
+		result, executeErr := handler.commands.Execute(request.Context(), envelope)
+		if executeErr != nil {
+			writeCommandError(writer, executeErr)
+			return
+		}
+		response = commandResultView(result)
+	}
+	if err := handler.archivists.CompleteActionCard(request.Context(), request.PathValue("cardID")); err != nil {
+		writeError(writer, http.StatusInternalServerError, "ACTION_CARD_UPDATE_FAILED")
+		return
+	}
+	writeJSON(writer, http.StatusOK, response)
+}
+
+func (handler *Handler) rejectActionCard(writer http.ResponseWriter, request *http.Request) {
+	if !handler.allowMutation(writer, request) {
+		return
+	}
+	var payload struct {
+		Reason string `json:"reason"`
+	}
+	if !decodeJSON(writer, request, &payload) {
+		return
+	}
+	principal, _ := request.Context().Value(principalContextKey{}).(security.Principal)
+	if err := handler.archivists.RejectActionCard(request.Context(), request.PathValue("cardID"), principal.ID, payload.Reason); err != nil {
+		writeArchivistError(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"data": map[string]any{
+		"action_card_id": request.PathValue("cardID"), "state": "REJECTED",
+	}})
+}
+
+func parameterString(parameters map[string]any, key string) string {
+	value, _ := parameters[key].(string)
+	return strings.TrimSpace(value)
+}
+
+func parameterUint64(parameters map[string]any, key string) uint64 {
+	switch value := parameters[key].(type) {
+	case uint64:
+		return value
+	case int:
+		if value > 0 {
+			return uint64(value)
+		}
+	case float64:
+		if value > 0 && value == float64(uint64(value)) {
+			return uint64(value)
+		}
+	}
+	return 0
+}
+
+func parameterInt(parameters map[string]any, key string) int {
+	switch value := parameters[key].(type) {
+	case int:
+		return value
+	case float64:
+		if value == float64(int(value)) {
+			return int(value)
+		}
+	}
+	return 0
+}
+
+func parameterStrings(parameters map[string]any, key string) []string {
+	switch values := parameters[key].(type) {
+	case []string:
+		return append([]string(nil), values...)
+	case []any:
+		result := make([]string, 0, len(values))
+		for _, raw := range values {
+			value, ok := raw.(string)
+			if !ok || strings.TrimSpace(value) == "" {
+				return nil
+			}
+			result = append(result, strings.TrimSpace(value))
+		}
+		return result
+	default:
+		return nil
+	}
+}
+
+func (handler *Handler) archiveIntakeProjection(writer http.ResponseWriter, request *http.Request) {
+	views, err := handler.drives.Projection(request.Context())
+	if err != nil {
+		writeError(writer, http.StatusInternalServerError, "QUERY_FAILED")
+		return
+	}
+	result := make([]driveView, 0, len(views))
+	for _, value := range views {
+		projected := driveView{
+			WorkspaceDriveID: value.WorkspaceDriveID, ArchiveRunID: value.ArchiveRunID, ArchiveRunRevision: value.ArchiveRunRevision,
+			CandidateRevision: value.CandidateRevision, FolderDiscoveryRevision: value.FolderDiscoveryRevision,
+			SessionID: value.SessionID, WorkerID: value.WorkerID, SourceVolumeID: value.SourceVolumeID,
+			SourceStorageID:  value.SourceStorageID,
+			ArchiveStorageID: value.ArchiveStorageID, State: value.State, ArchiveRunState: value.ArchiveRunState,
+			InputRevision: value.InputRevision, FileCount: value.FileCount, FolderCount: value.FolderCount,
+			StageOneRemaining: value.StageOneRemaining, StageTwoRemaining: value.StageTwoRemaining,
+			HoldCount: value.HoldCount, EligibleTranscriptionCount: value.EligibleTranscriptionCount,
+			CatalogRowCount: value.CatalogRowCount, CatalogUpdatedAt: value.CatalogUpdatedAt,
+			DiscoveredFileCount: value.DiscoveredFileCount, DiscoveredFolderCount: value.DiscoveredFolderCount,
+		}
+		for _, candidate := range value.StorageCandidates {
+			projected.StorageCandidates = append(projected.StorageCandidates, driveStorageView{
+				StorageID: candidate.StorageID, Role: string(candidate.Role), WorkspaceDriveID: candidate.WorkspaceDriveID,
+				AccessKind: string(candidate.AccessKind), Accessible: candidate.Accessible,
+				Model: candidate.Model, Label: candidate.Label, FileSystem: candidate.FileSystem,
+				CapacityBytes: candidate.CapacityBytes, FreeBytes: candidate.FreeBytes,
+			})
+		}
+		for _, folder := range value.Folders {
+			projected.Folders = append(projected.Folders, projectDriveFolder(folder))
+		}
+		for _, folder := range value.DiscoveredFolders {
+			projected.DiscoveredFolders = append(projected.DiscoveredFolders, projectDriveFolder(folder))
+		}
+		result = append(result, projected)
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"data": result})
+}
+
+func projectDriveFolder(folder archiveintakeworkspace.FolderView) driveFolderView {
+	holdReasons := make([]string, 0, len(folder.HoldReasons))
+	for _, reason := range folder.HoldReasons {
+		holdReasons = append(holdReasons, string(reason))
+	}
+	stages := make([]driveStageView, 0, len(folder.Stages))
+	for _, stage := range folder.Stages {
+		stages = append(stages, driveStageView{
+			ID: stage.ID, State: string(stage.State), WaitReason: string(stage.WaitReason),
+			WaitTargetStorageID: stage.WaitTargetStorageID,
+			CompletedCount:      stage.CompletedCount, TotalCount: stage.TotalCount,
+		})
+	}
+	qualities := make([]transcriptQualityView, 0, len(folder.TranscriptQualities))
+	for _, quality := range folder.TranscriptQualities {
+		reasons := make([]string, 0, len(quality.Reasons))
+		for _, reason := range quality.Reasons {
+			reasons = append(reasons, string(reason))
+		}
+		qualities = append(qualities, transcriptQualityView{
+			TranscriptID: quality.TranscriptID, OriginalAssetID: quality.OriginalAssetID,
+			State: string(quality.State), Reasons: reasons, DurationMillis: quality.DurationMillis,
+			SegmentCount: quality.SegmentCount, TextCharacterCount: quality.TextCharacterCount,
+		})
+	}
+	return driveFolderView{
+		Folder: folder.Folder, DecisionID: folder.DecisionID, InputRevision: folder.InputRevision,
+		DecisionSequence: folder.DecisionSequence, Disposition: string(folder.Disposition),
+		ProfileReference: folder.ProfileReference, HoldReasons: holdReasons, VideoCount: folder.VideoCount,
+		EstimatedOutputBytes: folder.EstimatedOutputBytes, JobID: folder.JobID,
+		TranscriptionJobID: folder.TranscriptionJobID, CurrentStepID: folder.CurrentStepID,
+		StepState: string(folder.StepState), Stages: stages, ArchivePackageID: folder.ArchivePackageID,
+		ArchiveState: string(folder.ArchiveState), CanAddTranscription: folder.CanAddTranscription,
+		TranscriptQualities: qualities,
+	}
+}
+
+type driveOverrideRequest struct {
+	CommandID              string `json:"command_id"`
+	DecisionID             string `json:"decision_id"`
+	IdempotencyKey         string `json:"idempotency_key"`
+	Folder                 string `json:"folder"`
+	ExpectedRevision       uint64 `json:"expected_revision"`
+	Disposition            string `json:"disposition"`
+	TargetVideoBitRateKbps int    `json:"target_video_bitrate_kbps,omitempty"`
+}
+
+func (handler *Handler) overrideArchiveIntakeDecision(writer http.ResponseWriter, request *http.Request) {
+	if !handler.allowMutation(writer, request) {
+		return
+	}
+	var payload driveOverrideRequest
+	if !decodeJSON(writer, request, &payload) {
+		return
+	}
+	principal, _ := request.Context().Value(principalContextKey{}).(security.Principal)
+	decision, err := handler.drives.Override(request.Context(), archiveintakeworkspace.OverrideCommand{
+		CommandID: payload.CommandID, DecisionID: payload.DecisionID, IdempotencyKey: payload.IdempotencyKey,
+		WorkspaceDriveID: request.PathValue("workspaceDriveID"), Folder: payload.Folder,
+		ExpectedInputRevision: payload.ExpectedRevision, Disposition: vocabulary.OrganizationDisposition(payload.Disposition),
+		TargetVideoBitRateKbps: payload.TargetVideoBitRateKbps,
+		Actor:                  command.Actor{Type: principal.ActorType, ID: principal.ID}, OccurredAt: time.Now().UTC(),
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, organization.ErrStaleInputRevision), errors.Is(err, command.ErrIdempotencyConflict):
+			writeError(writer, http.StatusConflict, "ORGANIZATION_OVERRIDE_CONFLICT")
+		case errors.Is(err, organization.ErrInvalidDecision):
+			writeError(writer, http.StatusBadRequest, "INVALID_ORGANIZATION_OVERRIDE")
+		default:
+			writeError(writer, http.StatusInternalServerError, "ORGANIZATION_OVERRIDE_FAILED")
+		}
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"data": map[string]any{
+		"decision_id": decision.ID, "sequence": decision.Sequence, "input_revision": decision.InputRevision,
+		"disposition": decision.Disposition, "profile_reference": decision.ProfileReference, "hold_reasons": decision.HoldReasons,
+	}})
+}
+
+type archiveRunStartRequest struct {
+	ArchiveRunID              string   `json:"archive_run_id"`
+	IdempotencyKey            string   `json:"idempotency_key"`
+	SessionID                 string   `json:"session_id"`
+	SourceVolumeID            string   `json:"source_volume_id"`
+	ExpectedCandidateRevision uint64   `json:"expected_candidate_revision"`
+	ArchiveStorageID          string   `json:"archive_storage_id"`
+	InputRevision             uint64   `json:"input_revision"`
+	FolderIDs                 []string `json:"folder_ids"`
+}
+
+type archiveIntakeSelectionRequest struct {
+	SessionID                 string `json:"session_id"`
+	VolumeID                  string `json:"volume_id"`
+	ExpectedCandidateRevision uint64 `json:"expected_candidate_revision"`
+}
+
+func (handler *Handler) selectArchiveIntake(writer http.ResponseWriter, request *http.Request) {
+	if !handler.allowMutation(writer, request) {
+		return
+	}
+	var payload archiveIntakeSelectionRequest
+	if !decodeJSON(writer, request, &payload) {
+		return
+	}
+	principal, _ := request.Context().Value(principalContextKey{}).(security.Principal)
+	access, err := handler.archiveIntake.Select(request.Context(), appdriveintake.SelectRequest{
+		SessionID: payload.SessionID, VolumeID: payload.VolumeID,
+		ExpectedCandidateRevision: payload.ExpectedCandidateRevision,
+		Actor:                     command.Actor{Type: principal.ActorType, ID: principal.ID}, SelectedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, coreintake.ErrStaleCandidate):
+			writeError(writer, http.StatusConflict, "DRIVE_SELECTION_STALE")
+		case errors.Is(err, coreintake.ErrHumanSelectionRequired), errors.Is(err, coreintake.ErrInvalidCandidate), errors.Is(err, coreintake.ErrInvalidSession):
+			writeError(writer, http.StatusBadRequest, "INVALID_DRIVE_SELECTION")
+		default:
+			writeError(writer, http.StatusInternalServerError, "DRIVE_SELECTION_FAILED")
+		}
+		return
+	}
+	if access.Root != nil {
+		if closeErr := access.Root.Close(); closeErr != nil {
+			writeError(writer, http.StatusInternalServerError, "DRIVE_SELECTION_FAILED")
+			return
+		}
+	}
+	writeJSON(writer, http.StatusCreated, map[string]any{"data": map[string]any{
+		"session_id": access.Session.ID, "candidate_revision": access.Session.CandidateRevision,
+		"workspace_drive_id": access.Session.WorkspaceDriveID, "worker_id": access.Session.WorkerID,
+		"source_storage_id": access.Session.StorageID,
+	}})
+}
+
+func (handler *Handler) startArchiveRun(writer http.ResponseWriter, request *http.Request) {
+	if !handler.allowMutation(writer, request) {
+		return
+	}
+	var payload archiveRunStartRequest
+	if !decodeJSON(writer, request, &payload) {
+		return
+	}
+	principal, _ := request.Context().Value(principalContextKey{}).(security.Principal)
+	result, err := handler.archiveRuns.Start(request.Context(), archiveorganization.StartRequest{
+		ArchiveRunID: payload.ArchiveRunID, IdempotencyKey: payload.IdempotencyKey, SessionID: payload.SessionID,
+		SourceVolumeID: payload.SourceVolumeID, ExpectedCandidateRevision: payload.ExpectedCandidateRevision,
+		ArchiveStorageID: payload.ArchiveStorageID, InputRevision: payload.InputRevision, FolderIDs: payload.FolderIDs,
+		Actor:      command.Actor{Type: principal.ActorType, ID: principal.ID},
+		SelectedBy: command.Actor{Type: principal.ActorType, ID: principal.ID}, StartedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, archiveorganization.ErrStartRejected), errors.Is(err, organization.ErrInvalidDecision):
+			writeError(writer, http.StatusBadRequest, "INVALID_ARCHIVE_RUN_START")
+		case errors.Is(err, command.ErrIdempotencyConflict):
+			writeError(writer, http.StatusConflict, "ARCHIVE_RUN_START_CONFLICT")
+		default:
+			writeError(writer, http.StatusInternalServerError, "ARCHIVE_RUN_START_FAILED")
+		}
+		return
+	}
+	status := http.StatusCreated
+	if result.Replayed {
+		status = http.StatusOK
+	}
+	writeJSON(writer, status, map[string]any{"data": map[string]any{
+		"archive_run_id": result.Receipt.ID, "session_id": result.Receipt.SessionID,
+		"workspace_drive_id": result.Receipt.WorkspaceDriveID, "input_revision": result.Receipt.InputRevision,
+		"file_count": len(result.Receipt.Files), "folder_count": len(result.Receipt.Folders), "replayed": result.Replayed,
+	}})
+}
+
+type archiveTranscriptionStartRequest struct {
+	IdempotencyKey             string `json:"idempotency_key"`
+	ExpectedArchiveRunRevision uint64 `json:"expected_archive_run_revision"`
+}
+
+func (handler *Handler) startArchiveTranscription(writer http.ResponseWriter, request *http.Request) {
+	if !handler.allowMutation(writer, request) {
+		return
+	}
+	var payload archiveTranscriptionStartRequest
+	if !decodeJSON(writer, request, &payload) {
+		return
+	}
+	principal, _ := request.Context().Value(principalContextKey{}).(security.Principal)
+	result, err := handler.archiveTranscriptions.Start(request.Context(), archivetranscription.StartRequest{
+		ArchiveRunID: request.PathValue("archiveRunID"), ExpectedArchiveRunRevision: payload.ExpectedArchiveRunRevision,
+		IdempotencyKey: payload.IdempotencyKey, Actor: command.Actor{Type: principal.ActorType, ID: principal.ID},
+		StartedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, archivetranscription.ErrStageOneIncomplete), errors.Is(err, command.ErrIdempotencyConflict):
+			writeError(writer, http.StatusConflict, "ARCHIVE_TRANSCRIPTION_NOT_READY")
+		case errors.Is(err, archivetranscription.ErrInvalidRequest), errors.Is(err, archivetranscription.ErrInvalidStoredResult):
+			writeError(writer, http.StatusBadRequest, "INVALID_ARCHIVE_TRANSCRIPTION_START")
+		default:
+			writeError(writer, http.StatusInternalServerError, "ARCHIVE_TRANSCRIPTION_START_FAILED")
+		}
+		return
+	}
+	writeJSON(writer, http.StatusCreated, map[string]any{"data": map[string]any{
+		"archive_run_id": result.ArchiveRunID, "job_ids": result.JobIDs,
+		"eligible_count": result.EligibleCount, "hold_count": result.HoldCount,
+	}})
+}
+
+func writeArchivistError(writer http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, archivistruntime.ErrArchivistHostNotConfigured), errors.Is(err, archivistruntime.ErrInvalidSession),
+		errors.Is(err, archivistruntime.ErrInvalidTurn), errors.Is(err, archivistcontrol.ErrInvalidRequest):
+		writeError(writer, http.StatusBadRequest, "INVALID_ARCHIVIST_REQUEST")
+	case errors.Is(err, archivistcontrol.ErrSessionNotFound):
+		writeError(writer, http.StatusNotFound, "ARCHIVIST_SESSION_NOT_FOUND")
+	default:
+		writeError(writer, http.StatusConflict, "ARCHIVIST_REQUEST_CONFLICT")
+	}
 }
 
 func (handler *Handler) session(writer http.ResponseWriter, request *http.Request) {
@@ -297,7 +981,7 @@ func (handler *Handler) session(writer http.ResponseWriter, request *http.Reques
 		return
 	}
 	http.SetCookie(writer, &http.Cookie{
-		Name: "video_archive_csrf", Value: csrfToken, Path: "/", HttpOnly: true,
+		Name: "archive_csrf", Value: csrfToken, Path: "/", HttpOnly: true,
 		SameSite: http.SameSiteStrictMode, Secure: request.TLS != nil,
 	})
 	writer.Header().Set("Cache-Control", "no-store")
@@ -366,12 +1050,12 @@ func (handler *Handler) cancelJob(writer http.ResponseWriter, request *http.Requ
 func (handler *Handler) envelope(request *http.Request, envelope command.Envelope) command.Envelope {
 	principal, _ := request.Context().Value(principalContextKey{}).(security.Principal)
 	envelope.Actor = command.Actor{Type: principal.ActorType, ID: principal.ID}
-	envelope.RequestedVia = "dashboard"
+	envelope.RequestedVia = "archive_workspace"
 	return envelope
 }
 
 func (handler *Handler) allowMutation(writer http.ResponseWriter, request *http.Request) bool {
-	cookie, err := request.Cookie("video_archive_csrf")
+	cookie, err := request.Cookie("archive_csrf")
 	if err != nil || security.ValidateBrowserMutation(security.BrowserMutation{
 		Method: request.Method, Origin: request.Header.Get("Origin"), AllowedOrigins: handler.allowedOrigins,
 		ContentType: request.Header.Get("Content-Type"), CSRFHeader: request.Header.Get("X-CSRF-Token"),
@@ -456,7 +1140,7 @@ type jobSummaryView struct {
 	ExecutorKind           string      `json:"executor_kind"`
 	ActorID                string      `json:"actor_id,omitempty"`
 	WorkerID               string      `json:"worker_id,omitempty"`
-	AgentAction            string      `json:"agent_action,omitempty"`
+	ArchivistAction        string      `json:"archivist_action,omitempty"`
 	ToolCallStatus         string      `json:"tool_call_status,omitempty"`
 	WaitReason             string      `json:"wait_reason,omitempty"`
 	ErrorClass             string      `json:"error_class,omitempty"`
@@ -481,12 +1165,188 @@ type workerView struct {
 }
 
 type workerStatusView struct {
-	WorkerID             string    `json:"worker_id"`
-	State                string    `json:"state"`
-	LastHeartbeat        time.Time `json:"last_heartbeat,omitempty"`
-	AcceptingWork        bool      `json:"accepting_work"`
-	HeavyRunning         int       `json:"heavy_running"`
-	AccessibleStorageIDs []string  `json:"accessible_storage_ids"`
+	WorkerID                     string        `json:"worker_id"`
+	State                        string        `json:"state"`
+	LastHeartbeat                time.Time     `json:"last_heartbeat,omitempty"`
+	SnapshotID                   uint64        `json:"snapshot_id"`
+	ObservedAt                   time.Time     `json:"observed_at,omitempty"`
+	CPUAverage5m                 float64       `json:"cpu_average_5m"`
+	GPUAverage5m                 float64       `json:"gpu_average_5m"`
+	IdleStableMillis             int64         `json:"idle_stable_millis"`
+	AvailableMemoryBytes         uint64        `json:"available_memory_bytes"`
+	AvailableVRAMBytes           uint64        `json:"available_vram_bytes"`
+	ScratchFreeBytes             uint64        `json:"scratch_free_bytes"`
+	AcceptingWork                bool          `json:"accepting_work"`
+	HeavyRunning                 int           `json:"heavy_running"`
+	LightRunning                 int           `json:"light_running"`
+	AccessibleStorageIDs         []string      `json:"accessible_storage_ids"`
+	ReservedMemoryBytes          uint64        `json:"reserved_memory_bytes"`
+	ReservedScratchBytes         uint64        `json:"reserved_scratch_bytes"`
+	CapacityAvailableMemoryBytes uint64        `json:"capacity_available_memory_bytes"`
+	CapacityScratchFreeBytes     uint64        `json:"capacity_scratch_free_bytes"`
+	HeavySlotsUsed               int           `json:"heavy_slots_used"`
+	HeavySlotsMaximum            int           `json:"heavy_slots_maximum"`
+	LightSlotsUsed               int           `json:"light_slots_used"`
+	LightSlotsMaximum            int           `json:"light_slots_maximum"`
+	AdditionalWorkPossible       bool          `json:"additional_work_possible"`
+	HeavyAdmission               admissionView `json:"heavy_admission"`
+	LightAdmission               admissionView `json:"light_admission"`
+}
+
+type admissionView struct {
+	Available  bool   `json:"available"`
+	WaitReason string `json:"wait_reason,omitempty"`
+	Code       string `json:"code,omitempty"`
+}
+
+func projectAdmission(value worker.Admission) admissionView {
+	return admissionView{Available: value.Available, WaitReason: string(value.WaitReason), Code: value.Code}
+}
+
+type archivistHostStatusView struct {
+	ArchivistHostID string    `json:"archivist_host_id"`
+	State           string    `json:"state"`
+	LastHeartbeat   time.Time `json:"last_heartbeat,omitempty"`
+	DetectedCLIIDs  []string  `json:"detected_cli_ids"`
+}
+
+type driveView struct {
+	WorkspaceDriveID           string             `json:"workspace_drive_id"`
+	ArchiveRunID               string             `json:"archive_run_id"`
+	ArchiveRunRevision         uint64             `json:"archive_run_revision"`
+	CandidateRevision          uint64             `json:"candidate_revision"`
+	FolderDiscoveryRevision    uint64             `json:"folder_discovery_revision"`
+	SessionID                  string             `json:"session_id"`
+	WorkerID                   string             `json:"worker_id"`
+	SourceVolumeID             string             `json:"source_volume_id"`
+	SourceStorageID            string             `json:"source_storage_id"`
+	ArchiveStorageID           string             `json:"archive_storage_id"`
+	State                      string             `json:"state"`
+	ArchiveRunState            string             `json:"archive_run_state"`
+	InputRevision              uint64             `json:"input_revision"`
+	FileCount                  int                `json:"file_count"`
+	FolderCount                int                `json:"folder_count"`
+	StageOneRemaining          int                `json:"stage_one_remaining"`
+	StageTwoRemaining          int                `json:"stage_two_remaining"`
+	HoldCount                  int                `json:"hold_count"`
+	EligibleTranscriptionCount int                `json:"eligible_transcription_count"`
+	CatalogRowCount            int                `json:"catalog_row_count"`
+	CatalogUpdatedAt           time.Time          `json:"catalog_updated_at,omitempty"`
+	Folders                    []driveFolderView  `json:"folders"`
+	DiscoveredFileCount        int                `json:"discovered_file_count"`
+	DiscoveredFolderCount      int                `json:"discovered_folder_count"`
+	DiscoveredFolders          []driveFolderView  `json:"discovered_folders"`
+	StorageCandidates          []driveStorageView `json:"storage_candidates"`
+}
+
+type driveStorageView struct {
+	StorageID        string `json:"storage_id"`
+	Role             string `json:"role"`
+	WorkspaceDriveID string `json:"workspace_drive_id"`
+	AccessKind       string `json:"access_kind"`
+	Accessible       bool   `json:"accessible"`
+	Model            string `json:"model,omitempty"`
+	Label            string `json:"label,omitempty"`
+	FileSystem       string `json:"file_system,omitempty"`
+	CapacityBytes    uint64 `json:"capacity_bytes"`
+	FreeBytes        uint64 `json:"free_bytes"`
+}
+
+type driveFolderView struct {
+	Folder               string                  `json:"folder"`
+	DecisionID           string                  `json:"decision_id"`
+	InputRevision        uint64                  `json:"input_revision"`
+	DecisionSequence     uint64                  `json:"decision_sequence"`
+	Disposition          string                  `json:"disposition"`
+	ProfileReference     string                  `json:"profile_reference,omitempty"`
+	HoldReasons          []string                `json:"hold_reasons"`
+	VideoCount           int                     `json:"video_count"`
+	EstimatedOutputBytes uint64                  `json:"estimated_output_bytes"`
+	JobID                string                  `json:"job_id,omitempty"`
+	TranscriptionJobID   string                  `json:"transcription_job_id,omitempty"`
+	CurrentStepID        string                  `json:"current_step_id"`
+	StepState            string                  `json:"step_state"`
+	Stages               []driveStageView        `json:"stages"`
+	ArchivePackageID     string                  `json:"archive_package_id,omitempty"`
+	ArchiveState         string                  `json:"archive_state,omitempty"`
+	CanAddTranscription  bool                    `json:"can_add_transcription"`
+	TranscriptQualities  []transcriptQualityView `json:"transcript_qualities"`
+}
+
+type transcriptQualityView struct {
+	TranscriptID       string   `json:"transcript_id"`
+	OriginalAssetID    string   `json:"original_asset_id,omitempty"`
+	State              string   `json:"state"`
+	Reasons            []string `json:"reasons"`
+	DurationMillis     int64    `json:"duration_millis"`
+	SegmentCount       int      `json:"segment_count"`
+	TextCharacterCount int      `json:"text_character_count"`
+}
+
+type driveStageView struct {
+	ID                  string `json:"stage_id"`
+	State               string `json:"state"`
+	WaitReason          string `json:"wait_reason,omitempty"`
+	WaitTargetStorageID string `json:"wait_target_storage_id,omitempty"`
+	CompletedCount      int    `json:"completed_count"`
+	TotalCount          int    `json:"total_count"`
+}
+
+type archivistSessionView struct {
+	SessionID       string              `json:"session_id"`
+	Name            string              `json:"name"`
+	ArchivistHostID string              `json:"archivist_host_id"`
+	Backend         string              `json:"backend"`
+	CLIID           string              `json:"cli_id"`
+	WorkspaceRootID string              `json:"workspace_root_id"`
+	ControlMode     string              `json:"control_mode"`
+	JobID           string              `json:"job_id,omitempty"`
+	CreatedAt       time.Time           `json:"created_at"`
+	Turns           []archivistTurnView `json:"turns"`
+	ActionCards     []actionCardView    `json:"action_cards"`
+}
+
+type archivistTurnView struct {
+	TurnID         string                                  `json:"turn_id"`
+	RequestID      string                                  `json:"request_id"`
+	State          string                                  `json:"state"`
+	Prompt         string                                  `json:"prompt"`
+	SubmittedBy    string                                  `json:"submitted_by"`
+	CreatedAt      time.Time                               `json:"created_at"`
+	UpdatedAt      time.Time                               `json:"updated_at"`
+	FinalResponse  *archivistruntime.FinalResponse         `json:"final_response,omitempty"`
+	Entries        []archivistruntime.TurnEntry            `json:"entries"`
+	ToolCalls      []archivistToolCallView                 `json:"tool_calls"`
+	DriveSelection *archivistruntime.DriveSelection        `json:"drive_selection,omitempty"`
+	WorkContext    *archivistruntime.ArchiveRunWorkContext `json:"work_context,omitempty"`
+}
+
+type archivistToolCallView struct {
+	ToolCallID string    `json:"tool_call_id"`
+	ToolName   string    `json:"tool_name"`
+	TargetID   string    `json:"target_id,omitempty"`
+	State      string    `json:"state"`
+	UpdatedAt  time.Time `json:"updated_at"`
+}
+
+type actionCardView struct {
+	ActionCardID     string           `json:"action_card_id"`
+	ArchivistTurnID  string           `json:"archivist_turn_id"`
+	CommandType      string           `json:"command_type"`
+	TargetID         string           `json:"target_id"`
+	ExpectedRevision uint64           `json:"expected_revision"`
+	State            string           `json:"state"`
+	ApprovalRequired bool             `json:"approval_required"`
+	Scope            *actionCardScope `json:"scope,omitempty"`
+	RejectedBy       string           `json:"rejected_by,omitempty"`
+	RejectedAt       time.Time        `json:"rejected_at,omitempty"`
+	RejectionReason  string           `json:"rejection_reason,omitempty"`
+}
+
+type actionCardScope struct {
+	WorkspaceDriveID string `json:"workspace_drive_id,omitempty"`
+	ArchiveStorageID string `json:"archive_storage_id,omitempty"`
+	FolderCount      int    `json:"folder_count,omitempty"`
 }
 
 type stepView struct {
@@ -503,7 +1363,7 @@ type stepView struct {
 	DependencyIDs []string  `json:"dependency_ids"`
 }
 
-type agentActionView struct {
+type archivistActionView struct {
 	Action         string    `json:"action"`
 	ToolCallID     string    `json:"tool_call_id"`
 	ToolCallStatus string    `json:"tool_call_status"`
@@ -518,19 +1378,19 @@ type timelineView struct {
 }
 
 type jobDetailView struct {
-	Summary      jobSummaryView    `json:"summary"`
-	Steps        []stepView        `json:"steps"`
-	AgentActions []agentActionView `json:"agent_actions"`
-	Workers      []workerView      `json:"workers"`
-	Timeline     []timelineView    `json:"timeline"`
+	Summary          jobSummaryView        `json:"summary"`
+	Steps            []stepView            `json:"steps"`
+	ArchivistActions []archivistActionView `json:"archivist_actions"`
+	Workers          []workerView          `json:"workers"`
+	Timeline         []timelineView        `json:"timeline"`
 }
 
-func projectJobSummary(value dashboard.JobSummary) jobSummaryView {
+func projectJobSummary(value archiveworkspace.JobSummary) jobSummaryView {
 	result := jobSummaryView{
 		JobID: value.JobID, Revision: value.Revision, TemplateName: value.TemplateName, TargetTitle: value.TargetTitle,
 		ControlMode: string(value.ControlMode), CurrentStepID: value.CurrentStepID, StepState: string(value.StepState),
 		Progress: value.Progress, ExecutorKind: string(value.ExecutorKind), ActorID: value.ActorID, WorkerID: value.WorkerID,
-		AgentAction: value.AgentAction, ToolCallStatus: string(value.ToolCallStatus), WaitReason: string(value.WaitReason),
+		ArchivistAction: value.ArchivistAction, ToolCallStatus: string(value.ToolCallStatus), WaitReason: string(value.WaitReason),
 		ErrorClass: value.ErrorClass, LastEventAt: value.LastEventAt, LogReference: value.LogReference,
 		NeedsHumanIntervention: value.NeedsHumanIntervention, InterventionReason: value.InterventionReason,
 	}
@@ -541,7 +1401,7 @@ func projectJobSummary(value dashboard.JobSummary) jobSummaryView {
 	return result
 }
 
-func projectJobDetail(value dashboard.JobView) jobDetailView {
+func projectJobDetail(value archiveworkspace.JobView) jobDetailView {
 	result := jobDetailView{Summary: projectJobSummary(value.Summary)}
 	for _, step := range value.Steps {
 		result.Steps = append(result.Steps, stepView{
@@ -551,8 +1411,8 @@ func projectJobDetail(value dashboard.JobView) jobDetailView {
 			DependencyIDs: append([]string(nil), step.DependencyIDs...),
 		})
 	}
-	for _, action := range value.AgentActions {
-		result.AgentActions = append(result.AgentActions, agentActionView{
+	for _, action := range value.ArchivistActions {
+		result.ArchivistActions = append(result.ArchivistActions, archivistActionView{
 			Action: action.Action, ToolCallID: action.ToolCallID,
 			ToolCallStatus: string(action.ToolCallStatus), OccurredAt: action.OccurredAt,
 		})
@@ -568,7 +1428,7 @@ func projectJobDetail(value dashboard.JobView) jobDetailView {
 	return result
 }
 
-func projectWorker(value dashboard.WorkerResource) workerView {
+func projectWorker(value archiveworkspace.WorkerResource) workerView {
 	return workerView{
 		WorkerID: value.WorkerID, CPUPercent: value.CPUPercent, GPUPercent: value.GPUPercent,
 		AvailableMemoryBytes: value.AvailableMemoryBytes, AvailableVRAMBytes: value.AvailableVRAMBytes,

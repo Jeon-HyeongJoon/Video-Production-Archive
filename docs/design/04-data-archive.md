@@ -7,14 +7,15 @@
 | SQLite | 상태, 관계, 검색, 승인, 감사, lease | 영상 BLOB, Provider credential |
 | 내부 SSD | DB, migration, 회전 로그 | 장기 영상 원본 |
 | Scratch | 처리 중 임시 파일 | 확정된 유일 복사본 |
-| Archive storage | 원본·파생본·sidecar·manifest | 활성 DB |
+| 아카이브 저장소 (`ARCHIVE_PRIMARY`) | 검증된 최적화 기록물·sidecar·manifest | 활성 DB, 기술적 복제본이라는 의미 |
+| Archive mirror/offsite | 확정 조건을 위한 검증 복제본 | 수정 가능한 작업 결과 |
 | OS Secret Store | API key/OAuth token | 영상 메타데이터 |
 
 ## 2. 논리 데이터 모델
 
 ```text
 Job 1 ── N Step 1 ── N Event
- │          └────── Approval / ExecutionLease / AgentToolCall
+ │          └────── Approval / ExecutionLease / ArchivistToolCall
  └── N OriginalAsset 1 ── N MediaInspection
                      └── N Artifact
                          ├── Rendition
@@ -23,12 +24,17 @@ Job 1 ── N Step 1 ── N Event
                          └── QCReport
 
 ArchivePackage 1 ── N ArchiveCopy ── Storage
+ArchivePackage 1 ── N PackageRevision(STORED → COMMITTED)
 PhysicalDevice 1 ── N Partition 1 ── N Volume
 Volume 1 ── N Storage
-Job N ── N WorkspaceDrive(role of PhysicalDevice)
+Job N ── N WorkspaceDrive(role of Volume) ── PhysicalDevice I/O guard
+ArchiveRun ── Worker / Source Storage / Archive Storage / fixed FolderScope
+ArchiveRun 1 ── 1 OrganizationStageOwnership / 1 TranscriptionStageOwnership
 ```
 
-Agent 계층은 `AgentSession → AgentTurn → ProviderRequest → AgentToolCall`로 연결하며 Tool Call은 같은 `command_id`를 사용한다.
+ArchiveRun는 기존 run 명령 영수증과 다른 영속 aggregate다. 생성할 때 담당자가 고른 참조와 고정 FolderScope를 저장하며, 단계의 시작 조건·Job 구성·완료 의미는 ArchiveRun 생성 계약에 섞지 않고 각 단계 요구사항에서 정한다. `ORG-012`
+
+Archivist 계층은 `ArchivistSession → ArchivistTurn → ProviderRequest → ArchivistToolCall`로 연결하며 Tool Call은 같은 `command_id`를 사용한다.
 
 다중 PC 실행 상태는 `WorkerDefinition → WorkerConnection/Heartbeat → ExecutionLease`로 연결한다. Worker는 DB를 직접 갱신하지 않고 Control API가 heartbeat와 결과를 transaction으로 기록한다.
 
@@ -39,13 +45,21 @@ Agent 계층은 `AgentSession → AgentTurn → ProviderRequest → AgentToolCal
 - `..`, UNC 우회, symlink와 등록 root 밖의 경로를 거부한다. Windows junction/reparse point는 실제 Windows acceptance test인 `ARC-008`로 검증한다.
 - mount path는 장치 식별자가 아니다. 장치 serial, filesystem UUID, model, capacity, 물리 라벨을 조합한다.
 - path는 저장 시 정규화하되 사용자 표시용 원본 파일명도 별도 보존한다.
-- 대용량 파일 Job의 작업 공간 단위는 PhysicalDevice다. Storage Adapter는 storage_id를 해당 PhysicalDevice ID로 해석하며 같은 장치의 여러 Volume과 root를 별도 작업 공간으로 취급하지 않는다. `DEV-006`
+- 대용량 파일 Job의 작업 공간 단위는 논리 Volume이다. Storage Adapter는 storage_id를 stable volume ID의 workspace_drive_id로 해석하며 같은 Volume의 여러 root는 같은 작업 공간, 같은 PhysicalDevice의 서로 다른 Volume은 다른 작업 공간으로 취급한다. PhysicalDevice ID는 동시 I/O 충돌과 안전 제거 판정용 보조 키로 별도 반환한다. `DEV-006`
+
+Storage는 로컬 root, 연결된 네트워크 공유 root, 새 외장 data volume root 또는 FTP·SFTP 원격 파일 서비스 root일 수 있다. 이 차이는 `StorageAccessKind.LOCAL`, `MOUNTED_NETWORK`, `ATTACHED_VOLUME`, `FTP`, `SFTP`로 표시하며 StorageRole과 섞지 않는다. API·MCP·업무 상태는 모든 경우 `storage_id`만 사용하고 절대경로·endpoint·credential 원문을 노출하지 않는다. 새 외장 Volume은 Worker가 자동 관찰하고 같은 root에도 SOURCE_MEDIA와 ARCHIVE_PRIMARY의 서로 다른 stable Storage ID를 만든다. 원본과 다른 논리 Volume의 ARCHIVE_PRIMARY ID만 아카이브 후보가 되며 담당자가 직접 고른다. 같은 PhysicalDevice의 별도 Volume도 후보가 될 수 있지만 Scheduler는 물리 I/O 충돌 키로 동시 heavy 작업을 막는다. 네트워크 공유의 identity·UNC·credential 방식은 `CFG-012`, FTP·SFTP의 endpoint identity·Secret Store reference·안전 게시 기능은 `CFG-013` acceptance 전까지 `planned`다.
+
+원격 파일 서비스 Adapter는 임시 업로드, 게시 전후 다시 읽기, 목록, manifest checksum 검증과 원자 rename 또는 그와 동등한 안전 게시를 제공해야 한다. 해당 기능을 확인하지 못한 후보는 화면에 접근 불가로 투영하고 아카이브 실행에 선택할 수 없다. SMTP는 파일 namespace의 목록·재검증·패키지 리비전 게시를 제공하지 않으므로 아카이브 저장소가 아니다. 완료 보고서나 아카이브 참조를 보내는 전달 채널로만 별도 설계한다.
 
 ## 4. 원본과 파생본
 
 원본은 `InputFileObservation`에서 최초 검증한 checksum·원래 이름·크기와 관찰 기록 ID를 고정한 immutable `OriginalAsset`이다. Storage와 상대경로는 관찰 기록 또는 사본 기록이 소유하며 OriginalAsset에 복제하지 않는다. 체크섬이나 원래 이름을 고쳐야 하면 새 OriginalAsset과 대체 관계를 만든다. `INT-002`, `ARC-001`
 
-`MediaInspection`은 `OriginalAsset` ID뿐 아니라 확정 checksum에도 묶인 추가 전용 Record다. 파일 경로나 ffprobe 원문을 검색 기준으로 삼지 않고 정규화한 컨테이너, 길이, 크기, bitrate와 stream 기술정보를 저장한다. `MED-001`
+`MediaInspection`은 `OriginalAsset` ID뿐 아니라 확정 checksum에도 묶인 추가 전용 Record다. 파일 경로나 ffprobe 원문을 검색 기준으로 삼지 않고 정규화한 컨테이너, 길이, 크기, 전체 bitrate와 stream별 기술정보·bitrate를 저장한다. `MED-001`, `MED-005`
+
+`OrganizationDecision`은 작업 공간 드라이브와 MediaFolder 입력 revision, policy version, 정렬된 OriginalAsset·MediaInspection 참조, OrganizationDisposition, 선택 Profile, CutMarker, STT 가능 여부와 보류 사유를 가진 추가 전용 Record다. 사람 또는 Archivist의 명시적 분류는 기존 Record를 고치지 않고 ActorType·행위자 ID·사유·근거가 있는 새 sequence를 추가한다. `ORG-002~003`
+
+`SourceTimeline`은 여러 OriginalAsset의 Clip 순서와 in/out, CutMarker를 가진 리비전 대상 Entity다. 이를 입력으로 만든 Rendition provenance는 Timeline ID와 모든 root OriginalAsset ID를 가진다. 단일 원본 파생물은 기존 `original_asset_id` 계약을 유지하지만 다중 원본 파생물을 첫 원본 하나로 축약하지 않는다. `ORG-006`, `ARC-009`
 
 파생 `Artifact`는 다음 provenance가 완전해야 한다. `ARC-002`
 
@@ -64,13 +78,13 @@ size + sha256
 
 `Subtitle`은 Transcript의 시간 구간을 versioned SRT Profile로 직렬화한 게시 Artifact다. Subtitle provenance는 입력 Transcript ID를 하나만 가지며 등록 Storage root 안의 임시 파일을 검증한 뒤 게시한다. `SUB-001~002`
 
-`Summary`는 입력 Transcript 하나를 가리키는 게시 JSON Artifact이면서 검수 대상인 ID·리비전, 작성 주체, 요약 text·키워드·시간 챕터를 소유한다. Agent 생성과 사람 폴백은 같은 구조를 사용하고 작성 주체로 구분하며 Transcript 원문을 복제하거나 대체하지 않는다. SQLite는 저장된 Transcript 참조와 Summary ID·리비전 유일성을 확인해 추가 전용으로 보존한다. `SUM-001~003`
+`Summary`는 입력 Transcript 하나를 가리키는 게시 JSON Artifact이면서 검수 대상인 ID·리비전, 작성 주체, 요약 text·키워드·시간 챕터를 소유한다. Archivist 생성과 사람 폴백은 같은 구조를 사용하고 작성 주체로 구분하며 Transcript 원문을 복제하거나 대체하지 않는다. SQLite는 저장된 Transcript 참조와 Summary ID·리비전 유일성을 확인해 추가 전용으로 보존한다. `SUM-001~003`
 
 내용 검수는 provenance를 덮어쓰지 않고 존재하는 Summary 리비전을 참조하는 추가 전용 ContentReview로 기록한다. SQLite에서 Event 저장 순번을 고유하게 보존하고 가장 큰 순번의 기록을 현재 검수 상태로 투영한다. `REV-001~002`
 
 ## 5. SQLite 운영 원칙
 
-- Control Service만 write connection을 소유한다.
+- Archive Control만 write connection을 소유한다.
 - WAL mode를 사용하고 DB를 네트워크 공유 경로에 두지 않는다.
 - 현재 상태, CommandRecord, Event, idempotency receipt와 outbox 레코드는 한 transaction에 기록한다. `PER-001`
 - 렌더링 동안 transaction을 열어두지 않는다.
@@ -80,7 +94,7 @@ size + sha256
 
 SQLite Command Store는 `PER-001` integration test로 transaction rollback을 검증한다. 전체 projection, migration, backup/restore는 다음 수직 슬라이스에서 별도 요구사항으로 내린다.
 
-Control Service 시작 시 boot 설정의 Storage topology를 같은 SQLite DB에 등록한다. 동일한 physical device·partition·volume·Storage ID·root 재등록은 재시작으로 보고 멱등하게 허용하지만 기존 ID의 parent나 root가 달라지면 시작을 중단한다. `CFG-006`, `CTL-002`
+Archive Control 시작 시 boot 설정의 Storage topology를 같은 SQLite DB에 등록한다. 동일한 physical device·partition·volume·Storage ID·root 재등록은 재시작으로 보고 멱등하게 허용하지만 기존 ID의 parent나 root가 달라지면 시작을 중단한다. `CFG-006`, `CTL-002`
 
 입고 카탈로그의 원본 기록은 JSON payload와 조회용 키를 함께 저장한다. `InputFileObservation`과 `OriginalAsset`은 ID 및 checksum으로, `MediaInspection`은 원본 자산 ID와 관찰 시각으로 조회한다. 인덱스 필드는 payload를 대체하는 별도 진실이 아니며 저장 시 도메인 Record와 함께 검증한다. `INT-003~004`, `MED-004`
 
@@ -88,21 +102,25 @@ Control Service 시작 시 boot 설정의 Storage topology를 같은 SQLite DB�
 
 Transcript payload도 OriginalAsset과 게시 시각을 조회 키로 함께 저장하되 JSON payload가 진실이다. 같은 ID와 같은 내용만 멱등하게 허용하며, 전사문 검색은 OriginalAsset별 가장 최근 Transcript의 segment text에서 일치한 millisecond 구간을 반환한다. `TRN-004`, `CAT-003`
 
-## 6. 아카이브 패키지
+## 6. 아카이브 패키지와 보관됨
+
+Archive Intake의 ArchivePackage는 결과 영상 하나당 하나다. SOURCE_MEDIA 원본 파일은 복사하지 않고 원본 드라이브 identity·원래 이름·상대경로·checksum·길이를 metadata에 남긴다.
 
 ```text
-VP-YYYYMMDD-NNNN/
-├── original/
-├── archive/
-├── proxy/
-├── transcript/
-├── thumbnail/
-├── metadata.json
-├── files.csv
-├── summary.md
-├── events.jsonl
-├── manifest-sha256.txt
-└── README.md
+<아카이브 저장소>/
+├── packages/
+│   └── VP-YYYYMMDD-NNNN/
+│       ├── video.mp4
+│       ├── transcript.json
+│       ├── transcript.txt
+│       ├── subtitle.srt
+│       ├── metadata.json
+│       ├── files.csv
+│       ├── events.jsonl
+│       ├── manifest-sha256.txt
+│       └── README.md
+└── catalog/
+    └── <원본 드라이브 ID>.csv
 ```
 
 - `metadata.json`: 기계가 읽는 엔티티·관계·provenance
@@ -111,9 +129,13 @@ VP-YYYYMMDD-NNNN/
 - `manifest-sha256.txt`: 정렬된 상대경로와 SHA-256
 - `README.md`: 도구가 없어도 읽을 수 있는 설명
 
+Archive Intake의 1단계 결과는 담당자가 고른 `ARCHIVE_PRIMARY`에 ArchivePackage로 게시한다. 한 벌이 manifest까지 검증되면 `STORED`, 즉 보관됨이다. 2단계 Transcript·TranscriptText·Subtitle은 확정 전 패키지에 manifest가 다른 새 리비전으로 추가한다. ArchiveCatalog는 전체 투영을 임시 파일로 작성·검증한 뒤 `catalog/<원본 드라이브 ID>.csv`로 원자 교체하며 ArchivePackage의 `files.csv`를 대체하지 않는다. `ORG-008~009`, `ARC-011`
+
 Core 메타데이터 round-trip 계약은 `ARC-005`, 실제 SQLite와 디렉터리를 사용하는 sidecar package import 계약은 `ARC-007`, manifest 계약은 `ARC-003`이다.
 
 ## 7. 아카이브 확정
+
+보관됨과 확정됨은 같은 상태가 아니다. 보관됨은 ARCHIVE_PRIMARY 한 벌의 검증 게시이고, 확정됨은 아래 `ARC-004` 증적을 모두 만족한 `COMMITTED` 상태다. 화면 이름 “아카이브”와 05 검색은 두 상태의 같은 기록물을 보되 상태를 구분한다.
 
 확정은 다음을 하나의 증적 묶음으로 검증한다. `ARC-004`
 
@@ -125,6 +147,8 @@ Core 메타데이터 round-trip 계약은 `ARC-005`, 실제 SQLite와 디렉터�
 6. 모든 기록의 ID, 대상 리비전, 검증 시각과 manifest digest 일치
 
 확정 후 수정은 기존 ArchivePackage를 덮어쓰지 않고 새 패키지가 이전 패키지를 대체하는 관계를 만든다.
+
+확정은 브라우저가 증적 payload를 올리거나 상태만 바꾸는 동기 API가 아니다. 담당자가 다른 물리 장치의 `ARCHIVE_MIRROR` 또는 `BACKUP_OFFSITE`를 고르면 Worker가 현재 리비전을 복제하고 양쪽 manifest·sidecar·QC를 검증한다. 그 manifest digest에 묶인 사람 Approval을 별도 ActionCard 조작으로 남긴 뒤 `CommitArchive`가 양쪽 current projection을 신규 임시 파일에 쓰고 검증한 후 교체한다. 복제·검증·승인·확정은 각각 멱등키 기록을 남기며, 어느 단계든 실패하면 `STORED`를 유지한다. 이 수직 흐름은 실제 서로 다른 두 물리 장치 acceptance 증적을 남기기 전까지 `ARC-012` planned로 둔다.
 
 ## 8. DB 재구축
 

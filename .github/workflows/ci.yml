@@ -40,7 +40,7 @@ jobs:
           cache: pip
           cache-dependency-path: requirements-visual.txt
 
-      - name: Install dashboard golden browser
+      - name: Install archive workspace golden browser
         run: |
           python -m pip install -r requirements-visual.txt
           python -m playwright install chromium

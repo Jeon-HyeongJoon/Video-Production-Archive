@@ -13,6 +13,7 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
+	"videoarchive/internal/core/archivistruntime"
 	"videoarchive/internal/core/config"
 	"videoarchive/internal/core/security"
 	"videoarchive/internal/core/storage"
@@ -23,15 +24,28 @@ import (
 var ErrInvalidConfiguration = errors.New("boot configuration is invalid")
 
 type Configuration struct {
-	SchemaVersion  uint32
-	DatabasePath   string
-	Settings       config.Settings
-	Access         security.AccessConfig
-	AllowedOrigins []string
-	TrustedProxies []netip.Prefix
-	HeartbeatTTL   time.Duration
-	Workers        []worker.Definition
-	Storages       []storage.Topology
+	SchemaVersion         uint32
+	DatabasePath          string
+	Settings              config.Settings
+	Access                security.AccessConfig
+	AllowedOrigins        []string
+	TrustedProxies        []netip.Prefix
+	HeartbeatTTL          time.Duration
+	RuntimeHeartbeatTTL   time.Duration
+	ArchivistTurnLeaseTTL time.Duration
+	Workers               []worker.Definition
+	ArchivistHosts        []archivistruntime.HostDefinition
+	Storages              []storage.Topology
+	ArchiveOrganization   *ArchiveOrganizationConfiguration
+}
+
+type LocalToolConfiguration struct {
+	Executable string
+	Version    string
+}
+
+type ArchiveOrganizationConfiguration struct {
+	FFprobe LocalToolConfiguration
 }
 
 type document struct {
@@ -70,6 +84,18 @@ type document struct {
 			AllowedStorageIDs []string `yaml:"allowed_storage_ids"`
 		} `yaml:"definitions"`
 	} `yaml:"workers"`
+	ArchivistHosts struct {
+		HeartbeatTTL string `yaml:"heartbeat_ttl"`
+		TurnLeaseTTL string `yaml:"turn_lease_ttl"`
+		Definitions  []struct {
+			ID                      string                      `yaml:"id"`
+			Enabled                 bool                        `yaml:"enabled"`
+			CredentialRef           string                      `yaml:"credential_ref"`
+			AllowedBackends         []vocabulary.RuntimeBackend `yaml:"allowed_backend_ids"`
+			AllowedCLIIDs           []string                    `yaml:"allowed_cli_ids"`
+			AllowedWorkspaceRootIDs []string                    `yaml:"allowed_workspace_root_ids"`
+		} `yaml:"definitions"`
+	} `yaml:"archivist_hosts"`
 	Storage []struct {
 		ID               string `yaml:"id"`
 		Role             string `yaml:"role"`
@@ -78,6 +104,12 @@ type document struct {
 		VolumeID         string `yaml:"volume_id"`
 		Root             string `yaml:"root"`
 	} `yaml:"storage"`
+	ArchiveOrganization *struct {
+		FFprobe struct {
+			Executable string `yaml:"executable"`
+			Version    string `yaml:"version"`
+		} `yaml:"ffprobe"`
+	} `yaml:"archive_organization"`
 }
 
 func Load(path string) (Configuration, error) {
@@ -177,7 +209,7 @@ func normalize(configurationPath string, source document) (Configuration, error)
 	for _, definition := range source.Workers.Definitions {
 		id := strings.TrimSpace(definition.ID)
 		credentialRef := strings.TrimSpace(definition.CredentialRef)
-		if !strings.HasPrefix(credentialRef, "wincred://") {
+		if !config.ValidSecretReference(credentialRef) {
 			return Configuration{}, ErrInvalidConfiguration
 		}
 		settings.Workers = append(settings.Workers, config.WorkerDefinition{ID: id, CredentialRef: credentialRef})
@@ -208,12 +240,79 @@ func normalize(configurationPath string, source document) (Configuration, error)
 	if len(workers) == 0 || settings.Validate() != nil {
 		return Configuration{}, ErrInvalidConfiguration
 	}
+	runtimeHeartbeatTTL := heartbeatTTL
+	if raw := strings.TrimSpace(source.ArchivistHosts.HeartbeatTTL); raw != "" {
+		runtimeHeartbeatTTL, err = time.ParseDuration(raw)
+		if err != nil || runtimeHeartbeatTTL <= 0 {
+			return Configuration{}, ErrInvalidConfiguration
+		}
+	}
+	archivistTurnLeaseTTL := 2 * time.Minute
+	if raw := strings.TrimSpace(source.ArchivistHosts.TurnLeaseTTL); raw != "" {
+		archivistTurnLeaseTTL, err = time.ParseDuration(raw)
+		if err != nil || archivistTurnLeaseTTL <= 0 {
+			return Configuration{}, ErrInvalidConfiguration
+		}
+	}
+	archivistHosts := make([]archivistruntime.HostDefinition, 0, len(source.ArchivistHosts.Definitions))
+	for _, definition := range source.ArchivistHosts.Definitions {
+		id := strings.TrimSpace(definition.ID)
+		credentialRef := strings.TrimSpace(definition.CredentialRef)
+		backends := make(map[vocabulary.RuntimeBackend]bool, len(definition.AllowedBackends))
+		for _, backend := range definition.AllowedBackends {
+			if !backend.Valid() || backends[backend] {
+				return Configuration{}, ErrInvalidConfiguration
+			}
+			backends[backend] = true
+		}
+		cliIDs, valid := stringSet(definition.AllowedCLIIDs)
+		if !valid {
+			return Configuration{}, ErrInvalidConfiguration
+		}
+		workspaceIDs, valid := stringSet(definition.AllowedWorkspaceRootIDs)
+		if !valid || id == "" || !config.ValidSecretReference(credentialRef) || len(backends) == 0 || len(cliIDs) == 0 || len(workspaceIDs) == 0 {
+			return Configuration{}, ErrInvalidConfiguration
+		}
+		settings.ArchivistHosts = append(settings.ArchivistHosts, config.ArchivistHostDefinition{ID: id, CredentialRef: credentialRef})
+		archivistHosts = append(archivistHosts, archivistruntime.HostDefinition{
+			ID: id, Enabled: definition.Enabled, CredentialRef: credentialRef,
+			AllowedBackends: backends, AllowedCLIIDs: cliIDs, AllowedWorkspaceRootIDs: workspaceIDs,
+		})
+	}
+	if settings.Validate() != nil {
+		return Configuration{}, ErrInvalidConfiguration
+	}
+	var archiveIntake *ArchiveOrganizationConfiguration
+	if source.ArchiveOrganization != nil {
+		executable := strings.TrimSpace(source.ArchiveOrganization.FFprobe.Executable)
+		version := strings.TrimSpace(source.ArchiveOrganization.FFprobe.Version)
+		info, statErr := os.Stat(executable)
+		if executable == "" || version == "" || !filepath.IsAbs(executable) || statErr != nil || !info.Mode().IsRegular() {
+			return Configuration{}, ErrInvalidConfiguration
+		}
+		archiveIntake = &ArchiveOrganizationConfiguration{FFprobe: LocalToolConfiguration{
+			Executable: filepath.Clean(executable), Version: version,
+		}}
+	}
 	return Configuration{
 		SchemaVersion: source.SchemaVersion, DatabasePath: databasePath, Settings: settings,
 		Access:         security.AccessConfig{Mode: settings.AuthMode, AllowedNetworks: allowedNetworks},
 		AllowedOrigins: allowedOrigins, TrustedProxies: trustedProxies,
-		HeartbeatTTL: heartbeatTTL, Workers: workers, Storages: storages,
+		HeartbeatTTL: heartbeatTTL, RuntimeHeartbeatTTL: runtimeHeartbeatTTL, ArchivistTurnLeaseTTL: archivistTurnLeaseTTL,
+		Workers: workers, ArchivistHosts: archivistHosts, Storages: storages, ArchiveOrganization: archiveIntake,
 	}, nil
+}
+
+func stringSet(values []string) (map[string]bool, bool) {
+	result := make(map[string]bool, len(values))
+	for _, raw := range values {
+		value := strings.TrimSpace(raw)
+		if value == "" || result[value] {
+			return nil, false
+		}
+		result[value] = true
+	}
+	return result, true
 }
 
 func parsePrefixes(values []string, required bool) ([]netip.Prefix, error) {

@@ -60,7 +60,7 @@ func TestAuthModeCanChangeOnlyFromLocalConfigWithServiceRestart(t *testing.T) {
 	for _, attempt := range []struct {
 		source  ModeChangeSource
 		restart bool
-	}{{ModeChangeDashboard, true}, {ModeChangeAPI, true}, {ModeChangeLocalConfig, false}} {
+	}{{ModeChangeArchiveWorkspace, true}, {ModeChangeAPI, true}, {ModeChangeLocalConfig, false}} {
 		if err := ValidateAuthModeChange(attempt.source, attempt.restart); !errors.Is(err, ErrModeChangeDenied) {
 			t.Fatalf("remote or live mode change accepted: %+v err=%v", attempt, err)
 		}

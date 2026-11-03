@@ -14,6 +14,7 @@ type StepDefinition struct {
 	ExecutorKind            vocabulary.ExecutorKind
 	FallbackExecutorKind    vocabulary.ExecutorKind
 	RequiredProcessingKinds []vocabulary.ProcessingKind
+	InitialWaitReason       vocabulary.WaitReason
 }
 
 type Template struct {
@@ -37,6 +38,12 @@ func humanStep(id string, dependsOn ...string) StepDefinition {
 	return StepDefinition{ID: id, DependsOn: dependsOn, ResourceClass: vocabulary.ResourceControl, ExecutorKind: vocabulary.ExecutorHuman}
 }
 
+func waitingHumanStep(id string, reason vocabulary.WaitReason, dependsOn ...string) StepDefinition {
+	step := humanStep(id, dependsOn...)
+	step.InitialWaitReason = reason
+	return step
+}
+
 func approvalStep(id string, dependsOn ...string) StepDefinition {
 	step := humanStep(id, dependsOn...)
 	step.ApprovalRequired = true
@@ -58,10 +65,10 @@ func heavyStep(id string, processingKind vocabulary.ProcessingKind, dependsOn ..
 	return workerStep(id, vocabulary.ResourceHeavy, processingKind, dependsOn...)
 }
 
-func agentStep(id string, processingKind vocabulary.ProcessingKind, fallback vocabulary.ExecutorKind, dependsOn ...string) StepDefinition {
+func archivistStep(id string, processingKind vocabulary.ProcessingKind, fallback vocabulary.ExecutorKind, dependsOn ...string) StepDefinition {
 	return StepDefinition{
 		ID: id, DependsOn: dependsOn, ResourceClass: vocabulary.ResourceLight,
-		ExecutorKind: vocabulary.ExecutorAgentGateway, FallbackExecutorKind: fallback,
+		ExecutorKind: vocabulary.ExecutorArchivistGateway, FallbackExecutorKind: fallback,
 		RequiredProcessingKinds: []vocabulary.ProcessingKind{processingKind},
 	}
 }
@@ -86,7 +93,7 @@ func OccasionRecording() Template {
 		lightStep("thumbnail", vocabulary.ProcessingThumbnail, "analyze"),
 		lightStep("audio", vocabulary.ProcessingAudioExtract, "analyze"),
 		heavyStep("transcript", vocabulary.ProcessingSTT, "audio"),
-		agentStep("summary", vocabulary.ProcessingSummary, vocabulary.ExecutorHuman, "transcript"),
+		archivistStep("summary", vocabulary.ProcessingSummary, vocabulary.ExecutorHuman, "transcript"),
 		humanStep("content_review", "summary"),
 		heavyStep("qc", vocabulary.ProcessingQC, "proxy", "thumbnail", "content_review"),
 	}
@@ -138,6 +145,49 @@ func LargeFileIntake() Template {
 	)
 }
 
+func ArchiveOrganization(disposition vocabulary.OrganizationDisposition) (Template, error) {
+	switch disposition {
+	case vocabulary.OrganizationAsIs:
+		return newTemplate("archive-intake-as-is",
+			lightStep("qc", vocabulary.ProcessingQC),
+			lightStep("organize", vocabulary.ProcessingOrganize, "qc"),
+			lightStep("archive_catalog", vocabulary.ProcessingOrganize, "organize"),
+		), nil
+	case vocabulary.OrganizationRenderRecordings:
+		return newTemplate("archive-intake-render-recordings",
+			heavyStep("render", vocabulary.ProcessingRender),
+			heavyStep("qc", vocabulary.ProcessingQC, "render"),
+			lightStep("organize", vocabulary.ProcessingOrganize, "qc"),
+			lightStep("archive_catalog", vocabulary.ProcessingOrganize, "organize"),
+		), nil
+	case vocabulary.OrganizationCompileSourceSequence:
+		return newTemplate("archive-intake-source-sequence",
+			controlStep("source_timeline"),
+			heavyStep("sequence_render", vocabulary.ProcessingRender, "source_timeline"),
+			heavyStep("qc", vocabulary.ProcessingQC, "sequence_render"),
+			lightStep("organize", vocabulary.ProcessingOrganize, "qc"),
+			lightStep("archive_catalog", vocabulary.ProcessingOrganize, "organize"),
+		), nil
+	case vocabulary.OrganizationHold:
+		return newTemplate("archive-intake-hold", waitingHumanStep("resolve_classification", vocabulary.WaitInput)), nil
+	default:
+		return Template{}, fmt.Errorf("invalid organization disposition %q", disposition)
+	}
+}
+
+// ArchiveTranscription is a separate stage-two Job. It is created only for a
+// stored recording selected by the owning ArchiveRun gate.
+func ArchiveTranscription() Template {
+	return newTemplate("archive-transcription",
+		lightStep("audio", vocabulary.ProcessingAudioExtract),
+		heavyStep("transcript", vocabulary.ProcessingSTT, "audio"),
+		lightStep("subtitle", vocabulary.ProcessingOrganize, "transcript"),
+		lightStep("transcript_text", vocabulary.ProcessingOrganize, "transcript"),
+		lightStep("archive_package_revision", vocabulary.ProcessingOrganize, "subtitle", "transcript_text"),
+		lightStep("archive_catalog", vocabulary.ProcessingOrganize, "archive_package_revision"),
+	)
+}
+
 func (template Template) Validate() error {
 	for id, step := range template.Steps {
 		if id == "" || step.ID != id {
@@ -146,7 +196,10 @@ func (template Template) Validate() error {
 		if !step.ResourceClass.Valid() || !step.ExecutorKind.Valid() {
 			return fmt.Errorf("step %s has invalid resource or executor class", id)
 		}
-		requiresProcessing := step.ExecutorKind == vocabulary.ExecutorWorker || step.ExecutorKind == vocabulary.ExecutorAgentGateway
+		if step.InitialWaitReason != "" && (!step.InitialWaitReason.Valid() || step.ExecutorKind != vocabulary.ExecutorHuman) {
+			return fmt.Errorf("step %s has invalid initial wait reason", id)
+		}
+		requiresProcessing := step.ExecutorKind == vocabulary.ExecutorWorker || step.ExecutorKind == vocabulary.ExecutorArchivistGateway
 		if requiresProcessing != (len(step.RequiredProcessingKinds) > 0) {
 			return fmt.Errorf("step %s has inconsistent processing declaration", id)
 		}
@@ -154,11 +207,11 @@ func (template Template) Validate() error {
 			if !processingKind.Valid() {
 				return fmt.Errorf("step %s has invalid processing kind %q", id, processingKind)
 			}
-			if processingKind == vocabulary.ProcessingSummary && step.ExecutorKind != vocabulary.ExecutorAgentGateway {
-				return fmt.Errorf("step %s routes SUMMARY outside Agent Gateway", id)
+			if processingKind == vocabulary.ProcessingSummary && step.ExecutorKind != vocabulary.ExecutorArchivistGateway {
+				return fmt.Errorf("step %s routes SUMMARY outside Archivist Gateway", id)
 			}
 		}
-		if step.ExecutorKind == vocabulary.ExecutorAgentGateway {
+		if step.ExecutorKind == vocabulary.ExecutorArchivistGateway {
 			if step.FallbackExecutorKind != vocabulary.ExecutorHuman && step.FallbackExecutorKind != vocabulary.ExecutorControl {
 				return fmt.Errorf("step %s has no non-AI fallback", id)
 			}

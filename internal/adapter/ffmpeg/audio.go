@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -18,13 +19,15 @@ import (
 var ErrAudioExtractionFailed = errors.New("ffmpeg audio extraction failed")
 
 type AudioRequest struct {
-	AudioArtifactID     string
-	OriginalAssetID     string
-	ResolvedInputPath   string
-	TemporaryOutputPath string
-	PublishedOutputPath string
-	ArtifactPath        string
-	Profile             audio.Profile
+	AudioArtifactID       string
+	OriginalAssetID       string
+	ResolvedInputPath     string
+	TemporaryOutputPath   string
+	PublishedOutputPath   string
+	ArtifactPath          string
+	TemporaryArtifactPath string
+	OutputRoot            *archive.StorageRoot
+	Profile               audio.Profile
 }
 
 type AudioExtractor struct {
@@ -60,16 +63,34 @@ func (extractor *AudioExtractor) Extract(ctx context.Context, request AudioReque
 		filepath.Clean(filepath.Dir(request.TemporaryOutputPath)) != filepath.Clean(filepath.Dir(request.PublishedOutputPath)) {
 		return audio.AudioArtifact{}, ErrInvalidRequest
 	}
-	if err := os.MkdirAll(filepath.Dir(request.PublishedOutputPath), 0o755); err != nil {
+	if request.OutputRoot != nil {
+		temporaryArtifactPath, temporaryOK := normalizeArtifactPath(request.TemporaryArtifactPath)
+		temporaryResolved, temporaryErr := request.OutputRoot.ExternalProcessPath(temporaryArtifactPath)
+		publishedResolved, publishedErr := request.OutputRoot.ExternalProcessPath(artifactPath)
+		if !temporaryOK || temporaryArtifactPath == artifactPath || path.Dir(temporaryArtifactPath) != path.Dir(artifactPath) ||
+			temporaryErr != nil || publishedErr != nil || filepath.Clean(temporaryResolved) != filepath.Clean(request.TemporaryOutputPath) ||
+			filepath.Clean(publishedResolved) != filepath.Clean(request.PublishedOutputPath) {
+			return audio.AudioArtifact{}, ErrInvalidRequest
+		}
+		if err := request.OutputRoot.MkdirAll(path.Dir(artifactPath), 0o755); err != nil {
+			return audio.AudioArtifact{}, err
+		}
+	} else if err := os.MkdirAll(filepath.Dir(request.PublishedOutputPath), 0o755); err != nil {
 		return audio.AudioArtifact{}, err
 	}
 	arguments := []string{
 		"-hide_banner", "-nostdin", "-y",
 		"-i", request.ResolvedInputPath,
-		"-vn", "-ac", strconv.Itoa(profile.Channels), "-ar", strconv.Itoa(profile.SampleRateHz),
+		"-vn",
+	}
+	if profile.FilterGraph != "" {
+		arguments = append(arguments, "-af", profile.FilterGraph)
+	}
+	arguments = append(arguments,
+		"-ac", strconv.Itoa(profile.Channels), "-ar", strconv.Itoa(profile.SampleRateHz),
 		"-c:a", profile.Codec, "-threads", strconv.Itoa(profile.ThreadCount), "-f", profile.Container,
 		request.TemporaryOutputPath,
-	}
+	)
 	plan := execution.Plan{
 		Executable: extractor.executable, Arguments: arguments,
 		TemporaryOutput: request.TemporaryOutputPath, PublishedOutput: request.PublishedOutputPath,
@@ -77,7 +98,13 @@ func (extractor *AudioExtractor) Extract(ctx context.Context, request AudioReque
 	if err := execution.RunVerified(ctx, plan, extractor.runner, extractor.verifier, extractor.publisher); err != nil {
 		return audio.AudioArtifact{}, errors.Join(ErrAudioExtractionFailed, err)
 	}
-	size, checksum, err := hashFile(request.PublishedOutputPath)
+	var size int64
+	var checksum string
+	if request.OutputRoot != nil {
+		size, checksum, err = request.OutputRoot.FileSHA256(artifactPath)
+	} else {
+		size, checksum, err = hashFile(request.PublishedOutputPath)
+	}
 	if err != nil || size <= 0 {
 		return audio.AudioArtifact{}, errors.Join(ErrAudioExtractionFailed, err)
 	}

@@ -71,3 +71,47 @@ func TestFFmpegAdapterExtractsVerifiedSpeechAudioWithoutShell(t *testing.T) {
 		t.Fatalf("audio artifact provenance is incomplete: %+v", result)
 	}
 }
+
+// Requirement: AUD-004
+func TestFFmpegAdapterAppliesFixedKoreanSpeechEnhancementProfile(t *testing.T) {
+	directory := t.TempDir()
+	argumentsPath := filepath.Join(directory, "arguments.txt")
+	payload := []byte("verified-enhanced-pcm-wave")
+	executablePath := ffmpegFixtureExecutable(t, argumentsPath, payload)
+	extractor, err := NewAudioExtractor(executablePath, "ffmpeg-8.0", "WORKER-1", OSRunner{}, payloadVerifier{expected: payload}, AtomicPublisher{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile, err := audio.KoreanSpeechEnhancementProfile(2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inputPath := filepath.Join(directory, "camera", "korean recording.mov")
+	temporaryPath := filepath.Join(directory, "output", "enhanced.wav.partial")
+	publishedPath := filepath.Join(directory, "output", "enhanced.wav")
+	result, err := extractor.Extract(context.Background(), AudioRequest{
+		AudioArtifactID: "AUDIO-ENHANCED-1", OriginalAssetID: "ASSET-1", ResolvedInputPath: inputPath,
+		TemporaryOutputPath: temporaryPath, PublishedOutputPath: publishedPath,
+		ArtifactPath: "audio/enhanced.wav", Profile: profile,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantArguments := []string{
+		"-hide_banner", "-nostdin", "-y", "-i", inputPath,
+		"-vn", "-af", audio.KoreanSpeechEnhancementFilterV1,
+		"-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", "-threads", "2", "-f", "wav", temporaryPath,
+	}
+	argumentPayload, err := os.ReadFile(argumentsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotArguments := strings.Split(strings.TrimSuffix(string(argumentPayload), "\n"), "\n")
+	if !reflect.DeepEqual(gotArguments, wantArguments) {
+		t.Fatalf("enhancement arguments=%q want=%q", gotArguments, wantArguments)
+	}
+	if result.Artifact.Origin.ProfileVersion != "speech-ko-enhanced-16k@v1" ||
+		result.ProfileID != "speech-ko-enhanced-16k" || result.SampleRateHz != 16_000 || result.Channels != 1 {
+		t.Fatalf("enhancement profile provenance is incomplete: %+v", result)
+	}
+}

@@ -21,7 +21,7 @@ import (
 )
 
 const audioChecksum = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-const whisperFixtureProcess = "VIDEO_ARCHIVE_WHISPER_FIXTURE_PROCESS"
+const whisperFixtureProcess = "ARCHIVE_WHISPER_FIXTURE_PROCESS"
 
 func TestMain(m *testing.M) {
 	if os.Getenv(whisperFixtureProcess) == "1" {

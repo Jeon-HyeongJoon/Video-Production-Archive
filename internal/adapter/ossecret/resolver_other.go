@@ -9,3 +9,5 @@ func New() *Resolver { return &Resolver{} }
 func (*Resolver) Resolve(string) (string, error) {
 	return "", ErrUnsupportedPlatform
 }
+
+func ProvisionDPAPI(string, string) error { return ErrUnsupportedPlatform }

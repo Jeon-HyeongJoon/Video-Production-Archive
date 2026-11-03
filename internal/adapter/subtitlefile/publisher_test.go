@@ -25,7 +25,7 @@ func TestSubtitlePublisherVerifiesTemporarySRTInsideStorageRootBeforePublishing(
 		t.Fatal(err)
 	}
 	defer root.Close()
-	publisher, err := NewPublisher(root, "videoarchive-subtitle-v1", "WORKER-1")
+	publisher, err := NewPublisher(root, "archive-subtitle-v1", "WORKER-1")
 	if err != nil {
 		t.Fatal(err)
 	}

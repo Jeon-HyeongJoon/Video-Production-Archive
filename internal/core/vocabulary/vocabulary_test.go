@@ -3,7 +3,7 @@ package vocabulary
 import "testing"
 
 func TestEveryDecidedVocabularyValueIsValid(t *testing.T) {
-	actorTypes := []ActorType{ActorHuman, ActorAgent, ActorWorker, ActorSystem}
+	actorTypes := []ActorType{ActorHuman, ActorArchivist, ActorWorker, ActorSystem}
 	for _, value := range actorTypes {
 		if !value.Valid() {
 			t.Fatalf("ActorType %q is not valid", value)
@@ -45,7 +45,16 @@ func TestEveryDecidedVocabularyValueIsValid(t *testing.T) {
 			t.Fatalf("StorageRole %q is not valid", value)
 		}
 	}
-	executorKinds := []ExecutorKind{ExecutorWorker, ExecutorAgentGateway, ExecutorControl, ExecutorHuman}
+	storageAccessKinds := []StorageAccessKind{
+		StorageAccessLocal, StorageAccessMountedNetwork, StorageAccessAttachedVolume,
+		StorageAccessFTP, StorageAccessSFTP,
+	}
+	for _, value := range storageAccessKinds {
+		if !value.Valid() {
+			t.Fatalf("StorageAccessKind %q is not valid", value)
+		}
+	}
+	executorKinds := []ExecutorKind{ExecutorWorker, ExecutorArchivistGateway, ExecutorControl, ExecutorHuman}
 	for _, value := range executorKinds {
 		if !value.Valid() {
 			t.Fatalf("ExecutorKind %q is not valid", value)
@@ -63,11 +72,34 @@ func TestEveryDecidedVocabularyValueIsValid(t *testing.T) {
 			t.Fatalf("ContentReviewDecision %q is not valid", value)
 		}
 	}
+	runtimeBackends := []RuntimeBackend{RuntimeEmbeddedCore, RuntimeOrcaCLI}
+	for _, value := range runtimeBackends {
+		if !value.Valid() {
+			t.Fatalf("RuntimeBackend %q is not valid", value)
+		}
+	}
+	archivistHostStates := []ArchivistHostState{ArchivistHostConnecting, ArchivistHostOnline, ArchivistHostBusy, ArchivistHostOffline, ArchivistHostDisabled}
+	for _, value := range archivistHostStates {
+		if !value.Valid() {
+			t.Fatalf("ArchivistHostState %q is not valid", value)
+		}
+	}
+	archivistTurnStates := []ArchivistTurnState{
+		ArchivistTurnQueued, ArchivistTurnLeased, ArchivistTurnSubmitted, ArchivistTurnRunning,
+		ArchivistTurnWaiting, ArchivistTurnCompleted, ArchivistTurnFailed, ArchivistTurnCancelled,
+	}
+	for _, value := range archivistTurnStates {
+		if !value.Valid() {
+			t.Fatalf("ArchivistTurnState %q is not valid", value)
+		}
+	}
 
 	if ActorType("UNKNOWN").Valid() || UserRole("UNKNOWN").Valid() || WaitReason("UNKNOWN").Valid() ||
 		ProcessingKind("UNKNOWN").Valid() || ResourceClass("UNKNOWN").Valid() || StorageRole("UNKNOWN").Valid() ||
+		StorageAccessKind("UNKNOWN").Valid() ||
 		ExecutorKind("UNKNOWN").Valid() ||
-		ApprovalDecision("UNKNOWN").Valid() || ContentReviewDecision("UNKNOWN").Valid() {
+		ApprovalDecision("UNKNOWN").Valid() || ContentReviewDecision("UNKNOWN").Valid() ||
+		RuntimeBackend("UNKNOWN").Valid() || ArchivistHostState("UNKNOWN").Valid() || ArchivistTurnState("UNKNOWN").Valid() {
 		t.Fatal("unknown vocabulary value was accepted")
 	}
 }

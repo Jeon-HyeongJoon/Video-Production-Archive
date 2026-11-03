@@ -44,13 +44,15 @@ func (AtomicPublisher) Publish(temporaryPath, publishedPath string) error {
 }
 
 type Request struct {
-	RenditionID         string
-	OriginalAssetID     string
-	ResolvedInputPath   string
-	TemporaryOutputPath string
-	PublishedOutputPath string
-	ArtifactPath        string
-	Profile             rendering.Profile
+	RenditionID           string
+	OriginalAssetID       string
+	ResolvedInputPath     string
+	TemporaryOutputPath   string
+	PublishedOutputPath   string
+	ArtifactPath          string
+	TemporaryArtifactPath string
+	OutputRoot            *archive.StorageRoot
+	Profile               rendering.Profile
 }
 
 type Renderer struct {
@@ -86,7 +88,19 @@ func (renderer *Renderer) Render(ctx context.Context, request Request) (renderin
 		filepath.Clean(filepath.Dir(request.TemporaryOutputPath)) != filepath.Clean(filepath.Dir(request.PublishedOutputPath)) {
 		return rendering.Rendition{}, ErrInvalidRequest
 	}
-	if err := os.MkdirAll(filepath.Dir(request.PublishedOutputPath), 0o755); err != nil {
+	if request.OutputRoot != nil {
+		temporaryArtifactPath, temporaryOK := normalizeArtifactPath(request.TemporaryArtifactPath)
+		temporaryResolved, temporaryErr := request.OutputRoot.ExternalProcessPath(temporaryArtifactPath)
+		publishedResolved, publishedErr := request.OutputRoot.ExternalProcessPath(artifactPath)
+		if !temporaryOK || temporaryArtifactPath == artifactPath || path.Dir(temporaryArtifactPath) != path.Dir(artifactPath) ||
+			temporaryErr != nil || publishedErr != nil || filepath.Clean(temporaryResolved) != filepath.Clean(request.TemporaryOutputPath) ||
+			filepath.Clean(publishedResolved) != filepath.Clean(request.PublishedOutputPath) {
+			return rendering.Rendition{}, ErrInvalidRequest
+		}
+		if err := request.OutputRoot.MkdirAll(path.Dir(artifactPath), 0o755); err != nil {
+			return rendering.Rendition{}, err
+		}
+	} else if err := os.MkdirAll(filepath.Dir(request.PublishedOutputPath), 0o755); err != nil {
 		return rendering.Rendition{}, err
 	}
 	arguments := renderArguments(request.ResolvedInputPath, request.TemporaryOutputPath, profile)
@@ -97,7 +111,13 @@ func (renderer *Renderer) Render(ctx context.Context, request Request) (renderin
 	if err := execution.RunVerified(ctx, plan, renderer.runner, renderer.verifier, renderer.publisher); err != nil {
 		return rendering.Rendition{}, errors.Join(ErrRenderFailed, err)
 	}
-	size, checksum, err := hashFile(request.PublishedOutputPath)
+	var size int64
+	var checksum string
+	if request.OutputRoot != nil {
+		size, checksum, err = request.OutputRoot.FileSHA256(artifactPath)
+	} else {
+		size, checksum, err = hashFile(request.PublishedOutputPath)
+	}
 	if err != nil || size <= 0 {
 		return rendering.Rendition{}, errors.Join(ErrRenderFailed, err)
 	}
@@ -119,17 +139,26 @@ func (renderer *Renderer) Render(ctx context.Context, request Request) (renderin
 func renderArguments(inputPath, outputPath string, profile rendering.Profile) []string {
 	scale := "scale=" + strconv.Itoa(profile.MaxWidth) + ":" + strconv.Itoa(profile.MaxHeight) +
 		":force_original_aspect_ratio=decrease:force_divisible_by=2"
-	return []string{
+	arguments := []string{
 		"-hide_banner", "-nostdin", "-y",
 		"-i", inputPath,
 		"-map", "0:v:0", "-map", "0:a?",
 		"-vf", scale,
-		"-c:v", profile.VideoEncoder, "-crf", strconv.Itoa(profile.ConstantRateFactor), "-pix_fmt", profile.PixelFormat,
-		"-c:a", profile.AudioEncoder, "-b:a", strconv.Itoa(profile.AudioBitRateKbps) + "k",
+		"-c:v", profile.VideoEncoder,
+	}
+	if profile.TargetVideoBitRateKbps > 0 {
+		bitRate := strconv.Itoa(profile.TargetVideoBitRateKbps) + "k"
+		arguments = append(arguments, "-b:v", bitRate, "-maxrate", bitRate, "-bufsize", strconv.Itoa(profile.TargetVideoBitRateKbps*2)+"k")
+	} else {
+		arguments = append(arguments, "-crf", strconv.Itoa(profile.ConstantRateFactor))
+	}
+	return append(arguments,
+		"-pix_fmt", profile.PixelFormat,
+		"-c:a", profile.AudioEncoder, "-b:a", strconv.Itoa(profile.AudioBitRateKbps)+"k",
 		"-threads", strconv.Itoa(profile.ThreadCount),
 		"-movflags", "+faststart", "-f", profile.Container,
 		outputPath,
-	}
+	)
 }
 
 func normalizeArtifactPath(value string) (string, bool) {

@@ -26,10 +26,10 @@ func TestSummaryKeepsRevisionAuthorKeywordsAndTimedChaptersSeparateFromTranscrip
 		ID: "SUMMARY-ARTIFACT-2", Path: "summary/event-r2.json", Size: 512, Checksum: checksumA,
 		Origin: archive.Provenance{
 			OriginalAssetID: "ASSET-1", InputArtifactIDs: []string{"TRANSCRIPT-1"}, ProcessingKind: vocabulary.ProcessingSummary,
-			ProcessorVersion: "provider-model-2026-10", ProfileVersion: profile.Reference(), CreatedBy: "AGENT-1", CreatedAt: time.Now().UTC(),
+			ProcessorVersion: "provider-model-2026-10", ProfileVersion: profile.Reference(), CreatedBy: "ARCHIVIST-1", CreatedAt: time.Now().UTC(),
 		},
 	}
-	result, err := NewSummary("SUMMARY-1", 2, artifact, profile, transcript, vocabulary.ActorAgent, "AGENT-1", Content{
+	result, err := NewSummary("SUMMARY-1", 2, artifact, profile, transcript, vocabulary.ActorArchivist, "ARCHIVIST-1", Content{
 		Text: " 행사 핵심 내용을 요약했습니다. ", Keywords: []string{"행사", " 기록 ", "행사"},
 		Chapters: []Chapter{
 			{Sequence: 1, StartMillis: 0, EndMillis: 1_250, Title: " 시작 "},
@@ -40,7 +40,7 @@ func TestSummaryKeepsRevisionAuthorKeywordsAndTimedChaptersSeparateFromTranscrip
 		t.Fatal(err)
 	}
 	if result.ID != "SUMMARY-1" || result.Revision != 2 || result.TranscriptID != "TRANSCRIPT-1" ||
-		result.TranscriptDurationMillis != 2_800 || result.AuthorType != vocabulary.ActorAgent || result.AuthorID != "AGENT-1" ||
+		result.TranscriptDurationMillis != 2_800 || result.AuthorType != vocabulary.ActorArchivist || result.AuthorID != "ARCHIVIST-1" ||
 		result.Content.Text != "행사 핵심 내용을 요약했습니다." || !reflect.DeepEqual(result.Content.Keywords, []string{"기록", "행사"}) ||
 		result.Content.Chapters[0].Title != "시작" {
 		t.Fatalf("summary did not preserve its revision and structured content: %+v", result)
@@ -48,7 +48,7 @@ func TestSummaryKeepsRevisionAuthorKeywordsAndTimedChaptersSeparateFromTranscrip
 	badContent := result.Content
 	badContent.Chapters = append([]Chapter(nil), badContent.Chapters...)
 	badContent.Chapters[1].StartMillis = 1_000
-	if _, err := NewSummary("SUMMARY-1", 3, artifact, profile, transcript, vocabulary.ActorAgent, "AGENT-1", badContent); !errors.Is(err, ErrInvalidSummary) {
+	if _, err := NewSummary("SUMMARY-1", 3, artifact, profile, transcript, vocabulary.ActorArchivist, "ARCHIVIST-1", badContent); !errors.Is(err, ErrInvalidSummary) {
 		t.Fatalf("overlapping chapter was accepted: %v", err)
 	}
 	if transcript.Content.Segments[0].Text != "첫 번째 원문" {

@@ -1,0 +1,16 @@
+schema_version: 1
+archivist_host:
+  id: archivist-windows
+  control_url: http://127.0.0.1:18080
+  mcp_control_url: http://127.0.0.1:18081
+  credential_ref: dpapi://C:/Archive/secrets/archivist-windows.dpapi
+  heartbeat_interval: 5s
+  claim_interval: 1s
+  mcp_listen_address: 127.0.0.1:18082
+clis:
+  - id: fixture-archivist
+    executable: C:/Archive/bin/archivist-fixture.exe
+    fixed_arguments: []
+workspace_roots:
+  - id: video-project
+    path: C:/Archive/workspace

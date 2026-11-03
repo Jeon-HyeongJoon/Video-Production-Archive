@@ -14,6 +14,8 @@ var (
 	ErrWorkerAuthentication = errors.New("worker service credential is invalid")
 	ErrWorkerNotConnected   = errors.New("worker is not connected")
 	ErrNoEligibleWorker     = errors.New("no eligible worker is online")
+	ErrInvalidSnapshot      = errors.New("worker resource snapshot is invalid")
+	ErrStaleSnapshot        = errors.New("worker resource snapshot is stale")
 )
 
 type Definition struct {
@@ -29,9 +31,49 @@ type CredentialVerifier interface {
 }
 
 type Metrics struct {
-	AcceptingWork        bool
-	HeavyRunning         int
-	AccessibleStorageIDs map[string]bool
+	SnapshotID            uint64
+	ObservedAt            time.Time
+	AverageCPU5m          float64
+	AverageGPU5m          float64
+	IdleStableFor         time.Duration
+	AvailableMemoryBytes  uint64
+	AvailableVRAMBytes    uint64
+	ScratchFreeBytes      uint64
+	HeavyRunning          int
+	LightRunning          int
+	BusyPhysicalDeviceIDs map[string]bool
+	AccessibleStorageIDs  map[string]bool
+	AcceptingWork         bool
+	StorageObservations   []StorageObservation
+	AttachedVolumes       []AttachedVolumeObservation
+}
+
+type AttachedVolumeObservation struct {
+	PhysicalDeviceID string `json:"physical_device_id"`
+	VolumeID         string `json:"volume_id"`
+	StorageID        string `json:"storage_id"`
+	ArchiveStorageID string `json:"archive_storage_id"`
+	Model            string `json:"model"`
+	Label            string `json:"label"`
+	FileSystem       string `json:"file_system"`
+	CapacityBytes    uint64 `json:"capacity_bytes"`
+	FreeBytes        uint64 `json:"free_bytes"`
+}
+
+type MediaFolderObservation struct {
+	Folder     string `json:"folder"`
+	VideoCount int    `json:"video_count"`
+	InputBytes uint64 `json:"input_bytes"`
+}
+
+type StorageObservation struct {
+	StorageID         string                       `json:"storage_id"`
+	Connected         bool                         `json:"connected"`
+	AccessKind        vocabulary.StorageAccessKind `json:"access_kind"`
+	CapacityBytes     uint64                       `json:"capacity_bytes"`
+	FreeBytes         uint64                       `json:"free_bytes"`
+	DiscoveryRevision uint64                       `json:"discovery_revision"`
+	Folders           []MediaFolderObservation     `json:"folders"`
 }
 
 type runtimeState struct {
@@ -42,6 +84,33 @@ type runtimeState struct {
 type Status struct {
 	WorkerID      string
 	State         string
+	LastHeartbeat time.Time
+	Metrics       Metrics
+	Capacity      Capacity
+}
+
+type Admission struct {
+	Available  bool
+	WaitReason vocabulary.WaitReason
+	Code       string
+}
+
+type Capacity struct {
+	ReservedMemoryBytes    uint64
+	ReservedScratchBytes   uint64
+	AvailableMemoryBytes   uint64
+	ScratchFreeBytes       uint64
+	HeavySlotsUsed         int
+	HeavySlotsMaximum      int
+	LightSlotsUsed         int
+	LightSlotsMaximum      int
+	AdditionalWorkPossible bool
+	HeavyAdmission         Admission
+	LightAdmission         Admission
+}
+
+type DispatchCandidate struct {
+	Definition    Definition
 	LastHeartbeat time.Time
 	Metrics       Metrics
 }
@@ -72,18 +141,74 @@ func (r *Registry) Connect(workerID, presentedCredential string, now time.Time, 
 	if r.verifier == nil || !r.verifier.Verify(workerID, definition.CredentialRef, presentedCredential) {
 		return ErrWorkerAuthentication
 	}
+	if err := validateMetrics(metrics); err != nil {
+		return err
+	}
+	if current, connected := r.states[workerID]; connected &&
+		(metrics.SnapshotID <= current.metrics.SnapshotID || metrics.ObservedAt.Before(current.metrics.ObservedAt)) {
+		return ErrStaleSnapshot
+	}
 	r.states[workerID] = runtimeState{lastHeartbeat: now, metrics: metrics}
+	return nil
+}
+
+func (r *Registry) Authenticate(workerID, presentedCredential string) error {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	definition, exists := r.definitions[workerID]
+	if !exists || !definition.Enabled {
+		return ErrWorkerNotConfigured
+	}
+	if r.verifier == nil || !r.verifier.Verify(workerID, definition.CredentialRef, presentedCredential) {
+		return ErrWorkerAuthentication
+	}
 	return nil
 }
 
 func (r *Registry) Heartbeat(workerID string, now time.Time, metrics Metrics) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, connected := r.states[workerID]; !connected {
+	current, connected := r.states[workerID]
+	if !connected {
 		return ErrWorkerNotConnected
+	}
+	if err := validateMetrics(metrics); err != nil {
+		return err
+	}
+	if metrics.SnapshotID <= current.metrics.SnapshotID || metrics.ObservedAt.Before(current.metrics.ObservedAt) {
+		return ErrStaleSnapshot
 	}
 	r.states[workerID] = runtimeState{lastHeartbeat: now, metrics: metrics}
 	return nil
+}
+
+func (r *Registry) DispatchSnapshot(workerID string, now time.Time) (Metrics, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	state, connected := r.states[workerID]
+	if !connected || !usableSnapshot(state, now, r.heartbeatTTL) {
+		return Metrics{}, false
+	}
+	return cloneMetrics(state.metrics), true
+}
+
+func (r *Registry) DispatchCandidates() []DispatchCandidate {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	workerIDs := make([]string, 0, len(r.definitions))
+	for workerID := range r.definitions {
+		workerIDs = append(workerIDs, workerID)
+	}
+	sort.Strings(workerIDs)
+	result := make([]DispatchCandidate, 0, len(workerIDs))
+	for _, workerID := range workerIDs {
+		state := r.states[workerID]
+		result = append(result, DispatchCandidate{
+			Definition: cloneDefinition(r.definitions[workerID]), LastHeartbeat: state.lastHeartbeat,
+			Metrics: cloneMetrics(state.metrics),
+		})
+	}
+	return result
 }
 
 func (r *Registry) Statuses(now time.Time) []Status {
@@ -134,14 +259,14 @@ func (r *Registry) Select(requirement Requirement, now time.Time) (Definition, e
 	var candidates []candidate
 	for id, definition := range r.definitions {
 		state, connected := r.states[id]
-		if !definition.Enabled || !connected || now.Sub(state.lastHeartbeat) > r.heartbeatTTL || !state.metrics.AcceptingWork {
+		if !definition.Enabled || !connected || !usableSnapshot(state, now, r.heartbeatTTL) || !state.metrics.AcceptingWork {
 			continue
 		}
 		if requirement.PinnedWorkerID != "" && id != requirement.PinnedWorkerID {
 			continue
 		}
 		if !supports(definition.ProcessingKinds, requirement.ProcessingKinds) ||
-			!supports(definition.AllowedStorageIDs, requirement.StorageIDs) ||
+			!SupportsConfiguredOrAttachedStorage(definition.AllowedStorageIDs, state.metrics, requirement.StorageIDs) ||
 			!supports(state.metrics.AccessibleStorageIDs, requirement.StorageIDs) {
 			continue
 		}
@@ -159,6 +284,23 @@ func (r *Registry) Select(requirement Requirement, now time.Time) (Definition, e
 	return candidates[0].definition, nil
 }
 
+// SupportsConfiguredOrAttachedStorage accepts only boot-authorized Storage or
+// role-separated Storage IDs from the Worker's current attached-volume
+// observation. Heartbeat accessibility remains an independent requirement.
+func SupportsConfiguredOrAttachedStorage(configured map[string]bool, metrics Metrics, required []string) bool {
+	attached := make(map[string]bool, len(metrics.AttachedVolumes)*2)
+	for _, volume := range metrics.AttachedVolumes {
+		attached[volume.StorageID] = true
+		attached[volume.ArchiveStorageID] = true
+	}
+	for _, storageID := range required {
+		if !configured[storageID] && !attached[storageID] {
+			return false
+		}
+	}
+	return true
+}
+
 func supports[T ~string](available map[T]bool, required []T) bool {
 	for _, item := range required {
 		if !available[item] {
@@ -173,8 +315,92 @@ func cloneMetrics(source Metrics) Metrics {
 	for storageID, available := range source.AccessibleStorageIDs {
 		accessible[storageID] = available
 	}
-	return Metrics{
-		AcceptingWork: source.AcceptingWork, HeavyRunning: source.HeavyRunning,
-		AccessibleStorageIDs: accessible,
+	devices := make(map[string]bool, len(source.BusyPhysicalDeviceIDs))
+	for deviceID, busy := range source.BusyPhysicalDeviceIDs {
+		devices[deviceID] = busy
 	}
+	observations := make([]StorageObservation, 0, len(source.StorageObservations))
+	for _, observation := range source.StorageObservations {
+		copy := observation
+		copy.Folders = append([]MediaFolderObservation(nil), observation.Folders...)
+		observations = append(observations, copy)
+	}
+	attachedVolumes := append([]AttachedVolumeObservation(nil), source.AttachedVolumes...)
+	return Metrics{
+		SnapshotID: source.SnapshotID, ObservedAt: source.ObservedAt,
+		AverageCPU5m: source.AverageCPU5m, AverageGPU5m: source.AverageGPU5m,
+		IdleStableFor: source.IdleStableFor, AvailableMemoryBytes: source.AvailableMemoryBytes,
+		AvailableVRAMBytes: source.AvailableVRAMBytes, ScratchFreeBytes: source.ScratchFreeBytes,
+		HeavyRunning: source.HeavyRunning, LightRunning: source.LightRunning,
+		BusyPhysicalDeviceIDs: devices, AccessibleStorageIDs: accessible, AcceptingWork: source.AcceptingWork,
+		StorageObservations: observations, AttachedVolumes: attachedVolumes,
+	}
+}
+
+func cloneDefinition(source Definition) Definition {
+	processingKinds := make(map[vocabulary.ProcessingKind]bool, len(source.ProcessingKinds))
+	for kind, supported := range source.ProcessingKinds {
+		processingKinds[kind] = supported
+	}
+	storageIDs := make(map[string]bool, len(source.AllowedStorageIDs))
+	for storageID, allowed := range source.AllowedStorageIDs {
+		storageIDs[storageID] = allowed
+	}
+	source.ProcessingKinds = processingKinds
+	source.AllowedStorageIDs = storageIDs
+	return source
+}
+
+func validateMetrics(metrics Metrics) error {
+	if metrics.SnapshotID == 0 || metrics.ObservedAt.IsZero() || metrics.AverageCPU5m < 0 || metrics.AverageCPU5m > 100 ||
+		metrics.AverageGPU5m < 0 || metrics.AverageGPU5m > 100 || metrics.IdleStableFor < 0 ||
+		metrics.HeavyRunning < 0 || metrics.LightRunning < 0 || metrics.AccessibleStorageIDs == nil ||
+		metrics.BusyPhysicalDeviceIDs == nil {
+		return ErrInvalidSnapshot
+	}
+	for storageID, available := range metrics.AccessibleStorageIDs {
+		if storageID == "" || !available {
+			return ErrInvalidSnapshot
+		}
+	}
+	for deviceID, busy := range metrics.BusyPhysicalDeviceIDs {
+		if deviceID == "" || !busy {
+			return ErrInvalidSnapshot
+		}
+	}
+	seenStorages := make(map[string]bool, len(metrics.StorageObservations))
+	for _, observation := range metrics.StorageObservations {
+		if observation.StorageID == "" || seenStorages[observation.StorageID] || observation.DiscoveryRevision == 0 ||
+			observation.FreeBytes > observation.CapacityBytes || !metrics.AccessibleStorageIDs[observation.StorageID] {
+			return ErrInvalidSnapshot
+		}
+		seenStorages[observation.StorageID] = true
+		seenFolders := make(map[string]bool, len(observation.Folders))
+		for _, folder := range observation.Folders {
+			if folder.Folder == "" || folder.VideoCount <= 0 || seenFolders[folder.Folder] {
+				return ErrInvalidSnapshot
+			}
+			seenFolders[folder.Folder] = true
+		}
+	}
+	seenVolumes := make(map[string]bool, len(metrics.AttachedVolumes))
+	for _, observation := range metrics.AttachedVolumes {
+		if observation.PhysicalDeviceID == "" || observation.VolumeID == "" || observation.StorageID == "" ||
+			observation.ArchiveStorageID == "" || observation.ArchiveStorageID == observation.StorageID ||
+			observation.Model == "" || observation.FileSystem == "" || observation.CapacityBytes == 0 ||
+			observation.FreeBytes > observation.CapacityBytes || seenVolumes[observation.VolumeID] ||
+			!metrics.AccessibleStorageIDs[observation.StorageID] || !metrics.AccessibleStorageIDs[observation.ArchiveStorageID] {
+			return ErrInvalidSnapshot
+		}
+		seenVolumes[observation.VolumeID] = true
+	}
+	return nil
+}
+
+func usableSnapshot(state runtimeState, now time.Time, ttl time.Duration) bool {
+	if state.lastHeartbeat.IsZero() || state.metrics.ObservedAt.IsZero() || now.Before(state.lastHeartbeat) ||
+		now.Before(state.metrics.ObservedAt) {
+		return false
+	}
+	return now.Sub(state.lastHeartbeat) <= ttl && now.Sub(state.metrics.ObservedAt) <= ttl
 }

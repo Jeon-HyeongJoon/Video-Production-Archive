@@ -55,7 +55,7 @@ func TestInputInspectionHashesRegisteredStorageFileWithoutChangingIt(t *testing.
 	}
 
 	digest := sha256.Sum256(payload)
-	if observation.ID != "OBSERVATION-1" || observation.StorageID != "SOURCE-1" || observation.WorkspaceDriveID != "DRIVE-USB-1" ||
+	if observation.ID != "OBSERVATION-1" || observation.StorageID != "SOURCE-1" || observation.WorkspaceDriveID != "VOLUME-1" ||
 		observation.RelativePath != "camera-a/CLIP 001.MOV" || observation.OriginalName != "CLIP 001.MOV" ||
 		observation.SizeBytes != int64(len(payload)) || observation.Checksum != hex.EncodeToString(digest[:]) ||
 		observation.ObservedBy != "WORKER-1" || observation.ObservedAt.IsZero() {

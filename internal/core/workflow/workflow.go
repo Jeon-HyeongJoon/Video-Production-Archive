@@ -39,9 +39,9 @@ const (
 type ControlMode string
 
 const (
-	AgentMode    ControlMode = "AGENT"
-	AssistedMode ControlMode = "ASSISTED"
-	ManualMode   ControlMode = "MANUAL"
+	ArchivistMode ControlMode = "ARCHIVIST"
+	AssistedMode  ControlMode = "ASSISTED"
+	ManualMode    ControlMode = "MANUAL"
 )
 
 var (
@@ -78,7 +78,7 @@ type Step struct {
 	ApprovalRequired bool
 	ApprovalRevision uint64
 	Approvals        []Approval
-	nextFencingToken uint64
+	LastFencingToken uint64
 }
 
 func (s Step) Ready(steps map[string]*Step) bool {
@@ -126,7 +126,7 @@ var allowedTransitions = map[StepState]map[StepState]bool{
 	Waiting:   {Queued: true, Reserved: true, Cancelled: true},
 	Reserved:  {Running: true, Queued: true, Cancelled: true},
 	Running:   {Verifying: true, Queued: true, Waiting: true, Paused: true, Failed: true, Cancelled: true},
-	Verifying: {Completed: true, Queued: true, Failed: true},
+	Verifying: {Completed: true, Queued: true, Failed: true, Cancelled: true},
 	Paused:    {Queued: true, Cancelled: true},
 	Failed:    {}, Completed: {}, Cancelled: {},
 }
@@ -233,18 +233,29 @@ func (s *Step) hasValidApproval() bool {
 }
 
 func (s *Step) ClaimExecutionLease(workerID string, now time.Time, ttl time.Duration) (uint64, error) {
+	token := s.LastFencingToken + 1
+	if err := s.AssignExecutionLease(workerID, now, ttl, token); err != nil {
+		return 0, err
+	}
+	return token, nil
+}
+
+func (s *Step) AssignExecutionLease(workerID string, now time.Time, ttl time.Duration, fencingToken uint64) error {
 	if workerID == "" || ttl <= 0 || (s.State != Reserved && s.State != Running) {
-		return 0, ErrIllegalTransition
+		return ErrIllegalTransition
 	}
 	if s.ExecutionLease != nil && now.Before(s.ExecutionLease.ExpiresAt) {
-		return 0, ErrExecutionLeaseHeld
+		return ErrExecutionLeaseHeld
 	}
-	s.nextFencingToken++
+	if fencingToken == 0 || fencingToken <= s.LastFencingToken {
+		return ErrStaleFencingToken
+	}
+	s.LastFencingToken = fencingToken
 	s.ExecutionLease = &ExecutionLease{
 		OwnerWorkerID: workerID, AcquiredAt: now, HeartbeatAt: now,
-		ExpiresAt: now.Add(ttl), FencingToken: s.nextFencingToken,
+		ExpiresAt: now.Add(ttl), FencingToken: fencingToken,
 	}
-	return s.nextFencingToken, nil
+	return nil
 }
 
 func (s *Step) AcceptWorkerResult(workerID string, fencingToken uint64) error {

@@ -1,0 +1,41 @@
+schema_version: 1
+database:
+  path: data/control.db
+server:
+  listen_address: 127.0.0.1:18080
+  allowed_cidrs: [127.0.0.0/8]
+  allowed_origins: [http://127.0.0.1:18080]
+  trusted_proxies: []
+security:
+  auth_mode: disabled
+  mcp_listen_address: 127.0.0.1:18081
+features:
+  allow_device_format: false
+  allow_original_delete: false
+  allow_archive_replace: false
+provider_accounts: []
+workers:
+  heartbeat_ttl: 30s
+  definitions:
+    - id: worker-windows
+      enabled: true
+      credential_ref: dpapi://C:/Archive/secrets/worker-windows.dpapi
+      processing_kinds: [INSPECT, RENDER, THUMBNAIL, AUDIO_EXTRACT, STT, QC, CHECKSUM, DEVICE]
+      allowed_storage_ids: [scratch-windows]
+archivist_hosts:
+  heartbeat_ttl: 30s
+  turn_lease_ttl: 5m
+  definitions:
+    - id: archivist-windows
+      enabled: true
+      credential_ref: dpapi://C:/Archive/secrets/archivist-windows.dpapi
+      allowed_backend_ids: [EMBEDDED_CORE]
+      allowed_cli_ids: [fixture-archivist]
+      allowed_workspace_root_ids: [video-project]
+storage:
+  - id: scratch-windows
+    role: SCRATCH
+    physical_device_id: desktop-fhi317j-system-drive
+    partition_id: desktop-fhi317j-system-partition
+    volume_id: desktop-fhi317j-scratch-volume
+    root: C:/Archive/workspace

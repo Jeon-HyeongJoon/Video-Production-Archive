@@ -30,6 +30,58 @@ func TestDerivedArtifactRequiresCompleteVersionedProvenance(t *testing.T) {
 	}
 }
 
+// Requirement: ARC-009
+func TestMultiOriginalArtifactProvenanceRoundTripsTimelineAndEveryRootAsset(t *testing.T) {
+	now := time.Date(2026, 10, 30, 12, 0, 0, 0, time.UTC)
+	snapshot := ArchiveSnapshot{
+		OriginalAssets: []OriginalAsset{
+			archiveOriginal("ASSET-1", checksumA, "C0001.MP4", now),
+			archiveOriginal("ASSET-2", checksumB, "C0002.MP4", now),
+			archiveOriginal("ASSET-3", "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "C0003.MP4", now),
+		},
+		Artifacts: []Artifact{{
+			ID: "RENDITION-SEQUENCE", Path: "organized/SOURCE-1/video.mp4", Size: 30, Checksum: checksumA,
+			Origin: Provenance{
+				RootOriginalAssetIDs: []string{"ASSET-3", "ASSET-1", "ASSET-2"}, InputTimelineID: "TIMELINE-1",
+				InputArtifactIDs: []string{}, ProcessingKind: vocabulary.ProcessingRender,
+				ProcessorVersion: "ffmpeg-8.0", ProfileVersion: "archive-1080p-20mbps@v1",
+				CreatedBy: "WORKER-1", CreatedAt: now,
+			},
+		}},
+	}
+	payload, err := ExportSnapshot(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restored, err := ImportSnapshot(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	origin := restored.Artifacts[0].Origin
+	if origin.OriginalAssetID != "" || origin.InputTimelineID != "TIMELINE-1" ||
+		!reflect.DeepEqual(origin.RootOriginalAssetIDs, []string{"ASSET-1", "ASSET-2", "ASSET-3"}) {
+		t.Fatalf("multi-root provenance did not round trip canonically: %+v", origin)
+	}
+	invalidCases := []struct {
+		name       string
+		rootIDs    []string
+		timelineID string
+	}{
+		{name: "representative only", rootIDs: []string{"ASSET-1"}, timelineID: "TIMELINE-1"},
+		{name: "unknown root", rootIDs: []string{"ASSET-1", "ASSET-UNKNOWN"}, timelineID: "TIMELINE-1"},
+		{name: "missing timeline", rootIDs: []string{"ASSET-1", "ASSET-2", "ASSET-3"}},
+	}
+	for _, testCase := range invalidCases {
+		invalid := snapshot
+		invalid.Artifacts = append([]Artifact(nil), snapshot.Artifacts...)
+		invalid.Artifacts[0].Origin.RootOriginalAssetIDs = testCase.rootIDs
+		invalid.Artifacts[0].Origin.InputTimelineID = testCase.timelineID
+		if _, err := ExportSnapshot(invalid); !errors.Is(err, ErrInvalidSnapshot) {
+			t.Fatalf("%s provenance accepted: %v", testCase.name, err)
+		}
+	}
+}
+
 // Requirement: ARC-003
 func TestManifestIsDeterministicSortedAndUsesRelativePaths(t *testing.T) {
 	manifest, err := BuildManifest([]ManifestEntry{{Path: "z/video.mp4", Checksum: checksumB}, {Path: "a/meta.json", Checksum: checksumA}})
