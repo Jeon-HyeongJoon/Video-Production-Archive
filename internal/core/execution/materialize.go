@@ -4,10 +4,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"path"
 	"sort"
 	"strings"
+
+	"videoarchive/internal/core/archive"
 )
 
 var ErrCannotMaterializeStepExecutionSpec = errors.New("dependent Step execution spec cannot be materialized")
@@ -90,11 +91,19 @@ func MaterializeDependentStepExecutionSpec(request MaterializeRequest) (StepExec
 		}
 		if parameters.SourceTimeline != nil {
 			packageID := stableArchivePackageID(parameters.ArchiveDate, parameters.OrganizationDecisionID, parameters.SourceTimeline.ID)
-			outputs = append(outputs, OutputTarget{ID: packageID, Kind: OutputOrganizedMedia, StorageID: parameters.ArchiveStorageID, RelativePath: path.Join("packages", packageID, "revisions", "000001", "metadata.json")})
+			directory, err := archive.PackageRevisionDirectory(packageID, 1)
+			if err != nil {
+				return StepExecutionSpec{}, ErrCannotMaterializeStepExecutionSpec
+			}
+			outputs = append(outputs, OutputTarget{ID: packageID, Kind: OutputOrganizedMedia, StorageID: parameters.ArchiveStorageID, RelativePath: path.Join(directory, "metadata.json")})
 		} else {
 			for _, original := range originalInputs {
 				packageID := stableArchivePackageID(parameters.ArchiveDate, parameters.OrganizationDecisionID, original.OriginalAssetID)
-				outputs = append(outputs, OutputTarget{ID: packageID, Kind: OutputOrganizedMedia, StorageID: parameters.ArchiveStorageID, RelativePath: path.Join("packages", packageID, "revisions", "000001", "metadata.json"), OriginalAssetID: original.OriginalAssetID})
+				directory, err := archive.PackageRevisionDirectory(packageID, 1)
+				if err != nil {
+					return StepExecutionSpec{}, ErrCannotMaterializeStepExecutionSpec
+				}
+				outputs = append(outputs, OutputTarget{ID: packageID, Kind: OutputOrganizedMedia, StorageID: parameters.ArchiveStorageID, RelativePath: path.Join(directory, "metadata.json"), OriginalAssetID: original.OriginalAssetID})
 			}
 		}
 	case "audio":
@@ -139,9 +148,13 @@ func MaterializeDependentStepExecutionSpec(request MaterializeRequest) (StepExec
 		inputs = append(inputs, inputsFromOutputs(allOutputs, outputOriginals, OutputSubtitle)...)
 		if parameters.ArchivePackageID != "" && parameters.ArchivePackageRevision > 0 && len(inputs) == 3 {
 			nextRevision := parameters.ArchivePackageRevision + 1
+			directory, err := archive.PackageRevisionDirectory(parameters.ArchivePackageID, nextRevision)
+			if err != nil {
+				return StepExecutionSpec{}, ErrCannotMaterializeStepExecutionSpec
+			}
 			outputs = []OutputTarget{{
 				ID: parameters.ArchivePackageID, Kind: OutputArchiveRevision, StorageID: parameters.ArchiveStorageID,
-				RelativePath: path.Join("packages", parameters.ArchivePackageID, "revisions", fmt.Sprintf("%06d", nextRevision), "metadata.json"),
+				RelativePath: path.Join(directory, "metadata.json"),
 			}}
 		}
 	case "archive_catalog":

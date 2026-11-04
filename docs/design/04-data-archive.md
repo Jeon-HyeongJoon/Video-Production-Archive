@@ -109,19 +109,22 @@ Archive Intake의 ArchivePackage는 결과 영상 하나당 하나다. SOURCE_ME
 ```text
 <아카이브 저장소>/
 ├── packages/
-│   └── VP-YYYYMMDD-NNNN/
-│       ├── video.mp4
-│       ├── transcript.json
-│       ├── transcript.txt
-│       ├── subtitle.srt
-│       ├── metadata.json
-│       ├── files.csv
-│       ├── events.jsonl
-│       ├── manifest-sha256.txt
-│       └── README.md
+│   └── YYYY/MM/DD/
+│       └── VP-YYYYMMDD-NNNN/
+│           ├── <원본 영상명 또는 MediaFolder 이름>.mp4
+│           ├── transcript.json
+│           ├── transcript.txt
+│           ├── subtitle.srt
+│           ├── metadata.json
+│           ├── files.csv
+│           ├── events.jsonl
+│           ├── manifest-sha256.txt
+│           └── README.md
 └── catalog/
     └── <원본 드라이브 ID>.csv
 ```
+
+패키지 ID는 멱등성과 참조 무결성을 위한 불변 기계 식별자이고 디렉터리는 ID의 처리 날짜로 `YYYY/MM/DD`까지 나눈다. 결과 영상은 단일 입력이면 원래 영상명의 확장자를 `.mp4`로 바꾸고, 여러 컷 통합이면 MediaFolder의 마지막 이름을 사용한다. Windows 금지문자·예약어·후행 점과 공백·과도한 길이는 결정적으로 안전한 이름으로 정규화한다. `metadata.json`은 처리 날짜, MediaFolder, 표시명, 실제 결과 영상 파일명과 함께 원래 이름·전체 상대경로·패키지 ID를 보존하므로 사람이 읽는 이름을 바꾸어도 identity를 잃지 않는다. `ARC-013`
 
 - `metadata.json`: 기계가 읽는 엔티티·관계·provenance
 - `files.csv`: 스프레드시트로 열 수 있는 파일 목록

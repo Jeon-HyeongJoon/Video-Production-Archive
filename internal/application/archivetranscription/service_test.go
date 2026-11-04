@@ -3,11 +3,13 @@ package archivetranscription
 import (
 	"context"
 	"errors"
+	"path"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"videoarchive/internal/adapter/sqlitecommand"
+	"videoarchive/internal/core/archive"
 	"videoarchive/internal/core/archiverun"
 	"videoarchive/internal/core/command"
 	"videoarchive/internal/core/execution"
@@ -149,11 +151,13 @@ func storedRecording(folder, originalID, decisionID string, disposition vocabula
 	for len(checksum) < 64 {
 		checksum += checksumByte
 	}
+	directory, _ := archive.PackageRevisionDirectory(packageID, 1)
+	presentation, _ := archive.PresentPackage(packageID, folder, []string{originalID + ".mp4"})
 	return StoredRecording{
 		FolderID: folder, WorkspaceDriveID: "VOLUME-1", OriginalAssetID: originalID,
 		OrganizationDecisionID: decisionID, Disposition: disposition,
 		ArchivePackageID: packageID, ArchivePackageRevision: 1,
-		VideoRelativePath: "packages/" + packageID + "/revisions/000001/video.mp4", VideoChecksum: checksum,
+		VideoRelativePath: path.Join(directory, presentation.VideoFileName), VideoChecksum: checksum,
 		SelectedProfileReference: "organization-1080p-6000k@v1",
 		SourceInputs: []execution.InputReference{{
 			OriginalAssetID: originalID, OriginalName: originalID + ".mp4", StorageID: "SOURCE-1",

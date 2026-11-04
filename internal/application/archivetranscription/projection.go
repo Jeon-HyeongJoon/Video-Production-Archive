@@ -3,10 +3,10 @@ package archivetranscription
 import (
 	"context"
 	"errors"
-	"fmt"
 	"path"
 	"strings"
 
+	"videoarchive/internal/core/archive"
 	"videoarchive/internal/core/archiverun"
 	"videoarchive/internal/core/command"
 	"videoarchive/internal/core/execution"
@@ -164,11 +164,20 @@ func storedRecordingFromJob(archiveRun archiverun.State, folder organization.Coo
 			return StoredRecording{}, ErrStageOneProjection
 		}
 	}
+	presentation, err := archive.PresentPackage(packageOutput.ID, folder.Folder, []string{source.OriginalName})
+	if err != nil {
+		return StoredRecording{}, ErrStageOneProjection
+	}
+	videoFileName := presentation.VideoFileName
+	legacyMetadataPath := path.Join("packages", packageOutput.ID, "revisions", "000001", "metadata.json")
+	if packageTarget.RelativePath == legacyMetadataPath {
+		videoFileName = "video.mp4"
+	}
 	return StoredRecording{
 		FolderID: folder.Folder, WorkspaceDriveID: parameters.WorkspaceDriveID,
 		OriginalAssetID: source.OriginalAssetID, OrganizationDecisionID: parameters.OrganizationDecisionID,
 		Disposition: folder.Decision.Disposition, ArchivePackageID: packageOutput.ID, ArchivePackageRevision: 1,
-		VideoRelativePath: path.Join("packages", packageOutput.ID, "revisions", fmt.Sprintf("%06d", 1), "video.mp4"),
+		VideoRelativePath: path.Join(path.Dir(packageTarget.RelativePath), videoFileName),
 		VideoChecksum:     videoChecksum, SelectedProfileReference: parameters.SelectedProfileReference,
 		SourceInputs: append([]execution.InputReference(nil), parameters.SourceInputs...),
 	}, nil

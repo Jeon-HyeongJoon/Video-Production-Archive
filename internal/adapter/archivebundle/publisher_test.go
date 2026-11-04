@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -21,6 +22,7 @@ func TestPublisherStoresOneResultPerRecoverablePackageAndAddsStageTwoAsNewRevisi
 	createdAt := time.Date(2026, 10, 31, 9, 0, 0, 0, time.UTC)
 	initial, err := publisher.PublishInitial(InitialRequest{
 		PackageID: "VP-20261031-0001", WorkspaceDriveID: "SOURCE-DRIVE-1", DecisionID: "DECISION-1",
+		MediaFolder: "recordings",
 		Disposition: vocabulary.OrganizationAsIs, ProfileReference: "archive-1080p-6mbps@v1",
 		Sources: []SourceReference{{
 			OriginalAssetID: "ASSET-1", OriginalName: "event.mov", RelativePath: "recordings/event.mov",
@@ -31,7 +33,7 @@ func TestPublisherStoresOneResultPerRecoverablePackageAndAddsStageTwoAsNewRevisi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if initial.State != archive.PackageStored || initial.Revision != 1 || initial.VideoPath != "packages/VP-20261031-0001/revisions/000001/video.mp4" ||
+	if initial.State != archive.PackageStored || initial.Revision != 1 || initial.VideoPath != "packages/2026/10/31/VP-20261031-0001/revisions/000001/event.mp4" ||
 		initial.TranscriptPath != "" || initial.TranscriptTextPath != "" || initial.SubtitlePath != "" {
 		t.Fatalf("initial package is not a stored video-only revision: %+v", initial)
 	}
@@ -64,7 +66,7 @@ func TestPublisherStoresOneResultPerRecoverablePackageAndAddsStageTwoAsNewRevisi
 		revised.TranscriptTextPath == "" || revised.SubtitlePath == "" {
 		t.Fatalf("stage-two files did not create a new manifest revision: initial=%+v revised=%+v", initial, revised)
 	}
-	if _, err := archiveRoot.ReadFile("packages/VP-20261031-0001/revisions/000001/transcript.json"); err == nil {
+	if _, err := archiveRoot.ReadFile("packages/2026/10/31/VP-20261031-0001/revisions/000001/transcript.json"); err == nil {
 		t.Fatal("stage-two revision mutated the stored first revision")
 	}
 }
@@ -75,6 +77,7 @@ func TestCommittedPackageRejectsFurtherRevisionAndKeepsPriorRevisionsImmutable(t
 	now := time.Date(2026, 10, 31, 10, 0, 0, 0, time.UTC)
 	first, err := publisher.PublishInitial(InitialRequest{
 		PackageID: "VP-20261031-0002", WorkspaceDriveID: "SOURCE-DRIVE-1", DecisionID: "DECISION-2",
+		MediaFolder: "recordings",
 		Disposition: vocabulary.OrganizationAsIs, ProfileReference: "archive-1080p-6mbps@v1",
 		Sources: []SourceReference{{OriginalAssetID: "ASSET-2", OriginalName: "event.mov", RelativePath: "recordings/event.mov", Checksum: originalChecksum}},
 		Video:   FileSource{Root: RootSource, Path: "recordings/event.mov", Checksum: originalChecksum}, CreatedAt: now,
@@ -110,6 +113,70 @@ func TestCommittedPackageRejectsFurtherRevisionAndKeepsPriorRevisionsImmutable(t
 	if _, _, err := archiveRoot.FileSHA256(first.VideoPath); err != nil {
 		t.Fatalf("first revision was lost after commit: %v", err)
 	}
+}
+
+// Requirement: ARC-013
+func TestArchivePackageUsesDateFoldersAndSafeSourceNamesWithoutLosingIdentity(t *testing.T) {
+	publisher, sourceRoot, archiveRoot, originalChecksum, _, _ := publisherFixture(t)
+	now := time.Date(2026, 11, 4, 9, 0, 0, 0, time.UTC)
+	cases := []struct {
+		name           string
+		packageID      string
+		decisionID     string
+		mediaFolder    string
+		disposition    vocabulary.OrganizationDisposition
+		sources        []SourceReference
+		wantVideoPath  string
+		wantVideoName  string
+		wantDisplayBit string
+	}{
+		{
+			name: "single original name", packageID: "VP-20261104-a1b2c3d4", decisionID: "DECISION-NAMED-1",
+			mediaFolder: "행사/원본", disposition: vocabulary.OrganizationAsIs,
+			sources: []SourceReference{{
+				OriginalAssetID: "ASSET-NAMED-1", OriginalName: "행사<최종>.MOV",
+				RelativePath: "행사/원본/input.mov", Checksum: originalChecksum, DurationMillis: 12_000,
+			}},
+			wantVideoPath: "packages/2026/11/04/VP-20261104-a1b2c3d4/revisions/000001/행사_최종_.mp4",
+			wantVideoName: "행사_최종_.mp4", wantDisplayBit: "행사<최종>.MOV",
+		},
+		{
+			name: "multi clip folder name", packageID: "VP-20261104-e5f6a7b8", decisionID: "DECISION-NAMED-2",
+			mediaFolder: "공연/430328:연습", disposition: vocabulary.OrganizationCompileSourceSequence,
+			sources: []SourceReference{
+				{OriginalAssetID: "ASSET-NAMED-2A", OriginalName: "C0001.MP4", RelativePath: "공연/430328/C0001.MP4", Checksum: originalChecksum, DurationMillis: 2_000},
+				{OriginalAssetID: "ASSET-NAMED-2B", OriginalName: "C0002.MP4", RelativePath: "공연/430328/C0002.MP4", Checksum: strings.Repeat("b", 64), DurationMillis: 3_000},
+			},
+			wantVideoPath: "packages/2026/11/04/VP-20261104-e5f6a7b8/revisions/000001/430328_연습.mp4",
+			wantVideoName: "430328_연습.mp4", wantDisplayBit: "430328:연습",
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			result, err := publisher.PublishInitial(InitialRequest{
+				PackageID: testCase.packageID, WorkspaceDriveID: "SOURCE-DRIVE-1", DecisionID: testCase.decisionID,
+				MediaFolder: testCase.mediaFolder, Disposition: testCase.disposition,
+				ProfileReference: "archive-1080p-20mbps@v1", Sources: testCase.sources,
+				Video: FileSource{Root: RootSource, Path: "recordings/event.mov", Checksum: originalChecksum}, CreatedAt: now,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.PackageID != testCase.packageID || result.ArchiveDate != "2026-11-04" ||
+				result.VideoPath != testCase.wantVideoPath || result.VideoFileName != testCase.wantVideoName ||
+				!strings.Contains(result.DisplayName, testCase.wantDisplayBit) {
+				t.Fatalf("package presentation lost date, source name or identity: %+v", result)
+			}
+			payload, err := archiveRoot.ReadFile(result.MetadataPath)
+			if err != nil || !bytes.Contains(payload, []byte(`"package_id": "`+testCase.packageID+`"`)) ||
+				!bytes.Contains(payload, []byte(`"archive_date": "2026-11-04"`)) ||
+				!bytes.Contains(payload, []byte(`"media_folder": "`+testCase.mediaFolder+`"`)) ||
+				!bytes.Contains(payload, []byte(`"original_name"`)) || !bytes.Contains(payload, []byte(`"relative_path"`)) {
+				t.Fatalf("metadata lost human or immutable identity fields: %s err=%v", payload, err)
+			}
+		})
+	}
+	_ = sourceRoot
 }
 
 func publisherFixture(t *testing.T) (*Publisher, *archive.StorageRoot, *archive.StorageRoot, string, string, string) {
