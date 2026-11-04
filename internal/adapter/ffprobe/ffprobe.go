@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"videoarchive/internal/core/archive"
 	"videoarchive/internal/core/mediaanalysis"
 	"videoarchive/internal/core/qc"
 )
@@ -105,6 +106,50 @@ func (inspector *Inspector) InspectPublishedOutput(ctx context.Context, resolved
 	if strings.TrimSpace(resolvedPath) == "" {
 		return qc.OutputObservation{}, ErrInvalidRequest
 	}
+	output, err := inspector.inspectOutputStreams(ctx, resolvedPath)
+	if err != nil {
+		return qc.OutputObservation{}, err
+	}
+	file, err := os.Open(resolvedPath)
+	if err != nil {
+		return qc.OutputObservation{}, err
+	}
+	defer file.Close()
+	hash := sha256.New()
+	size, err := io.Copy(hash, file)
+	if err != nil {
+		return qc.OutputObservation{}, err
+	}
+	output.Checksum = hex.EncodeToString(hash.Sum(nil))
+	output.SizeBytes = size
+	return output, nil
+}
+
+// InspectStorageOutput probes through the external process path derived from a
+// StorageRoot, but reads and hashes the resulting bytes only through that
+// capability.
+func (inspector *Inspector) InspectStorageOutput(ctx context.Context, root *archive.StorageRoot, relativePath string) (qc.OutputObservation, error) {
+	if root == nil {
+		return qc.OutputObservation{}, ErrInvalidRequest
+	}
+	resolvedPath, err := root.ExternalProcessPath(relativePath)
+	if err != nil {
+		return qc.OutputObservation{}, ErrInvalidRequest
+	}
+	output, err := inspector.inspectOutputStreams(ctx, resolvedPath)
+	if err != nil {
+		return qc.OutputObservation{}, err
+	}
+	size, checksum, err := root.FileSHA256(relativePath)
+	if err != nil {
+		return qc.OutputObservation{}, err
+	}
+	output.SizeBytes = size
+	output.Checksum = checksum
+	return output, nil
+}
+
+func (inspector *Inspector) inspectOutputStreams(ctx context.Context, resolvedPath string) (qc.OutputObservation, error) {
 	arguments := []string{
 		"-v", "error",
 		"-print_format", "json",
@@ -120,18 +165,7 @@ func (inspector *Inspector) InspectPublishedOutput(ctx context.Context, resolved
 	if err != nil {
 		return qc.OutputObservation{}, err
 	}
-	file, err := os.Open(resolvedPath)
-	if err != nil {
-		return qc.OutputObservation{}, err
-	}
-	defer file.Close()
-	hash := sha256.New()
-	size, err := io.Copy(hash, file)
-	if err != nil {
-		return qc.OutputObservation{}, err
-	}
 	output := qc.OutputObservation{
-		Checksum: hex.EncodeToString(hash.Sum(nil)), SizeBytes: size,
 		Containers: append([]string(nil), observed.Containers...), DurationMillis: observed.DurationMillis, Decodable: true,
 	}
 	primaryVideo := int(^uint(0) >> 1)
@@ -172,6 +206,7 @@ type probeDocument struct {
 		AverageRate   string `json:"avg_frame_rate"`
 		RealRate      string `json:"r_frame_rate"`
 		PixelFormat   string `json:"pix_fmt"`
+		BitRate       string `json:"bit_rate"`
 		SampleRate    string `json:"sample_rate"`
 		Channels      int    `json:"channels"`
 		ChannelLayout string `json:"channel_layout"`
@@ -207,9 +242,13 @@ func decode(payload []byte) (mediaanalysis.MediaInspection, error) {
 			if err != nil {
 				return mediaanalysis.MediaInspection{}, err
 			}
+			bitRate, err := parseOptionalInteger(stream.BitRate)
+			if err != nil {
+				return mediaanalysis.MediaInspection{}, err
+			}
 			inspection.VideoStreams = append(inspection.VideoStreams, mediaanalysis.VideoStream{
 				Index: stream.Index, Codec: stream.CodecName, Width: stream.Width, Height: stream.Height,
-				FrameRate: frameRate, PixelFormat: stream.PixelFormat,
+				FrameRate: frameRate, PixelFormat: stream.PixelFormat, BitRate: bitRate,
 			})
 		case "audio":
 			sampleRate, err := parseRequiredInteger(stream.SampleRate)

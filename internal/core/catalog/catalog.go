@@ -16,7 +16,7 @@ var (
 	ErrInvalidQuery  = errors.New("catalog search query is invalid")
 )
 
-// CatalogRecord is an append-only human or Agent-authored description revision
+// CatalogRecord is an append-only human or Archivist-authored description revision
 // for one OriginalAsset. It never owns or changes a file path.
 type CatalogRecord struct {
 	ID              string               `json:"id"`
@@ -39,7 +39,7 @@ func NewRecord(source CatalogRecord) (CatalogRecord, error) {
 	record.AuthorID = strings.TrimSpace(record.AuthorID)
 	record.Keywords = normalizeKeywords(record.Keywords)
 	if record.ID == "" || record.OriginalAssetID == "" || record.Revision == 0 || record.Title == "" || record.Description == "" ||
-		(record.AuthorType != vocabulary.ActorHuman && record.AuthorType != vocabulary.ActorAgent) || record.AuthorID == "" || record.RecordedAt.IsZero() {
+		(record.AuthorType != vocabulary.ActorHuman && record.AuthorType != vocabulary.ActorArchivist) || record.AuthorID == "" || record.RecordedAt.IsZero() {
 		return CatalogRecord{}, ErrInvalidRecord
 	}
 	return record, nil

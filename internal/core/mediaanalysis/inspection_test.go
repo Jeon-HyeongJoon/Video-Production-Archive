@@ -51,3 +51,30 @@ func TestMediaInspectionNormalizesCompleteTechnicalMetadata(t *testing.T) {
 		}
 	}
 }
+
+// Requirement: MED-005
+func TestMediaInspectionPreservesPerVideoStreamBitrateWithoutInference(t *testing.T) {
+	observed := MediaInspection{
+		ID: "INSPECTION-BITRATE", OriginalAssetID: "ASSET-1",
+		OriginalChecksum: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		Containers:       []string{"mp4"}, DurationMillis: 60_000, SizeBytes: 50_000_000, BitRate: 6_300_000,
+		VideoStreams: []VideoStream{
+			{Index: 2, Codec: "h264", Width: 1280, Height: 720, FrameRate: Rational{Numerator: 30, Denominator: 1}, BitRate: 0},
+			{Index: 0, Codec: "h264", Width: 1920, Height: 1080, FrameRate: Rational{Numerator: 30, Denominator: 1}, BitRate: 6_000_000},
+		},
+		AudioStreams:     []AudioStream{{Index: 1, Codec: "aac", SampleRateHz: 48_000, Channels: 2}},
+		ProcessorVersion: "ffprobe-8.0", ObservedBy: "WORKER-1", InspectedAt: time.Now().UTC(),
+	}
+	inspection, err := NewMediaInspection(observed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inspection.BitRate != 6_300_000 || inspection.VideoStreams[0].Index != 0 || inspection.VideoStreams[0].BitRate != 6_000_000 ||
+		inspection.VideoStreams[1].Index != 2 || inspection.VideoStreams[1].BitRate != 0 {
+		t.Fatalf("stream bitrate was changed or inferred: %+v", inspection)
+	}
+	observed.VideoStreams[0].BitRate = -1
+	if _, err := NewMediaInspection(observed); !errors.Is(err, ErrInvalidInspection) {
+		t.Fatalf("negative stream bitrate accepted: %v", err)
+	}
+}

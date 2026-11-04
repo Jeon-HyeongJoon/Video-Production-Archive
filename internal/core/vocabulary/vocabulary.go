@@ -6,15 +6,15 @@ package vocabulary
 type ActorType string
 
 const (
-	ActorHuman  ActorType = "HUMAN"
-	ActorAgent  ActorType = "AGENT"
-	ActorWorker ActorType = "WORKER"
-	ActorSystem ActorType = "SYSTEM"
+	ActorHuman     ActorType = "HUMAN"
+	ActorArchivist ActorType = "ARCHIVIST"
+	ActorWorker    ActorType = "WORKER"
+	ActorSystem    ActorType = "SYSTEM"
 )
 
 func (value ActorType) Valid() bool {
 	switch value {
-	case ActorHuman, ActorAgent, ActorWorker, ActorSystem:
+	case ActorHuman, ActorArchivist, ActorWorker, ActorSystem:
 		return true
 	default:
 		return false
@@ -65,12 +65,54 @@ const (
 	ProcessingQC           ProcessingKind = "QC"
 	ProcessingChecksum     ProcessingKind = "CHECKSUM"
 	ProcessingDevice       ProcessingKind = "DEVICE"
+	ProcessingOrganize     ProcessingKind = "ORGANIZE"
 )
 
 func (value ProcessingKind) Valid() bool {
 	switch value {
 	case ProcessingInspect, ProcessingRender, ProcessingThumbnail, ProcessingAudioExtract,
-		ProcessingSTT, ProcessingSummary, ProcessingQC, ProcessingChecksum, ProcessingDevice:
+		ProcessingSTT, ProcessingSummary, ProcessingQC, ProcessingChecksum, ProcessingDevice, ProcessingOrganize:
+		return true
+	default:
+		return false
+	}
+}
+
+type OrganizationDisposition string
+
+const (
+	OrganizationAsIs                  OrganizationDisposition = "ORGANIZE_AS_IS"
+	OrganizationRenderRecordings      OrganizationDisposition = "RENDER_RECORDINGS"
+	OrganizationCompileSourceSequence OrganizationDisposition = "COMPILE_SOURCE_SEQUENCE"
+	OrganizationHold                  OrganizationDisposition = "HOLD"
+)
+
+func (value OrganizationDisposition) Valid() bool {
+	switch value {
+	case OrganizationAsIs, OrganizationRenderRecordings, OrganizationCompileSourceSequence, OrganizationHold:
+		return true
+	default:
+		return false
+	}
+}
+
+type OrganizationHoldReason string
+
+const (
+	OrganizationHoldNoMedia                 OrganizationHoldReason = "NO_MEDIA"
+	OrganizationHoldMissingInspection       OrganizationHoldReason = "MISSING_INSPECTION"
+	OrganizationHoldAmbiguousMultipleVideos OrganizationHoldReason = "AMBIGUOUS_MULTIPLE_VIDEOS"
+	OrganizationHoldMixedReadyState         OrganizationHoldReason = "MIXED_READY_STATE"
+	OrganizationHoldNonconsecutiveSequence  OrganizationHoldReason = "NONCONSECUTIVE_SEQUENCE"
+	OrganizationHoldIncompatibleSequence    OrganizationHoldReason = "INCOMPATIBLE_SEQUENCE"
+	OrganizationHoldInvalidOverride         OrganizationHoldReason = "INVALID_OVERRIDE"
+)
+
+func (value OrganizationHoldReason) Valid() bool {
+	switch value {
+	case OrganizationHoldNoMedia, OrganizationHoldMissingInspection, OrganizationHoldAmbiguousMultipleVideos,
+		OrganizationHoldMixedReadyState, OrganizationHoldNonconsecutiveSequence,
+		OrganizationHoldIncompatibleSequence, OrganizationHoldInvalidOverride:
 		return true
 	default:
 		return false
@@ -111,18 +153,41 @@ func (value StorageRole) Valid() bool {
 	}
 }
 
+// StorageAccessKind describes how a Worker reaches a Storage. It is separate
+// from StorageRole: the same archive role can be backed by a local root, a
+// mounted share, an attached volume, or a remote file-service Adapter.
+type StorageAccessKind string
+
+const (
+	StorageAccessLocal          StorageAccessKind = "LOCAL"
+	StorageAccessMountedNetwork StorageAccessKind = "MOUNTED_NETWORK"
+	StorageAccessAttachedVolume StorageAccessKind = "ATTACHED_VOLUME"
+	StorageAccessFTP            StorageAccessKind = "FTP"
+	StorageAccessSFTP           StorageAccessKind = "SFTP"
+)
+
+func (value StorageAccessKind) Valid() bool {
+	switch value {
+	case StorageAccessLocal, StorageAccessMountedNetwork, StorageAccessAttachedVolume,
+		StorageAccessFTP, StorageAccessSFTP:
+		return true
+	default:
+		return false
+	}
+}
+
 type ExecutorKind string
 
 const (
-	ExecutorWorker       ExecutorKind = "WORKER"
-	ExecutorAgentGateway ExecutorKind = "AGENT_GATEWAY"
-	ExecutorControl      ExecutorKind = "CONTROL"
-	ExecutorHuman        ExecutorKind = "HUMAN"
+	ExecutorWorker           ExecutorKind = "WORKER"
+	ExecutorArchivistGateway ExecutorKind = "ARCHIVIST_GATEWAY"
+	ExecutorControl          ExecutorKind = "CONTROL"
+	ExecutorHuman            ExecutorKind = "HUMAN"
 )
 
 func (value ExecutorKind) Valid() bool {
 	switch value {
-	case ExecutorWorker, ExecutorAgentGateway, ExecutorControl, ExecutorHuman:
+	case ExecutorWorker, ExecutorArchivistGateway, ExecutorControl, ExecutorHuman:
 		return true
 	default:
 		return false
@@ -140,6 +205,25 @@ func (value ApprovalDecision) Valid() bool {
 	return value == ApprovalApproved || value == ApprovalRejected
 }
 
+type ActionClass string
+
+const (
+	ActionRead        ActionClass = "READ"
+	ActionProcess     ActionClass = "PROCESS"
+	ActionGated       ActionClass = "GATED"
+	ActionDestructive ActionClass = "DESTRUCTIVE"
+	ActionManage      ActionClass = "MANAGE"
+)
+
+func (value ActionClass) Valid() bool {
+	switch value {
+	case ActionRead, ActionProcess, ActionGated, ActionDestructive, ActionManage:
+		return true
+	default:
+		return false
+	}
+}
+
 type ContentReviewDecision string
 
 const (
@@ -149,4 +233,57 @@ const (
 
 func (value ContentReviewDecision) Valid() bool {
 	return value == ContentAccepted || value == ContentChangesRequested
+}
+
+type RuntimeBackend string
+
+const (
+	RuntimeEmbeddedCore RuntimeBackend = "EMBEDDED_CORE"
+	RuntimeOrcaCLI      RuntimeBackend = "ORCA_CLI"
+)
+
+func (value RuntimeBackend) Valid() bool {
+	return value == RuntimeEmbeddedCore || value == RuntimeOrcaCLI
+}
+
+type ArchivistHostState string
+
+const (
+	ArchivistHostConnecting ArchivistHostState = "CONNECTING"
+	ArchivistHostOnline     ArchivistHostState = "ONLINE"
+	ArchivistHostBusy       ArchivistHostState = "BUSY"
+	ArchivistHostOffline    ArchivistHostState = "OFFLINE"
+	ArchivistHostDisabled   ArchivistHostState = "DISABLED"
+)
+
+func (value ArchivistHostState) Valid() bool {
+	switch value {
+	case ArchivistHostConnecting, ArchivistHostOnline, ArchivistHostBusy, ArchivistHostOffline, ArchivistHostDisabled:
+		return true
+	default:
+		return false
+	}
+}
+
+type ArchivistTurnState string
+
+const (
+	ArchivistTurnQueued    ArchivistTurnState = "QUEUED"
+	ArchivistTurnLeased    ArchivistTurnState = "LEASED"
+	ArchivistTurnSubmitted ArchivistTurnState = "SUBMITTED"
+	ArchivistTurnRunning   ArchivistTurnState = "RUNNING"
+	ArchivistTurnWaiting   ArchivistTurnState = "WAITING"
+	ArchivistTurnCompleted ArchivistTurnState = "COMPLETED"
+	ArchivistTurnFailed    ArchivistTurnState = "FAILED"
+	ArchivistTurnCancelled ArchivistTurnState = "CANCELLED"
+)
+
+func (value ArchivistTurnState) Valid() bool {
+	switch value {
+	case ArchivistTurnQueued, ArchivistTurnLeased, ArchivistTurnSubmitted, ArchivistTurnRunning,
+		ArchivistTurnWaiting, ArchivistTurnCompleted, ArchivistTurnFailed, ArchivistTurnCancelled:
+		return true
+	default:
+		return false
+	}
 }

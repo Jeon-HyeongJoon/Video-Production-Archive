@@ -40,6 +40,7 @@ func (repository *Repository) Close() error {
 
 func (repository *Repository) migrate(ctx context.Context) error {
 	statements := []string{
+		`PRAGMA busy_timeout = 5000`,
 		`PRAGMA journal_mode = WAL`,
 		`PRAGMA foreign_keys = ON`,
 		`CREATE TABLE IF NOT EXISTS physical_devices (
@@ -180,7 +181,8 @@ func (repository *Repository) ResolveWorkspaceDrive(ctx context.Context, storage
 func (repository *Repository) ResolveAccess(ctx context.Context, storageID string) (storage.Access, error) {
 	var access storage.Access
 	err := repository.db.QueryRowContext(ctx, `
-		SELECT partitions.physical_device_id
+		SELECT volumes.volume_id
+		     , partitions.physical_device_id
 		     , storages.storage_id
 		     , storages.role
 		     , storages.root
@@ -188,15 +190,41 @@ func (repository *Repository) ResolveAccess(ctx context.Context, storageID strin
 		JOIN volumes ON volumes.volume_id = storages.volume_id
 		JOIN partitions ON partitions.partition_id = volumes.partition_id
 		WHERE storages.storage_id = ?
-	`, storageID).Scan(&access.WorkspaceDriveID, &access.StorageID, &access.Role, &access.Root)
+	`, storageID).Scan(&access.WorkspaceDriveID, &access.PhysicalDeviceID, &access.StorageID, &access.Role, &access.Root)
 	if errors.Is(err, sql.ErrNoRows) {
 		return storage.Access{}, storage.ErrStorageUnresolved
 	}
 	if err != nil {
 		return storage.Access{}, err
 	}
-	if access.StorageID == "" || !access.Role.Valid() || access.Root == "" || access.WorkspaceDriveID == "" {
+	if access.StorageID == "" || !access.Role.Valid() || access.Root == "" || access.WorkspaceDriveID == "" || access.PhysicalDeviceID == "" {
 		return storage.Access{}, storage.ErrStorageUnresolved
 	}
 	return access, nil
+}
+
+func (repository *Repository) ListAccess(ctx context.Context) ([]storage.Access, error) {
+	rows, err := repository.db.QueryContext(ctx, `
+		SELECT volumes.volume_id, partitions.physical_device_id, storages.storage_id, storages.role, storages.root
+		FROM storages
+		JOIN volumes ON volumes.volume_id = storages.volume_id
+		JOIN partitions ON partitions.partition_id = volumes.partition_id
+		ORDER BY storages.storage_id
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []storage.Access
+	for rows.Next() {
+		var access storage.Access
+		if err := rows.Scan(&access.WorkspaceDriveID, &access.PhysicalDeviceID, &access.StorageID, &access.Role, &access.Root); err != nil {
+			return nil, err
+		}
+		if access.StorageID == "" || !access.Role.Valid() || access.Root == "" || access.WorkspaceDriveID == "" || access.PhysicalDeviceID == "" {
+			return nil, storage.ErrStorageUnresolved
+		}
+		result = append(result, access)
+	}
+	return result, rows.Err()
 }

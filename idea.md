@@ -7,7 +7,7 @@
 
 ## 1. 목적
 
-촬영 원본을 안전하게 입고하고, 영상 유형에 맞게 렌더링·전사·요약·병합한 뒤, 결과와 처리 이력을 검색 가능한 형태로 기록한다. 에이전트가 자동으로 대용량 파일 Job을 계획하고 실행할 수 있어야 하며, 사람이 대시보드에서 업무 현황과 증적을 확인하고 중간에 개입하거나 에이전트 없이 같은 도메인 기능을 직접 실행할 수 있어야 한다.
+촬영 원본을 안전하게 입고하고, 영상 유형에 맞게 렌더링·전사·요약·병합한 뒤, 결과와 처리 이력을 검색 가능한 형태로 기록한다. Archivist가 자동으로 대용량 파일 Job을 계획하고 실행할 수 있어야 하며, 사람이 아카이브 작업 공간에서 업무 현황과 증적을 확인하고 중간에 개입하거나 Archivist 없이 같은 도메인 기능을 직접 실행할 수 있어야 한다.
 
 최종적으로 다음을 달성한다.
 
@@ -15,9 +15,9 @@
 2. 행사 녹화, VJ 소스, 최종 편집본 등 영상 유형별 워크플로를 제공한다.
 3. 영상 설명, 기술정보, STT, 요약, 체크섬, 보관 위치를 함께 기록한다.
 4. DB를 이용해 빠르게 검색하되 DB가 없어도 아카이브 내용을 해석하고 목록을 복구할 수 있게 한다.
-5. MCP, HTTP API, 대시보드, CLI가 동일한 도메인 기능을 사용한다.
+5. MCP, HTTP API, 아카이브 작업 공간, CLI가 동일한 도메인 기능을 사용한다.
 6. USB, SSD, HDD 같은 PhysicalDevice를 작업 공간 단위로 삼아 입고·복사·검증·안전 해제·포맷을 통제한다.
-7. 에이전트 장애나 AI 미사용 상황에서도 사람이 운영을 계속할 수 있게 한다.
+7. Archivist 장애나 AI 미사용 상황에서도 사람이 운영을 계속할 수 있게 한다.
 
 ## 2. 핵심 설계 원칙
 
@@ -33,7 +33,7 @@ CLI Adapter ─┘
 
 ### 2.2 워크플로 엔진이 상태를 소유
 
-에이전트는 조사, 분류, 계획, 오류 분석을 담당한다. 전체 작업 상태, 선행 조건, 재시도, 병렬 실행, 승인 대기는 워크플로 엔진이 영속적으로 관리한다. 에이전트가 종료되거나 교체되어도 진행 중인 작업은 유실되지 않아야 한다.
+Archivist는 조사, 분류, 계획, 오류 분석을 담당한다. 전체 작업 상태, 선행 조건, 재시도, 병렬 실행, 승인 대기는 워크플로 엔진이 영속적으로 관리한다. Archivist가 종료되거나 교체되어도 진행 중인 작업은 유실되지 않아야 한다.
 
 ### 2.3 원본은 불변
 
@@ -47,18 +47,18 @@ CLI Adapter ─┘
 
 ### 2.5 사람 우선 폴백
 
-표준 Template 실행과 즉시 실행은 에이전트가 없어도 동작해야 한다. 채팅은 편의를 제공하지만 필수 운영 인터페이스가 아니다.
+표준 Template 실행과 즉시 실행은 Archivist가 없어도 동작해야 한다. 채팅은 편의를 제공하지만 필수 운영 인터페이스가 아니다.
 
 ### 2.6 파괴적 작업은 자동화하지 않음
 
-포맷, 원본 삭제, 기존 아카이브 대체와 같은 작업은 에이전트가 제안할 수 있지만 사람의 명시적 승인 없이 실행하지 않는다.
+포맷, 원본 삭제, 기존 아카이브 대체와 같은 작업은 Archivist가 제안할 수 있지만 사람의 명시적 승인 없이 실행하지 않는다.
 
 ## 3. 전체 아키텍처
 
 ```mermaid
 flowchart TB
-    UI[Dashboard\n버튼·폼·채팅] -->|HTTP + SSE| API[Control API]
-    AGENT[Server Agent] -->|MCP| MCP[MCP Adapter]
+    UI[Archive Workspace\n버튼·폼·채팅] -->|HTTP + SSE| API[Control API]
+    ARCHIVIST[Server Archivist] -->|MCP| MCP[MCP Adapter]
     CLI[Admin CLI] --> CMD[Application Command Layer]
     API --> CMD
     MCP --> CMD
@@ -84,7 +84,7 @@ flowchart TB
 
 - 사용자, 역할, 승인 관리
 - 작업 생성과 상태 전이
-- 에이전트 계획과 사람 피드백
+- Archivist 계획과 사람 피드백
 - 도메인 명령 검증
 - CommandRecord와 Event
 - 장치 및 아카이브 인벤토리
@@ -113,12 +113,12 @@ Control Plane과 Execution Plane은 코드와 프로세스 경계에서는 분�
 
 ```text
 32GB Windows PC
-├── Control Service
-│   ├── Dashboard / API
+├── Archive Control
+│   ├── Archive Workspace / API
 │   ├── MCP Adapter
 │   ├── Workflow Scheduler
 │   └── SQLite / Search
-└── Media Worker
+└── Archive Worker
     ├── Worker Device Adapter
     ├── FFmpeg
     ├── STT
@@ -126,21 +126,21 @@ Control Plane과 Execution Plane은 코드와 프로세스 경계에서는 분�
     └── Archive Copy
 ```
 
-두 역할을 별도 프로세스로 유지해 미디어 작업의 오류가 Control Service를 함께 종료하지 않게 한다. 향후 PC를 추가할 때 Media Worker만 다른 장비로 이동하거나 추가할 수 있어야 한다.
+두 역할을 별도 프로세스로 유지해 미디어 작업의 오류가 Archive Control를 함께 종료하지 않게 한다. 향후 PC를 추가할 때 Archive Worker만 다른 장비로 이동하거나 추가할 수 있어야 한다.
 
 ### 3.5 다중 Worker PC
 
-Worker PC가 추가되면 Control Service와 SQLite는 중앙 PC에 유지하고 `Media Worker`만 여러 PC에 설치한다.
+Worker PC가 추가되면 Archive Control와 SQLite는 중앙 PC에 유지하고 `Archive Worker`만 여러 PC에 설치한다.
 
 ```text
-Control Service + SQLite
+Archive Control + SQLite
     ↑ outbound connect / heartbeat / lease / result
     ├── worker-main       같은 PC의 기본 Worker
     ├── worker-render-01  렌더 전용 Worker PC
     └── worker-ingest-01  외장 장치 입고 PC
 ```
 
-Worker는 DB 파일을 직접 열지 않는다. 각 Worker는 설정 파일에 사전 등록된 `worker_id`, 개별 service credential reference, 처리 종류, 접근 가능한 storage ID를 갖는다. Dashboard 사용자 인증을 끄더라도 Worker service 인증은 끄지 않는다. Worker가 Control로 outbound 연결하므로 Worker PC에 inbound 포트를 열지 않는다.
+Worker는 DB 파일을 직접 열지 않는다. 각 Worker는 설정 파일에 사전 등록된 `worker_id`, 개별 service credential reference, 처리 종류, 접근 가능한 storage ID를 갖는다. Archive Workspace 사용자 인증을 끄더라도 Worker service 인증은 끄지 않는다. Worker가 Control로 outbound 연결하므로 Worker PC에 inbound 포트를 열지 않는다.
 
 Scheduler는 heartbeat가 유효하고 필요한 처리 종류와 Storage 접근성을 가진 Worker에만 Step lease를 발급한다. USB·SD·HDD가 특정 Worker에 연결된 경우 해당 물리 매체를 사용하는 단계는 그 Worker에 고정한다. 다른 Worker로 이어서 처리하려면 shared Storage 게시 또는 명시적인 transfer 단계가 선행되어야 한다.
 
@@ -167,7 +167,7 @@ Scheduler는 heartbeat가 유효하고 필요한 처리 종류와 Storage 접근
 VJ 도메인은 영상을 직접 최종 렌더링하지 않는다. 다음과 같은 타임라인을 생성하고 Rendering 도메인이 이를 소비한다.
 
 ```text
-VJ 클립 → VJ Assembly → Timeline → 사람/에이전트 검수
+VJ 클립 → VJ Assembly → Timeline → 사람/Archivist 검수
                                     ↓
                               Rendering → Rendition
 ```
@@ -213,7 +213,7 @@ STT는 인식 결과이고 요약은 AI 해석 결과다. 사람이 작성한 �
 - 처리 종류와 처리기 버전
 - 렌더 또는 STT 프로파일 버전
 - 생성 시각
-- 실행자: 사람, 에이전트, 시스템
+- 실행자: 사람, Archivist, 시스템
 - 파일 크기와 체크섬
 - 검수 상태
 
@@ -229,7 +229,7 @@ MCP, API, CLI는 동일한 명령으로 변환한다.
     "type": "human",
     "id": "operator-01"
   },
-  "requested_via": "dashboard",
+  "requested_via": "archive_workspace",
   "target_id": "JOB-20261005-0001",
   "expected_revision": 17,
   "idempotency_key": "JOB-20261005-0001:archive-render:v1",
@@ -241,9 +241,9 @@ MCP, API, CLI는 동일한 명령으로 변환한다.
 }
 ```
 
-- `expected_revision`: 사람과 에이전트의 동시 변경 충돌 방지
+- `expected_revision`: 사람과 Archivist의 동시 변경 충돌 방지
 - `idempotency_key`: 중복 실행 방지
-- `reason`: 감사 및 에이전트 판단 근거
+- `reason`: 감사 및 Archivist 판단 근거
 - 임의 절대경로 대신 `asset_id`, `artifact_id`, `storage_id` 사용
 
 ## 7. MCP 및 API 어댑터
@@ -251,7 +251,7 @@ MCP, API, CLI는 동일한 명령으로 변환한다.
 초기에는 하나의 MCP 서버 안에서 도메인 모듈을 분리한다.
 
 ```text
-video-archive-mcp
+archive-mcp
 ├── intake
 ├── media_analysis
 ├── transcription
@@ -277,18 +277,18 @@ archive.commit_package
 device.release_workspace_drive
 ```
 
-`run_ffmpeg`, `execute_shell`, 임의 경로를 받는 `move_file` 같은 범용 기능은 에이전트에 노출하지 않는다.
+`run_ffmpeg`, `execute_shell`, 임의 경로를 받는 `move_file` 같은 범용 기능은 Archivist에 노출하지 않는다.
 
 장시간 MCP 호출은 비동기 작업으로 등록하고 내부 `step_id`와 `mcp_task_id`를 연결한다. MCP Task는 통신 핸들이며 전체 운영 DB를 대신하지 않는다.
 
-### 7.1 외부 Agent Gateway
+### 7.1 외부 Archivist Gateway
 
-AI 모델은 로컬 PC에서 실행하지 않는다. Dashboard와 외부 AI 제공자 사이에 `Agent Gateway`를 두고 OpenAI, Claude 계열 또는 별도 Codex 클라이언트를 Provider Adapter로 연결한다.
+AI 모델은 로컬 PC에서 실행하지 않는다. Archive Workspace와 외부 AI 제공자 사이에 `Archivist Gateway`를 두고 OpenAI, Claude 계열 또는 별도 Codex 클라이언트를 Provider Adapter로 연결한다.
 
 ```text
-Dashboard Chat
+Archive Workspace Chat
     ↓
-Agent Gateway
+Archivist Gateway
     ├── Conversation / Context Builder
     ├── Provider Adapter
     ├── Approval Handler
@@ -299,11 +299,11 @@ Agent Gateway
        Application Command Layer
 ```
 
-권장 방식은 외부 모델이 사내 MCP에 임의로 접속하게 하는 것보다 Agent Gateway가 외부 모델 API를 호출하고, 모델이 요청한 도구를 로컬 MCP Client로 실행하는 중계형 구조다. 이 방식은 외부에서 사내 포트를 열 필요가 없고 AI 제공자를 교체하기 쉽다.
+권장 방식은 외부 모델이 사내 MCP에 임의로 접속하게 하는 것보다 Archivist Gateway가 외부 모델 API를 호출하고, 모델이 요청한 도구를 로컬 MCP Client로 실행하는 중계형 구조다. 이 방식은 외부에서 사내 포트를 열 필요가 없고 AI 제공자를 교체하기 쉽다.
 
 OpenAI처럼 원격 MCP 연결 또는 사설 MCP용 보안 터널을 지원하는 제공자는 전용 Provider Adapter에서 해당 방식을 선택적으로 지원한다. 어떤 방식이든 도메인 기능, 권한, 승인, 감사 기록은 동일하게 유지한다.
 
-### 7.2 에이전트 도구 권한
+### 7.2 Archivist 도구 권한
 
 ```text
 read        자동 허용: 상태, 로그, 기술정보, 검색
@@ -312,16 +312,16 @@ commit      사람 승인: 아카이브 확정, 계획 변경
 destructive 항상 승인과 대상 재확인: 포맷, 삭제, 기존 기록 대체
 ```
 
-외부 에이전트에는 현재 사용자와 작업에 필요한 도구만 노출한다. 전체 MCP 도구 목록을 매번 제공하지 않고 도메인 및 작업 상태에 따라 allowlist를 구성한다.
+외부 Archivist에는 현재 사용자와 작업에 필요한 도구만 노출한다. 전체 MCP 도구 목록을 매번 제공하지 않고 도메인 및 작업 상태에 따라 allowlist를 구성한다.
 
 ### 7.3 Provider Account Pool과 폴백
 
-Orca와 유사하게 여러 제공자 프로파일의 상태와 우선순위를 한 화면에서 관리하는 사용자 경험은 구현할 수 있다. 다만 공개 Orca CLI에는 내부 계정 저장 구조가 노출되어 있지 않으므로 내부 구현을 복제하지 않고 다음과 같은 독립적인 `Provider Account Pool`과 `Agent Router`를 둔다.
+Orca와 유사하게 여러 제공자 프로파일의 상태와 우선순위를 한 화면에서 관리하는 사용자 경험은 구현할 수 있다. 다만 공개 Orca CLI에는 내부 계정 저장 구조가 노출되어 있지 않으므로 내부 구현을 복제하지 않고 다음과 같은 독립적인 `Provider Account Pool`과 `Archivist Router`를 둔다.
 
 ```text
-Dashboard Chat
+Archive Workspace Chat
     ↓
-Agent Router
+Archivist Router
     ├── Routing Policy
     ├── Account Health / Circuit Breaker
     ├── Local Usage Ledger
@@ -331,7 +331,7 @@ Agent Router
           └── Manual Mode
 ```
 
-대시보드에 내장된 채팅용 계정과 외부 Codex·Claude 클라이언트의 계정은 구분한다. 내장 채팅은 서버가 관리하는 공식 API 자격 증명을 사용한다. 외부 클라이언트가 MCP Gateway에 접속하는 경우에는 해당 클라이언트가 자체 인증하며 서버가 그 로그인 계정이나 구독 세션을 보관하지 않는다.
+아카이브 작업 공간에 내장된 채팅용 계정과 외부 Codex·Claude 클라이언트의 계정은 구분한다. 내장 채팅은 서버가 관리하는 공식 API 자격 증명을 사용한다. 외부 클라이언트가 MCP Gateway에 접속하는 경우에는 해당 클라이언트가 자체 인증하며 서버가 그 로그인 계정이나 구독 세션을 보관하지 않는다.
 
 #### 계정과 비밀정보 저장
 
@@ -345,7 +345,7 @@ provider_accounts:
   cooldown_until, last_success_at, last_error_code
 ```
 
-API Key, OAuth refresh token, 비밀번호, 브라우저 쿠키는 DB와 로그에 평문으로 저장하지 않는다. 초기 Windows 단일 PC에서는 전용 Windows 서비스 계정 아래의 Credential Manager 또는 DPAPI로 암호화한 로컬 Secret Store에 보관하고, SQLite에는 불투명한 `secret_ref`만 둔다. 대시보드는 비밀값을 다시 조회할 수 없고 등록, 교체, 폐기만 가능하게 한다. DB 백업에도 비밀을 포함하지 않으며 복구 후에는 계정을 다시 연결한다.
+API Key, OAuth refresh token, 비밀번호, 브라우저 쿠키는 DB와 로그에 평문으로 저장하지 않는다. 초기 Windows 단일 PC에서는 전용 Windows 서비스 계정 아래의 Credential Manager 또는 DPAPI로 암호화한 로컬 Secret Store에 보관하고, SQLite에는 불투명한 `secret_ref`만 둔다. 아카이브 작업 공간는 비밀값을 다시 조회할 수 없고 등록, 교체, 폐기만 가능하게 한다. DB 백업에도 비밀을 포함하지 않으며 복구 후에는 계정을 다시 연결한다.
 
 개인용 구독 계정 여러 개를 자동 순환하여 제공자 한도를 우회하는 구조는 사용하지 않는다. 공식 API 자격 증명, 조직에서 승인한 프로젝트·워크스페이스, 명시적인 비용 한도만 Pool에 등록한다.
 
@@ -364,7 +364,7 @@ usage_estimate         응답 usage를 합산한 로컬 추정치
 
 ```text
 provider_usage_ledger:
-  request_id, conversation_id, agent_turn_id, provider_account_id
+  request_id, conversation_id, archivist_turn_id, provider_account_id
   model, input_tokens, output_tokens, cached_tokens
   estimated_cost, pricing_version, occurred_at
 
@@ -388,7 +388,7 @@ SPEND_LIMIT | AUTH_FAILED | UNHEALTHY | DISABLED
 | 일시적 rate limit | `Retry-After` 또는 reset까지 해당 계정을 `COOLDOWN`; 정책이 허용하면 다음 후보 사용 |
 | 크레딧·usage·spend limit 소진 | 같은 계정 재시도 금지; `QUOTA_EXHAUSTED` 또는 `SPEND_LIMIT`; 다음 승인 후보 사용 |
 | 5xx, overload, 네트워크 timeout | 지수 백오프로 제한 횟수 재시도 후 circuit breaker와 폴백 |
-| 인증 실패·폐기된 키 | `AUTH_FAILED`; 자동 순환으로 감추지 않고 관리자 재연결 요청 |
+| 인증 실패·폐기된 키 | `AUTH_FAILED`; 자동 순환으로 감추지 않고 재연결 필요로 표시 |
 | 모델 종료·일시 비가용 | 필요한 기능과 데이터 정책이 같은 대체 모델 또는 제공자로 전환 |
 | context 길이 초과 | 계정 교체가 아니라 대화 요약 또는 새 세션으로 복구 |
 | 잘못된 요청, 안전 정책 거부, 승인 거부 | 다른 계정으로 우회하지 않고 사용자에게 원인 표시 |
@@ -398,7 +398,7 @@ SPEND_LIMIT | AUTH_FAILED | UNHEALTHY | DISABLED
 
 #### 라우팅 순서
 
-Agent Router는 작업마다 다음 조건을 먼저 필터링한다.
+Archivist Router는 작업마다 다음 조건을 먼저 필터링한다.
 
 1. 계정이 활성 상태이고 cooldown이 지났는가
 2. 작업에 필요한 모델 기능과 context 크기를 지원하는가
@@ -417,15 +417,15 @@ Agent Router는 작업마다 다음 조건을 먼저 필터링한다.
 5. AI 사용 불가 → 사람 폴백 또는 비-AI 기능으로 계속 진행
 ```
 
-모든 계정이 불가해도 렌더링, STT, 입고, 검색과 MCP 도메인 기능 자체는 멈추지 않는다. 대시보드 채팅만 `AI unavailable` 상태로 전환하고 사람은 버튼·폼으로 기존 작업을 계속 수행한다.
+모든 계정이 불가해도 렌더링, STT, 입고, 검색과 MCP 도메인 기능 자체는 멈추지 않는다. 아카이브 작업 공간 채팅만 `AI unavailable` 상태로 전환하고 사람은 버튼·폼으로 기존 작업을 계속 수행한다.
 
 #### 폴백 중 중복 실행 방지
 
-에이전트 응답 timeout이 발생했더라도 직전 Tool Call이 이미 성공했을 수 있다. 따라서 변경형 MCP 명령은 모두 `command_id`와 idempotency key를 요구하고, Agent Gateway는 다음을 영속 기록한다.
+Archivist 응답 timeout이 발생했더라도 직전 Tool Call이 이미 성공했을 수 있다. 따라서 변경형 MCP 명령은 모두 `command_id`와 idempotency key를 요구하고, Archivist Gateway는 다음을 영속 기록한다.
 
 ```text
-agent_turns, provider_requests, provider_fallback_events
-agent_tool_calls, command_id, mcp_task_id, result_state
+archivist_turns, provider_requests, provider_fallback_events
+archivist_tool_calls, command_id, mcp_task_id, result_state
 ```
 
 새 계정이나 제공자로 전환하기 전 완료된 Tool Call과 실제 Job 상태를 다시 읽는다. 이미 완료된 명령을 전체 대화와 함께 재실행하지 않고 미완료된 논리 단계만 이어간다.
@@ -548,29 +548,29 @@ CRITICAL     데이터 안전 위험: 안전 종료 또는 재시도 전환
 - 다시 시작: 유휴 조건 10분 유지
 - 사용자 수동 작업은 background 작업보다 항상 우선
 
-에이전트는 작업 우선순위를 제안할 수 있지만 자원 최소치와 디스크 잠금을 우회할 수 없다.
+Archivist는 작업 우선순위를 제안할 수 있지만 자원 최소치와 디스크 잠금을 우회할 수 없다.
 
-## 10. 대시보드 UX
+## 10. 아카이브 작업 공간 UX
 
 ### 10.1 기본 원칙
 
-- 첫 화면의 목적: 에이전트가 관리하는 Job·Step·Tool Call·Worker 실행의 현재 업무 현황 파악
-- 버튼과 폼: pause, retry, cancel, 제어 모드 변경, 필요한 입력·승인과 Agent 부재 시 직접 실행
+- 첫 화면의 목적: Archivist가 관리하는 Job·Step·Tool Call·Worker 실행의 현재 업무 현황 파악
+- 버튼과 폼: pause, retry, cancel, 제어 모드 변경, 필요한 입력·승인과 Archivist 부재 시 직접 실행
 - 작업 그래프와 표: 상태, 진행률, 선행 관계 확인
 - 채팅: 검색, 계획 생성, 오류 설명, 일괄 작업 제안
 - 채팅에서 생성한 변경은 실행 계획 카드로 보여준 뒤 승인 버튼으로 실행
-- Provider·Worker·Storage·보안 설정은 Dashboard에서 바꾸지 않고 로컬 설정 파일과 서비스 재시작으로 적용
-- 매체 소유권·대여·반환 승인·반환 이력은 Dashboard 범위에서 제외
+- Provider·Worker·Storage·보안 설정은 Archive Workspace에서 바꾸지 않고 로컬 설정 파일과 서비스 재시작으로 적용
+- 매체 소유권·대여·반환 승인·반환 이력은 Archive Workspace 범위에서 제외
 
 ### 10.2 주요 화면
 
-1. 작업함: 에이전트 제어 모드, 현재 Step·Tool Call, 대기, 실행, 승인 대기, 실패
+1. 작업함: Archivist 제어 모드, 현재 Step·Tool Call, 대기, 실행, 승인 대기, 실패
 2. 작업 상세: DAG, 진행률, Event, 로그 참조, 결과, Worker, 사람 개입
-3. 실패·개입: 오류 분류, 재시도, 일시정지, 제어 모드 전환, 에이전트에게 질문
+3. 실패·개입: 오류 분류, 재시도, 일시정지, 제어 모드 전환, Archivist에게 질문
 4. Worker·자원: CPU, memory, GPU/VRAM, scratch, PhysicalDevice lock과 안전 해제 가능 여부
 5. 채팅 보조: 현재 Job과 화면을 문맥으로 설명·분석·계획 제안
 
-아카이브 검색과 기록 조회는 같은 웹 애플리케이션에 둘 수 있지만 운영 Dashboard의 첫 책임과 분리한다. 원격 정책·계정·Worker registry 편집 화면은 인증 비활성 초기 범위에 두지 않는다.
+아카이브 검색과 기록 조회는 같은 웹 애플리케이션에 둘 수 있지만 운영 Archive Workspace의 첫 책임과 분리한다. 원격 정책·계정·Worker registry 편집 화면은 인증 비활성 초기 범위에 두지 않는다.
 
 ### 10.3 사람 개입
 
@@ -581,10 +581,10 @@ execution_state:
   queued | running | waiting_input | paused | failed | completed | cancelled
 
 control_mode:
-  agent | assisted | manual
+  archivist | assisted | manual
 ```
 
-사람이 `manual` 제어권을 가져가면 에이전트의 실행 lease를 해제한다. 사람의 변경이 끝난 뒤 에이전트에게 다시 넘기면 최신 이벤트를 바탕으로 재계획한다.
+사람이 `manual` 제어권을 가져가면 Archivist의 실행 lease를 해제한다. 사람의 변경이 끝난 뒤 Archivist에게 다시 넘기면 최신 이벤트를 바탕으로 재계획한다.
 
 ### 10.4 채팅 기반 질문과 오류 분석
 
@@ -598,7 +598,7 @@ control_mode:
 - 다른 프로파일 또는 Worker 사용 제안
 - 특정 작업의 처리 이력 요약
 
-실패 화면의 `에이전트에게 묻기` 버튼은 단순 오류 문자열이 아니라 제한된 오류 컨텍스트 패키지를 채팅에 첨부한다.
+실패 화면의 `Archivist에게 묻기` 버튼은 단순 오류 문자열이 아니라 제한된 오류 컨텍스트 패키지를 채팅에 첨부한다.
 
 ```json
 {
@@ -616,7 +616,7 @@ control_mode:
 }
 ```
 
-에이전트는 우선 읽기 도구로 상태를 조사하고 해결 계획을 제안한다. 변경 작업은 대화 안에서 바로 숨겨 실행하지 않고 Action Card로 표시한다.
+Archivist는 우선 읽기 도구로 상태를 조사하고 해결 계획을 제안한다. 변경 작업은 대화 안에서 바로 숨겨 실행하지 않고 Action Card로 표시한다.
 
 ```text
 제안: scratch 공간 확보 후 render-01 재시도
@@ -634,12 +634,12 @@ control_mode:
 | Tool Invocation | MCP/API 입력과 결과, 실행자 | DB, 민감값 제거 |
 | Process Log | FFmpeg·STT stdout/stderr | 회전 로그 파일 |
 | Worker Metric | 메모리, CPU, GPU, 디스크 | 단기 DB 집계 |
-| Agent Turn | 질문, 답변, 사용 도구 | DB |
+| Archivist Turn | 질문, 답변, 사용 도구 | DB |
 | Approval | 승인 대상과 승인자 | DB |
 
-DB에 무제한 원문 로그를 저장하지 않는다. DB에는 시각, 수준, 오류 코드, 로그 파일 위치와 마지막 일부만 저장하고 원문은 회전·압축한다. 외부 에이전트에는 전체 로그를 자동 전송하지 않고 오류 주변, 비밀값이 제거된 명령, 관련 상태만 제공한다.
+DB에 무제한 원문 로그를 저장하지 않는다. DB에는 시각, 수준, 오류 코드, 로그 파일 위치와 마지막 일부만 저장하고 원문은 회전·압축한다. 외부 Archivist에는 전체 로그를 자동 전송하지 않고 오류 주변, 비밀값이 제거된 명령, 관련 상태만 제공한다.
 
-대시보드에는 `/api/v1/notifications` SSE로 Event에서 만든 알림과 일시적인 진행률·자원 알림을 전달한다. Event 기반 알림의 재연결 cursor만 Event 저장 순번을 사용한다.
+아카이브 작업 공간에는 `/api/v1/notifications` SSE로 Event에서 만든 알림과 일시적인 진행률·자원 알림을 전달한다. Event 기반 알림의 재연결 cursor만 Event 저장 순번을 사용한다.
 
 ```text
 job.status_changed
@@ -648,10 +648,10 @@ step.failed
 worker.resource_changed
 device.connected
 approval.required
-agent.tool_called
+archivist.tool_called
 ```
 
-### 10.6 에이전트 계정 화면
+### 10.6 Archivist 계정 화면
 
 계정 화면에는 별칭, 제공자, 사용 목적, 우선순위, 기본 모델, 상태, cooldown, 로컬 사용량 추정, 마지막 성공과 오류만 표시한다. 비밀값은 일부라도 다시 노출하지 않는다.
 
@@ -680,8 +680,8 @@ copy_sessions, checksums, storage_locks
 archive_packages, archive_locations
 workflow_templates, tool_invocations, operator_feedback
 provider_accounts, provider_account_health, provider_usage_ledger
-routing_policies, agent_sessions, agent_turns, provider_requests
-provider_fallback_events, agent_tool_calls
+routing_policies, archivist_sessions, archivist_turns, provider_requests
+provider_fallback_events, archivist_tool_calls
 ```
 
 영상 파일 자체는 DB에 저장하지 않는다.
@@ -828,15 +828,15 @@ eject_pending   신규 작업 금지
 3. Storage 갱신
 4. 포맷 CommandRecord와 Event에 실행자, 승인자, 전후 장치 정보를 기록
 
-에이전트에는 포맷 승인 권한을 부여하지 않는다.
+Archivist에는 포맷 승인 권한을 부여하지 않는다.
 
 ## 14. 권한과 안전
 
 ### 14.1 내부망 전용 접근
 
-Dashboard와 HTTP API는 공용 인터넷에 공개하지 않는다. 다음 경계를 동시에 적용한다.
+Archive Workspace와 HTTP API는 공용 인터넷에 공개하지 않는다. 다음 경계를 동시에 적용한다.
 
-1. Control Service는 지정한 사무실 NIC의 내부 IP에 bind하고 `0.0.0.0`을 기본값으로 사용하지 않는다.
+1. Archive Control는 지정한 사무실 NIC의 내부 IP에 bind하고 `0.0.0.0`을 기본값으로 사용하지 않는다.
 2. Windows Defender Firewall은 실제 사용하는 사무실 CIDR과 서비스 포트만 inbound 허용한다.
 3. 애플리케이션도 socket peer IP를 CIDR allowlist로 검사한다.
 4. 포트 포워딩과 UPnP는 사용하지 않는다.
@@ -844,9 +844,9 @@ Dashboard와 HTTP API는 공용 인터넷에 공개하지 않는다. 다음 경�
 
 RFC1918 또는 Tailscale CGNAT 대역 전체를 허용하지 않고 실제 subnet, 장치 ACL 또는 필요한 주소만 허용한다. 초기에는 reverse proxy를 두지 않고 `X-Forwarded-For`를 신뢰하지 않는다. 이후 proxy를 추가할 때도 직접 연결 peer가 설정된 trusted proxy인 경우에만 전달된 원본 IP를 사용한다.
 
-### 14.2 선택형 로그인
+### 14.2 v1 무로그인과 후속 인증 경계
 
-로그인은 기능 구현 단계부터 모드로 분리하되, 초기 사무실 운영은 `disabled`를 선택할 수 있다.
+v1 아카이브 작업 공간은 `disabled`만 사용하고 로그인 화면·계정·세션 발급을 제공하지 않는다. `local`은 후속 인증 정책 경계다.
 
 ```text
 auth_mode: disabled
@@ -857,30 +857,31 @@ auth_mode: disabled
   포맷·삭제는 boot config 정책이 켜지고 대상 확인을 통과한 경우만 가능
 
 auth_mode: local
+  후속 버전 경계이며 v1 운영 모드가 아님
   로그인한 operator/admin
-  역할과 승인 정책에 따라 기능 허용
+  역할과 승인 정책은 후속 요구사항에서 결정
 ```
 
-내부 IP는 위치 제한일 뿐 사람의 신원을 증명하지 않는다. 개발 및 초기 운영의 `disabled` 모드에서는 사용자별 작업 분류를 하지 않고 모든 UI Command actor를 `internal-operator`로 기록한다. source IP와 request ID는 진단 메타데이터로만 보존한다.
+내부 IP는 위치 제한일 뿐 사람의 신원을 증명하지 않는다. v1의 `disabled` 모드에서는 사용자별 작업 분류를 하지 않고 모든 UI Command actor를 `internal-operator`로 기록한다. source IP와 request ID는 진단 메타데이터로만 보존한다.
 
-인증 모드는 Dashboard 버튼으로 실시간 변경하지 않는다. OS ACL로 보호된 로컬 설정 파일에서만 바꾸고 Control Service를 재시작해야 적용한다. 인증이 꺼져 있을 때는 관리 화면과 관리 API 자체를 등록하지 않는다. Provider 계정, Worker registry, storage, 보존 및 파괴 작업 허용 정책은 시작 전에 설정 파일로 정의한다. credential 원문은 파일에 쓰지 않고 Windows Credential Manager 또는 DPAPI reference만 둔다.
+인증 모드는 Archive Workspace 버튼으로 실시간 변경하지 않는다. 후속 `local` 경계를 도입할 때도 OS ACL로 보호된 로컬 설정 파일과 Archive Control 재시작으로만 바꾼다. v1은 원격 관리 화면과 관리 API 자체를 등록하지 않는다. Provider 계정, Worker·Archivist Host registry, Storage, 보존 및 파괴 작업 허용 정책은 시작 전에 설정 파일로 정의한다. credential 원문은 파일에 쓰지 않고 Windows Credential Manager 또는 DPAPI reference만 둔다.
 
 로그인 여부와 무관하게 브라우저 상태 변경 요청은 정확한 `Origin`, `application/json` Content-Type과 cookie/header가 일치하는 CSRF token을 요구한다. 인증 없는 MCP endpoint는 loopback에만 listen한다.
 
-| 기능군 | 에이전트 | disabled internal-operator | local 담당자 | local 관리자 |
-|---|---:|---:|---:|---:|
-| 조회·분석 | 자동 | 가능 | 가능 | 가능 |
-| 프록시·STT·썸네일 | 정책 범위 내 | 가능 | 가능 | 가능 |
-| 워크플로 변경 | 제안 | 확인·수정 | 승인·수정 | 가능 |
-| 아카이브 확정 | 요청 | 명시 확인 | 승인 | 가능 |
-| 기존 아카이브 대체 | 불가 | boot policy+대상 확인 | 제한 | 승인 |
-| 원본 삭제·포맷 | 불가 | boot policy+대상 확인 | 요청 | 별도 확인 후 실행 |
-| Provider·Worker·보안 설정 | 불가 | surface 없음 | 불가 | 가능 |
-| 임의 셸 실행 | 불가 | 불가 | 불가 | 시스템 관리 영역 |
+| 기능군 | Archivist | v1 internal-operator |
+|---|---:|---:|
+| 조회·분석 | 인증된 MCP allowlist | 가능 |
+| 프록시·STT·썸네일 | 저장된 ARCHIVIST 제어 모드의 비파괴 PROCESS만 | 가능 |
+| 워크플로 변경 | ActionCard 제안 | 확인·수정 |
+| 아카이브 확정 | 요청 | 명시 확인 |
+| 기존 아카이브 대체 | 불가 | boot policy+대상 확인 |
+| 원본 삭제·포맷 | 불가 | boot policy+대상 확인 |
+| Provider·Worker·Archivist Host·Storage·보안 설정 | 불가 | surface 없음 |
+| 임의 셸 실행 | 불가 | 불가 |
 
-파일명, STT, 자막, 영상 설명은 신뢰할 수 없는 콘텐츠로 취급한다. 콘텐츠에 포함된 문장을 에이전트 명령으로 해석하지 않는다.
+파일명, STT, 자막, 영상 설명은 신뢰할 수 없는 콘텐츠로 취급한다. 콘텐츠에 포함된 문장을 Archivist 명령으로 해석하지 않는다.
 
-Provider 자격 증명은 영상 DB와 분리된 OS Secret Store에 두고 전용 서비스 계정만 접근한다. API 응답, 오류 로그, Agent Turn과 지원용 진단 묶음을 저장하기 전에 키, Authorization 헤더, 쿠키와 OAuth token을 제거한다. 계정별 데이터 반출 정책을 두어 민감 프로젝트의 전사문이 허용되지 않은 제공자로 폴백되지 않게 한다.
+Provider 자격 증명은 영상 DB와 분리된 OS Secret Store에 두고 전용 서비스 계정만 접근한다. API 응답, 오류 로그, Archivist Turn과 지원용 진단 묶음을 저장하기 전에 키, Authorization 헤더, 쿠키와 OAuth token을 제거한다. 계정별 데이터 반출 정책을 두어 민감 프로젝트의 전사문이 허용되지 않은 제공자로 폴백되지 않게 한다.
 
 모든 상태 변경에 다음을 기록한다.
 
@@ -926,10 +927,10 @@ Provider 자격 증명은 영상 DB와 분리된 OS Secret Store에 두고 전�
 초기 목표는 최대 처리속도가 아니라 기존 32GB Windows PC 한 대에서 안정적으로 처리하는 것이다.
 
 - 사용자 1~3명
-- Dashboard, DB, MCP, Workflow, Worker를 한 PC에서 운영
+- Archive Workspace, DB, MCP, Workflow, Worker를 한 PC에서 운영
 - 무거운 작업은 동시에 1개
 - 프록시, 렌더, STT는 큐에서 순차 처리
-- 대기시간은 허용하지만 대시보드와 DB 응답성은 유지
+- 대기시간은 허용하지만 아카이브 작업 공간와 DB 응답성은 유지
 - 외장 매체 또는 로컬 scratch에서 처리
 - 향후 Worker를 추가할 수 있는 논리적 경계 유지
 
@@ -945,7 +946,7 @@ Provider 자격 증명은 영상 DB와 분리된 OS Secret Store에 두고 전�
 | 네트워크 | 1GbE | 중앙 스토리지 사용 시 2.5GbE 이상 |
 | 전원 | 일반 전원 | 자동 종료 연동 UPS |
 
-OS·DB와 scratch를 물리적으로 분리하면 렌더링 I/O가 SQLite와 대시보드 응답성을 방해하는 것을 크게 줄일 수 있다. 슬롯이 하나뿐이라면 단일 SSD로도 시작할 수 있지만 DB, 로그, scratch 디렉터리는 논리적으로 분리한다.
+OS·DB와 scratch를 물리적으로 분리하면 렌더링 I/O가 SQLite와 아카이브 작업 공간 응답성을 방해하는 것을 크게 줄일 수 있다. 슬롯이 하나뿐이라면 단일 SSD로도 시작할 수 있지만 DB, 로그, scratch 디렉터리는 논리적으로 분리한다.
 
 ### 15.4 메모리 및 CPU 예산
 
@@ -954,9 +955,9 @@ OS·DB와 scratch를 물리적으로 분리하면 렌더링 I/O가 SQLite와 대
 | 항목 | 목표 범위 |
 |---|---:|
 | Windows 및 기본 서비스 | 6~8GB |
-| Control Service, Dashboard, MCP | 1~2GB |
+| Archive Control, Archive Workspace, MCP | 1~2GB |
 | SQLite 및 검색 | 0.1~0.5GB |
-| Media Worker 상주 부분 | 0.2~1GB |
+| Archive Worker 상주 부분 | 0.2~1GB |
 | 단일 FFmpeg 또는 STT 작업 | 3~8GB |
 | 항상 남겨둘 안전 여유 | 최소 6GB |
 
@@ -979,7 +980,7 @@ CONSTRAINED  6~10GB: 새 heavy 단계 금지, light 단계 제한
 CRITICAL     6GB 미만: 신규 작업 금지, 낮은 우선순위 작업 종료 검토
 ```
 
-- Control Service는 정상 우선순위로 실행한다.
+- Archive Control는 정상 우선순위로 실행한다.
 - FFmpeg, 체크섬, STT는 `Below Normal` 우선순위로 실행한다.
 - CPU 논리 코어 최소 2개를 Control Plane과 OS에 남긴다.
 - FFmpeg 스레드 수는 프로파일에서 제한한다.
@@ -990,10 +991,10 @@ CRITICAL     6GB 미만: 신규 작업 금지, 낮은 우선순위 작업 종료
 상시 프로세스는 두 개를 기본으로 한다.
 
 ```text
-Control Service
-  Go API + Dashboard + Agent Gateway + MCP + Scheduler + SQLite FTS
+Archive Control
+  Go API + Archive Workspace + Archivist Gateway + MCP + Scheduler + SQLite FTS
 
-Media Worker
+Archive Worker
   Go Worker + Device Adapter + 도메인 실행기 + subprocess 관리자
 ```
 
@@ -1007,7 +1008,7 @@ Media Worker
 - 도메인마다 분리된 상시 서비스 프로세스
 - 상시 로드된 STT 또는 로컬 LLM
 
-작업 큐, lease, Event는 SQLite 테이블로 관리하고 Notification SSE로 대시보드에 상태를 전달한다. STT 모델은 대기열이 있을 때 로드하며 연속 작업을 묶어서 처리한 뒤 유휴 시간이 지나면 해제한다.
+작업 큐, lease, Event는 SQLite 테이블로 관리하고 Notification SSE로 아카이브 작업 공간에 상태를 전달한다. STT 모델은 대기열이 있을 때 로드하며 연속 작업을 묶어서 처리한 뒤 유휴 시간이 지나면 해제한다.
 
 ### 15.6 큐와 동시 실행 정책
 
@@ -1035,7 +1036,7 @@ light 슬롯:            2
   STT + 로컬 LLM
 ```
 
-대기열이 장기간 전혀 줄지 않거나 새 작업 유입 속도를 따라가지 못할 때만 메모리 증설보다 두 번째 Worker 추가를 먼저 검토한다. Worker가 추가되면 Control Service와 SQLite는 기존 PC에 유지할 수 있으며, 쓰기 경합이나 고가용성 요구가 확인될 때 PostgreSQL로 이전한다.
+대기열이 장기간 전혀 줄지 않거나 새 작업 유입 속도를 따라가지 못할 때만 메모리 증설보다 두 번째 Worker 추가를 먼저 검토한다. Worker가 추가되면 Archive Control와 SQLite는 기존 PC에 유지할 수 있으며, 쓰기 경합이나 고가용성 요구가 확인될 때 PostgreSQL로 이전한다.
 
 현재 운영은 완료 기한이 없으므로 대기열의 나이만으로 자동 동시성을 높이지 않는다. 작업은 다음 두 모드만 제공한다.
 
@@ -1081,7 +1082,7 @@ manual      사용자가 즉시 실행을 명시한 작업, 안전 한계는 그
 1. 대표 카메라별 1시간 원본 복사와 SHA-256 검증 시간
 2. H.264, HEVC, ProRes별 프록시 및 아카이브 렌더 속도
 3. 한국어 행사 음성 1시간의 STT 처리시간과 정확도
-4. 렌더 또는 STT 한 개 실행 중 API 및 대시보드 응답성
+4. 렌더 또는 STT 한 개 실행 중 API 및 아카이브 작업 공간 응답성
 5. 동일 외장 하드를 동시에 읽을 때의 실제 처리량 저하
 6. Worker 강제 종료와 재시작 후 작업 복구
 7. 정전 모의 상황 후 DB, 큐, 임시 렌더 결과의 일관성
@@ -1097,12 +1098,12 @@ manual      사용자가 즉시 실행을 명시한 작업, 안전 한계는 그
 
 Go를 다음 영역의 기본 구현 언어로 사용한다.
 
-- Dashboard Backend API
-- Agent Gateway와 Provider Adapter
+- Archive Workspace Backend API
+- Archivist Gateway와 Provider Adapter
 - MCP Server 및 MCP Client
 - Workflow Scheduler와 SQLite 작업 큐
 - SSE Notification 스트림
-- Media Worker와 subprocess 관리
+- Archive Worker와 subprocess 관리
 - Worker Device Adapter의 공통 로직
 
 선택 이유:
@@ -1124,7 +1125,7 @@ Go의 `go generate` 또는 별도 코드 생성기로 다음 중복만 제거한
 도메인 Command Schema
 → HTTP OpenAPI Schema
 → MCP Tool Input/Output Schema
-→ Dashboard TypeScript Types
+→ Archive Workspace TypeScript Types
 ```
 
 도메인 규칙과 권한을 생성 코드에 숨기지 않는다. 리플렉션 기반 범용 실행기나 매크로에 가까운 복잡한 구조보다 명시적인 Command Handler를 유지한다.
@@ -1162,17 +1163,17 @@ Rust 공식 MCP SDK도 존재하지만 초기에는 Go MCP SDK 하나로 통일�
 8. Assembly는 사실상 최후 수단
 ```
 
-### 16.5 외부 에이전트 연결 원칙
+### 16.5 외부 Archivist 연결 원칙
 
-- Dashboard 채팅은 Provider Adapter를 통해 외부 모델 API 사용
+- Archive Workspace 채팅은 Provider Adapter를 통해 외부 모델 API 사용
 - Codex 또는 Claude 같은 외부 운영 도구도 동일한 MCP Gateway에 연결 가능
 - 외부 제공자별 대화 API를 도메인 코드에 직접 결합하지 않음
 - 대화 기록과 Tool Call은 내부 `conversation_id`, `command_id`로 연결
 - 민감 영상 내용, 전체 전사문과 원본 경로는 기본적으로 외부 전송하지 않음
 - 파일명과 로그에 포함된 프롬프트 인젝션 가능성을 고려함
-- 민감 작업은 항상 대시보드 승인 필요
+- 민감 작업은 항상 아카이브 작업 공간 승인 필요
 
-대시보드에 임베드되는 채팅은 제공자의 CLI 프로그램을 서버에서 실행하는 방식보다 공식 API 기반 Provider Adapter가 적합하다. Codex 또는 다른 개발 에이전트는 관리자용 별도 MCP 클라이언트로도 사용할 수 있다.
+아카이브 작업 공간에 임베드되는 채팅은 제공자의 CLI 프로그램을 서버에서 실행하는 방식보다 공식 API 기반 Provider Adapter가 적합하다. Codex 또는 다른 개발 Archivist는 관리자용 별도 MCP 클라이언트로도 사용할 수 있다.
 
 ## 17. 구현 단계
 
@@ -1185,7 +1186,7 @@ Rust 공식 MCP SDK도 존재하지만 초기에는 Go MCP SDK 하나로 통일�
 - local Worker registry, service credential와 heartbeat
 - PostgreSQL 또는 SQLite 저장 어댑터
 - 작업 큐와 워커
-- 버튼·폼 중심 대시보드
+- 버튼·폼 중심 아카이브 작업 공간
 - 입고, 기술정보, 프록시, 체크섬
 - Job과 Approval의 CommandRecord 및 Event
 
@@ -1205,7 +1206,7 @@ Rust 공식 MCP SDK도 존재하지만 초기에는 Go MCP SDK 하나로 통일�
 - 복제본 및 무결성 검사 일정
 - DB 재구축과 사이드카 검증
 
-### Phase 4: 에이전트 및 MCP
+### Phase 4: Archivist 및 MCP
 
 - 도메인 기능 MCP 노출
 - 자동 분류와 워크플로 제안
@@ -1222,7 +1223,7 @@ Rust 공식 MCP SDK도 존재하지만 초기에는 Go MCP SDK 하나로 통일�
 
 1. 도메인 코어와 MCP/API 어댑터 분리
 2. 워크플로 엔진이 영속 상태 소유
-3. 버튼·폼 중심 대시보드와 보조 채팅
+3. 버튼·폼 중심 아카이브 작업 공간와 보조 채팅
 4. DB + JSON/CSV/체크섬 사이드카 병행
 5. 영상 파일은 DB 외부 저장
 6. Worker Device Adapter로 외장 미디어 관리
@@ -1230,20 +1231,20 @@ Rust 공식 MCP SDK도 존재하지만 초기에는 Go MCP SDK 하나로 통일�
 8. 초기 All-in-One DB는 SQLite와 FTS 사용
 9. 32GB Windows PC 한 대에서 시작하되 Worker 분리가 가능한 구조
 10. Backend, MCP, Scheduler, Worker의 기본 언어는 Go
-11. 외부 Agent는 Provider Adapter와 Agent Gateway를 통해 연결
+11. 외부 Archivist는 Provider Adapter와 Archivist Gateway를 통해 연결
 12. Rust와 Assembly는 프로파일링으로 필요성이 입증되기 전에는 사용하지 않음
 13. 자동 미디어 작업은 기한 없이 유휴 자원에서만 실행
-14. 에이전트 계정은 OS Secret Store와 SQLite 메타데이터로 분리
+14. Archivist 계정은 OS Secret Store와 SQLite 메타데이터로 분리
 15. 허가된 Provider Account Pool과 정책 기반 폴백을 사용하며 전체 실패 시 AI 사용 불가로 전환하고 사람 폴백 또는 비-AI 기능을 유지
-16. Dashboard/API는 공용 인터넷에 공개하지 않고 Windows Firewall과 애플리케이션 CIDR allowlist를 함께 사용
+16. Archive Workspace/API는 공용 인터넷에 공개하지 않고 Windows Firewall과 애플리케이션 CIDR allowlist를 함께 사용
 17. 개발 및 초기 인증 모드는 `disabled`로 두고 사용자별 계정·작업 소유자 없이 단일 `internal-operator` 사용
 18. 인증이 꺼져 있으면 관리 화면/API를 등록하지 않고 모든 관리 정책은 시작 전 설정 파일에서 적용
 19. 인증 모드와 관리 설정 변경은 로컬 설정과 서비스 재시작으로만 수행
 20. 여러 Worker PC는 사전 등록된 Worker로 연결하며 각 Worker의 service credential은 사용자 인증과 별도로 유지
-21. 모든 DB write는 중앙 Control Service가 수행하고 Worker는 heartbeat·lease·result API만 사용
+21. 모든 DB write는 중앙 Archive Control가 수행하고 Worker는 heartbeat·lease·result API만 사용
 22. 작업 공간 하나는 PhysicalDevice 하나이며 Storage와 Volume은 해당 드라이브 안의 접근 위치다. 예약·I/O 충돌·metric·안전 해제는 PhysicalDevice ID 단위로 수행
 23. 매체 소유권·대여·반환 이력과 반환 승인은 모델링하지 않으며, 작업 완료 뒤의 안전 해제는 Device 기능으로 유지
-24. Dashboard의 첫 책임은 에이전트 Job의 상태·도구 호출·대기·실패·로그·자원과 사람 개입 필요 여부를 보여주는 것
+24. Archive Workspace의 첫 책임은 Archivist Job의 상태·도구 호출·대기·실패·로그·자원과 사람 개입 필요 여부를 보여주는 것
 25. 도메인 기능은 MCP·HTTP와 무관한 Application Port로 직접 실행할 수 있어야 하며 모든 Adapter는 같은 Command Bus를 사용
 26. 모든 검증 실행은 요구사항 ID, 코드 리비전, 시각, 결과와 산출물 참조를 기계 판독 가능한 증적 묶음으로 남기되 운영 증적과 source control은 분리
 
@@ -1258,7 +1259,7 @@ Rust 공식 MCP SDK도 존재하지만 초기에는 Go MCP SDK 하나로 통일�
 7. 동시 사용자와 동시 렌더 목표
 8. 현재 32GB Windows PC의 렌더·STT 실제 벤치마크
 9. 실제 사무실 LAN/Tailscale 허용 CIDR과 고정 주소
-10. Provider 계정·보안 설정을 원격 Dashboard에서 관리하기 위해 `local` 인증을 켤 시점
+10. Provider 계정·보안 설정을 원격 Archive Workspace에서 관리하기 위해 `local` 인증을 켤 시점
 11. 추가 Worker PC 수, 처리 종류와 실제 Storage 접근 구성
 
 ## 19. 참고 자료
@@ -1277,7 +1278,7 @@ Rust 공식 MCP SDK도 존재하지만 초기에는 Go MCP SDK 하나로 통일�
 - [OpenAI API의 MCP 서버 연결](https://developers.openai.com/api/docs/guides/tools-connectors-mcp)
 - [OpenAI API Error Codes](https://developers.openai.com/api/docs/guides/error-codes)
 - [OpenAI API Rate Limits](https://developers.openai.com/api/docs/guides/rate-limits)
-- [OpenAI Agents API 오류와 복구](https://developers.openai.com/api/docs/guides/agents-api/errors)
+- [OpenAI Archivists API 오류와 복구](https://developers.openai.com/api/docs/guides/archivists-api/errors)
 - [Anthropic API Errors](https://docs.anthropic.com/en/api/errors)
 - [공식 MCP Go SDK](https://github.com/modelcontextprotocol/go-sdk)
 - [공식 MCP SDK 등급](https://github.com/modelcontextprotocol/modelcontextprotocol/blob/main/docs/docs/2026-07-28/sdk.mdx)

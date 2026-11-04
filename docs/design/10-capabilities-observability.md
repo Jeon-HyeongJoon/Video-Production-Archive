@@ -19,16 +19,18 @@ Capability는 versioned input, 필요한 Domain ID, 예상 리비전과 실행 �
 - 짧은 기능: Command receipt와 결과 ID
 - 대용량 파일 기능: 생성된 Job ID, Step ID 또는 async task handle
 
-도메인 모듈은 서로의 Adapter를 호출하지 않는다. 합성은 Template의 Step 의존성과 Command Bus가 담당한다. MCP, HTTP와 CLI Adapter는 protocol 입력을 같은 Capability input으로 바꾸고 결과를 protocol response로 변환할 뿐 업무 규칙을 구현하지 않는다.
+도메인 모듈은 서로의 Adapter를 호출하지 않는다. 합성은 Template의 Step 의존성과 Command Bus가 담당한다. MCP, HTTP와 CLI Adapter는 protocol 입력을 같은 Capability input으로 바꾸고 결과를 protocol response로 변환할 뿐 업무 규칙을 구현하지 않는다. Archivist Host의 loopback MCP proxy도 ArchivistSession·ArchivistTurn·ArchivistToolCall 상관관계를 추가할 뿐 Capability를 우회하지 않는다. `MCP-001~002`
 
-Control Service를 띄우지 않은 integration test와 진단 CLI에서도 같은 Capability를 직접 호출할 수 있어야 한다. 요구사항: `APP-001`
+대용량 파일 Job은 생성 시점의 업무 입력을 잃지 않는다. Coordinator는 Domain ID·Storage ID·정규화 상대경로·Profile reference를 Step별 typed `StepExecutionSpec`으로 내리고, 선행 출력이 필요한 Step의 명세는 이전 `StepOutputRecord`가 확정된 transaction에서 구체화한다. Capability receipt의 Job·Step handle과 실제 Worker 실행 입력은 이 두 기록으로 연결하며 protocol DTO나 Worker 로컬 절대경로를 Job 상태에 넣지 않는다. `APP-003~004`, `WRK-010~012`
+
+Archive Control를 띄우지 않은 integration test와 진단 CLI에서도 같은 Capability를 직접 호출할 수 있어야 한다. 요구사항: `APP-001`
 
 ## 2. 작업 공간 드라이브
 
-대용량 파일 Capability는 임의 경로 대신 `storage_id`를 받는다. Storage Adapter는 Storage → Volume → Partition → PhysicalDevice 관계를 해석하고 각 입력·출력에 `workspace_drive_id`를 붙인다.
+대용량 파일 Capability는 임의 경로 대신 `storage_id`를 받는다. Storage Adapter는 Storage → Volume → Partition → PhysicalDevice 관계를 해석하고 각 입력·출력에 stable Volume ID인 `workspace_drive_id`와 별도 PhysicalDevice I/O 충돌 키를 붙인다.
 
 - WorkspaceDrive 하나는 PhysicalDevice 하나다.
-- 같은 PhysicalDevice에 속한 여러 Volume이나 Storage root는 같은 작업 공간으로 예약한다.
+- 같은 Volume의 여러 Storage root는 같은 작업 공간이고 같은 PhysicalDevice의 서로 다른 Volume은 별도 작업 공간이다. PhysicalDevice lock은 두 작업 공간의 동시 heavy I/O를 계속 막는다.
 - Job 하나가 여러 드라이브를 사용하면 각 PhysicalDevice를 별도로 예약하고 metric을 집계한다.
 - scheduler, device lock과 안전 해제는 모두 같은 PhysicalDevice ID를 사용한다.
 - 관계를 확인할 수 없는 Storage에서는 대용량 파일 Capability를 시작하지 않는다.
@@ -51,7 +53,8 @@ CapabilityRequested
 ```text
 run_id, capability_name, capability_version
 command_id, job_id, step_id, actor, requested_via
-worker_id, workspace_drive_ids
+worker_id, archivist_host_id, archivist_session_id, archivist_turn_id, archivist_tool_call_id
+workspace_drive_ids
 started_at, observed_at, finished_at
 outcome, error_class
 input/output ID와 검증 증적 참조
@@ -82,3 +85,5 @@ artifacts/      manifest, checksum, 보고서 같은 작은 검증 산출물
 개발 도구 자체의 테스트처럼 요구사항 ID가 없는 테스트도 결과를 기록하되 `requirement_id`를 비우고 `test_category=tooling`으로 구분한다. 실행된 테스트 하나가 `results.jsonl` 레코드 하나에 대응해야 한다. CI는 같은 revision에 대해 요구사항·온톨로지 검사, `go vet`, Linux test와 Windows amd64 cross-build도 수행한다. 요구사항: `TST-001`
 
 운영 Windows 장치·GPU·FFmpeg acceptance는 현재 CI 성공과 분리한다. 운영기기가 SSH로 제공되면 별도 승인된 acceptance job이 장비 식별자와 결과를 같은 증적 형식으로 남긴다.
+
+로컬 CLI acceptance는 실제 Windows Archivist Host·CLI ID·backend ID를 증적에 남기되 credential, resume token, raw 대화와 실제 filesystem path는 정제한다. 강제 연결 종료 전후의 ArchivistTurn event cursor, Tool Call receipt와 Command ID를 비교해 재개 뒤 중복 실행이 없음을 검증한다. `LRH-009`

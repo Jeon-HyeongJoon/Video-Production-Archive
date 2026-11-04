@@ -107,7 +107,7 @@ func observedInput(runID, name, commandID, targetID, jobID, stepID string) capab
 		Name: name, Version: 1,
 		Command: command.Envelope{
 			CommandID: commandID, CommandType: name,
-			Actor:        command.Actor{Type: command.AgentActor, ID: "agent-1"},
+			Actor:        command.Actor{Type: command.ArchivistActor, ID: "archivist-1"},
 			RequestedVia: "application-port", TargetID: targetID,
 			IdempotencyKey: commandID + ":v1", Reason: "capability evidence verification",
 		},

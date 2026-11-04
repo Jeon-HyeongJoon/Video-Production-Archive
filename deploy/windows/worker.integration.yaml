@@ -1,0 +1,30 @@
+schema_version: 1
+worker:
+  id: worker-windows
+  control_url: http://127.0.0.1:18080
+  credential_ref: dpapi://C:/Archive/secrets/worker-windows.dpapi
+  heartbeat_interval: 5s
+  claim_interval: 1s
+  storage_roots:
+    - storage_id: scratch-windows
+      root: C:/Archive/workspace
+    - storage_id: models-windows
+      root: C:/Archive/models
+  tools:
+    ffmpeg:
+      executable: C:/Archive/tools/ffmpeg-release-essentials/ffmpeg-9.0.2-essentials_build/bin/ffmpeg.exe
+      version: ffmpeg-9.0.2-essentials_build
+    ffprobe:
+      executable: C:/Archive/tools/ffmpeg-release-essentials/ffmpeg-9.0.2-essentials_build/bin/ffprobe.exe
+      version: ffprobe-9.0.2-essentials_build
+    whispercpp:
+      executable: C:/Archive/tools/whispercpp-b5454/Release/whisper-cli.exe
+      version: whisper.cpp-1.9.5-b5454
+      model_storage_id: models-windows
+      model_relative_path: ggml-large-v3-turbo-q5_0.bin
+      profile:
+        id: event-ko
+        version: 1
+        model_id: ggml-large-v3-turbo-q5_0
+        language: ko
+        thread_count: 4

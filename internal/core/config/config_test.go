@@ -8,12 +8,11 @@ import (
 )
 
 // Requirement: CFG-001
-func TestDisabledAuthOmitsRemoteManagementSurface(t *testing.T) {
-	if routes := (Settings{AuthMode: security.AuthDisabled}).ManagementRoutes(); len(routes) != 0 {
-		t.Fatal("remote management was enabled without authentication")
-	}
-	if routes := (Settings{AuthMode: security.AuthLocal}).ManagementRoutes(); len(routes) == 0 {
-		t.Fatal("remote management was not enabled for local authentication")
+func TestV1OmitsRemoteManagementSurfaceForEveryAuthMode(t *testing.T) {
+	for _, mode := range []security.AuthMode{security.AuthDisabled, security.AuthLocal} {
+		if routes := (Settings{AuthMode: mode}).ManagementRoutes(); len(routes) != 0 {
+			t.Fatalf("remote management was enabled for %s: %v", mode, routes)
+		}
 	}
 }
 
@@ -22,7 +21,7 @@ func TestManagementConfigurationAppliesOnlyFromLocalFileAtProcessStart(t *testin
 	for _, attempt := range []struct {
 		source   ChangeSource
 		starting bool
-	}{{ChangeDashboard, true}, {ChangeAPI, true}, {ChangeLocalFile, false}} {
+	}{{ChangeArchiveWorkspace, true}, {ChangeAPI, true}, {ChangeLocalFile, false}} {
 		if err := ValidateBootApplication(attempt.source, attempt.starting); !errors.Is(err, ErrRestartRequired) {
 			t.Fatalf("runtime or remote change accepted: %+v err=%v", attempt, err)
 		}
@@ -36,8 +35,8 @@ func TestManagementConfigurationAppliesOnlyFromLocalFileAtProcessStart(t *testin
 func TestBootConfigAcceptsOnlyUniqueOSSecretReferences(t *testing.T) {
 	valid := Settings{
 		AuthMode: security.AuthDisabled, ListenAddress: "192.168.40.8:8080", MCPListenAddress: "127.0.0.1:8081",
-		Providers: []ProviderDefinition{{ID: "provider-primary", SecretRef: "wincred://video-archive/provider-primary"}},
-		Workers:   []WorkerDefinition{{ID: "worker-main", CredentialRef: "dpapi://video-archive/worker-main"}},
+		Providers: []ProviderDefinition{{ID: "provider-primary", SecretRef: "wincred://archive/provider-primary"}},
+		Workers:   []WorkerDefinition{{ID: "worker-main", CredentialRef: "dpapi://C:/Archive/secrets/worker-main.dpapi"}},
 	}
 	if err := valid.Validate(); err != nil {
 		t.Fatalf("valid config rejected: %v", err)
@@ -46,6 +45,11 @@ func TestBootConfigAcceptsOnlyUniqueOSSecretReferences(t *testing.T) {
 	rawSecret.Providers = []ProviderDefinition{{ID: "provider-primary", SecretRef: "sk-plaintext-secret"}}
 	if err := rawSecret.Validate(); !errors.Is(err, ErrInvalidSecretReference) {
 		t.Fatalf("raw credential accepted: %v", err)
+	}
+	relativeDPAPI := valid
+	relativeDPAPI.Workers = []WorkerDefinition{{ID: "worker-main", CredentialRef: "dpapi://archive/worker-main.dpapi"}}
+	if err := relativeDPAPI.Validate(); !errors.Is(err, ErrInvalidSecretReference) {
+		t.Fatalf("relative DPAPI reference accepted: %v", err)
 	}
 	duplicate := valid
 	duplicate.Workers = append(duplicate.Workers, duplicate.Workers[0])

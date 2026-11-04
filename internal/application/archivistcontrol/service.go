@@ -1,0 +1,520 @@
+package archivistcontrol
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+	"strconv"
+	"strings"
+	"time"
+
+	"videoarchive/internal/core/archivistruntime"
+	"videoarchive/internal/core/command"
+	"videoarchive/internal/core/vocabulary"
+	"videoarchive/internal/core/workflow"
+)
+
+var (
+	ErrInvalidConfiguration = errors.New("archivist control configuration is invalid")
+	ErrInvalidRequest       = errors.New("archivist control request is invalid")
+	ErrSessionNotFound      = errors.New("archivist session not found")
+	ErrTurnNotFound         = errors.New("archivist turn not found")
+	ErrArchiveRunNotBound   = errors.New("archive run is not bound to an archivist turn")
+)
+
+type SessionRecord struct {
+	Session   archivistruntime.Session
+	JobID     string
+	CreatedAt time.Time
+}
+
+type TurnRecord struct {
+	Turn      archivistruntime.Turn
+	Prompt    string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+type SessionProjection struct {
+	Session     archivistruntime.Session
+	JobID       string
+	CreatedAt   time.Time
+	Turns       []TurnProjection
+	ActionCards []ActionCardProjection
+}
+
+type TurnProjection struct {
+	ID             string
+	RequestID      string
+	State          string
+	Prompt         string
+	SubmittedBy    vocabulary.ActorType
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+	FinalResponse  *archivistruntime.FinalResponse
+	Entries        []archivistruntime.TurnEntry
+	ToolCalls      []ToolCallProjection
+	DriveSelection *archivistruntime.DriveSelection
+	WorkContext    *archivistruntime.ArchiveRunWorkContext
+}
+
+type ToolCallProjection struct {
+	ID        string
+	ToolName  string
+	TargetID  string
+	State     string
+	UpdatedAt time.Time
+}
+
+type ActionCardProjection struct {
+	ID               string
+	ArchivistTurnID  string
+	CommandType      string
+	TargetID         string
+	ExpectedRevision uint64
+	State            string
+	ApprovalRequired bool
+	CommandID        string
+	IdempotencyKey   string
+	Reason           string
+	Basis            []string
+	Parameters       map[string]any
+	RejectedBy       string
+	RejectedAt       time.Time
+	RejectionReason  string
+}
+
+type ToolCallRecord struct {
+	SessionID string
+	TurnID    string
+	Call      ToolCallProjection
+}
+
+type ActionCardRecord struct {
+	SessionID string
+	Card      ActionCardProjection
+}
+
+type ActionCardRejection struct {
+	ActionCardID string
+	ActorID      string
+	Reason       string
+	RejectedAt   time.Time
+}
+
+type ArchiveRunBinding struct {
+	SessionID string
+	TurnID    string
+	Selection archivistruntime.DriveSelection
+}
+
+type ClaimedTurn struct {
+	Session archivistruntime.Session
+	Turn    archivistruntime.Turn
+	Prompt  string
+	Lease   archivistruntime.TurnLease
+}
+
+type Store interface {
+	CreateSession(context.Context, SessionRecord) error
+	Session(context.Context, string) (SessionRecord, error)
+	ListSessions(context.Context) ([]SessionRecord, error)
+	CreateTurn(context.Context, TurnRecord) error
+	Turn(context.Context, string) (TurnRecord, error)
+	ListTurns(context.Context, string) ([]TurnRecord, error)
+	PutToolCall(context.Context, ToolCallRecord) error
+	ListToolCalls(context.Context, string) ([]ToolCallProjection, error)
+	ListTurnEntries(context.Context, string) ([]archivistruntime.TurnEntry, error)
+	PutActionCard(context.Context, ActionCardRecord) error
+	ListActionCards(context.Context, string) ([]ActionCardProjection, error)
+	ActionCard(context.Context, string) (ActionCardRecord, error)
+	SetActionCardState(context.Context, string, string) error
+	RejectActionCard(context.Context, ActionCardRejection) error
+	ClaimTurn(context.Context, string, time.Time, time.Duration) (ClaimedTurn, error)
+	PrepareDelivery(context.Context, string, string, uint64, time.Time, string) (TurnRecord, bool, error)
+	ApplyRuntimeEvent(context.Context, string, string, uint64, time.Time, archivistruntime.RuntimeEvent) (TurnRecord, bool, error)
+	RenewTurnLease(context.Context, string, string, uint64, time.Time, time.Duration) (TurnRecord, error)
+	BindArchiveRun(context.Context, ArchiveRunBinding) error
+	ArchiveRunBinding(context.Context, string) (ArchiveRunBinding, error)
+}
+
+type Service struct {
+	store    Store
+	hosts    *archivistruntime.HostRegistry
+	now      func() time.Time
+	leaseTTL time.Duration
+}
+
+type RecallTrigger string
+
+const (
+	RecallStageOneComplete   RecallTrigger = "STAGE_ONE_COMPLETE"
+	RecallArchiveRunComplete RecallTrigger = "ARCHIVE_RUN_COMPLETE"
+	RecallNewHold            RecallTrigger = "NEW_HOLD"
+)
+
+type RecallEvent struct {
+	SessionID    string
+	ArchiveRunID string
+	Trigger      RecallTrigger
+	TriggerID    string
+	HoldCount    int
+	Selection    archivistruntime.DriveSelection
+}
+
+func New(store Store, hosts *archivistruntime.HostRegistry, now func() time.Time, leaseTTL time.Duration) (*Service, error) {
+	if store == nil || hosts == nil || now == nil || leaseTTL <= 0 {
+		return nil, ErrInvalidConfiguration
+	}
+	return &Service{store: store, hosts: hosts, now: now, leaseTTL: leaseTTL}, nil
+}
+
+func (service *Service) CreateSession(ctx context.Context, spec archivistruntime.SessionSpec, jobID string) (SessionRecord, error) {
+	if !service.hosts.Allows(spec) {
+		return SessionRecord{}, archivistruntime.ErrArchivistHostNotConfigured
+	}
+	session, err := archivistruntime.NewSession(spec)
+	if err != nil {
+		return SessionRecord{}, err
+	}
+	record := SessionRecord{Session: session, JobID: strings.TrimSpace(jobID), CreatedAt: service.now().UTC()}
+	if err := service.store.CreateSession(ctx, record); err != nil {
+		return SessionRecord{}, err
+	}
+	return record, nil
+}
+
+func (service *Service) CreateArchivist(ctx context.Context, sessionID, name, archivistHostID, cliID string, mode workflow.ControlMode) (SessionRecord, error) {
+	spec, err := service.hosts.ConfiguredSessionSpec(
+		strings.TrimSpace(sessionID), strings.TrimSpace(name), strings.TrimSpace(archivistHostID), strings.TrimSpace(cliID), mode,
+	)
+	if err != nil {
+		return SessionRecord{}, err
+	}
+	return service.CreateSession(ctx, spec, "")
+}
+
+func (service *Service) SubmitTurn(ctx context.Context, sessionID, turnID, requestID, prompt string) (TurnRecord, error) {
+	return service.SubmitTurnWithDriveSelection(ctx, sessionID, turnID, requestID, prompt, nil)
+}
+
+func (service *Service) SubmitTurnWithDriveSelection(ctx context.Context, sessionID, turnID, requestID, prompt string, selection *archivistruntime.DriveSelection) (TurnRecord, error) {
+	prompt = strings.TrimSpace(prompt)
+	if prompt == "" {
+		return TurnRecord{}, ErrInvalidRequest
+	}
+	if _, err := service.store.Session(ctx, strings.TrimSpace(sessionID)); err != nil {
+		return TurnRecord{}, err
+	}
+	turn, err := archivistruntime.NewTurnWithDriveSelection(turnID, sessionID, requestID, selection)
+	if err != nil {
+		return TurnRecord{}, err
+	}
+	now := service.now().UTC()
+	record := TurnRecord{Turn: turn, Prompt: prompt, CreatedAt: now, UpdatedAt: now}
+	if err := service.store.CreateTurn(ctx, record); err != nil {
+		return TurnRecord{}, err
+	}
+	return record, nil
+}
+
+// HandleRecallEvent queues one SYSTEM Turn for a durable ArchiveRun trigger.
+// It does not require the pinned Archivist Host to be online.
+func (service *Service) HandleRecallEvent(ctx context.Context, event RecallEvent) (TurnRecord, bool, error) {
+	event.SessionID = strings.TrimSpace(event.SessionID)
+	event.ArchiveRunID = strings.TrimSpace(event.ArchiveRunID)
+	event.TriggerID = strings.TrimSpace(event.TriggerID)
+	if event.SessionID == "" || event.ArchiveRunID == "" || event.TriggerID == "" || event.HoldCount < 0 ||
+		(event.Trigger != RecallStageOneComplete && event.Trigger != RecallArchiveRunComplete && event.Trigger != RecallNewHold) {
+		return TurnRecord{}, false, ErrInvalidRequest
+	}
+	if _, err := service.store.Session(ctx, event.SessionID); err != nil {
+		return TurnRecord{}, false, err
+	}
+	binding, err := service.store.ArchiveRunBinding(ctx, event.ArchiveRunID)
+	if err != nil || binding.SessionID != event.SessionID {
+		return TurnRecord{}, false, ErrInvalidRequest
+	}
+	selection, err := archivistruntime.NewDriveSelection(event.Selection)
+	if err != nil || selection.ArchiveRunID != event.ArchiveRunID || selection.ArchiveRunRevision == 0 ||
+		selection.ArchiveRunID != binding.Selection.ArchiveRunID {
+		return TurnRecord{}, false, ErrInvalidRequest
+	}
+	digest := sha256.Sum256([]byte(event.SessionID + "\x00" + event.ArchiveRunID + "\x00" + string(event.Trigger) + "\x00" + event.TriggerID))
+	turnID := "SYSTEM-RECALL-" + hex.EncodeToString(digest[:12])
+	if stored, loadErr := service.store.Turn(ctx, turnID); loadErr == nil {
+		if stored.Turn.SessionID != event.SessionID || stored.Turn.SubmittedBy != vocabulary.ActorSystem {
+			return TurnRecord{}, false, command.ErrIdempotencyConflict
+		}
+		return stored, true, nil
+	} else if !errors.Is(loadErr, ErrTurnNotFound) {
+		return TurnRecord{}, false, loadErr
+	}
+	turn, err := archivistruntime.NewSystemTurnWithDriveSelection(turnID, event.SessionID, "REQUEST-"+turnID, selection)
+	if err != nil {
+		return TurnRecord{}, false, err
+	}
+	workContext, err := archivistruntime.NewArchiveRunWorkContext(event.ArchiveRunID, binding.TurnID, workTrigger(event.Trigger))
+	if err != nil {
+		return TurnRecord{}, false, err
+	}
+	turn, err = archivistruntime.AttachArchiveRunWorkContext(turn, workContext)
+	if err != nil {
+		return TurnRecord{}, false, err
+	}
+	prompt := recallPrompt(event)
+	now := service.now().UTC()
+	record := TurnRecord{Turn: turn, Prompt: prompt, CreatedAt: now, UpdatedAt: now}
+	if err := service.store.CreateTurn(ctx, record); err != nil {
+		stored, loadErr := service.store.Turn(ctx, turnID)
+		if loadErr == nil && stored.Turn.SessionID == event.SessionID && stored.Turn.SubmittedBy == vocabulary.ActorSystem {
+			return stored, true, nil
+		}
+		return TurnRecord{}, false, err
+	}
+	return record, false, nil
+}
+
+func workTrigger(trigger RecallTrigger) archivistruntime.ArchiveRunWorkTrigger {
+	switch trigger {
+	case RecallStageOneComplete:
+		return archivistruntime.WorkStageOneComplete
+	case RecallNewHold:
+		return archivistruntime.WorkNewHold
+	default:
+		return archivistruntime.WorkArchiveRunComplete
+	}
+}
+
+func recallPrompt(event RecallEvent) string {
+	switch event.Trigger {
+	case RecallStageOneComplete:
+		return "ArchiveRun " + event.ArchiveRunID + " stage one complete; inspect results and start transcription"
+	case RecallArchiveRunComplete:
+		return "ArchiveRun " + event.ArchiveRunID + " complete; report counts, holds, and archive target"
+	default:
+		return "ArchiveRun " + event.ArchiveRunID + " has " + strconv.Itoa(event.HoldCount) + " hold decisions; review the selected hold list, classify each item only when structured evidence is sufficient, and report the remaining holds"
+	}
+}
+
+func (service *Service) TurnDriveSelection(ctx context.Context, sessionID, turnID string) (archivistruntime.DriveSelection, error) {
+	turn, err := service.store.Turn(ctx, strings.TrimSpace(turnID))
+	if err != nil {
+		return archivistruntime.DriveSelection{}, err
+	}
+	if turn.Turn.SessionID != strings.TrimSpace(sessionID) || turn.Turn.DriveSelection == nil {
+		return archivistruntime.DriveSelection{}, ErrInvalidRequest
+	}
+	return archivistruntime.NewDriveSelection(*turn.Turn.DriveSelection)
+}
+
+func (service *Service) SessionControlMode(ctx context.Context, sessionID string) (workflow.ControlMode, error) {
+	record, err := service.store.Session(ctx, strings.TrimSpace(sessionID))
+	if err != nil {
+		return "", err
+	}
+	return record.Session.ControlMode, nil
+}
+
+func (service *Service) BindArchiveRun(ctx context.Context, sessionID, turnID, archiveRunID string, revision uint64) error {
+	selection, err := service.TurnDriveSelection(ctx, sessionID, turnID)
+	if err != nil {
+		return err
+	}
+	selection.ArchiveRunID = strings.TrimSpace(archiveRunID)
+	selection.ArchiveRunRevision = revision
+	selection, err = archivistruntime.NewDriveSelection(selection)
+	if err != nil {
+		return ErrInvalidRequest
+	}
+	return service.store.BindArchiveRun(ctx, ArchiveRunBinding{
+		SessionID: strings.TrimSpace(sessionID), TurnID: strings.TrimSpace(turnID), Selection: selection,
+	})
+}
+
+func (service *Service) RecallArchiveRunProjection(ctx context.Context, archiveRunID string, revision uint64, batchState string, holdCount int) error {
+	binding, err := service.store.ArchiveRunBinding(ctx, strings.TrimSpace(archiveRunID))
+	if err != nil {
+		return err
+	}
+	events := make([]RecallEvent, 0, 2)
+	if holdCount > 0 {
+		events = append(events, RecallEvent{
+			SessionID: binding.SessionID, ArchiveRunID: archiveRunID, Trigger: RecallNewHold,
+			TriggerID: archiveRunID + ":hold:" + strconv.Itoa(holdCount), HoldCount: holdCount, Selection: binding.Selection,
+		})
+	}
+	switch batchState {
+	case "TRANSCRIPTION_READY":
+		events = append(events, RecallEvent{
+			SessionID: binding.SessionID, ArchiveRunID: archiveRunID, Trigger: RecallStageOneComplete,
+			TriggerID: archiveRunID + ":stage-one:" + strconv.FormatUint(revision, 10), HoldCount: holdCount, Selection: binding.Selection,
+		})
+	case "COMPLETED":
+		events = append(events, RecallEvent{
+			SessionID: binding.SessionID, ArchiveRunID: archiveRunID, Trigger: RecallArchiveRunComplete,
+			TriggerID: archiveRunID + ":complete:" + strconv.FormatUint(revision, 10), HoldCount: holdCount, Selection: binding.Selection,
+		})
+	}
+	for _, event := range events {
+		if _, _, err := service.HandleRecallEvent(ctx, event); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (service *Service) Projection(ctx context.Context) ([]SessionProjection, error) {
+	sessions, err := service.store.ListSessions(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]SessionProjection, 0, len(sessions))
+	for _, session := range sessions {
+		turns, err := service.store.ListTurns(ctx, session.Session.ID)
+		if err != nil {
+			return nil, err
+		}
+		projection := SessionProjection{Session: session.Session, JobID: session.JobID, CreatedAt: session.CreatedAt}
+		for _, turn := range turns {
+			toolCalls, err := service.store.ListToolCalls(ctx, turn.Turn.ID)
+			if err != nil {
+				return nil, err
+			}
+			entries, err := service.store.ListTurnEntries(ctx, turn.Turn.ID)
+			if err != nil {
+				return nil, err
+			}
+			projection.Turns = append(projection.Turns, TurnProjection{
+				ID: turn.Turn.ID, RequestID: turn.Turn.RequestID, State: string(turn.Turn.State),
+				Prompt: turn.Prompt, SubmittedBy: turn.Turn.SubmittedBy,
+				CreatedAt: turn.CreatedAt, UpdatedAt: turn.UpdatedAt,
+				FinalResponse: turn.Turn.FinalResponse, Entries: entries, ToolCalls: toolCalls,
+				DriveSelection: turn.Turn.DriveSelection, WorkContext: turn.Turn.WorkContext,
+			})
+		}
+		projection.ActionCards, err = service.store.ListActionCards(ctx, session.Session.ID)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, projection)
+	}
+	return result, nil
+}
+
+func (service *Service) RecordToolCall(ctx context.Context, sessionID, turnID, id, toolName, targetID, state string) error {
+	record := ToolCallRecord{SessionID: strings.TrimSpace(sessionID), TurnID: strings.TrimSpace(turnID), Call: ToolCallProjection{
+		ID: strings.TrimSpace(id), ToolName: strings.TrimSpace(toolName), TargetID: strings.TrimSpace(targetID),
+		State: strings.TrimSpace(state), UpdatedAt: service.now().UTC(),
+	}}
+	if record.SessionID == "" || record.TurnID == "" || record.Call.ID == "" || record.Call.ToolName == "" || record.Call.State == "" {
+		return ErrInvalidRequest
+	}
+	return service.store.PutToolCall(ctx, record)
+}
+
+func (service *Service) RecordActionCard(ctx context.Context, sessionID string, card ActionCardProjection) error {
+	if strings.TrimSpace(sessionID) == "" || strings.TrimSpace(card.ID) == "" || strings.TrimSpace(card.ArchivistTurnID) == "" ||
+		strings.TrimSpace(card.CommandType) == "" || strings.TrimSpace(card.TargetID) == "" || strings.TrimSpace(card.State) == "" {
+		return ErrInvalidRequest
+	}
+	return service.store.PutActionCard(ctx, ActionCardRecord{SessionID: strings.TrimSpace(sessionID), Card: card})
+}
+
+func (service *Service) PrepareActionCard(ctx context.Context, cardID, actorID string) (command.Envelope, error) {
+	record, err := service.store.ActionCard(ctx, strings.TrimSpace(cardID))
+	if err != nil {
+		return command.Envelope{}, err
+	}
+	if record.Card.State != "PENDING" {
+		return command.Envelope{}, ErrInvalidRequest
+	}
+	decision, err := archivistruntime.ResolveActionCard(archivistruntime.ActionCard{
+		ID: record.Card.ID, ArchivistTurnID: record.Card.ArchivistTurnID, CommandID: record.Card.CommandID,
+		CommandType: record.Card.CommandType, TargetID: record.Card.TargetID,
+		ExpectedRevision: record.Card.ExpectedRevision, IdempotencyKey: record.Card.IdempotencyKey,
+		Reason: record.Card.Reason, Basis: append([]string(nil), record.Card.Basis...),
+		ApprovalRequired: record.Card.ApprovalRequired,
+		Parameters:       record.Card.Parameters,
+	}, archivistruntime.ActionCardRequest{
+		Source: archivistruntime.ActionFromCard, ActorType: vocabulary.ActorHuman,
+		ActorID: strings.TrimSpace(actorID), CurrentRevision: record.Card.ExpectedRevision,
+	})
+	if err != nil || decision.Command == nil {
+		return command.Envelope{}, err
+	}
+	return *decision.Command, nil
+}
+
+func (service *Service) CompleteActionCard(ctx context.Context, cardID string) error {
+	return service.store.SetActionCardState(ctx, strings.TrimSpace(cardID), "COMPLETED")
+}
+
+func (service *Service) RejectActionCard(ctx context.Context, cardID, actorID, reason string) error {
+	rejection := ActionCardRejection{
+		ActionCardID: strings.TrimSpace(cardID), ActorID: strings.TrimSpace(actorID),
+		Reason: strings.TrimSpace(reason), RejectedAt: service.now().UTC(),
+	}
+	if rejection.ActionCardID == "" || rejection.ActorID == "" || rejection.Reason == "" {
+		return ErrInvalidRequest
+	}
+	return service.store.RejectActionCard(ctx, rejection)
+}
+
+func (service *Service) Heartbeat(archivistHostID, credential string) error {
+	return service.hosts.Connect(archivistHostID, credential, service.now().UTC())
+}
+
+func (service *Service) Authenticate(archivistHostID, credential string) error {
+	return service.hosts.Authenticate(archivistHostID, credential)
+}
+
+func (service *Service) HostStatuses() []archivistruntime.HostStatus {
+	return service.hosts.Statuses(service.now().UTC())
+}
+
+func (service *Service) HostProfiles() []archivistruntime.HostProfile {
+	return service.hosts.Profiles(service.now().UTC())
+}
+
+func (service *Service) Claim(ctx context.Context, archivistHostID string) (ClaimedTurn, error) {
+	now := service.now().UTC()
+	if !service.hosts.Online(archivistHostID, now) {
+		return ClaimedTurn{}, archivistruntime.ErrArchivistHostOffline
+	}
+	return service.store.ClaimTurn(ctx, archivistHostID, now, service.leaseTTL)
+}
+
+func (service *Service) PrepareDelivery(ctx context.Context, turnID, archivistHostID string, fencingToken uint64, requestID string) (TurnRecord, bool, error) {
+	return service.store.PrepareDelivery(ctx, turnID, archivistHostID, fencingToken, service.now().UTC(), requestID)
+}
+
+func (service *Service) ApplyRuntimeEvent(ctx context.Context, turnID, archivistHostID string, fencingToken uint64, event archivistruntime.RuntimeEvent) (TurnRecord, bool, error) {
+	return service.store.ApplyRuntimeEvent(ctx, turnID, archivistHostID, fencingToken, service.now().UTC(), event)
+}
+
+func (service *Service) RenewLease(ctx context.Context, turnID, archivistHostID string, fencingToken uint64) (TurnRecord, error) {
+	return service.store.RenewTurnLease(ctx, turnID, archivistHostID, fencingToken, service.now().UTC(), service.leaseTTL)
+}
+
+func (service *Service) ValidateToolContext(ctx context.Context, archivistHostID, sessionID, turnID string, fencingToken uint64) error {
+	session, err := service.store.Session(ctx, strings.TrimSpace(sessionID))
+	if err != nil {
+		return err
+	}
+	turn, err := service.store.Turn(ctx, strings.TrimSpace(turnID))
+	if err != nil {
+		return err
+	}
+	if session.Session.ArchivistHostID != archivistHostID || turn.Turn.SessionID != session.Session.ID {
+		return archivistruntime.ErrRuntimeBindingMismatch
+	}
+	if err := archivistruntime.ValidateTurnReport(turn.Turn, archivistHostID, fencingToken, service.now().UTC()); err != nil {
+		return err
+	}
+	if turn.Turn.State != vocabulary.ArchivistTurnRunning && turn.Turn.State != vocabulary.ArchivistTurnWaiting {
+		return archivistruntime.ErrInvalidRuntimeEvent
+	}
+	return nil
+}

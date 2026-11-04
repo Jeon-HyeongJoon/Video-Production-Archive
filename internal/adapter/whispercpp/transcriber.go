@@ -46,14 +46,16 @@ func (AtomicPublisher) Publish(temporaryPath, publishedPath string) error {
 }
 
 type Request struct {
-	TranscriptID        string
-	AudioArtifact       audio.AudioArtifact
-	ResolvedAudioPath   string
-	ResolvedModelPath   string
-	TemporaryOutputPath string
-	PublishedOutputPath string
-	ArtifactPath        string
-	Profile             transcription.Profile
+	TranscriptID          string
+	AudioArtifact         audio.AudioArtifact
+	ResolvedAudioPath     string
+	ResolvedModelPath     string
+	TemporaryOutputPath   string
+	PublishedOutputPath   string
+	ArtifactPath          string
+	TemporaryArtifactPath string
+	OutputRoot            *archive.StorageRoot
+	Profile               transcription.Profile
 }
 
 type Transcriber struct {
@@ -89,14 +91,31 @@ func (transcriber *Transcriber) Transcribe(ctx context.Context, request Request)
 		filepath.Clean(filepath.Dir(request.TemporaryOutputPath)) != filepath.Clean(filepath.Dir(request.PublishedOutputPath)) {
 		return transcription.Transcript{}, ErrInvalidRequest
 	}
-	if err := os.MkdirAll(filepath.Dir(request.PublishedOutputPath), 0o755); err != nil {
+	if request.OutputRoot != nil {
+		temporaryArtifactPath, temporaryOK := normalizeArtifactPath(request.TemporaryArtifactPath)
+		temporaryResolved, temporaryErr := request.OutputRoot.ExternalProcessPath(temporaryArtifactPath)
+		publishedResolved, publishedErr := request.OutputRoot.ExternalProcessPath(artifactPath)
+		if !temporaryOK || temporaryArtifactPath == artifactPath || path.Dir(temporaryArtifactPath) != path.Dir(artifactPath) ||
+			temporaryErr != nil || publishedErr != nil || filepath.Clean(temporaryResolved) != filepath.Clean(request.TemporaryOutputPath) ||
+			filepath.Clean(publishedResolved) != filepath.Clean(request.PublishedOutputPath) {
+			return transcription.Transcript{}, ErrInvalidRequest
+		}
+		if err := request.OutputRoot.MkdirAll(path.Dir(artifactPath), 0o755); err != nil {
+			return transcription.Transcript{}, err
+		}
+	} else if err := os.MkdirAll(filepath.Dir(request.PublishedOutputPath), 0o755); err != nil {
 		return transcription.Transcript{}, err
 	}
 
 	rawPrefix := request.TemporaryOutputPath + ".whisper"
 	rawPath := rawPrefix + ".json"
-	defer os.Remove(rawPath)
-	defer os.Remove(request.TemporaryOutputPath)
+	if request.OutputRoot != nil {
+		defer request.OutputRoot.Remove(request.TemporaryArtifactPath + ".whisper.json")
+		defer request.OutputRoot.Remove(request.TemporaryArtifactPath)
+	} else {
+		defer os.Remove(rawPath)
+		defer os.Remove(request.TemporaryOutputPath)
+	}
 	arguments := []string{
 		"-m", request.ResolvedModelPath,
 		"-f", request.ResolvedAudioPath,
@@ -108,7 +127,12 @@ func (transcriber *Transcriber) Transcribe(ctx context.Context, request Request)
 	if err := transcriber.runner.Run(ctx, transcriber.executable, arguments); err != nil {
 		return transcription.Transcript{}, errors.Join(ErrTranscriptionFailed, err)
 	}
-	rawPayload, err := os.ReadFile(rawPath)
+	var rawPayload []byte
+	if request.OutputRoot != nil {
+		rawPayload, err = request.OutputRoot.ReadFile(request.TemporaryArtifactPath + ".whisper.json")
+	} else {
+		rawPayload, err = os.ReadFile(rawPath)
+	}
 	if err != nil {
 		return transcription.Transcript{}, errors.Join(ErrTranscriptionFailed, err)
 	}
@@ -133,7 +157,11 @@ func (transcriber *Transcriber) Transcribe(ctx context.Context, request Request)
 	if err != nil {
 		return transcription.Transcript{}, err
 	}
-	if err := os.WriteFile(request.TemporaryOutputPath, payload, 0o600); err != nil {
+	if request.OutputRoot != nil {
+		if err := request.OutputRoot.WriteFile(request.TemporaryArtifactPath, payload, 0o600); err != nil {
+			return transcription.Transcript{}, err
+		}
+	} else if err := os.WriteFile(request.TemporaryOutputPath, payload, 0o600); err != nil {
 		return transcription.Transcript{}, err
 	}
 	if err := transcriber.publisher.Publish(request.TemporaryOutputPath, request.PublishedOutputPath); err != nil {

@@ -141,7 +141,7 @@ func TestSQLiteCatalogSearchUsesLatestDescriptionCodecAndDurationWithoutPaths(t 
 	records := []catalog.CatalogRecord{
 		{ID: "RECORD-1", OriginalAssetID: "ASSET-1", Revision: 1, Title: "임시 제목", Description: "초기 설명", AuthorType: vocabulary.ActorHuman, AuthorID: "operator-1", RecordedAt: now},
 		{ID: "RECORD-2", OriginalAssetID: "ASSET-1", Revision: 2, Title: "2026 가을 행사", Description: "전체 행사 기록 영상", Keywords: []string{"강연", "서울"}, AuthorType: vocabulary.ActorHuman, AuthorID: "operator-1", RecordedAt: now.Add(time.Minute)},
-		{ID: "RECORD-3", OriginalAssetID: "ASSET-2", Revision: 1, Title: "2026 봄 행사", Description: "장시간 행사 기록", AuthorType: vocabulary.ActorAgent, AuthorID: "agent-1", RecordedAt: now},
+		{ID: "RECORD-3", OriginalAssetID: "ASSET-2", Revision: 1, Title: "2026 봄 행사", Description: "장시간 행사 기록", AuthorType: vocabulary.ActorArchivist, AuthorID: "archivist-1", RecordedAt: now},
 	}
 	for _, record := range records {
 		if err := store.AppendCatalogRecord(ctx, record); err != nil {
@@ -423,10 +423,10 @@ func storedSummary(t *testing.T, id, artifactID string, revision uint64, transcr
 		ID: artifactID, Path: "summary/" + artifactID + ".json", Size: int64(len(text)), Checksum: checksumB,
 		Origin: archive.Provenance{
 			OriginalAssetID: transcript.Artifact.Origin.OriginalAssetID, InputArtifactIDs: []string{transcript.Artifact.ID},
-			ProcessingKind: vocabulary.ProcessingSummary, ProcessorVersion: "videoarchive-summary-v1",
-			ProfileVersion: profile.Reference(), CreatedBy: "AGENT-1", CreatedAt: createdAt,
+			ProcessingKind: vocabulary.ProcessingSummary, ProcessorVersion: "archive-summary-v1",
+			ProfileVersion: profile.Reference(), CreatedBy: "ARCHIVIST-1", CreatedAt: createdAt,
 		},
-	}, profile, transcript, vocabulary.ActorAgent, "AGENT-1", summary.Content{
+	}, profile, transcript, vocabulary.ActorArchivist, "ARCHIVIST-1", summary.Content{
 		Text: text, Keywords: []string{"행사", "기록"},
 		Chapters: []summary.Chapter{{
 			Sequence: 1, StartMillis: transcript.Content.Segments[0].StartMillis,

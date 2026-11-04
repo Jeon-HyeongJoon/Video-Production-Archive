@@ -8,6 +8,7 @@ import (
 
 	"videoarchive/internal/core/archive"
 	"videoarchive/internal/core/mediaanalysis"
+	"videoarchive/internal/core/organization"
 	"videoarchive/internal/core/rendering"
 	"videoarchive/internal/core/vocabulary"
 )
@@ -68,4 +69,53 @@ func TestIntegratedQCOnlyPassesCompleteMatchingRenditionEvidence(t *testing.T) {
 		}
 	}
 	t.Fatal("duration check was not recorded")
+}
+
+// Requirement: QCT-003
+func TestSourceTimelineQCUsesClipSumInsteadOfAnySingleOriginalDuration(t *testing.T) {
+	payload := []byte("verified-source-sequence")
+	digest := sha256.Sum256(payload)
+	checksum := hex.EncodeToString(digest[:])
+	profile, err := rendering.OrganizationProfile(20_000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 10, 30, 14, 0, 0, 0, time.UTC)
+	timeline := organization.SourceTimeline{
+		ID: "TIMELINE-1", Revision: 1, DecisionID: "DECISION-1",
+		Clips: []organization.SourceClip{
+			{Sequence: 1, OriginalAssetID: "ASSET-1", InMillis: 0, OutMillis: 10_000},
+			{Sequence: 2, OriginalAssetID: "ASSET-2", InMillis: 0, OutMillis: 12_000},
+			{Sequence: 3, OriginalAssetID: "ASSET-3", InMillis: 0, OutMillis: 8_000},
+		},
+		Markers: []organization.CutMarker{
+			{BeforeClipID: "ASSET-1", AfterClipID: "ASSET-2", AtMillis: 10_000},
+			{BeforeClipID: "ASSET-2", AfterClipID: "ASSET-3", AtMillis: 22_000},
+		},
+	}
+	artifact := archive.Artifact{
+		ID: "RENDITION-SEQUENCE", Path: "organized/SOURCE-1/video.mp4", Size: int64(len(payload)), Checksum: checksum,
+		Origin: archive.Provenance{
+			RootOriginalAssetIDs: []string{"ASSET-1", "ASSET-2", "ASSET-3"}, InputTimelineID: timeline.ID,
+			InputArtifactIDs: []string{}, ProcessingKind: vocabulary.ProcessingRender,
+			ProcessorVersion: "ffmpeg-8.0", ProfileVersion: profile.Reference(), CreatedBy: "WORKER-1", CreatedAt: now,
+		},
+	}
+	rendition, err := rendering.NewRendition(artifact, profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := OutputObservation{
+		Checksum: checksum, SizeBytes: int64(len(payload)), Containers: []string{"mp4"}, DurationMillis: 30_040,
+		VideoCodec: "h264", AudioCodec: "aac", Width: 1920, Height: 1080, Decodable: true,
+	}
+	passed, err := EvaluateTimeline("QC-TIMELINE-1", rendition, profile, timeline, output, Policy{DurationToleranceMillis: 100}, "WORKER-1", now)
+	if err != nil || passed.Outcome != Passed || passed.SourceTimelineID != timeline.ID {
+		t.Fatalf("timeline sum did not pass QC: report=%+v err=%v", passed, err)
+	}
+	output.DurationMillis = 10_000
+	failed, err := EvaluateTimeline("QC-TIMELINE-2", rendition, profile, timeline, output, Policy{DurationToleranceMillis: 100}, "WORKER-1", now)
+	if err != nil || failed.Outcome != Failed {
+		t.Fatalf("single-clip duration passed timeline QC: report=%+v err=%v", failed, err)
+	}
 }

@@ -51,6 +51,7 @@ func (store *Store) Close() error {
 
 func (store *Store) migrate(ctx context.Context) error {
 	statements := []string{
+		`PRAGMA busy_timeout = 5000`,
 		`PRAGMA journal_mode = WAL`,
 		`PRAGMA foreign_keys = ON`,
 		`CREATE TABLE IF NOT EXISTS input_file_observations (
@@ -162,6 +163,17 @@ func (store *Store) Observation(ctx context.Context, observationID string) (inta
 	return intake.NewInputFileObservation(observation)
 }
 
+func (store *Store) FindObservation(ctx context.Context, observationID string) (intake.InputFileObservation, bool, error) {
+	observation, err := store.Observation(ctx, observationID)
+	if errors.Is(err, ErrRecordNotFound) {
+		return intake.InputFileObservation{}, false, nil
+	}
+	if err != nil {
+		return intake.InputFileObservation{}, false, err
+	}
+	return observation, true, nil
+}
+
 func (store *Store) AppendOriginal(ctx context.Context, original asset.OriginalAsset) error {
 	if err := original.Validate(); err != nil {
 		return err
@@ -181,6 +193,27 @@ func (store *Store) AppendOriginal(ctx context.Context, original asset.OriginalA
 		`INSERT INTO original_assets(asset_id, checksum, registered_observation_id, payload) VALUES (?, ?, ?, ?)`,
 		`SELECT payload FROM original_assets WHERE asset_id = ?`,
 		original.ID, payload, original.Checksum, original.RegisteredFromObservationID)
+}
+
+func (store *Store) FindOriginal(ctx context.Context, assetID string) (asset.OriginalAsset, bool, error) {
+	var payload []byte
+	err := store.db.QueryRowContext(ctx, `
+		SELECT payload FROM original_assets WHERE asset_id = ?
+	`, strings.TrimSpace(assetID)).Scan(&payload)
+	if errors.Is(err, sql.ErrNoRows) {
+		return asset.OriginalAsset{}, false, nil
+	}
+	if err != nil {
+		return asset.OriginalAsset{}, false, err
+	}
+	var original asset.OriginalAsset
+	if err := json.Unmarshal(payload, &original); err != nil {
+		return asset.OriginalAsset{}, false, err
+	}
+	if err := original.Validate(); err != nil {
+		return asset.OriginalAsset{}, false, err
+	}
+	return original, true, nil
 }
 
 func (store *Store) FindOriginalsByChecksum(ctx context.Context, checksum string) ([]asset.OriginalAsset, error) {
@@ -266,6 +299,28 @@ func (store *Store) InspectionsByOriginal(ctx context.Context, originalAssetID s
 		inspections = append(inspections, normalized)
 	}
 	return inspections, rows.Err()
+}
+
+func (store *Store) FindInspection(ctx context.Context, inspectionID string) (mediaanalysis.MediaInspection, bool, error) {
+	var payload []byte
+	err := store.db.QueryRowContext(ctx, `
+		SELECT payload FROM media_inspections WHERE inspection_id = ?
+	`, strings.TrimSpace(inspectionID)).Scan(&payload)
+	if errors.Is(err, sql.ErrNoRows) {
+		return mediaanalysis.MediaInspection{}, false, nil
+	}
+	if err != nil {
+		return mediaanalysis.MediaInspection{}, false, err
+	}
+	var inspection mediaanalysis.MediaInspection
+	if err := json.Unmarshal(payload, &inspection); err != nil {
+		return mediaanalysis.MediaInspection{}, false, err
+	}
+	normalized, err := mediaanalysis.NewMediaInspection(inspection)
+	if err != nil {
+		return mediaanalysis.MediaInspection{}, false, err
+	}
+	return normalized, true, nil
 }
 
 func (store *Store) AppendCatalogRecord(ctx context.Context, record catalog.CatalogRecord) error {

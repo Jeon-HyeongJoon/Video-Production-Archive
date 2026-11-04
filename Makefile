@@ -1,9 +1,12 @@
-.PHONY: build test requirements requirements-lock ontology visual-deps dashboard-golden-update verify
+.PHONY: build test requirements requirements-lock ontology visual-deps archive-workspace-golden-update archive-workspace-golden-evidence verify
 
 build:
 	mkdir -p bin
-	go build -o bin/video-archive-control ./cmd/video-archive-control
-	go build -o bin/video-archive-worker ./cmd/video-archive-worker
+	go build -o bin/archive-control ./cmd/archive-control
+	go build -o bin/archive-worker ./cmd/archive-worker
+	go build -o bin/archivist-host ./cmd/archivist-host
+	go build -o bin/archivist-fixture ./cmd/archivist-fixture
+	go build -o bin/archive-secret ./cmd/archive-secret
 
 test:
 	go test ./...
@@ -21,7 +24,10 @@ visual-deps:
 	python3 -m pip install -r requirements-visual.txt
 	python3 -m playwright install chromium
 
-dashboard-golden-update:
-	UPDATE_DASHBOARD_GOLDEN=1 go test -count=1 ./internal/adapter/httpcontrol -run '^TestControlHTTPServesSQLiteDashboardAndSearchOnlyToAllowedNetwork$$'
+archive-workspace-golden-update:
+	UPDATE_ARCHIVE_WORKSPACE_GOLDEN=1 go test -count=1 ./internal/adapter/httpcontrol -run '^(TestArchiveOrganizationWorkspaceMatchesOperatingSystemGolden|TestArchiveWorkspaceStatusWithArchivistPaneMatchesOperatingSystemGolden)$$'
+
+archive-workspace-golden-evidence:
+	./deploy/run-archive-workspace-golden-evidence.sh
 
 verify: requirements ontology test

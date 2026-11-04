@@ -13,8 +13,9 @@ var (
 	ErrWorkspaceDriveUnresolved = errors.New("workspace drive cannot be resolved")
 )
 
-// Topology records the stable identity chain used to resolve a Storage to the
-// PhysicalDevice that owns its workspace. Mount paths are deliberately absent.
+// Topology records the stable identity chain used to resolve a Storage to its
+// logical Volume workspace and the PhysicalDevice used only for I/O conflict
+// protection. Mount paths are deliberately absent from either identity.
 type Topology struct {
 	PhysicalDeviceID string
 	PartitionID      string
@@ -32,8 +33,8 @@ func (topology Topology) Validate() error {
 	return nil
 }
 
-// WorkspaceDrive is a role of a PhysicalDevice, not a separate persisted
-// device identity. ID is therefore always the resolved PhysicalDevice ID.
+// WorkspaceDrive is the logical Volume selected by the operator. ID is always
+// the resolved Volume ID, never a mount path or PhysicalDevice ID.
 type WorkspaceDrive struct {
 	ID string
 }
@@ -49,6 +50,7 @@ type Access struct {
 	Role             vocabulary.StorageRole
 	Root             string
 	WorkspaceDriveID string
+	PhysicalDeviceID string
 }
 
 type AccessResolver interface {

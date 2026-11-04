@@ -36,3 +36,27 @@ func TestRenderProfileIsVersionedCodecSafeAndResourceBounded(t *testing.T) {
 		t.Fatalf("unapproved encoder accepted: %v", err)
 	}
 }
+
+// Requirement: RND-004
+func TestOrganizationRenderProfilesAllowOnlySixOrTwentyMbpsAndDefaultToSix(t *testing.T) {
+	defaultProfile, err := OrganizationProfile(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	six, err := OrganizationProfile(6_000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	twenty, err := OrganizationProfile(20_000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if defaultProfile != six || six.Reference() != "archive-1080p-6mbps@v1" || six.TargetVideoBitRateKbps != 6_000 ||
+		twenty.Reference() != "archive-1080p-20mbps@v1" || twenty.TargetVideoBitRateKbps != 20_000 ||
+		six.MaxWidth != 1920 || six.MaxHeight != 1080 || twenty.MaxWidth != 1920 || twenty.MaxHeight != 1080 {
+		t.Fatalf("organization profiles changed: default=%+v six=%+v twenty=%+v", defaultProfile, six, twenty)
+	}
+	if _, err := OrganizationProfile(8_000); !errors.Is(err, ErrUnsupportedProfile) {
+		t.Fatalf("arbitrary organization bitrate accepted: %v", err)
+	}
+}

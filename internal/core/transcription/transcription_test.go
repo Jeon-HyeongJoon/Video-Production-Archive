@@ -54,3 +54,31 @@ func TestTranscriptKeepsTimedSegmentsAndVersionedSTTProvenance(t *testing.T) {
 		t.Fatalf("overlapping transcript segments were accepted: %v", err)
 	}
 }
+
+// Requirement: TRN-007
+func TestTranscriptQualityAssessmentRecommendsReviewFromDeterministicTimingAndTextMetrics(t *testing.T) {
+	good, err := NewContent("ko", []Segment{
+		{Sequence: 1, StartMillis: 0, EndMillis: 2_500, Text: "오늘 행사를 시작합니다"},
+		{Sequence: 2, StartMillis: 2_700, EndMillis: 5_000, Text: "첫 번째 순서를 소개합니다"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	passed, err := AssessQuality(good)
+	if err != nil || passed.State != QualityPassed || len(passed.Reasons) != 0 || passed.SegmentCount != 2 || passed.TextCharacterCount != 21 {
+		t.Fatalf("ordinary transcript did not pass deterministic quality assessment: %+v err=%v", passed, err)
+	}
+
+	suspicious, err := NewContent("ko", []Segment{{
+		Sequence: 1, StartMillis: 0, EndMillis: 19_120, Text: "이 시각 세계였습니다.",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	review, err := AssessQuality(suspicious)
+	if err != nil || review.State != QualityReviewRecommended || review.DurationMillis != 19_120 ||
+		review.SegmentCount != 1 || review.TextCharacterCount != 9 ||
+		!reflect.DeepEqual(review.Reasons, []QualityReason{QualityReasonSegmentTooLong, QualityReasonLowTextDensity}) {
+		t.Fatalf("suspicious transcript did not preserve review reasons and metrics: %+v err=%v", review, err)
+	}
+}

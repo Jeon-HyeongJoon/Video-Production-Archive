@@ -24,14 +24,14 @@ provider_accounts:
   - id: provider-primary
     provider: openai
     enabled: false
-    secret_ref: wincred://video-archive/providers/provider-primary
+    secret_ref: wincred://archive/providers/provider-primary
 
 workers:
   heartbeat_ttl: 30s
   definitions:
     - id: worker-main
       enabled: true
-      credential_ref: wincred://video-archive/workers/worker-main
+      credential_ref: wincred://archive/workers/worker-main
       processing_kinds:
         - INSPECT
         - RENDER
@@ -50,10 +50,10 @@ storage:
     physical_device_id: internal-nvme-01
     partition_id: internal-nvme-01-p1
     volume_id: scratch-main
-    root: D:/VideoArchive/scratch
+    root: D:/Archive/scratch
   - id: archive-primary
     role: ARCHIVE_PRIMARY
     physical_device_id: archive-hdd-01
     partition_id: archive-hdd-01-p1
     volume_id: archive-primary
-    root: E:/VideoArchive/archive
+    root: E:/Archive/archive

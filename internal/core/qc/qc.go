@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"videoarchive/internal/core/mediaanalysis"
+	"videoarchive/internal/core/organization"
 	"videoarchive/internal/core/rendering"
 )
 
@@ -62,6 +63,7 @@ type QCAssessment struct {
 	TargetArtifactID   string    `json:"target_artifact_id"`
 	TargetChecksum     string    `json:"target_checksum"`
 	SourceInspectionID string    `json:"source_inspection_id"`
+	SourceTimelineID   string    `json:"source_timeline_id,omitempty"`
 	ProfileReference   string    `json:"profile_reference"`
 	Outcome            Outcome   `json:"outcome"`
 	Checks             []Check   `json:"checks"`
@@ -82,14 +84,42 @@ func Evaluate(assessmentID string, rendition rendering.Rendition, profile render
 	if err != nil || normalizedSource.OriginalAssetID != rendition.Artifact.Origin.OriginalAssetID {
 		return QCAssessment{}, ErrInvalidAssessment
 	}
+	return evaluateExpectedDuration(assessmentID, rendition, normalizedProfile, normalizedSource.ID, "", normalizedSource.DurationMillis, output, policy, workerID, createdAt)
+}
+
+func EvaluateTimeline(assessmentID string, rendition rendering.Rendition, profile rendering.Profile, timeline organization.SourceTimeline, output OutputObservation, policy Policy, workerID string, createdAt time.Time) (QCAssessment, error) {
+	normalizedProfile, err := rendering.NewProfile(profile)
+	if err != nil {
+		return QCAssessment{}, ErrInvalidAssessment
+	}
+	validatedRendition, err := rendering.NewRendition(rendition.Artifact, normalizedProfile)
+	if err != nil || validatedRendition.ProfileID != rendition.ProfileID || validatedRendition.ProfileVersion != rendition.ProfileVersion || timeline.Validate() != nil {
+		return QCAssessment{}, ErrInvalidAssessment
+	}
+	rootIDs := make(map[string]bool, len(rendition.Artifact.Origin.RootOriginalAssetIDs))
+	for _, assetID := range rendition.Artifact.Origin.RootOriginalAssetIDs {
+		rootIDs[assetID] = true
+	}
+	if rendition.Artifact.Origin.InputTimelineID != timeline.ID || len(rootIDs) != len(timeline.Clips) {
+		return QCAssessment{}, ErrInvalidAssessment
+	}
+	for _, clip := range timeline.Clips {
+		if !rootIDs[clip.OriginalAssetID] {
+			return QCAssessment{}, ErrInvalidAssessment
+		}
+	}
+	return evaluateExpectedDuration(assessmentID, rendition, normalizedProfile, "", timeline.ID, timeline.DurationMillis(), output, policy, workerID, createdAt)
+}
+
+func evaluateExpectedDuration(assessmentID string, rendition rendering.Rendition, profile rendering.Profile, sourceInspectionID, sourceTimelineID string, expectedDuration int64, output OutputObservation, policy Policy, workerID string, createdAt time.Time) (QCAssessment, error) {
 	output = normalizeOutput(output)
 	if strings.TrimSpace(assessmentID) == "" || strings.TrimSpace(workerID) == "" || createdAt.IsZero() ||
-		policy.DurationToleranceMillis < 0 || output.Checksum == "" || output.SizeBytes <= 0 ||
+		policy.DurationToleranceMillis < 0 || expectedDuration <= 0 || output.Checksum == "" || output.SizeBytes <= 0 ||
 		len(output.Containers) == 0 || output.DurationMillis <= 0 {
 		return QCAssessment{}, ErrInvalidAssessment
 	}
 
-	durationDelta := output.DurationMillis - normalizedSource.DurationMillis
+	durationDelta := output.DurationMillis - expectedDuration
 	if durationDelta < 0 {
 		durationDelta = -durationDelta
 	}
@@ -97,13 +127,13 @@ func Evaluate(assessmentID string, rendition rendering.Rendition, profile render
 		{Kind: CheckDecodable, Passed: output.Decodable, Expected: "true", Actual: strconv.FormatBool(output.Decodable)},
 		{Kind: CheckChecksum, Passed: output.Checksum == rendition.Artifact.Checksum, Expected: rendition.Artifact.Checksum, Actual: output.Checksum},
 		{Kind: CheckFileSize, Passed: output.SizeBytes == rendition.Artifact.Size, Expected: strconv.FormatInt(rendition.Artifact.Size, 10), Actual: strconv.FormatInt(output.SizeBytes, 10)},
-		{Kind: CheckContainer, Passed: contains(output.Containers, normalizedProfile.Container), Expected: normalizedProfile.Container, Actual: strings.Join(output.Containers, ",")},
+		{Kind: CheckContainer, Passed: contains(output.Containers, profile.Container), Expected: profile.Container, Actual: strings.Join(output.Containers, ",")},
 		{Kind: CheckVideoCodec, Passed: output.VideoCodec == "h264", Expected: "h264", Actual: output.VideoCodec},
 		{Kind: CheckAudioCodec, Passed: output.AudioCodec == "aac", Expected: "aac", Actual: output.AudioCodec},
-		{Kind: CheckDimensions, Passed: output.Width <= normalizedProfile.MaxWidth && output.Height <= normalizedProfile.MaxHeight && output.Width%2 == 0 && output.Height%2 == 0,
-			Expected: fmt.Sprintf("even <= %dx%d", normalizedProfile.MaxWidth, normalizedProfile.MaxHeight), Actual: fmt.Sprintf("%dx%d", output.Width, output.Height)},
+		{Kind: CheckDimensions, Passed: output.Width <= profile.MaxWidth && output.Height <= profile.MaxHeight && output.Width%2 == 0 && output.Height%2 == 0,
+			Expected: fmt.Sprintf("even <= %dx%d", profile.MaxWidth, profile.MaxHeight), Actual: fmt.Sprintf("%dx%d", output.Width, output.Height)},
 		{Kind: CheckDuration, Passed: durationDelta <= policy.DurationToleranceMillis,
-			Expected: fmt.Sprintf("%d±%dms", normalizedSource.DurationMillis, policy.DurationToleranceMillis), Actual: strconv.FormatInt(output.DurationMillis, 10) + "ms"},
+			Expected: fmt.Sprintf("%d±%dms", expectedDuration, policy.DurationToleranceMillis), Actual: strconv.FormatInt(output.DurationMillis, 10) + "ms"},
 	}
 	outcome := Passed
 	for _, check := range checks {
@@ -114,7 +144,7 @@ func Evaluate(assessmentID string, rendition rendering.Rendition, profile render
 	}
 	return QCAssessment{
 		ID: strings.TrimSpace(assessmentID), TargetArtifactID: rendition.Artifact.ID, TargetChecksum: rendition.Artifact.Checksum,
-		SourceInspectionID: normalizedSource.ID, ProfileReference: normalizedProfile.Reference(), Outcome: outcome,
+		SourceInspectionID: sourceInspectionID, SourceTimelineID: sourceTimelineID, ProfileReference: profile.Reference(), Outcome: outcome,
 		Checks: checks, CreatedBy: strings.TrimSpace(workerID), CreatedAt: createdAt,
 	}, nil
 }

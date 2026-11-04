@@ -27,7 +27,7 @@ func TestSummaryPublisherVerifiesHumanFallbackJSONInsideStorageRootBeforePublish
 		t.Fatal(err)
 	}
 	defer root.Close()
-	publisher, err := NewPublisher(root, "videoarchive-summary-v1")
+	publisher, err := NewPublisher(root, "archive-summary-v1")
 	if err != nil {
 		t.Fatal(err)
 	}

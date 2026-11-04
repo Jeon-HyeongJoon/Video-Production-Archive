@@ -10,7 +10,7 @@ import (
 func validEnvelope() Envelope {
 	return Envelope{
 		CommandID: "CMD-1", CommandType: "render.create", Actor: Actor{Type: HumanActor, ID: "op-1"},
-		RequestedVia: "dashboard", TargetID: "JOB-1", ExpectedRevision: 3,
+		RequestedVia: "archive_workspace", TargetID: "JOB-1", ExpectedRevision: 3,
 		IdempotencyKey: "JOB-1:render:v1", Parameters: map[string]any{"profile": "proxy-v1"}, Reason: "create proxy",
 	}
 }
@@ -169,7 +169,7 @@ func TestAcceptedCommandCommitsStateRecordEventsAndReceiptAtomically(t *testing.
 		t.Fatalf("state=%+v records=%+v events=%+v receipt=%+v found=%v err=%v", state, records, events, receipt, found, err)
 	}
 	event := events[0]
-	if event.CommandID != "CMD-1" || event.Actor.ID != "op-1" || event.RequestedVia != "dashboard" ||
+	if event.CommandID != "CMD-1" || event.Actor.ID != "op-1" || event.RequestedVia != "archive_workspace" ||
 		event.BeforeRevision != 3 || event.AfterRevision != 4 || event.Reason != "create proxy" {
 		t.Fatalf("event lacks command provenance: %+v", event)
 	}
@@ -178,7 +178,7 @@ func TestAcceptedCommandCommitsStateRecordEventsAndReceiptAtomically(t *testing.
 // Requirement: CMD-008
 func TestRejectedCommandAppendsCommandRecordWithoutDomainEvent(t *testing.T) {
 	store := testStore(3)
-	denied := errors.New("automation policy denied")
+	denied := errors.New("authorization policy denied")
 	executor := NewAuthorizedExecutor(store, func(Envelope) error { return denied }, func(Envelope, Snapshot) (Change, error) {
 		t.Fatal("handler must not run")
 		return Change{}, nil

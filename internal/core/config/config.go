@@ -26,6 +26,11 @@ type WorkerDefinition struct {
 	CredentialRef string
 }
 
+type ArchivistHostDefinition struct {
+	ID            string
+	CredentialRef string
+}
+
 type Settings struct {
 	AuthMode            security.AuthMode
 	ListenAddress       string
@@ -35,17 +40,11 @@ type Settings struct {
 	AllowArchiveReplace bool
 	Providers           []ProviderDefinition
 	Workers             []WorkerDefinition
+	ArchivistHosts      []ArchivistHostDefinition
 }
 
-func (s Settings) RemoteManagementEnabled() bool {
-	return s.AuthMode == security.AuthLocal
-}
-
-func (s Settings) ManagementRoutes() []string {
-	if !s.RemoteManagementEnabled() {
-		return nil
-	}
-	return []string{"/api/v1/admin/providers", "/api/v1/admin/workers", "/api/v1/admin/security"}
+func (Settings) ManagementRoutes() []string {
+	return nil
 }
 
 type DestructiveFeature string
@@ -72,9 +71,9 @@ func (s Settings) AllowsDestructive(feature DestructiveFeature) bool {
 type ChangeSource string
 
 const (
-	ChangeDashboard ChangeSource = "dashboard"
-	ChangeAPI       ChangeSource = "api"
-	ChangeLocalFile ChangeSource = "local_file"
+	ChangeArchiveWorkspace ChangeSource = "archive_workspace"
+	ChangeAPI              ChangeSource = "api"
+	ChangeLocalFile        ChangeSource = "local_file"
 )
 
 func ValidateBootApplication(source ChangeSource, processStarting bool) error {
@@ -113,9 +112,29 @@ func (s Settings) Validate() error {
 		}
 		workerIDs[worker.ID] = true
 	}
+	archivistHostIDs := make(map[string]bool, len(s.ArchivistHosts))
+	for _, host := range s.ArchivistHosts {
+		if host.ID == "" || !ValidSecretReference(host.CredentialRef) {
+			return fmt.Errorf("archivist host %q: %w", host.ID, ErrInvalidSecretReference)
+		}
+		if archivistHostIDs[host.ID] {
+			return fmt.Errorf("archivist host %q: %w", host.ID, ErrDuplicateDefinition)
+		}
+		archivistHostIDs[host.ID] = true
+	}
 	return nil
 }
 
 func ValidSecretReference(reference string) bool {
-	return strings.HasPrefix(reference, "wincred://") || strings.HasPrefix(reference, "dpapi://")
+	reference = strings.TrimSpace(reference)
+	if strings.HasPrefix(reference, "wincred://") {
+		target := strings.TrimPrefix(reference, "wincred://")
+		return target != "" && !strings.ContainsAny(target, "\x00\r\n")
+	}
+	if !strings.HasPrefix(reference, "dpapi://") {
+		return false
+	}
+	path := strings.TrimPrefix(reference, "dpapi://")
+	return len(path) >= 3 && ((path[0] >= 'A' && path[0] <= 'Z') || (path[0] >= 'a' && path[0] <= 'z')) &&
+		path[1] == ':' && (path[2] == '/' || path[2] == '\\') && !strings.ContainsAny(path[3:], "\x00\r\n:")
 }

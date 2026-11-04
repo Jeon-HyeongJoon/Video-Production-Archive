@@ -1,0 +1,253 @@
+# 11. 로컬 CLI Archivist Host 설계
+
+## 1. 결정
+
+v1의 Archivist 실행 경로는 Orca 전체 애플리케이션을 운영 의존성으로 두지 않는다. Archive Control와 별도인 `archivist-host`가 필요한 최소 런타임 기능만 제공하고, Orca CLI는 같은 Port를 구현하는 선택형 backend로 둔다.
+
+이 결정의 목적은 로컬 Codex·Claude 같은 CLI의 도구 사용과 세션 재개 능력은 유지하면서 영상 기록 시스템에 필요하지 않은 개발 기능의 결합을 피하는 것이다.
+
+```text
+Archive Workspace
+   ├── button/form/API ──────────────────> Command Bus
+   └── chat ─> ArchivistSession / ArchivistTurn ─> Archivist Gateway
+                                               │
+Archive Control ── Command Bus ── Capability Registry
+   ▲      ▲                              ▲
+   │      └── authenticated MCP ─────────┘
+   │
+   └── outbound authenticated stream ── Archivist Host
+                                           │
+                                           ├── Embedded Core backend (v1 기본)
+                                           └── Orca CLI backend (선택)
+                                                        │
+                                                   Codex / Claude CLI
+```
+
+Archivist Host는 Archivist 역할이 아니다. 특정 PC에서 CLI 프로세스와 세션을 감독하는 서비스 구성요소이며, 미디어 Step을 실행하는 Worker와도 분리한다.
+
+## 2. 상태 소유권
+
+| 소유자 | 영속 상태 | 소유하지 않는 것 |
+|---|---|---|
+| Archive Control | ArchivistSession, ArchivistTurn, ArchivistTurnLease와 fencing token, ArchivistToolCall, ActionCard, Approval, Command 상관관계 | PTY handle, CLI 화면 상태 |
+| Archivist Host | PC 등록 identity, 허용 CLI·작업 root, 암호화된 CLI resume token, 마지막 확인 event cursor | Job·Step 상태, 승인 정책, Command 결과의 원장 |
+| Runtime backend | 한 CLI process/PTY, backend의 임시 runtime handle, 구조화된 입출력 변환 | durable session ID, 업무 멱등성 |
+| MCP Adapter | 허용된 도구 schema와 Capability 변환 | 범용 shell, 임의 파일 경로 접근, 승인 우회 |
+
+Control의 `archivist_session_id`와 `archivist_turn_id`만 영속 identity다. Orca terminal ID, PID, PTY handle 같은 `runtime_handle`은 프로세스 수명에 한정하며 DB identity로 저장하지 않는다.
+
+Archivist 추가 화면은 이름·`archivist_host_id`·감지된 `cli_id`·기본 제어 모드만 받는다. `runtime_backend`와 `workspace_root_id`는 사전 등록된 Host 설정에서 결정하고 화면이 임의 값을 받지 않는다. 고정된 Host가 offline이면 ArchivistTurn을 기다리게 하고 다른 PC로 자동 우회하지 않는다. 재배정은 사람이 명시적으로 선택한 별도 Command로만 허용한다. `CTL-006`, `DSH-012`
+
+## 3. 최소 런타임 코어
+
+v1 기본 backend인 Embedded Core가 제공할 기능은 다음뿐이다.
+
+| 필수 기능 | 계약 |
+|---|---|
+| process/PTY 수명주기 | 허용 목록의 실행 파일과 인수 배열만 시작·종료 |
+| 세션 연결 | durable ArchivistSession을 하나의 로컬 CLI 세션과 연결 |
+| turn 전달 | request ID로 중복 없이 구조화된 입력 전송 |
+| 단계 이벤트 | `INPUT_ACCEPTED`, `TURN_STARTED`, `TURN_PROGRESS`, `TURN_WAITING`, `TURN_COMPLETED`, `TURN_FAILED` 보고 |
+| cursor replay | 단조 증가 cursor 이후의 정제된 이벤트를 재전송 |
+| CLI별 재개 | native resume token 우선, 없으면 정제된 checkpoint 사용 |
+| 재시작 조정 | stale runtime handle을 폐기하고 durable session으로 다시 해석 |
+
+다음 Orca 기능은 v1 Archivist Host에 포함하지 않는다.
+
+- Git worktree·branch·repository 생애주기
+- 여러 terminal·pane 관리
+- 내장 browser와 desktop UI
+- artifact 게시·공유
+- automation scheduling과 세션 검색 색인
+- 다중 개발 Archivist orchestration·handoff
+- Electron 또는 Orca 애플리케이션 프로세스 의존성
+
+Orca 코드를 재사용할 때는 PTY, cursor buffer, request delivery, resume record처럼 독립시킬 수 있는 모듈만 추출한다. Orca 내부 UI 모델이나 worktree identity를 제품 계약으로 노출하지 않는다. 직접 추출할 수 없거나 결합 비용이 크면 같은 Port의 작은 구현을 작성한다.
+
+## 4. Runtime backend Port
+
+구체 backend는 다음 의미의 Port를 구현한다. 메서드 이름은 구현 언어에 맞출 수 있지만 관찰 가능한 결과는 바꾸지 않는다.
+
+```text
+Open(SessionSpec) → RuntimeSessionRef
+Submit(RuntimeSessionRef, TurnRequest) → DeliveryReceipt
+ReadEvents(RuntimeSessionRef, after_cursor) → RuntimeEvent[]
+Resume(RuntimeSessionRef, ResumeCheckpoint) → RuntimeSessionRef
+Close(RuntimeSessionRef) → CloseReceipt
+```
+
+`SessionSpec`에는 durable session ID, CLI ID, workspace root ID, MCP endpoint reference만 들어간다. credential 원문과 unrestricted path는 들어가지 않는다. `TurnRequest`에는 durable turn ID, request ID, prompt와 최소 context가 들어간다.
+
+Orca CLI backend를 사용할 때는 다음 제약을 둔다.
+
+- ArchivistSession 하나에 terminal 하나만 사용한다.
+- terminal handle은 runtime-scoped 값으로 취급하고 restart 또는 stale 응답 뒤 `terminal list/show`로 다시 찾는다.
+- prompt 전송의 `input_accepted`는 전달 수락일 뿐 실행 시작이 아니다. 별도 `turn_started`가 있어야 ArchivistTurnState.RUNNING으로 바꾼다.
+- 제출 관찰은 최초 request ID로 계속하고 timeout 때문에 prompt를 다시 보내지 않는다.
+- `tui-idle`이나 화면 문자열만으로 업무 완료를 판정하지 않는다. backend가 명시적 완료·실패 이벤트를 제공하지 않으면 Orca core에 그 이벤트를 추가하거나 MCP 완료 protocol을 사용한다.
+- `terminal read`의 cursor는 출력 재연결에만 쓰며 Control의 Event ID를 대체하지 않는다.
+
+## 5. ArchivistTurn 전달과 fencing
+
+```text
+아카이브 작업 공간이 ArchivistTurn 제출
+→ Control이 ArchivistTurnState.QUEUED를 먼저 확정
+→ 연결된 Host가 ArchivistTurnLease claim
+→ Control이 fencing token 발급
+→ Host가 같은 request ID를 backend에 한 번 전달
+→ INPUT_ACCEPTED
+→ TURN_STARTED
+→ TURN_PROGRESS / tool call / waiting
+→ TURN_COMPLETED 또는 TURN_FAILED
+```
+
+동시에 유효한 ArchivistTurnLease는 하나뿐이다. lease 만료 뒤 새 claim에는 더 큰 fencing token을 발급하고, 이전 Host나 이전 process가 보낸 event·Tool Call·완료 결과는 거부한다.
+
+ArchivistTurnState는 다음 전이만 허용한다.
+
+```text
+QUEUED → LEASED → SUBMITTED → RUNNING
+RUNNING → WAITING → RUNNING
+QUEUED | LEASED | SUBMITTED | RUNNING | WAITING → CANCELLED
+RUNNING | WAITING → COMPLETED | FAILED
+```
+
+`INPUT_ACCEPTED`는 SUBMITTED, `TURN_STARTED`는 RUNNING에 대응한다. Host heartbeat나 PTY idle은 ArchivistTurn 상태 이벤트가 아니다.
+
+## 6. 재시작과 세션 재개
+
+Host는 native CLI resume token을 OS Secret Store 또는 해당 서비스 계정만 읽을 수 있는 암호화 저장소에 둔다. Control에는 token reference와 정제된 checkpoint만 저장한다.
+
+Host 또는 backend 재시작 시 다음 순서를 따른다.
+
+1. runtime handle을 신뢰하지 않고 ArchivistSession·backend·CLI ID로 로컬 세션을 다시 해석한다.
+2. native resume token이 있으면 해당 CLI의 공식 resume 기능을 사용한다.
+3. token이 없으면 사용자 목표, 확정된 업무 상태, 완료된 ArchivistToolCall 결과 요약과 미완료 호출 ID만 포함한 checkpoint로 새 CLI 세션을 연다.
+4. 완료된 ArchivistToolCall은 결과를 replay하고 다시 실행하지 않는다.
+5. 진행 중 호출만 같은 idempotency key와 현재 fencing token으로 조정한다.
+
+대화 원문 전체, credential, 불필요한 파일 경로와 raw terminal screen은 checkpoint에 넣지 않는다.
+
+이미 전달된 Turn의 lease를 만료 뒤 다시 claim하면 Control은 `delivered_request_id`, 마지막 runtime event cursor와 새 fencing token을 반환한다. Host는 같은 사용자 입력을 새 입력으로 확정하지 않으며 `INPUT_ACCEPTED`를 반복하지 않는다. native reference가 없는 Embedded Core는 원래 목표와 정제된 checkpoint로 backend를 다시 열고, `TURN_STARTED`부터 마지막 cursor 다음 값으로 보고한다. Control은 이미 전달된 Turn에 한해서 새 lease의 `TURN_STARTED`를 `LEASED → RUNNING` 재개 전이로 허용한다.
+
+`TURN_COMPLETED`는 상태 문자열만 보내지 않는다. backend는 사람이 읽을 수 있는 `summary`와 정제된 `result_ids`를 가진 구조화 `final_response`를 반환하고, Host는 현재 fencing token과 단조 cursor로 이를 Control에 보낸다. Control은 final response가 없는 완료를 거부하고 ArchivistTurn과 같은 transaction으로 저장·투영한다. raw stdout, credential, resume token과 실제 filesystem path는 final response에 넣지 않는다.
+
+`TURN_PROGRESS`는 raw terminal cursor를 Control에 복제하는 통로가 아니다. Runtime Adapter가 사용자에게 공개할 내용으로 명시적으로 만든 `summary`만 `ProgressUpdate`로 보고한다. `TURN_FAILED`는 raw error 문자열 대신 정규화 `code`와 정제 `summary`를 가진 `FailureReport`를 요구한다. Control은 PROGRESS·FAILURE를 `ArchivistTurnEntry` append-only 기록으로 Turn cursor·상태와 한 SQLite transaction에 확정하고 중복 cursor를 늘리지 않는다. Entry schema에는 stdout·stderr·credential·filesystem path 필드가 없다. 계약 fixture는 이 구조화 event stream을 사용하며, 실제 Codex·Claude JSONL 정제 Adapter는 `LRH-014` 실계정 acceptance 전까지 planned다. `LRH-013~014`
+
+## 7. 도구 호출 경계
+
+CLI는 Host가 loopback에 연 MCP proxy에만 연결한다. proxy는 Host service credential을 사용해 Control의 인증된 MCP endpoint로 outbound 연결하고 다음 상관관계를 추가한다.
+
+```text
+archivist_host_id
+archivist_session_id
+archivist_turn_id
+archivist_tool_call_id
+archivist_turn_lease_fencing_token
+idempotency_key
+```
+
+Control의 MCP Adapter는 도구를 Application Capability Registry로 변환한다. 조회는 정제된 결과를 반환하고 상태 변경은 공통 Command Bus를 통과한다. 제공 도구는 업무 의미 allowlist로 제한하며 `run_shell`, 임의 terminal 입력, 임의 path 읽기·이동·삭제를 제공하지 않는다.
+
+ArchivistToolCall receipt가 이미 있으면 최초 결과를 반환한다. timeout이나 CLI 재개 뒤에도 같은 호출이 Command를 다시 만들지 않는다. 인증된 MCP Capability는 Session에 저장된 제어 모드를 사용한다. `MANUAL`의 상태 변경은 거부하고, `ASSISTED`에서는 ActionCard만 만들며, `ARCHIVIST`에서는 allowlist의 비파괴 `PROCESS` Command를 직접 실행할 수 있다. 파괴적 작업과 `GATED` 작업은 `ASSISTED`·`ARCHIVIST`에서 ActionCard를 만들 수만 있고, 별도의 사람 Approval과 최신 expected revision 없이 실행하지 않는다.
+
+재개된 CLI가 같은 Tool Call ID와 ActionCard ID를 다시 보고하면 저장소는 새 행을 만들지 않는다. 기존 ActionCard 제안 내용이 같으면 현재 투영 상태를 보존하고, 특히 `COMPLETED`를 `PENDING`으로 되돌리지 않는다. 같은 ID의 제안 내용이 다르면 idempotency 충돌로 거부한다.
+
+## 8. 아카이브 작업 공간 계약
+
+아카이브 작업 공간은 Runtime 상태를 보기만 하는 화면이 아니다. 사람은 ArchivistSession 없이 버튼·폼·API로 Job과 도메인 Command를 직접 시작할 수 있고, 채팅으로 ArchivistTurn을 만들어 로컬 CLI Archivist에게 같은 업무의 조회·계획·실행을 지시할 수 있다. 두 경로는 같은 Command Bus, Event 원장과 작업 상세를 사용한다.
+
+Archive Workspace 영역은 다음 영속 상태를 투영한다.
+
+```text
+Host: ONLINE | BUSY | OFFLINE | DISABLED
+Session: host, backend, cli, workspace, last_turn
+Turn: QUEUED | LEASED | SUBMITTED | RUNNING | WAITING | COMPLETED | FAILED | CANCELLED
+Tool Call: 이름, 대상, 상태, 정제된 결과
+Action Card: 제안 Command, 대상, expected revision, 사유, 근거, 승인 필요 여부
+```
+
+채팅 입력은 ArchivistTurn을 만들고 Control에 확정된 뒤 Host로 전달한다. 채팅 텍스트의 “진행”은 Archivist에게 후속 Tool Call을 요청할 수 있지만 Approval은 아니다. 승인 필요한 명령은 ActionCard의 명시적 조작만 Approval 또는 Command 후보를 만들며 제출 시 현재 리비전을 다시 검사한다.
+
+Archive Intake Turn은 담당자가 화면에서 고른 Worker·원본·아카이브 Storage·폴더 범위를 구조화된 ID와 revision으로 고정한다. Archivist는 본문에서 대상 드라이브를 추론하지 않고, 고정 참조 안에서 드라이브·폴더 조회, 1·2단계 시작, 현재 HOLD 목록·단일 구조화 근거 조회와 명시적 분류 Capability만 호출한다. Storage와 범위 선택은 사람 전용이며 선택 밖 분류는 거부한다. `COL-003`, `MCP-003~005`
+
+긴 작업은 한 Turn 안에서 기다리지 않는다. Archivist가 1단계를 시작한 Turn을 완료한 뒤 Control은 같은 Session에 1단계 완료·전체 완료·새 HOLD 계기별 SYSTEM 재호출 Turn을 정확히 한 번 제출한다. ArchiveRun을 연결할 때 최초 Turn에 `work_id=archive_run_id`, `origin_turn_id`, `ARCHIVE_RUN_STARTED` 계기를 저장하고 각 SYSTEM Turn은 같은 ID와 명시적 재호출 계기를 저장한다. 화면은 prompt 문장을 해석하지 않고 이 `ArchiveRunWorkContext`로만 Turn을 묶는다. Host가 offline이면 Turn은 QUEUED로 남고 Worker의 아카이브 실행은 계속된다. 재호출 전달은 기존 ArchivistTurnLease·fencing·cursor 규칙을 그대로 사용한다. `LRH-012`
+
+아카이브 작업 공간은 업무 문맥에 `ARCHIVE_RUN_COMPLETE` Turn이 종료되기 전까지 정제된 진행 항목·SYSTEM 재호출·Tool Call·응답을 모두 펼친다. 완료 뒤에는 최초 사용자 지시와 최종 응답 또는 최종 구조화 실패만 남기고, 나머지를 소요 시간·Tool Call 수가 있는 접힌 영역에 보존한다. `PENDING` ActionCard는 업무가 종료됐더라도 접힘 밖에 남겨 사람이 계속 조작할 수 있게 한다. `DSH-011`
+
+사람이 직접 만든 Command Event도 같은 Job 문맥과 다음 ArchivistTurn의 정제된 context에 포함한다. Archivist가 실행한 Command도 별도 작업으로 숨기지 않고 Actor·requested_via·Tool Call 상관관계와 함께 같은 작업 상세에 표시한다. `COL-001~002`
+
+화면은 무채색 표면·상태 신호 요소에만 쓰는 유채색·2px 이하 모서리·설명 문장 배제 원칙을 유지한다. Host·Session·Turn·ActionCard fixture는 실제 Chromium에서 운영체제별 PNG golden으로 검증하고, 의도된 변경만 golden을 갱신한다.
+
+## 9. 배포와 보안
+
+Archivist Host는 CLI를 실행할 PC마다 Windows Service로 설치하고 Control로만 outbound 연결한다. Host PC에 inbound SSH나 HTTP 포트를 열지 않는다.
+
+Windows Credential Manager의 generic credential은 사용자 profile이 적재된 대화형 또는 전용 서비스 로그온에서는 사용할 수 있다. 그러나 OpenSSH 서비스 로그온처럼 Credential Manager가 사용할 로그온 세션이 없는 환경에서는 `CredWrite` 자체가 실패하므로 이를 Archivist Host의 유일한 secret 저장 경계로 두지 않는다.
+
+이 경우 `dpapi://<absolute-blob-path>` reference를 사용한다. 설치·등록 도구는 credential을 `CRYPTPROTECT_LOCAL_MACHINE | CRYPTPROTECT_UI_FORBIDDEN`으로 보호해 임시 파일에 쓴 뒤 원자적으로 게시하고, 설치기는 blob 파일 ACL을 해당 Archivist Host 서비스 계정과 `SYSTEM`만 읽을 수 있게 제한한다. Resolver는 절대 경로만 허용하고 크기가 제한된 암호문을 읽어 메모리에서만 복호화한다. 평문은 boot 설정, argument, 환경 변수, 파일, 로그와 HTTP 응답에 넣지 않는다. machine scope는 profile 없는 서비스 프로세스 재시작을 허용하고, 계정 격리는 파일 ACL이 담당한다. `LRH-010`
+
+Control boot 설정에는 다음만 사전 등록한다.
+
+```text
+archivist_host_id
+credential_ref
+enabled
+allowed_backend_ids
+allowed_cli_ids
+allowed_workspace_root_ids
+heartbeat_ttl
+```
+
+Host boot 설정은 Control URL, 같은 service credential reference, 실행 파일의 절대 경로와 고정 인수, workspace root ID→절대 경로 mapping을 가진다. 원격 Control에는 HTTPS 또는 승인된 암호화 overlay로 연결한다. 실행 명령은 executable과 argument array로 만들며 shell 문자열을 사용하지 않는다.
+
+Worker와 Archivist Host는 같은 PC에 설치할 수 있지만 identity, credential, lease와 포트를 공유하지 않는다. Worker의 높은 CPU·GPU 사용은 CLI가 도구로 만든 Job의 실행 상태일 뿐, Archivist Host가 미디어 subprocess를 직접 실행하지 않는다.
+
+## 10. v1 완료 시나리오
+
+다음 acceptance가 통과할 때 아카이브 작업 공간에서 사람과 로컬 CLI Archivist가 같은 업무를 이어가는 v1 흐름이 완료된다.
+
+1. ArchivistSession이 없는 빈 작업함에서 사람이 버튼·폼·API로 Job을 직접 만들고 작업 상세를 확인한다.
+2. 사전 등록된 Windows Host와 CLI를 선택해 ArchivistSession을 만들고 같은 Job 문맥으로 ArchivistTurn을 제출한다.
+3. 같은 ArchivistTurn ID가 Host의 로컬 CLI에 한 번만 전달되고 CLI가 MCP 조회 도구로 자산과 Job 상태를 읽는다.
+4. `ARCHIVIST` 모드의 허용된 비파괴 Command는 공통 Command Bus에서 한 번 실행되어 사람이 만든 Event와 같은 작업 상세에 나타난다.
+5. `ASSISTED` 또는 승인 필요한 상태 변경은 ActionCard로 표시되고, 사람이 명시적으로 조작한 경우만 Approval 또는 Command가 만들어진다.
+6. 사람이 API로 추가 변경한 현재 상태를 다음 ArchivistTurn이 다시 읽어 이어서 처리한다.
+7. Host 연결과 CLI process를 강제로 끊고 다시 시작한다.
+8. 같은 ArchivistSession이 재개되고 완료된 Tool Call과 Command를 중복 실행하지 않은 채 최종 응답을 끝낸다.
+
+## 11. 구현 순서
+
+1. Control의 ArchivistSession·ArchivistTurn·ArchivistTurnLease Core와 SQLite Store
+2. Archivist Host 등록·heartbeat·claim·event stream API
+3. Embedded Core backend와 fake CLI integration fixture
+4. loopback MCP proxy와 Control MCP Adapter
+5. 아카이브 작업 공간의 직접 Command·Session·Turn·ActionCard projection과 golden
+6. 실제 Windows Host에서 Codex 또는 Claude CLI acceptance
+7. 필요할 때만 Orca CLI compatibility backend
+
+Orca CLI backend는 v1 완료의 선행 조건이 아니다. Embedded Core acceptance가 먼저 통과하고 Orca 연동의 유지비가 실제 운영 이점을 줄 때 추가한다.
+
+## 12. 현재 구현 경계
+
+Core에서 결정적으로 검증할 수 있는 계약은 구현 상태다.
+
+- ArchivistSession Host 고정과 offline 대기 `LRH-002`
+- ArchivistTurnLease 배타성·fencing `LRH-003`
+- request 중복 전달 방지와 INPUT_ACCEPTED/STARTED 분리 `LRH-004`
+- durable Session 기준 runtime rebind `LRH-005`
+- native reference 우선과 최소 checkpoint `LRH-006`
+- CLI·workspace allowlist 실행 계획 `LRH-007`
+- runtime event cursor와 명시적 완료 `LRH-008`
+- 정제된 진행·실패 항목의 cursor 멱등 저장·투영 `LRH-013`
+- Tool Call→Command 상관관계와 receipt replay `MCP-002`
+- 채팅과 ActionCard Approval 분리 `DSH-003`
+
+Adapter 경계도 구현 상태다.
+
+- Host service 인증·heartbeat·claim과 SQLite Session·Turn Store `LRH-001`, `CTL-005~006`
+- loopback proxy와 별도 Control MCP listener의 versioned Capability allowlist `MCP-001`
+- 사람·Archivist 공통 Command Bus와 정제된 아카이브 작업 공간 projection `COL-001~002`, `DSH-002`
+- Archivist Runtime·ActionCard fixture의 Chromium PNG golden `DSH-004`
+
+실제 Windows Archivist Host와 계약 fixture의 checkpoint 재개·중복 방지는 `LRH-011`, profile 없는 Windows 서비스 로그온의 DPAPI secret 경계는 `LRH-010` acceptance에서 검증했다. 실제 계정으로 인증된 Codex 또는 Claude CLI의 native resume 증적은 `LRH-009` acceptance가 남아 있다. fixture 결과를 제3자 CLI의 native resume 증적으로 대체하지 않는다.

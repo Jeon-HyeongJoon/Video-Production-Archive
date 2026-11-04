@@ -1,6 +1,8 @@
 package archive
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -26,6 +28,17 @@ var (
 	ErrInvalidSnapshot    = errors.New("archive snapshot is invalid")
 )
 
+type PackageState string
+
+const (
+	PackageStored    PackageState = "STORED"
+	PackageCommitted PackageState = "COMMITTED"
+)
+
+func (state PackageState) Valid() bool {
+	return state == PackageStored || state == PackageCommitted
+}
+
 type OriginalAsset = asset.OriginalAsset
 
 type Supersession = asset.Supersession
@@ -35,13 +48,15 @@ func SupersedeOriginal(previous, replacement OriginalAsset) (Supersession, error
 }
 
 type Provenance struct {
-	OriginalAssetID  string
-	InputArtifactIDs []string
-	ProcessingKind   vocabulary.ProcessingKind
-	ProcessorVersion string
-	ProfileVersion   string
-	CreatedBy        string
-	CreatedAt        time.Time
+	OriginalAssetID      string
+	RootOriginalAssetIDs []string
+	InputTimelineID      string
+	InputArtifactIDs     []string
+	ProcessingKind       vocabulary.ProcessingKind
+	ProcessorVersion     string
+	ProfileVersion       string
+	CreatedBy            string
+	CreatedAt            time.Time
 }
 
 type Artifact struct {
@@ -57,11 +72,35 @@ var windowsDrivePattern = regexp.MustCompile(`^[a-zA-Z]:/`)
 
 func (a Artifact) ValidateDerived() error {
 	if a.ID == "" || a.Path == "" || a.Size < 0 || !sha256Pattern.MatchString(a.Checksum) ||
-		a.Origin.OriginalAssetID == "" || a.Origin.InputArtifactIDs == nil || !a.Origin.ProcessingKind.Valid() || a.Origin.ProcessorVersion == "" ||
+		a.Origin.InputArtifactIDs == nil || !a.Origin.ProcessingKind.Valid() || a.Origin.ProcessorVersion == "" ||
 		a.Origin.ProfileVersion == "" || a.Origin.CreatedBy == "" || a.Origin.CreatedAt.IsZero() {
 		return ErrInvalidProvenance
 	}
+	if _, err := normalizeProvenance(a.Origin); err != nil {
+		return err
+	}
 	return nil
+}
+
+func normalizeProvenance(source Provenance) (Provenance, error) {
+	provenance := source
+	provenance.RootOriginalAssetIDs = append([]string(nil), source.RootOriginalAssetIDs...)
+	singleOriginal := provenance.OriginalAssetID != "" && len(provenance.RootOriginalAssetIDs) == 0 && provenance.InputTimelineID == ""
+	multipleOriginals := provenance.OriginalAssetID == "" && len(provenance.RootOriginalAssetIDs) >= 2 && provenance.InputTimelineID != ""
+	if !singleOriginal && !multipleOriginals {
+		return Provenance{}, ErrInvalidProvenance
+	}
+	if multipleOriginals {
+		seen := make(map[string]bool, len(provenance.RootOriginalAssetIDs))
+		for _, assetID := range provenance.RootOriginalAssetIDs {
+			if assetID == "" || seen[assetID] {
+				return Provenance{}, ErrInvalidProvenance
+			}
+			seen[assetID] = true
+		}
+		sort.Strings(provenance.RootOriginalAssetIDs)
+	}
+	return provenance, nil
 }
 
 type ManifestEntry struct {
@@ -194,10 +233,11 @@ type ArchiveSnapshot struct {
 }
 
 func ExportSnapshot(snapshot ArchiveSnapshot) ([]byte, error) {
-	if err := validateSnapshot(snapshot); err != nil {
+	normalized, err := normalizeSnapshot(snapshot)
+	if err != nil {
 		return nil, err
 	}
-	return json.Marshal(snapshot)
+	return json.Marshal(normalized)
 }
 
 func ImportSnapshot(payload []byte) (ArchiveSnapshot, error) {
@@ -207,28 +247,46 @@ func ImportSnapshot(payload []byte) (ArchiveSnapshot, error) {
 	if err := decoder.Decode(&snapshot); err != nil {
 		return ArchiveSnapshot{}, ErrInvalidSnapshot
 	}
-	if err := validateSnapshot(snapshot); err != nil {
+	normalized, err := normalizeSnapshot(snapshot)
+	if err != nil {
 		return ArchiveSnapshot{}, err
 	}
-	return snapshot, nil
+	return normalized, nil
 }
 
-func validateSnapshot(snapshot ArchiveSnapshot) error {
+func normalizeSnapshot(snapshot ArchiveSnapshot) (ArchiveSnapshot, error) {
+	normalized := ArchiveSnapshot{
+		OriginalAssets: append([]OriginalAsset(nil), snapshot.OriginalAssets...),
+		Artifacts:      append([]Artifact(nil), snapshot.Artifacts...),
+	}
 	assetIDs := make(map[string]bool, len(snapshot.OriginalAssets))
-	for _, asset := range snapshot.OriginalAssets {
+	for _, asset := range normalized.OriginalAssets {
 		if asset.Validate() != nil || assetIDs[asset.ID] {
-			return ErrInvalidSnapshot
+			return ArchiveSnapshot{}, ErrInvalidSnapshot
 		}
 		assetIDs[asset.ID] = true
 	}
-	artifactIDs := make(map[string]bool, len(snapshot.Artifacts))
-	for _, artifact := range snapshot.Artifacts {
-		if artifactIDs[artifact.ID] || artifact.ValidateDerived() != nil || !assetIDs[artifact.Origin.OriginalAssetID] {
-			return ErrInvalidSnapshot
+	artifactIDs := make(map[string]bool, len(normalized.Artifacts))
+	for index, artifact := range normalized.Artifacts {
+		provenance, err := normalizeProvenance(artifact.Origin)
+		if artifactIDs[artifact.ID] || artifact.ValidateDerived() != nil || err != nil {
+			return ArchiveSnapshot{}, ErrInvalidSnapshot
+		}
+		if provenance.OriginalAssetID != "" {
+			if !assetIDs[provenance.OriginalAssetID] {
+				return ArchiveSnapshot{}, ErrInvalidSnapshot
+			}
+		} else {
+			for _, assetID := range provenance.RootOriginalAssetIDs {
+				if !assetIDs[assetID] {
+					return ArchiveSnapshot{}, ErrInvalidSnapshot
+				}
+			}
 		}
 		artifactIDs[artifact.ID] = true
+		normalized.Artifacts[index].Origin = provenance
 	}
-	return nil
+	return normalized, nil
 }
 
 func ResolveStoragePath(root, requested string) (string, error) {
@@ -253,6 +311,12 @@ type StorageRoot struct {
 	root *os.Root
 }
 
+// ReadOnlyStorageRoot deliberately exposes no write or rename operations. It
+// is the filesystem capability handed to a selected ArchiveIntakeSession.
+type ReadOnlyStorageRoot struct {
+	root *StorageRoot
+}
+
 func OpenStorageRoot(root string) (*StorageRoot, error) {
 	rootResolved, _, err := normalizeStoragePath(root, "storage-root-check")
 	if err != nil {
@@ -265,7 +329,77 @@ func OpenStorageRoot(root string) (*StorageRoot, error) {
 	return &StorageRoot{root: handle}, nil
 }
 
+func OpenReadOnlyStorageRoot(root string) (*ReadOnlyStorageRoot, error) {
+	storageRoot, err := OpenStorageRoot(root)
+	if err != nil {
+		return nil, err
+	}
+	return &ReadOnlyStorageRoot{root: storageRoot}, nil
+}
+
+func (root *ReadOnlyStorageRoot) Close() error {
+	if root == nil || root.root == nil {
+		return ErrUnsafeStoragePath
+	}
+	return root.root.Close()
+}
+
+func (root *ReadOnlyStorageRoot) Open(requested string) (*os.File, error) {
+	if root == nil || root.root == nil {
+		return nil, ErrUnsafeStoragePath
+	}
+	return root.root.Open(requested)
+}
+
+func (root *ReadOnlyStorageRoot) ReadFile(requested string) ([]byte, error) {
+	if root == nil || root.root == nil {
+		return nil, ErrUnsafeStoragePath
+	}
+	return root.root.ReadFile(requested)
+}
+
+func (root *ReadOnlyStorageRoot) ReadDir(requested string) ([]os.DirEntry, error) {
+	if root == nil || root.root == nil {
+		return nil, ErrUnsafeStoragePath
+	}
+	return root.root.ReadDir(requested)
+}
+
+func (root *ReadOnlyStorageRoot) FileSHA256(requested string) (int64, string, error) {
+	if root == nil || root.root == nil {
+		return 0, "", ErrUnsafeStoragePath
+	}
+	return root.root.FileSHA256(requested)
+}
+
+// ExternalProcessPath resolves a subprocess input beneath the read-only
+// capability. The subprocess must not receive any writable output path under
+// this root.
+func (root *ReadOnlyStorageRoot) ExternalProcessPath(requested string) (string, error) {
+	if root == nil || root.root == nil {
+		return "", ErrUnsafeStoragePath
+	}
+	return root.root.ExternalProcessPath(requested)
+}
+
 func (root *StorageRoot) Close() error { return root.root.Close() }
+
+// ExternalProcessPath resolves a normalized relative path beneath this
+// capability for an argument-array subprocess. Callers must keep every
+// filesystem operation around the subprocess on the same StorageRoot.
+func (root *StorageRoot) ExternalProcessPath(requested string) (string, error) {
+	if root == nil || root.root == nil {
+		return "", ErrUnsafeStoragePath
+	}
+	_, clean, err := normalizeStoragePath(root.root.Name(), requested)
+	if err != nil {
+		return "", ErrUnsafeStoragePath
+	}
+	if err := rejectLinkLikeComponents(root.root.Name(), clean); err != nil {
+		return "", err
+	}
+	return filepath.Join(root.root.Name(), filepath.FromSlash(clean)), nil
+}
 
 func (root *StorageRoot) Open(requested string) (*os.File, error) {
 	if root == nil || root.root == nil {
@@ -294,6 +428,30 @@ func (root *StorageRoot) ReadFile(requested string) ([]byte, error) {
 	return io.ReadAll(file)
 }
 
+func (root *StorageRoot) ReadDir(requested string) ([]os.DirEntry, error) {
+	if root == nil || root.root == nil {
+		return nil, ErrUnsafeStoragePath
+	}
+	clean := "."
+	if strings.TrimSpace(requested) != "" && strings.TrimSpace(requested) != "." {
+		var err error
+		clean, err = root.safeRelative(requested)
+		if err != nil {
+			return nil, err
+		}
+	}
+	directory, err := root.root.Open(clean)
+	if err != nil {
+		return nil, ErrUnsafeStoragePath
+	}
+	defer directory.Close()
+	entries, err := directory.ReadDir(-1)
+	if err != nil {
+		return nil, ErrUnsafeStoragePath
+	}
+	return entries, nil
+}
+
 func (root *StorageRoot) WriteFile(requested string, data []byte, permission os.FileMode) error {
 	clean, err := root.safeRelative(requested)
 	if err != nil {
@@ -309,6 +467,62 @@ func (root *StorageRoot) WriteFile(requested string, data []byte, permission os.
 		return ErrUnsafeStoragePath
 	}
 	return nil
+}
+
+func (root *StorageRoot) CopyFileFrom(source *StorageRoot, sourcePath, destinationPath string, permission os.FileMode) (int64, string, error) {
+	if source == nil {
+		return 0, "", ErrUnsafeStoragePath
+	}
+	input, err := source.Open(sourcePath)
+	if err != nil {
+		return 0, "", err
+	}
+	defer input.Close()
+	destination, err := root.safeRelative(destinationPath)
+	if err != nil {
+		return 0, "", err
+	}
+	output, err := root.root.OpenFile(destination, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, permission)
+	if err != nil {
+		return 0, "", ErrUnsafeStoragePath
+	}
+	hash := sha256.New()
+	size, copyErr := io.Copy(io.MultiWriter(output, hash), input)
+	closeErr := output.Close()
+	if copyErr != nil || closeErr != nil {
+		_ = root.root.Remove(destination)
+		return 0, "", ErrUnsafeStoragePath
+	}
+	return size, hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+func (root *StorageRoot) FileSHA256(requested string) (int64, string, error) {
+	file, err := root.Open(requested)
+	if err != nil {
+		return 0, "", err
+	}
+	defer file.Close()
+	hash := sha256.New()
+	size, err := io.Copy(hash, file)
+	if err != nil {
+		return 0, "", ErrUnsafeStoragePath
+	}
+	return size, hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+func (root *StorageRoot) Exists(requested string) (bool, error) {
+	clean, err := root.safeRelative(requested)
+	if err != nil {
+		return false, err
+	}
+	_, err = root.root.Stat(clean)
+	if err == nil {
+		return true, nil
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	return false, ErrUnsafeStoragePath
 }
 
 func (root *StorageRoot) MkdirAll(requested string, permission os.FileMode) error {

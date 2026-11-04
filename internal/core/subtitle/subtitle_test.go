@@ -24,7 +24,7 @@ func TestSubtitleKeepsTranscriptTimecodesAndVersionedSRTProvenance(t *testing.T)
 		ID: "SUBTITLE-1", Path: "subtitle/event.srt", Size: 96, Checksum: checksumA,
 		Origin: archive.Provenance{
 			OriginalAssetID: "ASSET-1", InputArtifactIDs: []string{"TRANSCRIPT-1"}, ProcessingKind: vocabulary.ProcessingSTT,
-			ProcessorVersion: "videoarchive-subtitle-v1", ProfileVersion: profile.Reference(), CreatedBy: "WORKER-1", CreatedAt: time.Now().UTC(),
+			ProcessorVersion: "archive-subtitle-v1", ProfileVersion: profile.Reference(), CreatedBy: "WORKER-1", CreatedAt: time.Now().UTC(),
 		},
 	}
 	result, err := NewSubtitle(artifact, profile, transcript)

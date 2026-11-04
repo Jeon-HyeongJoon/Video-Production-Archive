@@ -37,6 +37,7 @@ func (store *Store) Close() error {
 
 func (store *Store) migrate(ctx context.Context) error {
 	statements := []string{
+		`PRAGMA busy_timeout = 5000`,
 		`PRAGMA journal_mode = WAL`,
 		`CREATE TABLE IF NOT EXISTS capability_evidence (
 			sequence INTEGER PRIMARY KEY AUTOINCREMENT,

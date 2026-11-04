@@ -1,77 +1,51 @@
 <!doctype html>
-<html lang="ko">
+<html lang="ko" data-theme="dark">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Video Production Archive</title>
+  <title>Archive</title>
   <link rel="stylesheet" href="/assets/style.css">
 </head>
 <body>
-  <header class="topbar">
-    <div class="brand-lockup">
-      <p class="product-mark">VPA / CONTROL</p>
-      <h1>영상 기록 제어실</h1>
+  <span class="sr-only">아카이브 작업 공간</span>
+  <div class="shell">
+    <header class="topbar">
+      <a class="brand" href="#/status" aria-label="아카이브 상태"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M3 5h18v4H3zM5 9v10h14V9M10 13h4"/></svg><span class="brand-text">아카이브</span></a>
+      <nav id="crumbs" class="crumbs" aria-label="위치"></nav>
+      <div class="topbar-tools">
+        <form id="search-form" class="topbar-search" role="search">
+          <label class="topbar-field"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M10.5 4a6.5 6.5 0 1 0 0 13a6.5 6.5 0 1 0 0-13zM15.5 15.5 20 20"/></svg><input id="search-text" type="search" name="q" aria-label="기록물·전사문 검색" placeholder="기록물·전사문 검색" autocomplete="off"><kbd aria-hidden="true">/</kbd></label>
+        </form>
+        <div class="alert-wrap" id="alert-wrap">
+          <button type="button" id="alert-button" class="alert-button" aria-haspopup="dialog" aria-expanded="false" aria-controls="alert-panel"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M6 16v-5a6 6 0 0 1 12 0v5l1.5 2h-15zM10 20.5h4"/></svg><b id="alert-count" class="alert-count num" hidden></b></button>
+          <div id="alert-panel" class="alert-panel" role="dialog" aria-label="알림" hidden></div>
+        </div>
+      </div>
+    </header>
+    <aside class="sidebar" aria-label="메뉴">
+      <nav id="menu" class="menu" aria-label="메뉴"></nav>
+      <section id="tree" class="tree" aria-label="Worker · 드라이브"></section>
+      <div class="side-foot">
+        <a id="open-settings" class="menu-link" href="#/settings"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 8.8a3.2 3.2 0 1 0 0 6.4a3.2 3.2 0 1 0 0-6.4zM12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4M5.5 5.5l1.7 1.7M16.8 16.8l1.7 1.7M5.5 18.5l1.7-1.7M16.8 7.2l1.7-1.7"/></svg><span class="menu-label">설정</span></a>
+        <div id="theme-switch" class="theme-switch" role="group" aria-label="화면 테마">
+          <button type="button" data-theme-choice="light" aria-label="라이트" title="라이트"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 8a4 4 0 1 0 0 8a4 4 0 1 0 0-8zM12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/></svg></button>
+          <button type="button" data-theme-choice="dark" aria-label="다크" title="다크"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/></svg></button>
+        </div>
+      </div>
+    </aside>
+    <div class="main-col">
+      <div id="stale-banner" class="banner banner-stale" role="alert" hidden><svg class="sicon" data-kind="fault" aria-hidden="true" viewBox="0 0 16 16"><path class="sicon-shape" d="M8 1.75a6.25 6.25 0 1 0 0 12.5a6.25 6.25 0 1 0 0-12.5z"/><path class="sicon-glyph" d="M5.7 5.7l4.6 4.6M10.3 5.7l-4.6 4.6"/></svg><span><b>연결 끊김</b> · <span id="stale-text"></span></span></div>
+      <main id="view" class="view"></main>
+      <div id="fresh-banner" class="toast" role="status" hidden>
+        <svg class="sicon" aria-hidden="true" viewBox="0 0 16 16"><path class="sicon-shape"/><path class="sicon-glyph"/></svg>
+        <span class="toast-text"><b>새 확인 필요</b><span id="fresh-text"></span></span>
+        <button type="button" id="fresh-go" class="toast-go">열기</button>
+        <button type="button" id="fresh-close" class="toast-close" aria-label="알림 닫기"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+      </div>
     </div>
-    <p id="health" class="status" aria-live="polite"><span class="status-dot" aria-hidden="true"></span><span class="status-label">CHECK</span></p>
-  </header>
-  <main>
-    <section class="panel jobs-panel" aria-labelledby="jobs-title">
-      <div class="section-heading">
-        <div class="section-title"><span class="section-index">01</span><h2 id="jobs-title">작업</h2></div>
-        <button id="refresh-jobs" class="icon-button" type="button" aria-label="작업 새로고침" title="작업 새로고침">
-          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.34 5.66M20 4v7h-7"/></svg>
-        </button>
-      </div>
-      <form id="job-create">
-        <label><span>제목</span><input name="target_title" required autocomplete="off"></label>
-        <label><span>템플릿</span><select name="template_name">
-          <option value="occasion-recording">행사 기록</option>
-          <option value="final-edit">최종 편집본</option>
-          <option value="large-file-intake">대용량 입고</option>
-          <option value="vj-compilation">VJ 컴필레이션</option>
-        </select></label>
-        <label><span>모드</span><select name="control_mode">
-          <option value="ASSISTED">ASSISTED</option>
-          <option value="MANUAL">MANUAL</option>
-          <option value="AGENT">AGENT</option>
-        </select></label>
-        <button class="primary-action" type="submit">생성</button>
-      </form>
-      <p id="job-command-status" class="detail" role="status"></p>
-      <div id="jobs" class="cards" aria-live="polite"></div>
-    </section>
-    <section class="panel workers-panel" aria-labelledby="workers-title">
-      <div class="section-heading">
-        <div class="section-title"><span class="section-index">02</span><h2 id="workers-title">Worker</h2></div>
-        <button id="refresh-workers" class="icon-button" type="button" aria-label="Worker 새로고침" title="Worker 새로고침">
-          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.34 5.66M20 4v7h-7"/></svg>
-        </button>
-      </div>
-      <div id="workers" class="cards" aria-live="polite"></div>
-    </section>
-    <section class="panel archive-panel" aria-labelledby="search-title">
-      <div class="section-heading">
-        <div class="section-title"><span class="section-index">03</span><h2 id="search-title">아카이브</h2></div>
-      </div>
-      <form id="asset-search">
-        <label><span>제목 · 설명 · 키워드</span><input name="text" autocomplete="off"></label>
-        <label><span>Codec</span><input name="video_codec" placeholder="h264" autocomplete="off"></label>
-        <button type="submit">검색</button>
-      </form>
-      <div id="assets" class="results" aria-live="polite"></div>
-    </section>
-    <section class="panel transcript-panel" aria-labelledby="transcript-title">
-      <div class="section-heading">
-        <div class="section-title"><span class="section-index">04</span><h2 id="transcript-title">타임코드</h2></div>
-      </div>
-      <form id="transcript-search">
-        <label><span>전사문</span><input name="text" required autocomplete="off"></label>
-        <button type="submit">찾기</button>
-      </form>
-      <div id="transcripts" class="results" aria-live="polite"></div>
-    </section>
-  </main>
-  <template id="empty"><p class="empty" aria-label="결과 없음">—</p></template>
-  <script src="/assets/app.js" defer></script>
+    <aside id="archivist-pane" class="agent-pane" aria-label="Agent"></aside>
+    <button type="button" id="agent-handle" class="agent-handle" aria-controls="archivist-pane" aria-expanded="false">Agent</button>
+  </div>
+  <script type="module" src="/assets/js/main.js"></script>
 </body>
 </html>

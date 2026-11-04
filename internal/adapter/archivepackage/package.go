@@ -81,6 +81,7 @@ func (repository *Repository) Close() error {
 
 func (repository *Repository) migrate(ctx context.Context) error {
 	statements := []string{
+		`PRAGMA busy_timeout = 5000`,
 		`PRAGMA journal_mode = WAL`,
 		`PRAGMA foreign_keys = ON`,
 		`CREATE TABLE IF NOT EXISTS archive_packages (

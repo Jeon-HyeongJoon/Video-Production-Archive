@@ -31,7 +31,7 @@ func TestCIEvidenceBundleRecordsEveryExecutedTestWithRequirementContext(t *testi
 }`)
 
 	err := generate(inputPath, catalogPath, outputDirectory, runMetadata{
-		RunID: "123-1", Revision: "abc123", Repository: "office/video-archive",
+		RunID: "123-1", Revision: "abc123", Repository: "office/archive",
 	})
 	if err != nil {
 		t.Fatal(err)

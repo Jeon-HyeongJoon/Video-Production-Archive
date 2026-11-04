@@ -127,7 +127,7 @@ func NewSummary(id string, revision uint64, artifact archive.Artifact, profile P
 	content, err := NewContent(normalizedProfile, transcript, source)
 	authorID = strings.TrimSpace(authorID)
 	if err != nil || strings.TrimSpace(id) == "" || revision == 0 ||
-		(authorType != vocabulary.ActorHuman && authorType != vocabulary.ActorAgent) || authorID == "" ||
+		(authorType != vocabulary.ActorHuman && authorType != vocabulary.ActorArchivist) || authorID == "" ||
 		artifact.ValidateDerived() != nil || artifact.Origin.ProcessingKind != vocabulary.ProcessingSummary ||
 		artifact.Origin.OriginalAssetID != transcript.Artifact.Origin.OriginalAssetID ||
 		artifact.Origin.ProfileVersion != normalizedProfile.Reference() || artifact.Origin.CreatedBy != authorID ||
@@ -147,7 +147,7 @@ func (summary Summary) Validate() error {
 	if err != nil || strings.TrimSpace(summary.ID) == "" || summary.ID != strings.TrimSpace(summary.ID) || summary.Revision == 0 ||
 		summary.TranscriptID == "" || !profileIDPattern.MatchString(summary.ProfileID) || summary.ProfileVersion == 0 ||
 		!languagePattern.MatchString(summary.Language) ||
-		(summary.AuthorType != vocabulary.ActorHuman && summary.AuthorType != vocabulary.ActorAgent) ||
+		(summary.AuthorType != vocabulary.ActorHuman && summary.AuthorType != vocabulary.ActorArchivist) ||
 		summary.AuthorID == "" || summary.AuthorID != strings.TrimSpace(summary.AuthorID) ||
 		summary.Artifact.ValidateDerived() != nil || summary.Artifact.Origin.ProcessingKind != vocabulary.ProcessingSummary ||
 		summary.Artifact.Origin.ProfileVersion != fmt.Sprintf("%s@v%d", summary.ProfileID, summary.ProfileVersion) ||

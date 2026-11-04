@@ -98,10 +98,10 @@ func TestForbiddenIdentifierIsReportedWithLocation(t *testing.T) {
 
 func TestGlobalForbiddenWordIsReportedButContextualWordIsNotScanned(t *testing.T) {
 	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "design.md"), []byte("use Device Agent here\nordinary workflow word\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "design.md"), []byte("use Device Archivist here\nordinary workflow word\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	problems, err := globallyForbiddenWords(root, []string{"Device Agent"})
+	problems, err := globallyForbiddenWords(root, []string{"Device Archivist"})
 	if err != nil {
 		t.Fatal(err)
 	}

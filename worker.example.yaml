@@ -3,8 +3,17 @@ schema_version: 1
 worker:
   id: worker-main
   control_url: http://127.0.0.1:8080
-  credential_ref: wincred://video-archive/workers/worker-main
+  credential_ref: wincred://archive/workers/worker-main
   heartbeat_interval: 10s
-  accessible_storage_ids:
-    - scratch-main
-    - archive-primary
+  storage_roots:
+    - storage_id: scratch-main
+      root: /srv/archive/scratch
+    - storage_id: archive-primary
+      root: /srv/archive/archive-primary
+  tools:
+    ffmpeg:
+      executable: /usr/local/bin/ffmpeg
+      version: ffmpeg-8.0
+    ffprobe:
+      executable: /usr/local/bin/ffprobe
+      version: ffprobe-8.0
