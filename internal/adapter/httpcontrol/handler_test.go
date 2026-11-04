@@ -276,6 +276,13 @@ func TestWorkspaceLocksDecisionsWhileRefreshIsStale(t *testing.T) {
 	})
 }
 
+// Requirement: DSH-022
+func TestWorkspaceShowsIncrementalFolderDiscoveryAndLocksPartialScope(t *testing.T) {
+	testControlHTTPScene(t, scenePreRun, func(t *testing.T, handler http.Handler) {
+		assertArchiveWorkspaceScript(t, handler, "check_archive_workspace_discovery.py")
+	})
+}
+
 func testControlHTTPWorkspace(t *testing.T, check func(*testing.T, http.Handler)) {
 	testControlHTTPScene(t, sceneStageOne, check)
 }
@@ -785,7 +792,7 @@ func (workspace *archiveIntakeWorkspaceFixture) Projection(context.Context) ([]a
 		WorkspaceDriveID: "VOLUME-1", ArchiveRunID: "ARCHIVE-RUN-1", ArchiveRunRevision: 1,
 		CandidateRevision: 7, FolderDiscoveryRevision: 7,
 		SessionID: "INTAKE-1", WorkerID: "WORKER-1", SourceVolumeID: "VOLUME-1", SourceStorageID: "source-main",
-		ArchiveStorageID: "archive-main", State: "HAS_HOLD", InputRevision: 7, FileCount: 795, FolderCount: len(folders),
+		ArchiveStorageID: "archive-main", State: "HAS_HOLD", InputRevision: 7, FolderDiscoveryState: vocabulary.FolderDiscoveryReady, FileCount: 795, FolderCount: len(folders),
 		HoldCount: 1, CatalogRowCount: 795,
 		StorageCandidates: []archiveintakeworkspace.StorageView{
 			{StorageID: "source-main", Role: vocabulary.StorageSourceMedia, WorkspaceDriveID: "VOLUME-1", AccessKind: vocabulary.StorageAccessAttachedVolume, Accessible: true, CapacityBytes: 1 << 40, FreeBytes: 420 << 30},
@@ -843,6 +850,11 @@ func (workspace *archiveIntakeWorkspaceFixture) Projection(context.Context) ([]a
 		drive.ArchiveRunState, drive.EligibleTranscriptionCount, drive.CatalogUpdatedAt = "COMPLETED", 4, now.Add(3*time.Hour)
 	}
 	drive.Folders = folders
+	drive.DiscoveredFolders = append([]archiveintakeworkspace.FolderView(nil), folders...)
+	drive.DiscoveredFolderCount = len(folders)
+	for _, folder := range folders {
+		drive.DiscoveredFileCount += folder.VideoCount
+	}
 	reviewA := transcribed(renderDone("review-a", 64, 12))
 	reviewB := sourceB
 	reviewB.Folder, reviewB.ArchivePackageID = "review-b", "VP-20261029-REVIEW-B"
@@ -851,9 +863,10 @@ func (workspace *archiveIntakeWorkspaceFixture) Projection(context.Context) ([]a
 		WorkspaceDriveID: "VOLUME-2", ArchiveRunID: "ARCHIVE-RUN-2", ArchiveRunRevision: 1,
 		CandidateRevision: 3, FolderDiscoveryRevision: 3,
 		SessionID: "INTAKE-2", WorkerID: "WORKER-2", SourceVolumeID: "VOLUME-2", SourceStorageID: "source-review",
-		ArchiveStorageID: "archive-nas", State: "COMPLETED", ArchiveRunState: "COMPLETED",
+		ArchiveStorageID: "archive-nas", State: "COMPLETED", ArchiveRunState: "COMPLETED", FolderDiscoveryState: vocabulary.FolderDiscoveryReady,
 		InputRevision: 3, FileCount: 386, FolderCount: 2, EligibleTranscriptionCount: 1,
 		CatalogRowCount: 386, CatalogUpdatedAt: now.Add(-20 * time.Hour), Folders: []archiveintakeworkspace.FolderView{reviewA, reviewB},
+		DiscoveredFileCount: 386, DiscoveredFolderCount: 2, DiscoveredFolders: []archiveintakeworkspace.FolderView{reviewA, reviewB},
 		StorageCandidates: []archiveintakeworkspace.StorageView{
 			{StorageID: "source-review", Role: vocabulary.StorageSourceMedia, WorkspaceDriveID: "VOLUME-2", AccessKind: vocabulary.StorageAccessAttachedVolume, Accessible: true, CapacityBytes: 1 << 40, FreeBytes: 500 << 30},
 			{StorageID: "archive-nas", Role: vocabulary.StorageArchivePrimary, WorkspaceDriveID: "ARCHIVE-NETWORK-VOLUME-1", AccessKind: vocabulary.StorageAccessMountedNetwork, Accessible: true, CapacityBytes: 8 << 40, FreeBytes: 3 << 40},

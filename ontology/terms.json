@@ -2694,6 +2694,51 @@
       "decided": "2026-11-01"
     },
     {
+      "id": "folder-discovery-state",
+      "layer": "product",
+      "kind": "enum",
+      "name": {
+        "ko": "폴더 탐색 상태",
+        "en": "Folder Discovery State"
+      },
+      "code_name": "FolderDiscoveryState",
+      "definition": "선택된 SOURCE_MEDIA의 비동기 folder inventory가 부분 결과를 만드는 현재 상태.",
+      "values": [
+        {
+          "id": "SCANNING",
+          "description": "탐색 중이며 부분 폴더·영상 집계는 표시할 수 있지만 실행 범위로 고정할 revision은 아직 없다."
+        },
+        {
+          "id": "READY",
+          "description": "전체 탐색이 끝나 0이 아닌 discovery revision과 완전한 폴더 집합을 사용할 수 있다."
+        },
+        {
+          "id": "FAILED",
+          "description": "선택 root를 열거나 탐색 결과를 완성하지 못해 실행 범위로 사용할 수 없다."
+        }
+      ],
+      "rules": [
+        "SCANNING의 부분 집계는 heartbeat와 화면에 보이지만 ArchiveRun의 폴더 범위로 선택할 수 없다.",
+        "READY만 0이 아닌 folder discovery revision을 가진다.",
+        "FAILED는 빈 폴더 목록과 같지 않으며 화면에서 검색 실패로 구분한다."
+      ],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "part-of",
+          "target": "archive-intake-session"
+        }
+      ],
+      "sources": [
+        "사용자 결정 2026-11-04: 대용량 드라이브 폴더 자동 감지 진행을 화면에 표시",
+        "requirements DEV-011, DSH-022"
+      ],
+      "decided": "2026-11-04"
+    },
+    {
       "id": "archive-storage",
       "layer": "product",
       "kind": "role",

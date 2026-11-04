@@ -32,6 +32,7 @@ type AttachedProbe struct {
 	states  map[string]*attachedScanState
 	refresh time.Duration
 	now     func() time.Time
+	scan    attachedScanFunc
 }
 
 type attachedScanState struct {
@@ -39,12 +40,16 @@ type attachedScanState struct {
 	ready       bool
 	scanning    bool
 	lastAttempt time.Time
+	attempt     uint64
 }
 
 type attachedScanTask struct {
 	storageID string
 	volume    device.ConnectedVolume
+	attempt   uint64
 }
+
+type attachedScanFunc func(context.Context, attachedScanTask, func([]worker.MediaFolderObservation)) (worker.StorageObservation, error)
 
 type inventoryRoot interface {
 	ReadDir(string) ([]fs.DirEntry, error)
@@ -59,7 +64,7 @@ func New(configuration workerconfig.Configuration, roots *workerconfig.StorageRo
 }
 
 func NewAttachedProbe() *AttachedProbe {
-	return &AttachedProbe{states: make(map[string]*attachedScanState), refresh: 30 * time.Second, now: time.Now}
+	return &AttachedProbe{states: make(map[string]*attachedScanState), refresh: 30 * time.Second, now: time.Now, scan: scanAttachedRoot}
 }
 
 func (probe *Probe) Observe(ctx context.Context) ([]worker.StorageObservation, error) {
@@ -72,14 +77,16 @@ func (probe *Probe) Observe(ctx context.Context) ([]worker.StorageObservation, e
 		if networkRoot(configured.Root) {
 			accessKind = vocabulary.StorageAccessMountedNetwork
 		}
-		observation := worker.StorageObservation{StorageID: configured.StorageID, AccessKind: accessKind, DiscoveryRevision: 1}
+		observation := worker.StorageObservation{
+			StorageID: configured.StorageID, AccessKind: accessKind, DiscoveryState: vocabulary.FolderDiscoveryFailed,
+		}
 		capacity, free, capacityErr := storageCapacity(configured.Root)
 		root, rootFound := probe.roots.Root(configured.StorageID)
 		if capacityErr != nil || !rootFound {
 			result = append(result, observation)
 			continue
 		}
-		observed, observeErr := observeRoot(ctx, observation, root, capacity, free)
+		observed, observeErr := observeRoot(ctx, observation, root, capacity, free, nil)
 		if observeErr != nil {
 			result = append(result, observation)
 			continue
@@ -91,7 +98,7 @@ func (probe *Probe) Observe(ctx context.Context) ([]worker.StorageObservation, e
 }
 
 func (probe *AttachedProbe) Observe(ctx context.Context, selectedStorageIDs []string, volumes []device.ConnectedVolume) ([]worker.StorageObservation, error) {
-	if probe == nil || probe.now == nil || probe.refresh <= 0 {
+	if probe == nil || probe.now == nil || probe.refresh <= 0 || probe.scan == nil {
 		return nil, ErrObservationFailed
 	}
 	connected := make(map[string]device.ConnectedVolume, len(volumes))
@@ -125,53 +132,91 @@ func (probe *AttachedProbe) Observe(ctx context.Context, selectedStorageIDs []st
 		}
 		state := probe.states[storageID]
 		if state == nil {
-			state = &attachedScanState{}
+			state = &attachedScanState{observation: scanningObservation(storageID, volume)}
 			probe.states[storageID] = state
 		}
-		if state.ready {
-			result = append(result, state.observation)
-		}
-		if !state.scanning && (!state.ready || now.Sub(state.lastAttempt) >= probe.refresh) {
+		retryDue := state.observation.DiscoveryState != vocabulary.FolderDiscoveryFailed || now.Sub(state.lastAttempt) >= probe.refresh
+		if !state.scanning && ((state.ready && now.Sub(state.lastAttempt) >= probe.refresh) || (!state.ready && retryDue)) {
 			state.scanning = true
 			state.lastAttempt = now
-			tasks = append(tasks, attachedScanTask{storageID: storageID, volume: volume})
+			state.attempt++
+			if !state.ready {
+				state.observation = scanningObservation(storageID, volume)
+			}
+			tasks = append(tasks, attachedScanTask{storageID: storageID, volume: volume, attempt: state.attempt})
 		}
+		result = append(result, cloneObservation(state.observation))
 	}
 	probe.mu.Unlock()
 	for _, task := range tasks {
-		go probe.scan(ctx, task)
+		go probe.runScan(ctx, task)
 	}
 	return result, nil
 }
 
-func (probe *AttachedProbe) scan(ctx context.Context, task attachedScanTask) {
-	root, err := archive.OpenReadOnlyStorageRoot(task.volume.Root)
-	if err != nil {
-		probe.finish(task.storageID, worker.StorageObservation{}, false)
-		return
+func scanningObservation(storageID string, volume device.ConnectedVolume) worker.StorageObservation {
+	return worker.StorageObservation{
+		StorageID: storageID, Connected: true, AccessKind: vocabulary.StorageAccessAttachedVolume,
+		DiscoveryState: vocabulary.FolderDiscoveryScanning,
+		CapacityBytes:  volume.CapacityBytes, FreeBytes: volume.FreeBytes,
 	}
-	observation, observeErr := observeRoot(ctx, worker.StorageObservation{
-		StorageID: task.storageID, AccessKind: vocabulary.StorageAccessAttachedVolume, DiscoveryRevision: 1,
-	}, root, task.volume.CapacityBytes, task.volume.FreeBytes)
-	closeErr := root.Close()
-	probe.finish(task.storageID, observation, observeErr == nil && closeErr == nil)
 }
 
-func (probe *AttachedProbe) finish(storageID string, observation worker.StorageObservation, succeeded bool) {
+func cloneObservation(observation worker.StorageObservation) worker.StorageObservation {
+	observation.Folders = append([]worker.MediaFolderObservation(nil), observation.Folders...)
+	return observation
+}
+
+func (probe *AttachedProbe) runScan(ctx context.Context, task attachedScanTask) {
+	observation, err := probe.scan(ctx, task, func(folders []worker.MediaFolderObservation) {
+		probe.progress(task, folders)
+	})
+	probe.finish(task, observation, err == nil)
+}
+
+func scanAttachedRoot(ctx context.Context, task attachedScanTask, report func([]worker.MediaFolderObservation)) (worker.StorageObservation, error) {
+	root, err := archive.OpenReadOnlyStorageRoot(task.volume.Root)
+	if err != nil {
+		return worker.StorageObservation{}, ErrObservationFailed
+	}
+	observation, observeErr := observeRoot(ctx, scanningObservation(task.storageID, task.volume), root,
+		task.volume.CapacityBytes, task.volume.FreeBytes, report)
+	closeErr := root.Close()
+	if observeErr != nil || closeErr != nil {
+		return worker.StorageObservation{}, ErrObservationFailed
+	}
+	return observation, nil
+}
+
+func (probe *AttachedProbe) progress(task attachedScanTask, folders []worker.MediaFolderObservation) {
 	probe.mu.Lock()
 	defer probe.mu.Unlock()
-	state := probe.states[storageID]
-	if state == nil {
+	state := probe.states[task.storageID]
+	if state == nil || state.attempt != task.attempt || state.ready || !state.scanning {
+		return
+	}
+	state.observation.Folders = append([]worker.MediaFolderObservation(nil), folders...)
+}
+
+func (probe *AttachedProbe) finish(task attachedScanTask, observation worker.StorageObservation, succeeded bool) {
+	probe.mu.Lock()
+	defer probe.mu.Unlock()
+	state := probe.states[task.storageID]
+	if state == nil || state.attempt != task.attempt {
 		return
 	}
 	state.scanning = false
 	if succeeded {
-		state.observation = observation
+		state.observation = cloneObservation(observation)
 		state.ready = true
+	} else if !state.ready {
+		state.observation = scanningObservation(task.storageID, task.volume)
+		state.observation.DiscoveryState = vocabulary.FolderDiscoveryFailed
+		state.observation.Folders = nil
 	}
 }
 
-func observeRoot(ctx context.Context, observation worker.StorageObservation, root inventoryRoot, capacity, free uint64) (worker.StorageObservation, error) {
+func observeRoot(ctx context.Context, observation worker.StorageObservation, root inventoryRoot, capacity, free uint64, report func([]worker.MediaFolderObservation)) (worker.StorageObservation, error) {
 	if root == nil || capacity == 0 || free > capacity {
 		return observation, ErrObservationFailed
 	}
@@ -179,11 +224,16 @@ func observeRoot(ctx context.Context, observation worker.StorageObservation, roo
 	if err != nil {
 		return observation, ErrObservationFailed
 	}
-	folders, err := scanner.Discover()
+	var progress func([]mediafolder.Folder)
+	if report != nil {
+		progress = func(folders []mediafolder.Folder) { report(summarizeFolders(folders)) }
+	}
+	folders, err := scanner.DiscoverWithProgress(progress)
 	if err != nil {
 		return observation, ErrObservationFailed
 	}
 	observation.Connected = true
+	observation.DiscoveryState = vocabulary.FolderDiscoveryReady
 	observation.CapacityBytes = capacity
 	observation.FreeBytes = free
 	digest := sha256.New()
@@ -219,6 +269,14 @@ func observeRoot(ctx context.Context, observation worker.StorageObservation, roo
 		observation.DiscoveryRevision = 1
 	}
 	return observation, nil
+}
+
+func summarizeFolders(folders []mediafolder.Folder) []worker.MediaFolderObservation {
+	result := make([]worker.MediaFolderObservation, 0, len(folders))
+	for _, folder := range folders {
+		result = append(result, worker.MediaFolderObservation{Folder: folder.RelativePath, VideoCount: len(folder.VideoPaths)})
+	}
+	return result
 }
 
 func networkRoot(root string) bool {

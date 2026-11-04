@@ -378,8 +378,10 @@ button.cal-cell[data-signal="work"]{border-color:var(--ink);background:var(--ink
 button.cal-cell[data-signal="idle"]{border-color:var(--strong);background:var(--surface)}
 button.cal-cell[aria-pressed="true"]{box-shadow:0 0 0 2px var(--surface),0 0 0 4px var(--ink)}
 .cal-sum{color:var(--muted);font-size:var(--text-xs);text-align:right}
-.chooser{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px}
+.chooser{display:flex;flex-direction:column;gap:10px}
 .chooser-col{display:flex;flex-direction:column;max-height:420px;overflow-y:auto;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface)}
+#prep-archives{max-height:300px}
+#prep-folders{max-height:520px}
 .chooser-head{position:sticky;top:0;z-index:1;min-height:42px;padding:8px 14px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--hair);background:var(--raised)}
 .chooser-head b{font-weight:600}
 .chooser-value{margin-left:auto;color:var(--muted);font-size:var(--text-xs);text-align:right}
@@ -392,11 +394,11 @@ button.cal-cell[aria-pressed="true"]{box-shadow:0 0 0 2px var(--surface),0 0 0 4
 .option-meta{display:flex;flex-direction:column;gap:2px;color:var(--soft);font-size:var(--text-xs)}
 .option-meta small{color:var(--muted)}
 .option:disabled .option-meta,.option:disabled .option-meta small{color:var(--idle)}
-.folder-pick{min-height:44px;padding:8px 14px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--hair);font-size:var(--text-sm);cursor:pointer}
+.folder-pick{min-height:44px;padding:8px 14px;display:grid;grid-template-columns:16px minmax(0,1fr) auto;align-items:start;gap:10px;border-bottom:1px solid var(--hair);font-size:var(--text-sm);cursor:pointer}
 .folder-pick input{width:16px;height:16px;margin:0;accent-color:var(--ink)}
-.folder-pick-name{flex:1;min-width:0;overflow-wrap:anywhere}
-.folder-pick small{color:var(--muted)}
-.folder-all{background:var(--raised);font-weight:600}
+.folder-pick-name{min-width:0;line-height:1.45;overflow-wrap:anywhere;word-break:break-word}
+.folder-pick small{color:var(--muted);white-space:nowrap;text-align:right}
+.folder-all{position:sticky;top:42px;z-index:1;grid-template-columns:16px minmax(0,1fr);align-items:center;background:var(--raised);font-weight:600}
 .start-bar{padding:12px 16px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
 .start-bar #selection-summary{font-weight:600}
 .start-reason{margin-left:auto;color:var(--decide-ink);font-size:var(--text-sm);font-weight:600}

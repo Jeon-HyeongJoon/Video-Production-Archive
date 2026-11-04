@@ -10,7 +10,7 @@ import {
 } from "../core.js";
 import {
   model, ui, notify, refresh, findDrive, driveName, folderProblem, folderState, folderSignal, isRunning, preparing,
-  prepareDrive, syncPreparation, discoveredFolders, archiveCandidates, startBlocker,
+  prepareDrive, syncPreparation, discoveredFolders, archiveCandidates, folderDiscoveryReady, folderDiscoveryText, startBlocker,
 } from "../store.js";
 import { driveFacts } from "../overview.js";
 import { flowGraph } from "../flow.js";
@@ -275,13 +275,14 @@ function archiveOption(storage) {
 function prepPanel(drive) {
   syncPreparation(drive);
   const folders = discoveredFolders(drive);
-  const all = el("input", { type: "checkbox", id: "select-all", "aria-label": "전체 선택" });
+  const ready = folderDiscoveryReady(drive);
+  const all = el("input", { type: "checkbox", id: "select-all", "aria-label": "전체 선택", disabled: !ready });
   const selected = folders.filter((folder) => ui.folders.has(folder.folder));
-  all.checked = folders.length > 0 && selected.length === folders.length;
+  all.checked = ready && folders.length > 0 && selected.length === folders.length;
   all.indeterminate = selected.length > 0 && selected.length < folders.length;
   all.addEventListener("change", () => { ui.folders = new Set(all.checked ? folders.map((folder) => folder.folder) : []); notify(); });
   const picks = folders.map((folder) => {
-    const check = el("input", { type: "checkbox", "aria-label": `${folder.folder} 선택` });
+    const check = el("input", { type: "checkbox", "aria-label": `${folder.folder} 선택`, disabled: !ready });
     check.checked = ui.folders.has(folder.folder);
     check.addEventListener("change", () => { check.checked ? ui.folders.add(folder.folder) : ui.folders.delete(folder.folder); notify(); });
     return el("label", { class: "folder-pick", dataset: { folderId: folder.folder } }, check,
@@ -292,6 +293,7 @@ function prepPanel(drive) {
   const videos = selected.reduce((sum, folder) => sum + (folder.video_count || 0), 0);
   const bytes = selected.reduce((sum, folder) => sum + (folder.estimated_output_bytes || 0), 0);
   const blocker = startBlocker(drive, selected);
+  const folderHeading = ready ? `탐색 r${drive.folder_discovery_revision} · ${folders.length}` : folderDiscoveryText(drive);
   return el("section", { class: "section", id: "drive-prep", "aria-label": "아카이브 실행 준비" },
     el("h2", { class: "section-title" }, "아카이브 실행 준비"),
     el("div", { class: "chooser" },
@@ -299,9 +301,9 @@ function prepPanel(drive) {
         el("div", { class: "chooser-head" }, el("b", {}, "아카이브 저장소"), el("span", { class: "chooser-value" }, ui.archiveID || "선택 없음")),
         ...(candidates.length ? candidates.map(archiveOption) : [emptyState("후보 없음")])),
       el("div", { class: "chooser-col", id: "prep-folders", "aria-label": "폴더" },
-        el("div", { class: "chooser-head" }, el("b", {}, "폴더"), el("span", { class: "chooser-value num" }, `탐색 r${drive.folder_discovery_revision || drive.input_revision} · ${folders.length}`)),
+        el("div", { class: "chooser-head" }, el("b", {}, "폴더"), el("span", { class: "chooser-value num" }, folderHeading)),
         el("label", { class: "folder-pick folder-all" }, all, el("span", {}, "전체")),
-        ...(picks.length ? picks : [emptyState("폴더 없음")]))),
+        ...(picks.length ? picks : [emptyState(drive.folder_discovery_state === "SCANNING" ? "검색 중" : drive.folder_discovery_state === "FAILED" ? "검색 실패" : "폴더 없음")]))),
     el("div", { class: "panel start-bar" },
       el("span", { id: "selection-summary", class: "num" }, `${selected.length} 폴더 · ${formatCount(videos)} 영상 · ${formatBytes(bytes)}`),
       el("span", { id: "start-reason", class: "start-reason" }, blocker),

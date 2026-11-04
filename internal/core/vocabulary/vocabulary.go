@@ -176,6 +176,21 @@ func (value StorageAccessKind) Valid() bool {
 	}
 }
 
+// FolderDiscoveryState reports whether a Worker's source-folder inventory is
+// still partial, complete and revisioned, or unavailable because discovery
+// failed. SCANNING observations are display-only and cannot define a run.
+type FolderDiscoveryState string
+
+const (
+	FolderDiscoveryScanning FolderDiscoveryState = "SCANNING"
+	FolderDiscoveryReady    FolderDiscoveryState = "READY"
+	FolderDiscoveryFailed   FolderDiscoveryState = "FAILED"
+)
+
+func (value FolderDiscoveryState) Valid() bool {
+	return value == FolderDiscoveryScanning || value == FolderDiscoveryReady || value == FolderDiscoveryFailed
+}
+
 type ExecutorKind string
 
 const (

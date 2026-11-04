@@ -114,13 +114,13 @@ scratch_free_bytes
 heavy_running, light_running
 busy_physical_device_ids
 accessible_storage_ids, accepting_work
-storage_observations: storage_id, connected, access kind, capacity/free, folder discovery revision, folder video count/input bytes
+storage_observations: storage_id, connected, access kind, capacity/free, folder discovery state/revision, folder video count/input bytes
 attached_volumes: physical_device_id, volume_id, source storage_id, model/label/filesystem, capacity/free
 ```
 
 Windows Worker는 OS가 `DRIVE_FIXED`로 보더라도 USB·SD 같은 외부 data bus의 volume을 원본 후보로 관찰한다. 내부 시스템 volume과 1GiB 미만 보조 partition은 제외하고 serial·model·물리 용량으로 PhysicalDevice ID, volume GUID·filesystem으로 volume ID를 만든다. drive letter와 mount root는 identity에 넣지 않고 Worker process 안에만 둔다. 이 단계에서는 파일이나 폴더를 읽지 않는다. `DEV-007`
 
-Control은 attached volume 관찰을 identity만 가진 SOURCE_MEDIA 후보로 저장한다. 사람이 현재 candidate revision을 선택하면 불변 ArchiveIntakeSession을 저장하고, 다음 heartbeat 응답에 선택된 source storage ID를 같은 Worker에 반환한다. Worker는 그때만 local mount를 `ReadOnlyStorageRoot`로 열어 폴더 inventory를 background에서 수행한다. 긴 탐색은 heartbeat·claim loop를 막지 않으며 이전에 완성된 관측이 있으면 그것을 계속 보낸다. 보호·숨김 OS 하위 폴더는 건너뛰고 선택 root 자체를 열 수 없으면 결과를 게시하지 않는다. `DEV-008`, `ORG-001`
+Control은 attached volume 관찰을 identity만 가진 SOURCE_MEDIA 후보로 저장한다. 사람이 현재 candidate revision을 선택하면 불변 ArchiveIntakeSession을 저장하고, 다음 heartbeat 응답에 선택된 source storage ID를 같은 Worker에 반환한다. Worker는 그때만 local mount를 `ReadOnlyStorageRoot`로 열어 폴더 inventory를 background에서 수행한다. 긴 탐색은 heartbeat·claim loop를 막지 않으며 최초 탐색은 `SCANNING`과 지금까지 찾은 폴더·영상 집계를, 성공하면 `READY`와 0이 아닌 revision을, root 개방이나 탐색 실패는 `FAILED`를 보낸다. `SCANNING`의 부분 목록은 화면 표시 전용이며 ArchiveRun 범위로 고정하지 않는다. 재탐색 중에는 이전에 완성된 `READY` 관측을 계속 보낸다. 보호·숨김 OS 하위 폴더는 건너뛴다. `DEV-008`, `DEV-011`, `ORG-001`
 
 Boot 설정 Storage와 선택된 attached source 모두 heartbeat에는 Storage ID와 집계만 보내며 파일 상대경로 목록과 root 절대경로는 보내지 않는다. 외장 Volume 관찰은 같은 root에 대해 SOURCE_MEDIA와 ARCHIVE_PRIMARY의 서로 다른 stable Storage ID를 함께 보고해 역할 capability를 섞지 않는다. Control은 등록 Storage topology, attached Volume·PhysicalDevice identity와 이 관측을 결합해 미분류 원본 폴더와 로컬·연결 네트워크·새 외장 드라이브 아카이브 후보를 투영한다. 접근 방식은 Worker Adapter가 `StorageAccessKind`로 보고하며 임의 Storage ID 문자열에서 추측하지 않는다. 같은 원본 Volume만 자체 아카이브 후보에서 제외하고 PhysicalDevice ID는 별도 I/O 충돌 키로 유지한다. `DEV-006~007`, `DEV-010`
 
