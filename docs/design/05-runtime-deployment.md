@@ -123,7 +123,7 @@ C:\Archive\
 └── legacy\               # 이전 위치 inventory와 복구 가능한 격리
 ```
 
-새 release는 별도 `releases/<rev>`에 복사·검증한 뒤 `current`를 전환한다. `C:\Video-Production-Archive`, 과거 `deploy/<rev>`와 다른 임시 배포는 먼저 inventory에 기록하고 서비스·설정·DB·패키지 checksum을 대조한 뒤 `legacy`로 옮긴다. 자동 삭제는 하지 않으며 ArchivePackage나 catalog는 선택한 아카이브 Storage에 그대로 둔다. 실제 Windows에서 서비스 경로 전환·재시작·복구와 기존 결과 불변을 검증할 때까지 `CFG-014`는 planned다.
+새 release는 별도 `releases/<rev>`에 복사·검증한 뒤 `current`를 전환한다. `C:\Video-Production-Archive`, 과거 `deploy/<rev>`와 다른 임시 배포는 먼저 inventory에 기록하고 서비스·설정·DB·패키지 checksum을 대조한 뒤 `legacy`로 옮긴다. 자동 삭제는 하지 않으며 ArchivePackage나 catalog는 선택한 아카이브 Storage에 그대로 둔다. Windows acceptance는 실행 중인 프로세스와 예약 작업이 `runtime/current`만 가리키는지, 역할별 설정 경로와 DB·scratch가 분리됐는지, 이전 경로와 패키지 검증 기록이 복구 가능한 `legacy`에 남았는지를 함께 확인한다. `CFG-014`
 
 `deploy/windows/manage-runtime-layout.ps1`은 기본 `Plan`, 비파괴 `Inventory`, 해시를 검증하는 `Stage`만 제공한다. 서비스의 `current` 전환과 이전 경로 격리는 Windows acceptance에서 설정·DB·패키지 manifest를 대조한 뒤 수행한다.
 
@@ -131,6 +131,15 @@ C:\Archive\
 .\deploy\windows\manage-runtime-layout.ps1 -Mode Plan
 .\deploy\windows\manage-runtime-layout.ps1 -Mode Inventory
 .\deploy\windows\manage-runtime-layout.ps1 -Mode Stage -Revision <git-revision> -SourceDirectory <binary-directory>
+```
+
+실제 설치를 전환하고 이전 경로를 격리한 뒤 다음 acceptance를 실행한다. 증적 디렉터리는 전환 전후 API·예약 작업·프로세스·DB migration·패키지 manifest 검증과 이동 목록을 포함해야 한다.
+
+```powershell
+$env:ARCHIVE_WINDOWS_RUNTIME_LAYOUT_ACCEPTANCE = '1'
+$env:ARCHIVE_WINDOWS_RUNTIME_ROOT = 'C:\Archive'
+$env:ARCHIVE_WINDOWS_RUNTIME_EVIDENCE = 'C:\Archive\evidence\<run-id>'
+go test ./internal/application/controlruntime -run TestWindowsRuntimeUsesSingleRootAndRetainsLegacyEvidence -v
 ```
 
 네트워크 설정은 서비스 설정과 Windows Firewall에 이중으로 둔다.

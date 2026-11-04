@@ -27,6 +27,15 @@ function Get-ArchiveRuntimeLayout {
     }
 }
 
+function Set-ArchiveUtf8Content {
+    param(
+        [string]$Path,
+        [string]$Content
+    )
+    $encoding = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText([System.IO.Path]::GetFullPath($Path), $Content, $encoding)
+}
+
 $layout = Get-ArchiveRuntimeLayout -RuntimeRoot $Root
 if ($Mode -eq "Plan") {
     [pscustomobject]@{
@@ -65,11 +74,12 @@ if ($Mode -eq "Inventory") {
     }
     $stamp = (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssZ")
     $target = Join-Path $layout.legacy "inventory-$stamp.json"
-    [pscustomobject]@{
+    $inventory = [pscustomobject]@{
         recorded_at = (Get-Date).ToUniversalTime().ToString("o")
         runtime_root = $layout.root
         legacy = @($items)
-    } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $target -Encoding utf8NoBOM
+    } | ConvertTo-Json -Depth 5
+    Set-ArchiveUtf8Content -Path $target -Content $inventory
     Write-Output $target
     exit 0
 }
@@ -108,12 +118,13 @@ $files = foreach ($binaryName in $binaryNames) {
 }
 
 $stagedManifest = Join-Path $stagingDirectory "release.json"
-[pscustomobject]@{
+$releaseManifest = [pscustomobject]@{
     revision = $Revision
     staged_at = (Get-Date).ToUniversalTime().ToString("o")
     files = @($files)
     activation = "pending Windows acceptance; services continue to use runtime/current"
-} | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $stagedManifest -Encoding utf8NoBOM
+} | ConvertTo-Json -Depth 4
+Set-ArchiveUtf8Content -Path $stagedManifest -Content $releaseManifest
 Move-Item -LiteralPath $stagingDirectory -Destination $releaseDirectory
 $manifest = Join-Path $releaseDirectory "release.json"
 Write-Output $manifest

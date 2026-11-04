@@ -66,11 +66,11 @@
 ## 5. 현재 기준선
 
 - 전체 요구사항: 247개
-- 구현됨: 230개, 주석 테스트 230개와 1:1 연결
+- 구현됨: 231개, 주석 테스트 231개와 1:1 연결
 - 구현된 integration 테스트: `ARC-006~007`, `ARC-013`, `PER-001`, `NTF-002`, `EXE-003`, `DSH-001~002`, `DSH-004~007`, `DSH-009~014`, `DSH-016~023`, `DEV-006~008`, `DEV-010`, `DEV-013`, `APP-001~004`, `APP-008`, `OBS-001`, `TST-001`, `MED-002`, `MED-004`, `MED-006`, `INT-001`, `INT-003~004`, `RND-002`, `RND-005~006`, `QCT-002`, `CAT-002~003`, `AUD-002`, `AUD-004`, `TRN-002`, `TRN-004`, `TRN-006`, `SUB-002`, `SUM-002~003`, `REV-002`, `CFG-006~010`, `CTL-001~006`, `WRK-005~006`, `WRK-008~012`, `LRH-001`, `LRH-012~013`, `MCP-001`, `MCP-003~005`, `ORG-001`, `ORG-008~009`, `ARC-011`, `COL-001`, `COL-003`, `DSP-003`, `CAN-001~004`
-- 구현된 실장비 acceptance 테스트: `ARC-008`, `MED-003`, `RND-003`, `AUD-003`, `LRH-010~011`, `APP-005`, `APP-007`
-- 계획됨: 17개
-- 계획된 실장비 acceptance 테스트: `DEV-005`, `TRN-003`, `WRK-007`, `LRH-009`, `LRH-014`, `DEV-009`, `DEV-012`, `TRN-005`, `CFG-012~014`, `ORG-010`
+- 구현된 실장비 acceptance 테스트: `ARC-008`, `MED-003`, `RND-003`, `AUD-003`, `LRH-010~011`, `APP-005`, `APP-007`, `CFG-014`
+- 계획됨: 16개
+- 계획된 실장비 acceptance 테스트: `DEV-005`, `TRN-003`, `WRK-007`, `LRH-009`, `LRH-014`, `DEV-009`, `DEV-012`, `TRN-005`, `CFG-012~013`, `ORG-010`
 - 계획된 integration 테스트: `CFG-011`, `APP-006`, `ARC-010`, `ARC-012`, `DSH-015`
 
 정확한 문구와 테스트 이름은 항상 [`catalog.json`](catalog.json)에서 확인한다. 이 문서에는 변경 시 쉽게 낡는 전체 테스트 목록을 복제하지 않는다.
@@ -85,7 +85,7 @@ go test ./...
 현재 정상 출력:
 
 ```text
-traceability ok: 244 requirements (228 implemented, 16 planned), 228 one-to-one tests
+traceability ok: 247 requirements (231 implemented, 16 planned), 231 one-to-one tests
 ```
 
 ## 7. 새 요구사항 추가 절차
