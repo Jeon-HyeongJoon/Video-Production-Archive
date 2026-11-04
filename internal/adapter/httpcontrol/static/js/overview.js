@@ -3,7 +3,7 @@
 // the flow graph of its ArchiveRun. Counts behind a fact wait on hover.
 
 import { el, svgIcon, icons, statusIcon, problemCounts, label, stateSignal, formatCount, formatBytes, shortTime, clockTime, meter } from "./core.js";
-import { model, drivePhase, driveName, driveProgress, driveProblemCounts, PHASE_LABEL, PHASE_ICON } from "./store.js";
+import { model, drivePhase, driveName, driveProgress, driveProblemCounts, folderDiscoveryText, PHASE_LABEL, PHASE_ICON } from "./store.js";
 import { flowGraph } from "./flow.js";
 
 function fact(name, value, attributes = {}) {
@@ -31,15 +31,15 @@ export function driveFacts(drive, progressID = "") {
   const offline = stateSignal(worker?.state) === "fault";
   const counts = driveProblemCounts(drive);
   const progress = driveProgress(drive);
-  const discovered = Array.isArray(drive.discovered_folders);
+	const discoveryIcon = drive.folder_discovery_state === "SCANNING" ? "work" : drive.folder_discovery_state === "FAILED" ? "fault" : "";
+	const discoveryValue = el("span", { class: "fact-value", dataset: { signal: drive.folder_discovery_state === "FAILED" ? "fault" : undefined } },
+		discoveryIcon ? statusIcon(discoveryIcon) : null, el("span", { class: "num" }, folderDiscoveryText(drive)));
   const facts = [
     fact("상태", el("span", { class: "fact-value" }, statusIcon(PHASE_ICON[phase]), el("span", {}, PHASE_LABEL[phase])), { dataset: { fact: "state", phase } }),
     drive.archive_run_id
       ? fact("보관 진행", el("span", { class: "fact-value" }, el("span", { class: "progress-pct num" }, `${progress.pct}%`)),
         { id: progressID || undefined, title: progressHover(drive), dataset: { fact: "progress" } })
-      : fact("발견", el("span", { class: "fact-value" }, el("span", { class: "num" },
-        `${formatCount(discovered ? drive.discovered_folder_count : drive.folder_count)} 폴더 · ${formatCount(discovered ? drive.discovered_file_count : drive.file_count)} 영상`)),
-      { dataset: { fact: "found" } }),
+      : fact("발견", discoveryValue, { dataset: { fact: "found" } }),
     fact("Worker", el("span", { class: "fact-value", dataset: { signal: offline ? "fault" : undefined } },
       offline ? statusIcon("fault") : null, el("span", {}, offline ? `${drive.worker_id} ${label("worker", worker?.state)}` : drive.worker_id)),
     { title: `${offline ? "마지막 응답" : "응답"} ${clockTime(worker?.last_heartbeat, true)}`, dataset: { fact: "worker" } }),

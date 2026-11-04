@@ -67,13 +67,14 @@ type MediaFolderObservation struct {
 }
 
 type StorageObservation struct {
-	StorageID         string                       `json:"storage_id"`
-	Connected         bool                         `json:"connected"`
-	AccessKind        vocabulary.StorageAccessKind `json:"access_kind"`
-	CapacityBytes     uint64                       `json:"capacity_bytes"`
-	FreeBytes         uint64                       `json:"free_bytes"`
-	DiscoveryRevision uint64                       `json:"discovery_revision"`
-	Folders           []MediaFolderObservation     `json:"folders"`
+	StorageID         string                          `json:"storage_id"`
+	Connected         bool                            `json:"connected"`
+	AccessKind        vocabulary.StorageAccessKind    `json:"access_kind"`
+	DiscoveryState    vocabulary.FolderDiscoveryState `json:"discovery_state"`
+	CapacityBytes     uint64                          `json:"capacity_bytes"`
+	FreeBytes         uint64                          `json:"free_bytes"`
+	DiscoveryRevision uint64                          `json:"discovery_revision"`
+	Folders           []MediaFolderObservation        `json:"folders"`
 }
 
 type runtimeState struct {
@@ -370,8 +371,12 @@ func validateMetrics(metrics Metrics) error {
 	}
 	seenStorages := make(map[string]bool, len(metrics.StorageObservations))
 	for _, observation := range metrics.StorageObservations {
-		if observation.StorageID == "" || seenStorages[observation.StorageID] || observation.DiscoveryRevision == 0 ||
+		if observation.StorageID == "" || seenStorages[observation.StorageID] || !observation.DiscoveryState.Valid() ||
 			observation.FreeBytes > observation.CapacityBytes || !metrics.AccessibleStorageIDs[observation.StorageID] {
+			return ErrInvalidSnapshot
+		}
+		if (observation.DiscoveryState == vocabulary.FolderDiscoveryReady) != (observation.DiscoveryRevision != 0) ||
+			(observation.DiscoveryState == vocabulary.FolderDiscoveryFailed && len(observation.Folders) != 0) {
 			return ErrInvalidSnapshot
 		}
 		seenStorages[observation.StorageID] = true

@@ -4,7 +4,7 @@
 // folders; its Worker, archive and counts wait on hover.
 
 import { el, statusIcon, problemCounts, label, stateSignal, formatCount, meter, emptyState } from "../core.js";
-import { model, driveGroup, drivePhase, driveName, driveProgress, driveProblemCounts, PHASE_LABEL, PHASE_ICON } from "../store.js";
+import { model, driveGroup, drivePhase, driveName, driveProgress, driveProblemCounts, folderDiscoveryText, PHASE_LABEL, PHASE_ICON } from "../store.js";
 
 const GROUPS = [["before", "실행 전"], ["during", "처리 중"], ["after", "완료"]];
 
@@ -12,11 +12,10 @@ function card(drive) {
   const worker = model.workers.find((item) => item.worker_id === drive.worker_id);
   const phase = drivePhase(drive);
   const counts = driveProblemCounts(drive);
-  const discovered = Array.isArray(drive.discovered_folders);
   const before = phase === "intake";
   const progress = driveProgress(drive);
   const scope = before
-    ? `${formatCount(discovered ? drive.discovered_folder_count : drive.folder_count)} 폴더 · ${formatCount(discovered ? drive.discovered_file_count : drive.file_count)} 영상`
+    ? folderDiscoveryText(drive)
     : `보관 ${formatCount(progress.stored)} / ${formatCount(progress.total)} 영상`;
   const offline = stateSignal(worker?.state) === "fault";
   return el("a", { class: "drive-card", href: `#/drives/${encodeURIComponent(drive.workspace_drive_id)}`, title: `${drive.worker_id} · → ${drive.archive_storage_id || "아카이브 미정"} · ${scope}`,

@@ -1,7 +1,7 @@
 // One read model for every screen. The workspace polls the same projections
 // every 5 seconds and each mounted screen re-renders from this model.
 
-import { api, mutation, newID, label, stageSignal, stateSignal, humanWait, activeStates, finishedTurns, finishedSteps } from "./core.js";
+import { api, mutation, newID, label, stageSignal, stateSignal, humanWait, activeStates, finishedTurns, finishedSteps, formatCount } from "./core.js";
 
 // Three missed 5 second refreshes in a row mean the screen is stale.
 const STALE_AFTER = 3;
@@ -96,6 +96,19 @@ export function discoveredFolders(drive) {
   return Array.isArray(drive?.discovered_folders) ? drive.discovered_folders : (drive?.folders || []);
 }
 
+export function folderDiscoveryReady(drive) {
+  return drive?.folder_discovery_state === "READY" && Boolean(drive.folder_discovery_revision);
+}
+
+export function folderDiscoveryText(drive) {
+  const folders = formatCount(drive?.discovered_folder_count || 0);
+  const videos = formatCount(drive?.discovered_file_count || 0);
+  if (drive?.folder_discovery_state === "SCANNING") return `검색 중 · ${folders} 폴더 · ${videos} 영상`;
+  if (drive?.folder_discovery_state === "FAILED") return "검색 실패";
+  if (folderDiscoveryReady(drive)) return `${folders} 폴더 · ${videos} 영상`;
+  return "검색 대기";
+}
+
 export function archiveCandidates(drive) {
   return (drive?.storage_candidates || [])
     .filter((item) => item.role === "ARCHIVE_PRIMARY" && item.storage_id !== drive.source_storage_id)
@@ -131,8 +144,12 @@ export function preparing(drive) {
 
 export function syncPreparation(drive) {
   if (!preparing(drive)) return;
-  const known = new Set(discoveredFolders(drive).map((folder) => folder.folder));
-  ui.folders = new Set([...ui.folders].filter((folder) => known.has(folder)));
+  if (!folderDiscoveryReady(drive)) {
+    ui.folders = new Set();
+  } else {
+    const known = new Set(discoveredFolders(drive).map((folder) => folder.folder));
+    ui.folders = new Set([...ui.folders].filter((folder) => known.has(folder)));
+  }
   if (ui.archiveID && !archiveCandidates(drive).some((item) => item.storage_id === ui.archiveID)) ui.archiveID = "";
 }
 
@@ -141,6 +158,9 @@ export function startBlocker(drive, selected) {
   const source = (drive.storage_candidates || []).find((item) => item.storage_id === drive.source_storage_id);
   const archive = archiveCandidates(drive).find((item) => item.storage_id === ui.archiveID);
   const estimated = selected.reduce((sum, folder) => sum + (folder.estimated_output_bytes || 0), 0);
+  if (drive.folder_discovery_state === "SCANNING") return "폴더 검색 중";
+  if (drive.folder_discovery_state === "FAILED") return "폴더 검색 실패";
+  if (!folderDiscoveryReady(drive)) return "폴더 검색 대기";
   if (!selected.length) return "폴더 선택 없음";
   if (!ui.archiveID) return "아카이브 선택 없음";
   if (!source?.accessible) return "원본 접근 불가";
@@ -157,6 +177,7 @@ export function startBlocker(drive, selected) {
 export function driveSelection(drive) {
   if (!drive) return null;
   const fixed = Boolean(drive.archive_run_id) && !preparing(drive);
+  if (!fixed && !folderDiscoveryReady(drive)) return null;
   const archiveID = fixed ? drive.archive_storage_id : ui.archiveID;
   const folders = fixed ? (drive.folders || []).map((folder) => folder.folder) : [...ui.folders];
   if (!archiveID || !folders.length) return null;

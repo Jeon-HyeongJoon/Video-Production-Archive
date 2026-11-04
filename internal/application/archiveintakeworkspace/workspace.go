@@ -88,6 +88,7 @@ type DriveView struct {
 	ArchiveRunRevision         uint64
 	CandidateRevision          uint64
 	FolderDiscoveryRevision    uint64
+	FolderDiscoveryState       vocabulary.FolderDiscoveryState
 	SessionID                  string
 	WorkerID                   string
 	SourceVolumeID             string

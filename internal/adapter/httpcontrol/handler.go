@@ -725,7 +725,8 @@ func (handler *Handler) archiveIntakeProjection(writer http.ResponseWriter, requ
 		projected := driveView{
 			WorkspaceDriveID: value.WorkspaceDriveID, ArchiveRunID: value.ArchiveRunID, ArchiveRunRevision: value.ArchiveRunRevision,
 			CandidateRevision: value.CandidateRevision, FolderDiscoveryRevision: value.FolderDiscoveryRevision,
-			SessionID: value.SessionID, WorkerID: value.WorkerID, SourceVolumeID: value.SourceVolumeID,
+			FolderDiscoveryState: string(value.FolderDiscoveryState),
+			SessionID:            value.SessionID, WorkerID: value.WorkerID, SourceVolumeID: value.SourceVolumeID,
 			SourceStorageID:  value.SourceStorageID,
 			ArchiveStorageID: value.ArchiveStorageID, State: value.State, ArchiveRunState: value.ArchiveRunState,
 			InputRevision: value.InputRevision, FileCount: value.FileCount, FolderCount: value.FolderCount,
@@ -1216,6 +1217,7 @@ type driveView struct {
 	ArchiveRunRevision         uint64             `json:"archive_run_revision"`
 	CandidateRevision          uint64             `json:"candidate_revision"`
 	FolderDiscoveryRevision    uint64             `json:"folder_discovery_revision"`
+	FolderDiscoveryState       string             `json:"folder_discovery_state"`
 	SessionID                  string             `json:"session_id"`
 	WorkerID                   string             `json:"worker_id"`
 	SourceVolumeID             string             `json:"source_volume_id"`

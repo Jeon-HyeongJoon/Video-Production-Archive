@@ -2510,6 +2510,18 @@
       "level": "integration"
     },
     {
+      "id": "DEV-011",
+      "design": "worker-folder-discovery-progress",
+      "statement": "Worker는 선택된 대용량 SOURCE_MEDIA의 비동기 폴더 탐색을 FolderDiscoveryState와 단조 증가하는 부분 폴더·영상 집계로 heartbeat에 보고하고 완료된 revision 전에는 그 부분 결과를 실행 범위로 확정하지 않아야 한다.",
+      "given": "탐색 중 첫 폴더를 찾은 뒤 다음 폴더에서 계속 실행되는 선택된 SOURCE_MEDIA와 탐색 실패·완료 결과가 있다.",
+      "when": "Worker가 background inventory 중과 종료 뒤 heartbeat용 StorageObservation을 반복해서 만든다.",
+      "then": "호출은 탐색을 기다리지 않고 SCANNING과 현재까지 찾은 폴더·영상 수를 단조 증가시켜 반환하며 revision은 0이고, 성공하면 READY와 전체 폴더 및 0이 아닌 revision을, 실패하면 FAILED와 revision 0을 반환한다.",
+      "test_file": "internal/adapter/storageinventory/attached_test.go",
+      "test_name": "TestSelectedAttachedSourceReportsIncrementalDiscoveryStateWithoutBlocking",
+      "status": "implemented",
+      "level": "unit"
+    },
+    {
       "id": "DEV-012",
       "design": "network-archive-device-wait",
       "statement": "실행 중 네트워크 아카이브 Storage에 접근할 수 없으면 해당 Step은 WaitReason.DEVICE로 기다리고 실행 시도 횟수를 소비하지 않아야 한다.",
@@ -2902,6 +2914,18 @@
       "then": "두 번 실패까지는 표시가 없고 세 번째 실패에서 마지막 갱신 시각 이후 갱신 없음·다시 연결 중·판정·실행 잠김이 표시되며 판정 기록을 포함한 모든 조작 버튼이 비활성화되고, 다음 갱신이 성공하면 표시가 사라지고 고른 판정을 그대로 기록할 수 있다.",
       "test_file": "internal/adapter/httpcontrol/handler_test.go",
       "test_name": "TestWorkspaceLocksDecisionsWhileRefreshIsStale",
+      "status": "implemented",
+      "level": "integration"
+    },
+    {
+      "id": "DSH-022",
+      "design": "archive-workspace-folder-discovery-progress",
+      "statement": "아카이브 작업 공간은 원본 폴더 탐색의 명시적 상태와 지금까지 발견한 폴더·영상 수를 표시하고 READY revision 전에는 부분 폴더 선택과 아카이브 실행 시작을 잠그며, 실행 준비의 아카이브와 폴더를 위아래로 나누고 폴더 전체 선택을 목록 상단에 고정해 긴 폴더 이름을 온전히 표시해야 한다.",
+      "given": "SCANNING 상태에서 부분 폴더와 영상 수를 보고한 드라이브가 다음 갱신에 READY와 전체 폴더 및 탐색 revision을 보고한다.",
+      "when": "담당자가 드라이브 상세의 실행 준비를 열어 탐색 중과 완료 뒤 화면을 확인한다.",
+      "then": "탐색 중에는 발견 사실과 폴더 선택 영역에 검색 중·부분 폴더·영상 수가 보이고 체크박스와 실행 시작은 잠기며, READY 갱신 뒤 아카이브 위·폴더 아래의 전체 목록과 revision이 보이고 폴더 선택이 활성화되며 전체 선택은 폴더 목록을 내려도 상단에 남고 긴 이름은 잘리거나 다른 값과 겹치지 않는다.",
+      "test_file": "internal/adapter/httpcontrol/handler_test.go",
+      "test_name": "TestWorkspaceShowsIncrementalFolderDiscoveryAndLocksPartialScope",
       "status": "implemented",
       "level": "integration"
     }

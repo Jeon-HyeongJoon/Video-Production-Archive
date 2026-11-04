@@ -42,11 +42,11 @@ func TestWorkerInventoryProjectsUnclassifiedFoldersAndRoleCapacityStorageCandida
 				Model: "TOSHIBA EXTERNAL", Label: "새 아카이브", FileSystem: "NTFS", CapacityBytes: 4_000, FreeBytes: 3_500,
 			}},
 			StorageObservations: []worker.StorageObservation{
-				{StorageID: "source-main", Connected: true, AccessKind: vocabulary.StorageAccessAttachedVolume, CapacityBytes: 1_000, FreeBytes: 300, DiscoveryRevision: 41,
+				{StorageID: "source-main", Connected: true, AccessKind: vocabulary.StorageAccessAttachedVolume, DiscoveryState: vocabulary.FolderDiscoveryReady, CapacityBytes: 1_000, FreeBytes: 300, DiscoveryRevision: 41,
 					Folders: []worker.MediaFolderObservation{{Folder: "event-a", VideoCount: 12, InputBytes: 600}, {Folder: "event-b", VideoCount: 4, InputBytes: 200}}},
-				{StorageID: "archive-local", Connected: true, AccessKind: vocabulary.StorageAccessLocal, CapacityBytes: 2_000, FreeBytes: 1_400, DiscoveryRevision: 1},
-				{StorageID: "archive-nas", Connected: false, AccessKind: vocabulary.StorageAccessMountedNetwork, CapacityBytes: 8_000, FreeBytes: 7_000, DiscoveryRevision: 1},
-				{StorageID: "system-scratch", Connected: true, CapacityBytes: 500, FreeBytes: 100, DiscoveryRevision: 1},
+				{StorageID: "archive-local", Connected: true, AccessKind: vocabulary.StorageAccessLocal, DiscoveryState: vocabulary.FolderDiscoveryReady, CapacityBytes: 2_000, FreeBytes: 1_400, DiscoveryRevision: 1},
+				{StorageID: "archive-nas", Connected: false, AccessKind: vocabulary.StorageAccessMountedNetwork, DiscoveryState: vocabulary.FolderDiscoveryFailed, CapacityBytes: 8_000, FreeBytes: 7_000},
+				{StorageID: "system-scratch", Connected: true, AccessKind: vocabulary.StorageAccessLocal, DiscoveryState: vocabulary.FolderDiscoveryReady, CapacityBytes: 500, FreeBytes: 100, DiscoveryRevision: 1},
 			},
 		},
 	}}
@@ -64,6 +64,7 @@ func TestWorkerInventoryProjectsUnclassifiedFoldersAndRoleCapacityStorageCandida
 	view := views[0]
 	if view.State != "UNCLASSIFIED" || view.ArchiveRunID != "" || view.WorkspaceDriveID != "SOURCE-VOLUME" ||
 		view.WorkerID != "WORKER-WINDOWS" || view.CandidateRevision != 3 || view.FolderDiscoveryRevision != 41 ||
+		view.FolderDiscoveryState != vocabulary.FolderDiscoveryReady ||
 		view.InputRevision != 41 || view.FolderCount != 2 || view.FileCount != 16 || len(view.StorageCandidates) != 4 {
 		t.Fatalf("pre-run source inventory was not projected: %+v", view)
 	}
