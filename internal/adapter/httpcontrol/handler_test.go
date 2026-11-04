@@ -283,6 +283,13 @@ func TestWorkspaceShowsIncrementalFolderDiscoveryAndLocksPartialScope(t *testing
 	})
 }
 
+// Requirement: DSH-023
+func TestWorkspaceShowsArchiveDateAndSourceDerivedNameBeforeOpaqueIDs(t *testing.T) {
+	testControlHTTPWorkspace(t, func(t *testing.T, handler http.Handler) {
+		assertArchiveWorkspaceScript(t, handler, "check_archive_workspace_archive_name.py")
+	})
+}
+
 func testControlHTTPWorkspace(t *testing.T, check func(*testing.T, http.Handler)) {
 	testControlHTTPScene(t, sceneStageOne, check)
 }
@@ -763,6 +770,9 @@ func (workspace *archiveIntakeWorkspaceFixture) Projection(context.Context) ([]a
 	}
 	stored := func(view archiveintakeworkspace.FolderView, state archive.PackageState) archiveintakeworkspace.FolderView {
 		view.ArchivePackageID, view.ArchiveState = "VP-20261030-"+strings.ToUpper(view.Folder), state
+		view.ArchiveDate = "2026-10-30"
+		view.ArchiveVideoFileName = view.Folder + ".mp4"
+		view.ArchiveDisplayName = view.ArchiveDate + " · " + view.Folder + " · " + view.ArchiveVideoFileName
 		view.CanAddTranscription = state == archive.PackageStored &&
 			(view.Disposition == vocabulary.OrganizationAsIs || view.Disposition == vocabulary.OrganizationRenderRecordings)
 		return view

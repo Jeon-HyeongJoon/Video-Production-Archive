@@ -152,11 +152,15 @@ function problemPanel(drive, folder, problem) {
 function folderDetail(folder) {
   const showSteps = ui.openSteps === folder.folder;
   const notes = [];
+  const archiveResult = folder.archive_date && folder.archive_video_file_name
+    ? `${folder.archive_date} · ${folder.archive_video_file_name}`
+    : "";
+  const trace = [folder.archive_display_name, folder.archive_package_id, folder.job_id].filter(Boolean).join("\n");
   if (folder.archive_state) notes.push(archiveBadge(folder.archive_state));
   if (folder.can_add_transcription) notes.push(el("span", { class: "folder-note" }, "STT 추가 가능"));
   if (folder.transcription_job_id && folder.step_state === "COMPLETED") notes.push(el("span", { class: "folder-note" }, "STT 완료"));
   return el("div", { class: "folder-detail", id: "folder-detail", dataset: { folderId: folder.folder } },
-    el("span", { class: "detail-meta", title: [`${formatCount(folder.video_count)} 영상`, formatBytes(folder.estimated_output_bytes), folder.archive_package_id].filter(Boolean).join(" · ") }, folder.job_id ? `작업 ${folder.job_id}` : "작업 없음"),
+    el("span", { class: "detail-meta", title: [trace, `${formatCount(folder.video_count)} 영상`, formatBytes(folder.estimated_output_bytes)].filter(Boolean).join("\n") }, archiveResult || (folder.job_id ? `작업 ${folder.job_id}` : "작업 없음")),
     notes.length ? el("div", { class: "detail-notes" }, ...notes) : null,
     el("div", { class: "detail-actions" },
       el("button", { type: "button", class: "btn btn-sm steps-toggle", "aria-expanded": String(showSteps), onclick: () => { ui.openSteps = showSteps ? "" : folder.folder; notify(); } },

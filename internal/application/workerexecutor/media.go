@@ -638,7 +638,8 @@ func (operations *mediaOperations) organizeMedia(_ context.Context, spec executi
 		}
 		request := archivebundle.InitialRequest{
 			PackageID: target.ID, WorkspaceDriveID: spec.Parameters.WorkspaceDriveID,
-			DecisionID: spec.Parameters.OrganizationDecisionID, Disposition: spec.Parameters.Disposition,
+			DecisionID: spec.Parameters.OrganizationDecisionID, MediaFolder: spec.Parameters.MediaFolder,
+			Disposition:      spec.Parameters.Disposition,
 			ProfileReference: spec.Parameters.SelectedProfileReference, CreatedAt: operations.now(),
 			Video: archivebundle.FileSource{Root: videoRoot, Path: video.RelativePath, Checksum: video.Checksum},
 		}

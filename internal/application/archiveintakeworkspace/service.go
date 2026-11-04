@@ -206,6 +206,7 @@ func (service *Service) Projection(ctx context.Context) ([]DriveView, error) {
 				view.StepState = currentStepState(jobState)
 				view.Stages = append(view.Stages, projectStageOne(jobState, view.VideoCount)...)
 				view.ArchivePackageID, view.ArchiveState = storedPackage(jobState)
+				projectArchivePresentation(&view, decision)
 				if view.ArchivePackageID != "" && service.archiveStates != nil {
 					packageState, stateErr := service.archiveStates.PackageState(ctx, state.view.ArchiveStorageID, view.ArchivePackageID)
 					if stateErr != nil {
@@ -493,6 +494,23 @@ func classificationAssets(decision organization.OrganizationDecision) []Classifi
 		})
 	}
 	return assets
+}
+
+func projectArchivePresentation(view *FolderView, decision organization.OrganizationDecision) {
+	if view == nil || view.ArchivePackageID == "" || len(decision.Inputs) == 0 {
+		return
+	}
+	originalNames := make([]string, 0, len(decision.Inputs))
+	for _, input := range decision.Inputs {
+		originalNames = append(originalNames, path.Base(input.RelativePath))
+	}
+	presentation, err := archive.PresentPackage(view.ArchivePackageID, decision.Folder, originalNames)
+	if err != nil {
+		return
+	}
+	view.ArchiveDate = presentation.ArchiveDate
+	view.ArchiveDisplayName = presentation.DisplayName
+	view.ArchiveVideoFileName = presentation.VideoFileName
 }
 
 func (service *Service) projectArchiveRun(view *DriveView, receipt organization.ArchiveOrganizationReceipt) {

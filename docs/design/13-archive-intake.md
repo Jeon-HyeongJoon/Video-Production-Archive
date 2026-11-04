@@ -88,21 +88,24 @@ Transcript 게시가 성공하면 Worker는 versioned 결정 규칙으로 구간
 ```text
 <아카이브 저장소>/
 ├── packages/
-│   └── VP-20261031-0001/
-│       ├── video.mp4
-│       ├── transcript.json
-│       ├── transcript.txt
-│       ├── subtitle.srt
-│       ├── metadata.json
-│       ├── files.csv
-│       ├── events.jsonl
-│       ├── manifest-sha256.txt
-│       └── README.md
+│   └── 2026/10/31/
+│       └── VP-20261031-0001/
+│           ├── <원본 영상명 또는 MediaFolder 이름>.mp4
+│           ├── transcript.json
+│           ├── transcript.txt
+│           ├── subtitle.srt
+│           ├── metadata.json
+│           ├── files.csv
+│           ├── events.jsonl
+│           ├── manifest-sha256.txt
+│           └── README.md
 └── catalog/
     └── <원본 드라이브 ID>.csv
 ```
 
 패키지는 `metadata.json`, `files.csv`, `events.jsonl`, manifest와 README만으로 DB 없이 복원할 수 있어야 한다. Storage 절대 root, mount path, credential과 executable 경로를 넣지 않는다. `ARC-007`
+
+새 패키지는 처리 날짜로 나뉜 상대경로에 둔다. 결과 영상 파일명은 단일 입력이면 원래 영상명, 여러 컷 통합이면 MediaFolder의 마지막 이름에서 만들며 Windows에서 안전하도록 정규화한다. 패키지 ID는 이름과 별개인 불변 identity로 유지하고, metadata와 ArchiveCatalog에는 원래 이름과 전체 상대경로도 함께 남긴다. 화면은 처리 날짜·결과 영상명을 주 정보로, 패키지 ID를 추적용 보조 정보로 보여준다. `ARC-013`, `DSH-023`
 
 ArchiveCatalog는 원본 영상 하나당 한 행이다. 고정 열은 원본 이름·상대경로·checksum·길이·codec·해상도·bitrate·판정과 판정 ID·ArchivePackage ID·결과 상대경로·Profile·Transcript·TranscriptText·Subtitle 상대경로·상태·보류 사유다. 상태 후보는 분류됨·보류·처리 중·보관됨·STT 완료·확정됨·실패다. 판정 추가와 결과 보관 때 전체 현재 투영을 같은 디렉터리의 임시 파일로 쓰고 검증한 뒤 원자 교체한다. `ORG-009`
 

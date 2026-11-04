@@ -50,6 +50,10 @@ type Package struct {
 	Revision           uint64               `json:"revision"`
 	State              archive.PackageState `json:"state"`
 	ManifestDigest     string               `json:"manifest_digest"`
+	ArchiveDate        string               `json:"archive_date"`
+	MediaFolder        string               `json:"media_folder"`
+	DisplayName        string               `json:"display_name"`
+	VideoFileName      string               `json:"video_file_name"`
 	VideoPath          string               `json:"video_path"`
 	TranscriptPath     string               `json:"transcript_path,omitempty"`
 	TranscriptTextPath string               `json:"transcript_text_path,omitempty"`
@@ -65,6 +69,7 @@ type InitialRequest struct {
 	PackageID        string
 	WorkspaceDriveID string
 	DecisionID       string
+	MediaFolder      string
 	Disposition      vocabulary.OrganizationDisposition
 	ProfileReference string
 	Sources          []SourceReference
@@ -81,10 +86,11 @@ type RevisionRequest struct {
 }
 
 type currentDocument struct {
-	PackageID      string               `json:"package_id"`
-	Revision       uint64               `json:"revision"`
-	State          archive.PackageState `json:"state"`
-	ManifestDigest string               `json:"manifest_digest"`
+	PackageID        string               `json:"package_id"`
+	Revision         uint64               `json:"revision"`
+	State            archive.PackageState `json:"state"`
+	ManifestDigest   string               `json:"manifest_digest"`
+	packageDirectory string               `json:"-"`
 }
 
 type Metadata struct {
@@ -92,6 +98,10 @@ type Metadata struct {
 	Revision           uint64                             `json:"revision"`
 	WorkspaceDriveID   string                             `json:"workspace_drive_id"`
 	DecisionID         string                             `json:"organization_decision_id"`
+	ArchiveDate        string                             `json:"archive_date"`
+	MediaFolder        string                             `json:"media_folder"`
+	DisplayName        string                             `json:"display_name"`
+	VideoFileName      string                             `json:"video_file_name"`
 	Disposition        vocabulary.OrganizationDisposition `json:"organization_disposition"`
 	ProfileReference   string                             `json:"profile_reference"`
 	Sources            []SourceReference                  `json:"sources"`
@@ -132,15 +142,24 @@ func (publisher *Publisher) PublishInitial(request InitialRequest) (Package, err
 	if err != nil {
 		return Package{}, err
 	}
+	originalNames := make([]string, 0, len(sources))
+	for _, source := range sources {
+		originalNames = append(originalNames, source.OriginalName)
+	}
+	presentation, err := archive.PresentPackage(request.PackageID, request.MediaFolder, originalNames)
+	if err != nil {
+		return Package{}, ErrInvalidRequest
+	}
 	if _, err := publisher.readCurrent(request.PackageID); err == nil {
 		return Package{}, ErrPackageExists
 	}
 	metadata := Metadata{
 		PackageID: request.PackageID, Revision: 1, WorkspaceDriveID: request.WorkspaceDriveID,
-		DecisionID: request.DecisionID, Disposition: request.Disposition,
+		DecisionID: request.DecisionID, ArchiveDate: presentation.ArchiveDate, MediaFolder: presentation.MediaFolder,
+		DisplayName: presentation.DisplayName, VideoFileName: presentation.VideoFileName, Disposition: request.Disposition,
 		ProfileReference: strings.TrimSpace(request.ProfileReference), Sources: sources, CreatedAt: request.CreatedAt.UTC(),
 	}
-	return publisher.publish(metadata, request.Video, nil)
+	return publisher.publish(metadata, request.Video, nil, presentation.PackageDirectory)
 }
 
 func (publisher *Publisher) Revise(request RevisionRequest) (Package, error) {
@@ -155,7 +174,8 @@ func (publisher *Publisher) Revise(request RevisionRequest) (Package, error) {
 	if current.State != archive.PackageStored {
 		return Package{}, ErrPackageState
 	}
-	previousMetadataPath := path.Join(revisionDirectory(request.PackageID, current.Revision), "metadata.json")
+	previousDirectory := path.Join(current.packageDirectory, "revisions", fmt.Sprintf("%06d", current.Revision))
+	previousMetadataPath := path.Join(previousDirectory, "metadata.json")
 	payload, err := publisher.archive.ReadFile(previousMetadataPath)
 	if err != nil {
 		return Package{}, err
@@ -167,7 +187,7 @@ func (publisher *Publisher) Revise(request RevisionRequest) (Package, error) {
 	metadata.Revision++
 	metadata.CreatedAt = request.CreatedAt.UTC()
 	video := FileSource{
-		Root: RootArchive, Path: path.Join(revisionDirectory(request.PackageID, current.Revision), "video.mp4"),
+		Root: RootArchive, Path: metadata.VideoPath,
 	}
 	_, video.Checksum, err = publisher.archive.FileSHA256(video.Path)
 	if err != nil {
@@ -175,7 +195,7 @@ func (publisher *Publisher) Revise(request RevisionRequest) (Package, error) {
 	}
 	return publisher.publish(metadata, video, map[string]FileSource{
 		"transcript.json": request.Transcript, "transcript.txt": request.TranscriptText, "subtitle.srt": request.Subtitle,
-	})
+	}, current.packageDirectory)
 }
 
 func (publisher *Publisher) Commit(packageID string, evidence archive.CommitEvidence) (Package, error) {
@@ -203,18 +223,29 @@ func (publisher *Publisher) Current(packageID string) (Package, error) {
 	return publisher.loadPackage(current), nil
 }
 
-func (publisher *Publisher) publish(metadata Metadata, video FileSource, additions map[string]FileSource) (Package, error) {
-	finalDirectory := revisionDirectory(metadata.PackageID, metadata.Revision)
+func (publisher *Publisher) publish(metadata Metadata, video FileSource, additions map[string]FileSource, packageDirectory string) (Package, error) {
+	if strings.TrimSpace(packageDirectory) == "" {
+		return Package{}, ErrInvalidRequest
+	}
+	finalDirectory := path.Join(packageDirectory, "revisions", fmt.Sprintf("%06d", metadata.Revision))
 	temporaryDirectory := finalDirectory + ".partial"
 	if err := publisher.archive.MkdirAll(temporaryDirectory, 0o755); err != nil {
 		return Package{}, err
 	}
-	videoChecksum, err := publisher.copyVerified(video, path.Join(temporaryDirectory, "video.mp4"))
+	videoFileName := strings.TrimSpace(metadata.VideoFileName)
+	if videoFileName == "" {
+		videoFileName = path.Base(metadata.VideoPath)
+	}
+	if videoFileName == "." || videoFileName == "" {
+		videoFileName = "video.mp4"
+	}
+	videoChecksum, err := publisher.copyVerified(video, path.Join(temporaryDirectory, videoFileName))
 	if err != nil {
 		return Package{}, err
 	}
-	metadata.VideoPath = path.Join(finalDirectory, "video.mp4")
-	fileChecksums := map[string]string{"video.mp4": videoChecksum}
+	metadata.VideoFileName = videoFileName
+	metadata.VideoPath = path.Join(finalDirectory, videoFileName)
+	fileChecksums := map[string]string{videoFileName: videoChecksum}
 	for _, name := range []string{"transcript.json", "transcript.txt", "subtitle.srt"} {
 		source, exists := additions[name]
 		if !exists {
@@ -244,7 +275,8 @@ func (publisher *Publisher) publish(metadata Metadata, video FileSource, additio
 	}
 	fileChecksums["metadata.json"] = digest(metadataPayload)
 	eventPayload := []byte(fmt.Sprintf("{\"event_type\":\"ArchivePackageRevisionStored\",\"package_id\":%q,\"revision\":%d}\n", metadata.PackageID, metadata.Revision))
-	readmePayload := []byte(fmt.Sprintf("# %s\n\nRevision %d · STORED\n", metadata.PackageID, metadata.Revision))
+	readmePayload := []byte(fmt.Sprintf("# %s\n\n- Package: `%s`\n- Archive date: %s\n- Media folder: `%s`\n- Result video: `%s`\n- Revision: %d · STORED\n",
+		metadata.DisplayName, metadata.PackageID, metadata.ArchiveDate, metadata.MediaFolder, metadata.VideoFileName, metadata.Revision))
 	if err := publisher.archive.WriteFile(path.Join(temporaryDirectory, "events.jsonl"), eventPayload, 0o600); err != nil {
 		return Package{}, err
 	}
@@ -284,7 +316,7 @@ func (publisher *Publisher) publish(metadata Metadata, video FileSource, additio
 	}
 	current := currentDocument{
 		PackageID: metadata.PackageID, Revision: metadata.Revision, State: archive.PackageStored,
-		ManifestDigest: digest(manifestPayload),
+		ManifestDigest: digest(manifestPayload), packageDirectory: packageDirectory,
 	}
 	if err := publisher.writeCurrent(current); err != nil {
 		return Package{}, err
@@ -315,8 +347,22 @@ func (publisher *Publisher) copyVerified(source FileSource, target string) (stri
 }
 
 func (publisher *Publisher) readCurrent(packageID string) (currentDocument, error) {
-	payload, err := publisher.archive.ReadFile(path.Join("packages", packageID, "current.json"))
-	if err != nil {
+	directory, pathErr := archive.PackageDirectory(packageID)
+	if pathErr != nil {
+		return currentDocument{}, ErrInvalidRequest
+	}
+	directories := []string{directory, path.Join("packages", packageID)}
+	var payload []byte
+	var err error
+	selected := ""
+	for _, candidate := range directories {
+		payload, err = publisher.archive.ReadFile(path.Join(candidate, "current.json"))
+		if err == nil {
+			selected = candidate
+			break
+		}
+	}
+	if selected == "" {
 		return currentDocument{}, err
 	}
 	var current currentDocument
@@ -324,11 +370,20 @@ func (publisher *Publisher) readCurrent(packageID string) (currentDocument, erro
 		!current.State.Valid() || !checksumPattern.MatchString(current.ManifestDigest) {
 		return currentDocument{}, ErrInvalidRequest
 	}
+	current.packageDirectory = selected
 	return current, nil
 }
 
 func (publisher *Publisher) writeCurrent(current currentDocument) error {
-	directory := path.Join("packages", current.PackageID)
+	directory := current.packageDirectory
+	if directory == "" {
+		var err error
+		directory, err = archive.PackageDirectory(current.PackageID)
+		if err != nil {
+			return ErrInvalidRequest
+		}
+		current.packageDirectory = directory
+	}
 	if err := publisher.archive.MkdirAll(directory, 0o755); err != nil {
 		return err
 	}
@@ -349,16 +404,29 @@ func (publisher *Publisher) writeCurrent(current currentDocument) error {
 }
 
 func (publisher *Publisher) loadPackage(current currentDocument) Package {
-	directory := revisionDirectory(current.PackageID, current.Revision)
+	directory := current.packageDirectory
+	if directory == "" {
+		var err error
+		directory, err = archive.PackageDirectory(current.PackageID)
+		if err != nil {
+			return Package{}
+		}
+	}
+	directory = path.Join(directory, "revisions", fmt.Sprintf("%06d", current.Revision))
 	result := Package{
 		PackageID: current.PackageID, Revision: current.Revision, State: current.State, ManifestDigest: current.ManifestDigest,
-		VideoPath: path.Join(directory, "video.mp4"), MetadataPath: path.Join(directory, "metadata.json"),
-		FilesPath: path.Join(directory, "files.csv"), EventsPath: path.Join(directory, "events.jsonl"),
+		MetadataPath: path.Join(directory, "metadata.json"),
+		FilesPath:    path.Join(directory, "files.csv"), EventsPath: path.Join(directory, "events.jsonl"),
 		ManifestPath: path.Join(directory, "manifest-sha256.txt"), ReadmePath: path.Join(directory, "README.md"),
 	}
 	if payload, err := publisher.archive.ReadFile(result.MetadataPath); err == nil {
 		var metadata Metadata
 		if json.Unmarshal(payload, &metadata) == nil {
+			result.ArchiveDate = metadata.ArchiveDate
+			result.MediaFolder = metadata.MediaFolder
+			result.DisplayName = metadata.DisplayName
+			result.VideoFileName = metadata.VideoFileName
+			result.VideoPath = metadata.VideoPath
 			result.TranscriptPath = metadata.TranscriptPath
 			result.TranscriptTextPath = metadata.TranscriptTextPath
 			result.SubtitlePath = metadata.SubtitlePath
@@ -405,10 +473,6 @@ func filesCSV(checksums map[string]string) ([]byte, error) {
 	}
 	writer.Flush()
 	return buffer.Bytes(), writer.Error()
-}
-
-func revisionDirectory(packageID string, revision uint64) string {
-	return path.Join("packages", packageID, "revisions", fmt.Sprintf("%06d", revision))
 }
 
 func normalizePath(value string) string {

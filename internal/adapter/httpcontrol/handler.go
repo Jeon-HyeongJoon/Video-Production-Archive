@@ -786,7 +786,9 @@ func projectDriveFolder(folder archiveintakeworkspace.FolderView) driveFolderVie
 		EstimatedOutputBytes: folder.EstimatedOutputBytes, JobID: folder.JobID,
 		TranscriptionJobID: folder.TranscriptionJobID, CurrentStepID: folder.CurrentStepID,
 		StepState: string(folder.StepState), Stages: stages, ArchivePackageID: folder.ArchivePackageID,
-		ArchiveState: string(folder.ArchiveState), CanAddTranscription: folder.CanAddTranscription,
+		ArchiveDate: folder.ArchiveDate, ArchiveDisplayName: folder.ArchiveDisplayName,
+		ArchiveVideoFileName: folder.ArchiveVideoFileName, ArchiveState: string(folder.ArchiveState),
+		CanAddTranscription: folder.CanAddTranscription,
 		TranscriptQualities: qualities,
 	}
 }
@@ -1270,6 +1272,9 @@ type driveFolderView struct {
 	StepState            string                  `json:"step_state"`
 	Stages               []driveStageView        `json:"stages"`
 	ArchivePackageID     string                  `json:"archive_package_id,omitempty"`
+	ArchiveDate          string                  `json:"archive_date,omitempty"`
+	ArchiveDisplayName   string                  `json:"archive_display_name,omitempty"`
+	ArchiveVideoFileName string                  `json:"archive_video_file_name,omitempty"`
 	ArchiveState         string                  `json:"archive_state,omitempty"`
 	CanAddTranscription  bool                    `json:"can_add_transcription"`
 	TranscriptQualities  []transcriptQualityView `json:"transcript_qualities"`

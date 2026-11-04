@@ -108,6 +108,31 @@ Windows Archivist acceptance는 DPAPI secret의 새 프로세스 복호화와 �
 - 정전 후 자동 부팅과 UPS 종료 hook 구성
 - 로그와 DB는 scratch 및 외장 archive와 분리
 
+Windows v1 설치는 `C:\Archive` 하나를 runtime root로 사용한다. 선택한 ARCHIVE_PRIMARY가 이 root라는 뜻은 아니며, 프로그램 작업 공간과 기록물 Storage를 섞지 않는다.
+
+```text
+C:\Archive\
+├── runtime\
+│   ├── current\          # 서비스가 실행하는 검증된 바이너리
+│   └── releases\<rev>\   # 되돌릴 수 있는 release
+├── config\               # YAML과 Secret Store reference만 보관
+├── data\                 # SQLite와 migration 상태
+├── logs\                 # 서비스별 회전 로그
+├── scratch\              # 재생성 가능한 임시 출력
+├── evidence\             # acceptance·golden·배포 증적
+└── legacy\               # 이전 위치 inventory와 복구 가능한 격리
+```
+
+새 release는 별도 `releases/<rev>`에 복사·검증한 뒤 `current`를 전환한다. `C:\Video-Production-Archive`, 과거 `deploy/<rev>`와 다른 임시 배포는 먼저 inventory에 기록하고 서비스·설정·DB·패키지 checksum을 대조한 뒤 `legacy`로 옮긴다. 자동 삭제는 하지 않으며 ArchivePackage나 catalog는 선택한 아카이브 Storage에 그대로 둔다. 실제 Windows에서 서비스 경로 전환·재시작·복구와 기존 결과 불변을 검증할 때까지 `CFG-014`는 planned다.
+
+`deploy/windows/manage-runtime-layout.ps1`은 기본 `Plan`, 비파괴 `Inventory`, 해시를 검증하는 `Stage`만 제공한다. 서비스의 `current` 전환과 이전 경로 격리는 Windows acceptance에서 설정·DB·패키지 manifest를 대조한 뒤 수행한다.
+
+```powershell
+.\deploy\windows\manage-runtime-layout.ps1 -Mode Plan
+.\deploy\windows\manage-runtime-layout.ps1 -Mode Inventory
+.\deploy\windows\manage-runtime-layout.ps1 -Mode Stage -Revision <git-revision> -SourceDirectory <binary-directory>
+```
+
 네트워크 설정은 서비스 설정과 Windows Firewall에 이중으로 둔다.
 
 ```text

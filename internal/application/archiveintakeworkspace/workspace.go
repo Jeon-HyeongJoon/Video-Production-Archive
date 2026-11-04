@@ -33,6 +33,9 @@ type FolderView struct {
 	StepState            workflow.StepState
 	Stages               []StageView
 	ArchivePackageID     string
+	ArchiveDate          string
+	ArchiveDisplayName   string
+	ArchiveVideoFileName string
 	ArchiveState         archive.PackageState
 	CanAddTranscription  bool
 	TranscriptQualities  []TranscriptQualityView

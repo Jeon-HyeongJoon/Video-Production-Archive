@@ -313,6 +313,7 @@ func claimHarness(t *testing.T, withSpec, tamper bool) (http.Handler, *sqlitecom
 		ProfileReference: "archive-1080p-6mbps@v1",
 		Parameters: execution.StepExecutionParameters{
 			OrganizationDecisionID: "DECISION-1", WorkspaceDriveID: "DRIVE-1", ArchiveStorageID: "scratch-main", InputRevision: 1,
+			MediaFolder: "recordings", ArchiveDate: "20261030",
 			Disposition: vocabulary.OrganizationRenderRecordings, SelectedProfileReference: "archive-1080p-6mbps@v1",
 			TranscriptionEligible: true, SourceInputs: []execution.InputReference{sourceInput},
 		},
