@@ -3098,6 +3098,18 @@
       "level": "integration"
     },
     {
+      "id": "ARC-014",
+      "design": "windows-storage-root-verified-publish",
+      "statement": "Windows StorageRoot는 검증된 임시 출력 파일을 쓰기 가능한 제한 핸들로 동기화한 뒤 같은 root 안의 공개 상대경로로 rename해야 한다.",
+      "given": "격리 Windows 파일시스템의 등록 StorageRoot와 검증된 임시 출력이 있다.",
+      "when": "공통 게시 경계가 임시 출력을 동기화하고 공개 상대경로로 rename한다.",
+      "then": "Windows FlushFileBuffers가 접근 거부 없이 성공하고 공개 파일은 원문과 같으며 임시 파일은 남지 않는다.",
+      "test_file": "internal/core/archive/storage_windows_acceptance_test.go",
+      "test_name": "TestWindowsStorageRootPublishesVerifiedOutputWithWritableSyncHandle",
+      "status": "implemented",
+      "level": "acceptance"
+    },
+    {
       "id": "APP-010",
       "design": "shared-media-operation-adapters",
       "statement": "단독 CLI Adapter와 선택형 관리 Runner Adapter는 같은 MediaOperation Port를 동시에 사용할 수 있고 같은 Storage 출력에 대한 실행만 교차 프로세스 잠금으로 직렬화해야 한다.",

@@ -69,7 +69,7 @@ Storage는 로컬 root, 연결된 네트워크 공유 root, 새 외장 data volu
 
 원격 파일 서비스 Adapter는 임시 업로드, 게시 전후 다시 읽기, 목록, manifest checksum 검증과 원자 rename 또는 그와 동등한 안전 게시를 제공해야 한다. 해당 기능을 확인하지 못한 후보는 화면에 접근 불가로 투영하고 아카이브 실행에 선택할 수 없다. SMTP는 파일 namespace의 목록·재검증·패키지 리비전 게시를 제공하지 않으므로 아카이브 저장소가 아니다. 완료 보고서나 아카이브 참조를 보내는 전달 채널로만 별도 설계한다.
 
-로컬·mount 기반 실제 게시의 공통 경계는 `archive.StorageRoot`다. 애플리케이션과 개별 Adapter는 검증한 문자열 경로를 unrestricted `os` 호출로 다시 열지 않는다. 임시 출력은 같은 root에서 파일 동기화와 checksum·형식 검증을 마친 뒤 `os.Root.Rename`으로 게시하고 상위 디렉터리를 동기화한다. subprocess가 만든 임시 출력도 같은 게시 경계를 통과하며 실패한 `.partial`은 다음 재시도 전에 제거한다. `ARC-005`, `ORG-008~009`, `WRK-012`
+로컬·mount 기반 실제 게시의 공통 경계는 `archive.StorageRoot`다. 애플리케이션과 개별 Adapter는 검증한 문자열 경로를 unrestricted `os` 호출로 다시 열지 않는다. 임시 출력은 같은 root에서 파일 동기화와 checksum·형식 검증을 마친 뒤 `os.Root.Rename`으로 게시하고 상위 디렉터리를 동기화한다. Windows 파일 동기화는 `FlushFileBuffers`가 허용되는 쓰기 가능한 root 제한 핸들을 사용한다. subprocess가 만든 임시 출력도 같은 게시 경계를 통과하며 실패한 `.partial`은 다음 재시도 전에 제거한다. `ARC-005`, `ARC-014`, `ORG-008~009`, `WRK-012`
 
 ## 4. 원본과 파생본
 

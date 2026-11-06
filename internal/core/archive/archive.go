@@ -619,18 +619,26 @@ func (root *StorageRoot) syncRelative(clean string) error {
 	if root == nil || root.root == nil {
 		return ErrUnsafeStoragePath
 	}
-	file, err := root.root.Open(clean)
+	info, err := root.root.Stat(clean)
 	if err != nil {
 		return storageIOError(err)
 	}
-	info, statErr := file.Stat()
-	syncErr := error(nil)
-	if statErr == nil {
-		syncErr = syncStorageFile(file, info.IsDir())
+	var file *os.File
+	if info.IsDir() {
+		file, err = root.root.Open(clean)
+	} else {
+		// FlushFileBuffers requires a writable Windows handle. Outputs passed to
+		// this boundary are temporary files created beneath this StorageRoot.
+		file, err = root.root.OpenFile(clean, os.O_RDWR, 0)
 	}
+	if err != nil {
+		return storageIOError(err)
+	}
+	syncErr := error(nil)
+	syncErr = syncStorageFile(file, info.IsDir())
 	closeErr := file.Close()
-	if statErr != nil || syncErr != nil || closeErr != nil {
-		return storageIOError(errors.Join(statErr, syncErr, closeErr))
+	if syncErr != nil || closeErr != nil {
+		return storageIOError(errors.Join(syncErr, closeErr))
 	}
 	return nil
 }

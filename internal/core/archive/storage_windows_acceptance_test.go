@@ -3,12 +3,44 @@
 package archive
 
 import (
+	"bytes"
 	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
 )
+
+// Requirement: ARC-014
+func TestWindowsStorageRootPublishesVerifiedOutputWithWritableSyncHandle(t *testing.T) {
+	if os.Getenv("ARCHIVE_WINDOWS_ACCEPTANCE") != "1" {
+		t.Skip("set ARCHIVE_WINDOWS_ACCEPTANCE=1 on the isolated Windows acceptance host")
+	}
+
+	directory := t.TempDir()
+	root, err := OpenStorageRoot(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	if err := root.MkdirAll("outputs", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	payload := []byte("verified Windows output")
+	if err := root.WriteFile("outputs/result.partial", payload, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := root.Rename("outputs/result.partial", "outputs/result.txt"); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := root.ReadFile("outputs/result.txt")
+	if err != nil || !bytes.Equal(stored, payload) {
+		t.Fatalf("published output=%q error=%v", stored, err)
+	}
+	if exists, err := root.Exists("outputs/result.partial"); err != nil || exists {
+		t.Fatalf("temporary output remains: exists=%v error=%v", exists, err)
+	}
+}
 
 // Requirement: ARC-008
 func TestWindowsStorageRootRejectsJunctionOutsideRegisteredRoot(t *testing.T) {
