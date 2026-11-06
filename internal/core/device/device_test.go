@@ -9,7 +9,7 @@ import (
 	"videoarchive/internal/core/vocabulary"
 )
 
-// Requirement: DEV-001
+// Planned contract: DEV-001
 func TestSharedReadsCoexistAndBlockExclusiveWrite(t *testing.T) {
 	locks := NewLockManager()
 	if err := locks.Acquire("vol-1", "reader-a", SharedRead); err != nil {
@@ -28,7 +28,7 @@ func TestSharedReadsCoexistAndBlockExclusiveWrite(t *testing.T) {
 	}
 }
 
-// Requirement: DEV-002
+// Planned contract: DEV-002
 func TestMaintenanceLockBlocksEveryOtherMode(t *testing.T) {
 	locks := NewLockManager()
 	if err := locks.Acquire("vol-1", "admin", Maintenance); err != nil {
@@ -41,7 +41,7 @@ func TestMaintenanceLockBlocksEveryOtherMode(t *testing.T) {
 	}
 }
 
-// Requirement: DEV-003
+// Planned contract: DEV-003
 func TestEjectPendingRequiresNoLocksAndBlocksNewWork(t *testing.T) {
 	locks := NewLockManager()
 	if err := locks.Acquire("vol-1", "reader", SharedRead); err != nil {
@@ -69,7 +69,7 @@ func validFormatRequest() FormatRequest {
 	}
 }
 
-// Requirement: DEV-004
+// Planned contract: DEV-004
 func TestFormatRequiresDeviceSafetyCopiesChecksumsAndTargetConfirmation(t *testing.T) {
 	if err := ValidateFormat(validFormatRequest()); err != nil {
 		t.Fatalf("valid request rejected: %v", err)

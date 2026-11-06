@@ -27,6 +27,7 @@ func TestArchiveRunPersistsSelectionsFolderScopeAndStageOwnershipSeparatelyFromR
 		ExpectedRevision: 0,
 		IdempotencyKey:   "ARCHIVE-RUN-1:create:v1",
 		Parameters: map[string]any{
+			"start_idempotency_key":     "ARCHIVE-RUN-1:create:v1",
 			"worker_id":                 "WORKER-WINDOWS-1",
 			"source_storage_id":         "SOURCE-STORAGE-1",
 			"source_volume_id":          "VOLUME-WINDOWS-1",
@@ -57,6 +58,12 @@ func TestArchiveRunPersistsSelectionsFolderScopeAndStageOwnershipSeparatelyFromR
 	if !reflect.DeepEqual(first, second) {
 		t.Fatalf("idempotent replay returned a different receipt: first=%+v second=%+v", first, second)
 	}
+	conflict := replay
+	conflict.CommandID = "COMMAND-CREATE-ARCHIVE-RUN-CONFLICT"
+	conflict.IdempotencyKey = "ARCHIVE-RUN-1:create:other"
+	if _, err := executor.Execute(conflict); err == nil {
+		t.Fatal("same ArchiveRun ID with another idempotency key was accepted")
+	}
 
 	snapshot, records, events, found := store.Snapshot("ARCHIVE-RUN-1")
 	if !found {
@@ -72,14 +79,14 @@ func TestArchiveRunPersistsSelectionsFolderScopeAndStageOwnershipSeparatelyFromR
 	wantFolders := []string{"FOLDER-A", "FOLDER-B", "FOLDER-C"}
 	wantStages := []StageOwnership{{Kind: OrganizationStage}, {Kind: TranscriptionStage}}
 	if state.ID != "ARCHIVE-RUN-1" || state.Revision != 1 || state.WorkerID != "WORKER-WINDOWS-1" ||
-		state.SourceStorageID != "SOURCE-STORAGE-1" || state.ArchiveStorageID != "ARCHIVE-STORAGE-1" ||
+		state.SourceStorageID != "SOURCE-STORAGE-1" || state.ArchiveStorageID != "ARCHIVE-STORAGE-1" || state.StartIdempotencyKey != "ARCHIVE-RUN-1:create:v1" ||
 		state.SourceVolumeID != "VOLUME-WINDOWS-1" || state.SourcePhysicalDeviceID != "PHYSICAL-WINDOWS-1" ||
 		state.FolderDiscoveryRevision != 17 || !reflect.DeepEqual(state.FolderIDs, wantFolders) ||
 		state.SelectedBy != (command.Actor{Type: command.HumanActor, ID: "OPERATOR-1"}) ||
 		!reflect.DeepEqual(state.StageOwnerships, wantStages) || !state.CreatedAt.Equal(createdAt.UTC()) {
 		t.Fatalf("persisted ArchiveRun lost fixed ownership data: %+v", state)
 	}
-	if len(records) != 2 || !records[0].Accepted || !records[1].Accepted || len(events) != 1 ||
+	if len(records) != 3 || !records[0].Accepted || !records[1].Accepted || records[2].Accepted || len(events) != 1 ||
 		events[0].EventType != "ArchiveRunCreated" || events[0].TargetID != state.ID || events[0].AfterRevision != 1 {
 		t.Fatalf("state, records and event were not stored through the command unit of work: records=%+v events=%+v", records, events)
 	}

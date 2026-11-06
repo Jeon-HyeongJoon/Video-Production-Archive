@@ -182,7 +182,7 @@ func (operations *mediaOperations) inspectMedia(ctx context.Context, spec execut
 	if err := outputRoot.MkdirAll(path.Dir(target.RelativePath), 0o755); err != nil {
 		return nil, nil, nil, err
 	}
-	temporary := target.RelativePath + ".partial"
+	temporary := temporaryOutputPath(ctx, target.RelativePath)
 	if err := outputRoot.WriteFile(temporary, payload, 0o600); err != nil {
 		return nil, nil, nil, err
 	}
@@ -296,7 +296,7 @@ func (operations *mediaOperations) renderRecording(ctx context.Context, spec exe
 			return nil, nil, err
 		}
 		outputRoot := roots.MustRoot(target.StorageID)
-		temporaryRelative := target.RelativePath + ".partial"
+		temporaryRelative := temporaryOutputPath(ctx, target.RelativePath)
 		publisher, err := newStoragePublisher(outputRoot, temporaryRelative, target.RelativePath)
 		if err != nil {
 			return nil, nil, err
@@ -345,7 +345,7 @@ func (operations *mediaOperations) renderSourceSequence(ctx context.Context, spe
 		hasAudio = hasAudio && input.HasAudio
 	}
 	outputRoot := roots.MustRoot(videoTarget.StorageID)
-	temporaryVideo := videoTarget.RelativePath + ".partial"
+	temporaryVideo := temporaryOutputPath(ctx, videoTarget.RelativePath)
 	publisher, err := newStoragePublisher(outputRoot, temporaryVideo, videoTarget.RelativePath)
 	if err != nil {
 		return nil, nil, err
@@ -363,7 +363,7 @@ func (operations *mediaOperations) renderSourceSequence(ctx context.Context, spe
 		ResolvedInputPaths: resolvedInputs, HasAudio: hasAudio,
 		TemporaryOutputPath: publisher.temporaryResolved, PublishedOutputPath: publisher.publishedResolved,
 		ArtifactPath: videoTarget.RelativePath, TemporaryArtifactPath: temporaryVideo, OutputRoot: outputRoot,
-		TemporaryMarkerPath: markerTarget.RelativePath + ".partial", PublishedMarkerPath: markerTarget.RelativePath, Profile: profile,
+		TemporaryMarkerPath: temporaryOutputPath(ctx, markerTarget.RelativePath), PublishedMarkerPath: markerTarget.RelativePath, Profile: profile,
 	})
 	if err != nil {
 		return nil, nil, err
@@ -443,7 +443,7 @@ func (operations *mediaOperations) qcRendition(ctx context.Context, spec executi
 			return nil, nil, err
 		}
 		outputRoot := roots.MustRoot(target.StorageID)
-		checksum, err = publishPayload(outputRoot, target.RelativePath, payload)
+		checksum, err = publishPayload(ctx, outputRoot, target.RelativePath, payload)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -514,7 +514,7 @@ func (operations *mediaOperations) extractSpeechAudio(ctx context.Context, spec 
 			return nil, nil, err
 		}
 		outputRoot := roots.MustRoot(target.StorageID)
-		temporaryRelative := target.RelativePath + ".partial"
+		temporaryRelative := temporaryOutputPath(ctx, target.RelativePath)
 		publisher, err := newStoragePublisher(outputRoot, temporaryRelative, target.RelativePath)
 		if err != nil {
 			return nil, nil, err
@@ -580,7 +580,7 @@ func (operations *mediaOperations) transcribeAudio(ctx context.Context, spec exe
 			return nil, nil, err
 		}
 		outputRoot := roots.MustRoot(target.StorageID)
-		temporaryRelative := target.RelativePath + ".partial"
+		temporaryRelative := temporaryOutputPath(ctx, target.RelativePath)
 		publisher, err := newStoragePublisher(outputRoot, temporaryRelative, target.RelativePath)
 		if err != nil {
 			return nil, nil, err
@@ -608,7 +608,7 @@ func (operations *mediaOperations) transcribeAudio(ctx context.Context, spec exe
 	return outputs, verificationReferences(spec.Operation, outputs), nil
 }
 
-func (operations *mediaOperations) writeSubtitle(_ context.Context, spec execution.StepExecutionSpec, roots *workerconfig.StorageRoots) ([]execution.StepOutput, []string, error) {
+func (operations *mediaOperations) writeSubtitle(ctx context.Context, spec execution.StepExecutionSpec, roots *workerconfig.StorageRoots) ([]execution.StepOutput, []string, error) {
 	if len(spec.Inputs) != len(spec.Outputs) || len(spec.Inputs) == 0 {
 		return nil, nil, ErrProductionExecution
 	}
@@ -638,7 +638,7 @@ func (operations *mediaOperations) writeSubtitle(_ context.Context, spec executi
 		}
 		result, err := publisher.Publish(subtitlefile.Request{
 			SubtitleID: target.ID, Transcript: transcript, Profile: profile,
-			TemporaryPath: target.RelativePath + ".partial", PublishedPath: target.RelativePath,
+			TemporaryPath: temporaryOutputPath(ctx, target.RelativePath), PublishedPath: target.RelativePath,
 		})
 		if err != nil {
 			return nil, nil, err
@@ -648,7 +648,7 @@ func (operations *mediaOperations) writeSubtitle(_ context.Context, spec executi
 	return outputs, verificationReferences(spec.Operation, outputs), nil
 }
 
-func (operations *mediaOperations) writeTranscriptText(_ context.Context, spec execution.StepExecutionSpec, roots *workerconfig.StorageRoots) ([]execution.StepOutput, []string, error) {
+func (operations *mediaOperations) writeTranscriptText(ctx context.Context, spec execution.StepExecutionSpec, roots *workerconfig.StorageRoots) ([]execution.StepOutput, []string, error) {
 	if len(spec.Inputs) != len(spec.Outputs) || len(spec.Inputs) == 0 {
 		return nil, nil, ErrProductionExecution
 	}
@@ -675,7 +675,7 @@ func (operations *mediaOperations) writeTranscriptText(_ context.Context, spec e
 			return nil, nil, err
 		}
 		artifact, err := publisher.Publish(transcripttext.Request{
-			ID: target.ID, Transcript: transcript, TemporaryPath: target.RelativePath + ".partial", PublishedPath: target.RelativePath,
+			ID: target.ID, Transcript: transcript, TemporaryPath: temporaryOutputPath(ctx, target.RelativePath), PublishedPath: target.RelativePath,
 		})
 		if err != nil {
 			return nil, nil, err
@@ -817,7 +817,7 @@ func (operations *mediaOperations) organizeMedia(_ context.Context, spec executi
 	return outputs, verificationReferences(spec.Operation, outputs), nil
 }
 
-func (operations *mediaOperations) writeArchiveCatalog(_ context.Context, spec execution.StepExecutionSpec, roots *workerconfig.StorageRoots) ([]execution.StepOutput, []string, error) {
+func (operations *mediaOperations) writeArchiveCatalog(ctx context.Context, spec execution.StepExecutionSpec, roots *workerconfig.StorageRoots) ([]execution.StepOutput, []string, error) {
 	if len(spec.Outputs) != 1 || spec.Outputs[0].Kind != execution.OutputArchiveCatalog || len(spec.Inputs) == 0 {
 		return nil, nil, ErrProductionExecution
 	}
@@ -875,7 +875,7 @@ func (operations *mediaOperations) writeArchiveCatalog(_ context.Context, spec e
 	}
 	result, err := publisher.PublishMerged(archivecatalog.Request{
 		WorkspaceDriveID: spec.Parameters.WorkspaceDriveID, Rows: rows,
-		TemporaryPath: target.RelativePath + ".partial", PublishedPath: target.RelativePath,
+		TemporaryPath: temporaryOutputPath(ctx, target.RelativePath), PublishedPath: target.RelativePath,
 	})
 	if err != nil {
 		return nil, nil, err
@@ -902,7 +902,7 @@ func packageCatalogStatus(metadata archivebundle.Metadata) string {
 	return "STORED"
 }
 
-func publishPayload(root *archive.StorageRoot, publishedPath string, payload []byte) (string, error) {
+func publishPayload(ctx context.Context, root *archive.StorageRoot, publishedPath string, payload []byte) (string, error) {
 	if root == nil {
 		return "", ErrProductionExecution
 	}
@@ -911,7 +911,7 @@ func publishPayload(root *archive.StorageRoot, publishedPath string, payload []b
 			return "", err
 		}
 	}
-	temporaryPath := publishedPath + ".partial"
+	temporaryPath := temporaryOutputPath(ctx, publishedPath)
 	defer root.Remove(temporaryPath)
 	if err := root.WriteFile(temporaryPath, payload, 0o600); err != nil {
 		return "", err

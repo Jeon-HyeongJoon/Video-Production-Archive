@@ -84,7 +84,7 @@ stateDiagram-v2
     PAUSED --> CANCELLED
 ```
 
-`WAITING`의 원인은 WaitReason.IDLE/MEMORY/SCRATCH/SLOT/DISK/APPROVAL/INPUT/DEVICE/PRIORITY로 분리한다. 모든 상태 변경 연산은 같은 전이표를 통과하고 자원 대기는 측정된 WaitReason을 그대로 기록한다. `COMPLETED`, `FAILED`, `CANCELLED`는 종결 상태다. 완료된 업무를 되돌려야 하면 기존 Step을 수정하지 않고 보상 Command와 새 Step/Event를 생성한다. 미시작·실행 중 Worker 취소와 완료 경합은 `CAN-001~004`로 확정했고, 외부 효과 조정과 업무 보상 후보는 [12. 취소와 보상 설계 제안](12-cancellation-compensation-proposal.md)에서 분리한다. 상태 계약은 `WFL-001~013`이다.
+`WAITING`의 원인은 WaitReason.IDLE/MEMORY/SCRATCH/SLOT/DISK/APPROVAL/INPUT/DEVICE/PRIORITY로 분리한다. 모든 상태 변경 연산은 같은 전이표를 통과하고 자원 대기는 측정된 WaitReason을 그대로 기록한다. `COMPLETED`, `FAILED`, `CANCELLED`는 종결 상태다. 완료된 업무를 되돌려야 하면 기존 Step을 수정하지 않고 보상 Command와 새 Step/Event를 생성한다. 미시작·실행 중 Worker 취소, 완료 경합과 외부 효과 PARTIAL·UNCERTAIN 조정은 `CAN-001~005`로 확정했고, 업무 보상 후보는 [12. 취소와 보상 설계 제안](12-cancellation-compensation-proposal.md)에서 분리한다. 상태 계약은 `WFL-001~013`이다.
 
 `QUEUED`는 단순 배열 위치가 아니라 dispatch 가능성을 나타낸다. Step에는 선행 조건을 처음 만족한 `ready_at`과 재시도 backoff용 `next_eligible_at`을 두고, Job에는 마지막 성공 dispatch sequence를 둔다. 이 값은 queue projection을 재구성하고 Control 재시작 전후 같은 다음 후보를 선택하는 근거이며 Worker lease가 실제로 확정되기 전에는 갱신하지 않는다. 순서와 공정성 계약은 `DSP-001`이 소유한다.
 
@@ -92,10 +92,11 @@ stateDiagram-v2
 
 - ExecutionLease에는 `owner_worker_id`, `acquired_at`, `expires_at`, `heartbeat_at`, `fencing_token`을 둔다.
 - ExecutionLease 발급 전에 같은 Worker·Step의 ResourceReservation을 만들고 둘을 StepState.RESERVED와 같은 Unit of Work로 확정한다.
-- Worker는 처리 중 주기적으로 heartbeat를 갱신한다.
+- Worker는 처리 중과 결과 HTTP 재전송 중 Control이 내려준 상대 주기로 현재 owner·fencing token의 heartbeat를 갱신한다. `WRK-013`
 - Control은 만료 전 동일 Step을 다른 Worker에 주지 않는다.
 - 새 ExecutionLease의 fencing token은 이전 값보다 커야 하며 늦게 돌아온 Worker의 결과는 거부한다.
-- 만료된 RUNNING Step은 idempotency receipt와 출력 publish 상태를 먼저 확인한다. 출력이 없을 때만 QUEUED로 복구하고 이미 게시됐으면 VERIFYING에서 조정한다.
+- 결과 정산은 같은 token의 동일 결과를 replay하는 결과 receipt와 후속 observer용 completion outbox를 같은 transaction에 기록한다. `WRK-009`, `WRK-014`
+- 만료된 RUNNING Step은 idempotency receipt와 결과 receipt를 먼저 확인한다. 실제 게시 파일은 있지만 결과 receipt가 없는 중단을 자동 조정하는 경계는 `EXE-003` planned이므로 그 경우를 안전한 재실행으로 간주하지 않는다.
 - ControlMode를 MANUAL로 바꿔도 StepState와 Worker ExecutionLease는 유지한다.
 
 ## 5. Retry 분류
@@ -107,9 +108,9 @@ stateDiagram-v2
 | 자원 부족 | 실패 횟수를 소비하지 않고 StepState.WAITING + 해당 WaitReason |
 | 외장 장치 분리 | 실패 횟수를 소비하지 않고 StepState.WAITING + WaitReason.DEVICE |
 | 승인 미완료 | StepState.WAITING + WaitReason.APPROVAL |
-| 취소 | subprocess 종료·임시 결과 정리 후 CANCELLED |
+| 취소 | subprocess 종료·임시 결과 정리 후 CANCELLED. 종료 뒤 외부 효과가 남으면 PARTIAL, 종료 여부가 불명확하면 UNCERTAIN과 Worker 격리 |
 
-재시도 한도 계약은 `WFL-005`, Provider 오류 재시도는 `AGT-004~006`이 소유한다.
+재시도 한도 계약은 `WFL-005`, 운영 Worker 오류 분류는 `WRK-015`가 소유한다. 외부 Provider 오류 재시도 `AGT-004~006`은 Provider Router 연결 전까지 planned다.
 
 ## 6. Template
 

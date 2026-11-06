@@ -6,13 +6,13 @@ import (
 	"errors"
 	"fmt"
 
-	_ "modernc.org/sqlite"
-
+	"videoarchive/internal/adapter/sqlitebase"
 	"videoarchive/internal/core/storage"
 )
 
 type Repository struct {
-	db *sql.DB
+	db      *sql.DB
+	release func() error
 }
 
 var ErrTopologyConflict = errors.New("storage topology conflicts with an existing definition")
@@ -21,21 +21,20 @@ var _ storage.WorkspaceResolver = (*Repository)(nil)
 var _ storage.AccessResolver = (*Repository)(nil)
 
 func Open(path string) (*Repository, error) {
-	db, err := sql.Open("sqlite", path)
+	db, release, err := sqlitebase.Acquire(path)
 	if err != nil {
 		return nil, err
 	}
-	db.SetMaxOpenConns(1)
-	repository := &Repository{db: db}
+	repository := &Repository{db: db, release: release}
 	if err := repository.migrate(context.Background()); err != nil {
-		db.Close()
+		release()
 		return nil, err
 	}
 	return repository, nil
 }
 
 func (repository *Repository) Close() error {
-	return repository.db.Close()
+	return repository.release()
 }
 
 func (repository *Repository) migrate(ctx context.Context) error {

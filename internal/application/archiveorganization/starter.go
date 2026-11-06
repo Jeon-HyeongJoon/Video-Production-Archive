@@ -181,7 +181,8 @@ func (service *StartService) Start(ctx context.Context, request StartRequest) (R
 		Actor: request.SelectedBy, RequestedVia: "APPLICATION", TargetID: request.ArchiveRunID, ExpectedRevision: 0,
 		IdempotencyKey: request.IdempotencyKey + ":archive-run",
 		Parameters: map[string]any{
-			"worker_id": candidate.WorkerID, "source_storage_id": candidate.StorageID,
+			"start_idempotency_key": request.IdempotencyKey,
+			"worker_id":             candidate.WorkerID, "source_storage_id": candidate.StorageID,
 			"source_volume_id": candidate.VolumeID, "source_physical_device_id": candidate.PhysicalDeviceID,
 			"archive_storage_id": archiveStorage.StorageID, "folder_discovery_revision": request.InputRevision,
 			"folder_ids": folderScope.FolderIDs(), "selected_by": request.SelectedBy,

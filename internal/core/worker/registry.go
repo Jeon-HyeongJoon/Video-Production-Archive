@@ -183,6 +183,29 @@ func (r *Registry) Heartbeat(workerID string, now time.Time, metrics Metrics) er
 	return nil
 }
 
+// UpdateStorageInventory attaches the potentially large folder inventory to
+// the exact resource snapshot that announced it. It does not refresh the
+// heartbeat TTL and cannot overwrite a newer snapshot.
+func (r *Registry) UpdateStorageInventory(workerID string, snapshotID uint64, observations []StorageObservation) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	current, connected := r.states[workerID]
+	if !connected {
+		return ErrWorkerNotConnected
+	}
+	if snapshotID != current.metrics.SnapshotID {
+		return ErrStaleSnapshot
+	}
+	next := cloneMetrics(current.metrics)
+	next.StorageObservations = cloneStorageObservations(observations)
+	if err := validateMetrics(next); err != nil {
+		return err
+	}
+	current.metrics = next
+	r.states[workerID] = current
+	return nil
+}
+
 func (r *Registry) DispatchSnapshot(workerID string, now time.Time) (Metrics, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -320,12 +343,7 @@ func cloneMetrics(source Metrics) Metrics {
 	for deviceID, busy := range source.BusyPhysicalDeviceIDs {
 		devices[deviceID] = busy
 	}
-	observations := make([]StorageObservation, 0, len(source.StorageObservations))
-	for _, observation := range source.StorageObservations {
-		copy := observation
-		copy.Folders = append([]MediaFolderObservation(nil), observation.Folders...)
-		observations = append(observations, copy)
-	}
+	observations := cloneStorageObservations(source.StorageObservations)
 	attachedVolumes := append([]AttachedVolumeObservation(nil), source.AttachedVolumes...)
 	return Metrics{
 		SnapshotID: source.SnapshotID, ObservedAt: source.ObservedAt,
@@ -336,6 +354,16 @@ func cloneMetrics(source Metrics) Metrics {
 		BusyPhysicalDeviceIDs: devices, AccessibleStorageIDs: accessible, AcceptingWork: source.AcceptingWork,
 		StorageObservations: observations, AttachedVolumes: attachedVolumes,
 	}
+}
+
+func cloneStorageObservations(source []StorageObservation) []StorageObservation {
+	observations := make([]StorageObservation, 0, len(source))
+	for _, observation := range source {
+		copy := observation
+		copy.Folders = append([]MediaFolderObservation(nil), observation.Folders...)
+		observations = append(observations, copy)
+	}
+	return observations
 }
 
 func cloneDefinition(source Definition) Definition {

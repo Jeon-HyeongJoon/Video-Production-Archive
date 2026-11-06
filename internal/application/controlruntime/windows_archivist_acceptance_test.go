@@ -20,8 +20,8 @@ import (
 	"testing"
 	"time"
 
+	"videoarchive/internal/adapter/controlruntime"
 	"videoarchive/internal/adapter/ossecret"
-	"videoarchive/internal/application/controlruntime"
 )
 
 // Requirement: LRH-011

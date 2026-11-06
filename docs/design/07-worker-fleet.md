@@ -114,13 +114,15 @@ scratch_free_bytes
 heavy_running, light_running
 busy_physical_device_ids
 accessible_storage_ids, accepting_work
-storage_observations: storage_id, connected, access kind, capacity/free, folder discovery state/revision, folder video count/input bytes
+storage_observations: storage_id, connected, access kind, capacity/free, folder discovery state/revision
 attached_volumes: physical_device_id, volume_id, source storage_id, model/label/filesystem, capacity/free
 ```
 
+heartbeat는 64KiB 안의 고정 크기 집계만 보낸다. 폴더 수에 따라 커지는 `folder video count/input bytes` 목록은 heartbeat가 수락된 뒤 같은 `snapshot_id`의 별도 인증 inventory 요청으로 보낸다. Control은 정확히 현재 snapshot에만 그 목록을 결합하고 이 요청만으로 heartbeat TTL을 연장하지 않는다. 따라서 수백 개 폴더가 있는 드라이브도 Worker 연결 상태를 끊지 않는다. `WRK-006`
+
 Windows Worker는 OS가 `DRIVE_FIXED`로 보더라도 USB·SD 같은 외부 data bus의 volume을 원본 후보로 관찰한다. 내부 시스템 volume과 1GiB 미만 보조 partition은 제외하고 serial·model·물리 용량으로 PhysicalDevice ID, volume GUID·filesystem으로 volume ID를 만든다. drive letter와 mount root는 identity에 넣지 않고 Worker process 안에만 둔다. 이 단계에서는 파일이나 폴더를 읽지 않는다. `DEV-007`
 
-Control은 attached volume 관찰을 identity만 가진 SOURCE_MEDIA 후보로 저장한다. 사람이 현재 candidate revision을 선택하면 불변 ArchiveIntakeSession을 저장하고, 다음 heartbeat 응답에 선택된 source storage ID를 같은 Worker에 반환한다. Worker는 그때만 local mount를 `ReadOnlyStorageRoot`로 열어 폴더 inventory를 background에서 수행한다. 긴 탐색은 heartbeat·claim loop를 막지 않으며 최초 탐색은 `SCANNING`과 지금까지 찾은 폴더·영상 집계를, 성공하면 `READY`와 0이 아닌 revision을, root 개방이나 탐색 실패는 `FAILED`를 보낸다. `SCANNING`의 부분 목록은 화면 표시 전용이며 ArchiveRun 범위로 고정하지 않는다. 재탐색 중에는 이전에 완성된 `READY` 관측을 계속 보낸다. 보호·숨김 OS 하위 폴더는 건너뛴다. `DEV-008`, `DEV-011`, `ORG-001`
+Control은 attached volume 관찰을 identity만 가진 SOURCE_MEDIA 후보로 저장한다. 같은 논리 Volume이 다른 Worker에서 더 새로운 시각으로 관찰되면 물리 장치·Volume·Storage identity가 모두 같은 경우 현재 Worker를 새 관찰자로 바꾸고 candidate revision을 올린다. 과거 Worker의 늦은 관찰은 무시한다. 사람이 현재 candidate revision을 선택하면 불변 ArchiveIntakeSession을 저장하고, 다음 heartbeat 응답에 선택된 source storage ID를 같은 Worker에 반환한다. Worker는 그때만 local mount를 `ReadOnlyStorageRoot`로 열어 폴더 inventory를 background에서 수행한다. 긴 탐색은 heartbeat·claim loop를 막지 않으며 최초 탐색은 `SCANNING`과 지금까지 찾은 폴더·영상 집계를, 성공하면 `READY`와 0이 아닌 revision을, root 개방이나 탐색 실패는 `FAILED`를 보낸다. `SCANNING`의 부분 목록은 화면 표시 전용이며 ArchiveRun 범위로 고정하지 않는다. 재탐색 중에는 이전에 완성된 `READY` 관측을 계속 보낸다. 보호·숨김 OS 하위 폴더는 건너뛴다. `DEV-008`, `DEV-011`, `ORG-001`
 
 Boot 설정 Storage와 선택된 attached source 모두 heartbeat에는 Storage ID와 집계만 보내며 파일 상대경로 목록과 root 절대경로는 보내지 않는다. 외장 Volume 관찰은 같은 root에 대해 SOURCE_MEDIA와 ARCHIVE_PRIMARY의 서로 다른 stable Storage ID를 함께 보고해 역할 capability를 섞지 않는다. Control은 등록 Storage topology, attached Volume·PhysicalDevice identity와 이 관측을 결합해 미분류 원본 폴더와 로컬·연결 네트워크·새 외장 드라이브 아카이브 후보를 투영한다. 접근 방식은 Worker Adapter가 `StorageAccessKind`로 보고하며 임의 Storage ID 문자열에서 추측하지 않는다. 같은 원본 Volume만 자체 아카이브 후보에서 제외하고 PhysicalDevice ID는 별도 I/O 충돌 키로 유지한다. `DEV-006~007`, `DEV-010`
 
@@ -132,7 +134,7 @@ Control은 Worker의 service credential과 단조 증가 snapshot ID를 검증�
 
 `accepting_work`는 Worker가 종료·정리 중인지 나타내는 운영 gate이며 CPU·memory 기반의 최종 수용 판정이 아니다. Control은 heartbeat 원시값에 아직 해제되지 않은 ResourceReservation을 결합해 WorkerCapacity를 계산한다. 따라서 Worker가 보내는 `heavy_running`·`light_running`만으로 추가 작업 가능 여부를 표시하거나 queue admission을 결정하지 않는다. 실제 Step의 예상량과 예약 차감값을 사용한 Control의 판정이 실행·보류 상태의 기준이다. `DSP-004`, `DSH-014`
 
-배정된 Worker는 outbound claim으로 자신의 `RESERVED` Step 하나를 `RUNNING`으로 확정한다. claim과 결과 API는 매 요청의 Worker credential을 다시 검증하고, 결과는 현재 ExecutionLease owner와 fencing token이 일치할 때만 수락한다. 성공·분류된 실패의 Step 전이, Event·Command 기록, ResourceReservation·device reservation·lease 해제는 같은 SQLite transaction에서 정산한다. timeout으로 늦게 도착한 결과는 예약 해제 뒤에도 성공으로 추정하지 않고 `STALE_FENCING_TOKEN`으로 거부한다. `WRK-009`
+배정된 Worker는 outbound claim으로 자신의 `RESERVED` Step 하나를 `RUNNING`으로 확정한다. claim과 결과 API는 매 요청의 Worker credential을 다시 검증하고, 결과는 현재 ExecutionLease owner와 fencing token이 일치할 때만 수락한다. Step 시작·성공·분류된 실패·취소 정산·lease 만료 복구의 결정적 상태 전이는 Core `WorkerLifecycleHandler`가 staged Job state와 Event로 만들며 SQLite Adapter는 Job state를 직접 바꾸지 않는다. staged change, 결과 receipt, Event·Command 기록, ResourceReservation·device reservation·lease 해제는 같은 SQLite transaction에서 정산한다. 응답을 받지 못해 같은 token과 같은 결과를 다시 보내면 저장된 receipt를 반환하고, 내용이 바뀌었거나 이미 다른 token으로 넘어간 결과는 `STALE_FENCING_TOKEN`으로 거부한다. `WRK-009`
 
 ### 4.1 실행 명세와 출력 기록
 
@@ -152,7 +154,13 @@ profile reference와 operation별 typed parameter
 
 선행 Step이 있는 실행 명세는 선행 출력이 확정되기 전에는 만들지 않는다. 성공 결과 정산 transaction이 최신 출력 기록과 Job의 고정 입력 문맥에서 다음 ready Step의 명세를 결정적으로 한 번 만들며, Worker가 보고한 절대경로나 임의 parameter를 후속 입력으로 승격하지 않는다. `APP-004`
 
-운영 `archive-worker`는 fixture flag 없이 typed operation을 등록 Adapter에 대응시키는 executor registry를 항상 조립한다. registry는 하나의 명세를 정확히 하나의 Adapter에만 연결하며, 입력·임시 출력·게시 경로를 모두 boot 때 연 `StorageRoot`로 해석한다. operation이 없거나 둘 이상에 대응하면 subprocess를 시작하지 않는다. `WRK-012`
+운영 `archive-worker`는 fixture flag 없이 typed operation을 등록 Adapter에 대응시키는 executor registry를 항상 조립한다. registry는 하나의 명세를 정확히 하나의 Adapter에만 연결하며, 입력·임시 출력·게시 경로를 모두 boot 때 연 `StorageRoot`로 해석한다. 임시 출력 이름에는 현재 fencing token을 포함하고 취소 정리는 그 token의 파일만 지워, lease를 잃은 실행이 뒤의 실행을 훼손하지 못하게 한다. ArchivePackage의 리비전·`current.json` 갱신은 StorageRoot의 package 단위 배타 잠금으로 직렬화한다. operation이 없거나 둘 이상에 대응하면 subprocess를 시작하지 않는다. `WRK-012`
+
+실행 중인 Worker는 Control이 claim에서 내려준 주기로 현재 owner·fencing token의 lease heartbeat를 보낸다. 갱신은 token을 바꾸지 않고 같은 TTL만 연장하며, Worker는 서버와 로컬 시계 차이를 피하려고 절대 만료 시각이 아니라 상대 갱신 주기로 다음 시각을 계산한다. 결과 HTTP를 재전송하는 동안에도 갱신을 계속 시도한다. `WRK-013`
+
+결과와 process 종료가 확인된 취소 정산 transaction은 읽기 projection 갱신·후속 Application observer·다음 dispatch 작업을 `worker_completion_outbox`에 함께 맡긴다. HTTP 요청은 이미 확정된 결과를 projection이나 dispatch의 일시 오류 때문에 거부하지 않고, 큰 검사 결과에서 Folder Job 생성을 끝까지 기다리지도 않는다. Worker는 응답을 받지 못한 결과·취소 보고의 동일 payload를 재전송하고 Control은 최초 receipt를 반환한다. Control의 조정 loop가 outbox를 재시작 뒤에도 읽어 세 후속 처리를 멱등 수행하고 전부 성공한 뒤에만 전달됨으로 표시한다. `WRK-014`, `CAN-005`
+
+운영 executor는 checksum·명세 불일치를 영구 `INPUT`, 일반 subprocess·일시 I/O 실패를 `TRANSIENT`, 접근 불가 Storage를 대상 ID가 있는 `DEVICE`, 용량 부족을 `DISK` 자원 대기로 보고한다. 자원 대기는 실행 시도 횟수를 소비하지 않는다. `WRK-015`
 
 권장 상태:
 
@@ -196,7 +204,7 @@ Archive Intake operation은 탐색·검사·렌더·QC·ArchivePackage 게시·�
 ## 7. 장애와 중복 방지
 
 - Worker 연결이 끊겨도 ExecutionLease TTL 전에는 같은 Step을 다른 Worker에 주지 않는다.
-- TTL 후 실제 Artifact publish 여부와 command idempotency receipt를 먼저 확인한다.
+- TTL 뒤에는 현재 결과 receipt와 command idempotency receipt를 먼저 확인한다. 게시까지 끝났지만 결과 receipt 전 Worker가 중단된 상태를 실제 Artifact로 복구하는 `EXE-003` 수직 경로는 아직 planned이므로, 이 창에서는 자동 재실행을 안전하다고 완료 판정하지 않는다.
 - 재발급한 ExecutionLease는 더 큰 fencing token을 가지며 이전 Worker의 늦은 결과는 거부한다. `WFL-007~009`
 - 완료되지 않은 단계만 재대기한다.
 - 임시 결과는 Worker별 scratch namespace에 둔다.

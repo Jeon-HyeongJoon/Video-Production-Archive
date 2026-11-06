@@ -90,7 +90,7 @@ Verify(temp outputs) → inspection/checksum/QC evidence
 Publish(evidence) → artifact IDs
 ```
 
-명령행은 배열 인수로 만들고 shell 문자열 결합을 사용하지 않는다. 출력은 임시 경로에서 검증한 뒤에만 게시한다. 로그에는 원문 credential이나 민감 경로를 노출하지 않는다. Core 계약은 `EXE-001~002`, DB와 파일 게시 사이 재시작 조정은 `EXE-003` integration test가 검증한다.
+명령행은 배열 인수로 만들고 shell 문자열 결합을 사용하지 않는다. 출력은 임시 경로에서 검증한 뒤에만 `StorageRoot`의 동기화·검증·root-relative rename을 거쳐 게시한다. 로그에는 원문 credential이나 민감 경로를 노출하지 않는다. Core 계약은 `EXE-001~002`가 검증한다. 게시 뒤 Worker 결과 receipt 전에 중단된 실행을 실제 파일에서 조정하는 `EXE-003` Adapter는 아직 runtime에 연결되지 않아 planned다.
 
 ffprobe Adapter는 Storage Adapter가 등록 root 안에서 해석한 실행 입력만 받아 `-show_format`, `-show_streams` JSON을 요청하고 이를 정규화한 `MediaInspection`으로 변환한다. CI에서는 격리 실행 파일로 인수 배열과 변환을 검증한다. 전용 Windows acceptance는 실제 H.264/AAC 입력을 만들고 운영 ffprobe가 container·길이·크기·bitrate·stream을 기록하는지와 입력 checksum 불변을 검증한다. `MED-002~003`
 
@@ -181,7 +181,7 @@ Archivist Host 종료:
 3. 진행 중 turn의 lease를 반납하거나 만료 복구 가능 상태로 둠
 4. CLI에 graceful stop을 전달하고 timeout 뒤 process tree 종료
 
-재시작 시 Worker에는 `WFL-004`, `WFL-008~009`의 ExecutionLease와 publish 복구 규칙을 적용한다. Archivist Host에는 `LRH-003~006`, `LRH-008`의 ArchivistTurnLease, durable session 재해석과 cursor replay 규칙을 적용한다.
+재시작 시 Worker에는 `WFL-004`, `WFL-008~009`, `WRK-013~014`의 ExecutionLease 갱신·결과 receipt·completion outbox 복구 규칙을 적용한다. 게시 뒤 결과 receipt 전 중단 복구는 `EXE-003` planned 경계로 명시한다. Archivist Host에는 `LRH-003~006`, `LRH-008`의 ArchivistTurnLease, durable session 재해석과 cursor replay 규칙을 적용한다.
 
 ## 9. 관측성
 
@@ -191,6 +191,6 @@ Archivist Host 종료:
 - Notification: Event 또는 metric에서 만든 실시간 메시지. Event 기반 알림만 재연결 replay
 - process 원문 로그: 회전 파일, DB에는 위치와 tail만 저장
 
-Provider 관련 필드는 저장 전 `AGT-008` 허용 목록 정책으로 정제한다. feed의 replay 분리는 `NTF-001`, 실제 HTTP/SSE 재연결은 `NTF-002` integration test가 검증한다.
+로컬 CLI ArchivistTurnEntry는 `LRH-013`의 허용 목록으로 정제한다. 외부 Provider 관련 필드의 `AGT-008` 정책은 Provider Router가 runtime에 연결될 때까지 planned다. feed의 replay 분리는 `NTF-001`, 실제 HTTP/SSE 재연결은 `NTF-002` integration test가 검증한다.
 
-도메인 기능 실행은 Capability Executor의 공통 Evidence Sink가 시작·진행·완료·실패와 상관 ID를 기록한다. requirement test는 CI evidence runner가 구조화한 뒤 CI artifact로 누적한다. 로컬 테스트 실행은 완료 판정 증적으로 사용하지 않는다. 운영 증적과 테스트 증적은 형식을 공유할 수 있지만 저장 수명주기와 원장은 분리한다. 자세한 계약은 [10. 도메인 기능 실행과 검증 증적](10-capabilities-observability.md)을 따른다. `OBS-001`, `TST-001`
+목표 runtime에서는 Capability Executor의 공통 Evidence Sink가 시작·진행·완료·실패와 상관 ID를 기록한다. 현재 requirement test는 CI evidence runner가 구조화한 뒤 CI artifact로 누적한다. 로컬 테스트 실행은 완료 판정 증적으로 사용하지 않는다. 운영 증적과 테스트 증적은 형식을 공유할 수 있지만 저장 수명주기와 원장은 분리한다. 모든 운영 Capability를 감싸는 Evidence Sink는 아직 planned인 `OBS-001`, 테스트 증적은 구현된 `TST-001`이 소유한다. 자세한 계약은 [10. 도메인 기능 실행과 검증 증적](10-capabilities-observability.md)을 따른다.

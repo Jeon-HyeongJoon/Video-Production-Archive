@@ -69,6 +69,8 @@ Storage는 로컬 root, 연결된 네트워크 공유 root, 새 외장 data volu
 
 원격 파일 서비스 Adapter는 임시 업로드, 게시 전후 다시 읽기, 목록, manifest checksum 검증과 원자 rename 또는 그와 동등한 안전 게시를 제공해야 한다. 해당 기능을 확인하지 못한 후보는 화면에 접근 불가로 투영하고 아카이브 실행에 선택할 수 없다. SMTP는 파일 namespace의 목록·재검증·패키지 리비전 게시를 제공하지 않으므로 아카이브 저장소가 아니다. 완료 보고서나 아카이브 참조를 보내는 전달 채널로만 별도 설계한다.
 
+로컬·mount 기반 실제 게시의 공통 경계는 `archive.StorageRoot`다. 애플리케이션과 개별 Adapter는 검증한 문자열 경로를 unrestricted `os` 호출로 다시 열지 않는다. 임시 출력은 같은 root에서 파일 동기화와 checksum·형식 검증을 마친 뒤 `os.Root.Rename`으로 게시하고 상위 디렉터리를 동기화한다. subprocess가 만든 임시 출력도 같은 게시 경계를 통과하며 실패한 `.partial`은 다음 재시도 전에 제거한다. `ARC-005`, `ORG-008~009`, `WRK-012`
+
 ## 4. 원본과 파생본
 
 원본은 `InputFileObservation`에서 최초 검증한 checksum·원래 이름·크기와 관찰 기록 ID를 고정한 immutable `OriginalAsset`이다. Storage와 상대경로는 관찰 기록 또는 사본 기록이 소유하며 OriginalAsset에 복제하지 않는다. 체크섬이나 원래 이름을 고쳐야 하면 새 OriginalAsset과 대체 관계를 만든다. `INT-002`, `ARC-001`
@@ -105,12 +107,13 @@ size + sha256
 - Archive Control만 write connection을 소유한다.
 - WAL mode를 사용하고 DB를 네트워크 공유 경로에 두지 않는다.
 - 현재 상태, CommandRecord, Event, idempotency receipt와 outbox 레코드는 한 transaction에 기록한다. `PER-001`
+- 같은 DB를 여는 runtime 저장소는 정규화한 경로별 process-wide `sql.DB` 하나와 reference-counted 수명주기를 공유한다. 개별 저장소가 독립 pool을 만들거나 다른 저장소가 쓰는 연결을 먼저 닫지 않는다. `PER-002`
 - 렌더링 동안 transaction을 열어두지 않는다.
 - Worker progress는 제한된 주기로 집계하여 무제한 row 증가를 막는다.
 - migration은 단조 증가 버전과 checksum을 가지며 시작 시 적용 상태를 검사한다.
 - backup은 SQLite Online Backup 방식으로 만들고 복원 시험을 운영 절차에 포함한다.
 
-SQLite Command Store는 `PER-001` integration test로 transaction rollback을 검증한다. Job 읽기 projection은 Control 시작 때 원장의 모든 유효 Job aggregate에서 다시 만들며 다른 aggregate를 Job으로 오인하지 않는다. DB 전체 migration과 backup/restore는 다음 수직 슬라이스에서 별도 요구사항으로 내린다. `CTL-007`
+SQLite Command Store는 `PER-001` integration test로 transaction rollback을, `PER-002`로 공유 연결 수명주기를 검증한다. row cursor를 연 채 같은 단일 연결로 후속 조회하지 않고 먼저 필요한 행을 버퍼링해 닫는다. 조회용 시각 문자열은 고정 9자리 소수부의 UTC 형식으로 기록해 문자열 정렬과 실제 시각 순서를 일치시키며, lease 만료 판정은 저장 문자열을 `time.Time`으로 파싱해 비교한다. Job 읽기 projection은 Control 시작 때 원장의 모든 유효 Job aggregate에서 다시 만들며 다른 aggregate를 Job으로 오인하지 않는다. DB 전체 migration과 backup/restore는 다음 수직 슬라이스에서 별도 요구사항으로 내린다. `CTL-007`
 
 Archive Control 시작 시 boot 설정의 Storage topology를 같은 SQLite DB에 등록한다. 동일한 physical device·partition·volume·Storage ID·root 재등록은 재시작으로 보고 멱등하게 허용하지만 기존 ID의 parent나 root가 달라지면 시작을 중단한다. `CFG-006`, `CTL-002`
 
@@ -149,9 +152,9 @@ Archive Intake의 ArchivePackage는 결과 영상 하나당 하나다. SOURCE_ME
 - `manifest-sha256.txt`: 정렬된 상대경로와 SHA-256
 - `README.md`: 도구가 없어도 읽을 수 있는 설명
 
-Archive Intake의 1단계 결과는 담당자가 고른 `ARCHIVE_PRIMARY`에 ArchivePackage로 게시한다. 한 벌이 manifest까지 검증되면 `STORED`, 즉 보관됨이다. 2단계 Transcript·TranscriptText·Subtitle은 확정 전 패키지에 manifest가 다른 새 리비전으로 추가한다. ArchiveCatalog는 같은 `ARCHIVE_PRIMARY`를 쓰는 작업과 원본 드라이브를 가리지 않고 최상단 `archive-catalog.csv` 하나에 누적한다. 현재 전체 투영을 `archive-catalog.csv.partial`에 작성·검증한 뒤 원자 교체하며 ArchivePackage의 `files.csv`를 대체하지 않는다. 기존 `catalog/<원본 드라이브 ID>.csv`가 있고 최상단 파일이 없으면 첫 게시에서 행을 병합하고 기존 파일은 복구 근거로 유지한다. `ORG-008~009`, `ARC-011`
+Archive Intake의 1단계 결과는 담당자가 고른 `ARCHIVE_PRIMARY`에 ArchivePackage로 게시한다. 한 벌이 manifest까지 검증되면 `STORED`, 즉 보관됨이다. 2단계 Transcript·TranscriptText·Subtitle은 확정 전 패키지에 manifest가 다른 새 리비전으로 추가한다. ArchiveCatalog는 같은 `ARCHIVE_PRIMARY`를 쓰는 작업과 원본 드라이브를 가리지 않고 최상단 `archive-catalog.csv` 하나에 누적한다. Worker와 process가 달라도 같은 StorageRoot의 잠금 파일을 배타적으로 잡은 뒤 현재 투영을 읽고 병합해 `archive-catalog.csv.partial`에 작성·동기화·검증한 뒤 `os.Root.Rename`으로 원자 교체한다. ArchivePackage의 `files.csv`는 대체하지 않는다. 기존 `catalog/<원본 드라이브 ID>.csv`가 있고 최상단 파일이 없으면 첫 게시에서 행을 병합하고 기존 파일은 복구 근거로 유지한다. `ORG-008~009`, `ARC-011`
 
-Core 메타데이터 round-trip 계약은 `ARC-005`, 실제 SQLite와 디렉터리를 사용하는 sidecar package import 계약은 `ARC-007`, manifest 계약은 `ARC-003`이다.
+Core 메타데이터 round-trip 계약은 `ARC-005`, manifest 계약은 `ARC-003`이다. SQLite와 디렉터리를 사용하는 sidecar package import prototype은 있으나 Control의 복원 명령에 연결되지 않았으므로 `ARC-007`은 planned다.
 
 ## 7. 아카이브 확정
 
@@ -172,4 +175,4 @@ Core 메타데이터 round-trip 계약은 `ARC-005`, 실제 SQLite와 디렉터�
 
 ## 8. DB 재구축
 
-중앙 DB를 잃은 경우 volume catalog → package metadata → events → manifest 순으로 읽는다. import는 기존 ID와 checksum이 같은 항목은 멱등하게 병합하고 충돌은 자동 덮어쓰기하지 않으며 과거 Event를 중복 생성하지 않는다. `ARC-007`
+중앙 DB를 잃은 경우 volume catalog → package metadata → events → manifest 순으로 읽는다. import는 기존 ID와 checksum이 같은 항목은 멱등하게 병합하고 충돌은 자동 덮어쓰기하지 않으며 과거 Event를 중복 생성하지 않는다. 이 복원 흐름은 제품 명령과 실제 패키지에 연결하는 integration test가 생길 때까지 `ARC-007` planned다.

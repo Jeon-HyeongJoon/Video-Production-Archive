@@ -47,6 +47,7 @@ type State struct {
 	SourceVolumeID          string           `json:"source_volume_id"`
 	SourcePhysicalDeviceID  string           `json:"source_physical_device_id"`
 	ArchiveStorageID        string           `json:"archive_storage_id"`
+	StartIdempotencyKey     string           `json:"start_idempotency_key"`
 	FolderDiscoveryRevision uint64           `json:"folder_discovery_revision"`
 	FolderIDs               []string         `json:"folder_ids"`
 	SelectedBy              command.Actor    `json:"selected_by"`
@@ -60,6 +61,7 @@ type CreateParameters struct {
 	SourceVolumeID          string        `json:"source_volume_id"`
 	SourcePhysicalDeviceID  string        `json:"source_physical_device_id"`
 	ArchiveStorageID        string        `json:"archive_storage_id"`
+	StartIdempotencyKey     string        `json:"start_idempotency_key"`
 	FolderDiscoveryRevision uint64        `json:"folder_discovery_revision"`
 	FolderIDs               []string      `json:"folder_ids"`
 	SelectedBy              command.Actor `json:"selected_by"`
@@ -93,9 +95,13 @@ func (handler *Handler) Handle(envelope command.Envelope, snapshot command.Snaps
 	parameters.SourceVolumeID = strings.TrimSpace(parameters.SourceVolumeID)
 	parameters.SourcePhysicalDeviceID = strings.TrimSpace(parameters.SourcePhysicalDeviceID)
 	parameters.ArchiveStorageID = strings.TrimSpace(parameters.ArchiveStorageID)
+	parameters.StartIdempotencyKey = strings.TrimSpace(parameters.StartIdempotencyKey)
+	if parameters.StartIdempotencyKey == "" {
+		parameters.StartIdempotencyKey = strings.TrimSpace(envelope.IdempotencyKey)
+	}
 	parameters.SelectedBy.ID = strings.TrimSpace(parameters.SelectedBy.ID)
 	if parameters.WorkerID == "" || parameters.SourceStorageID == "" || parameters.SourceVolumeID == "" ||
-		parameters.SourcePhysicalDeviceID == "" || parameters.ArchiveStorageID == "" ||
+		parameters.SourcePhysicalDeviceID == "" || parameters.ArchiveStorageID == "" || parameters.StartIdempotencyKey == "" ||
 		parameters.SelectedBy.Type != command.HumanActor || parameters.SelectedBy.ID == "" {
 		return command.Change{}, command.DeterministicFailure("INVALID_ARCHIVE_RUN", ErrInvalidArchiveRun)
 	}
@@ -117,6 +123,7 @@ func (handler *Handler) Handle(envelope command.Envelope, snapshot command.Snaps
 		SourceVolumeID:          parameters.SourceVolumeID,
 		SourcePhysicalDeviceID:  parameters.SourcePhysicalDeviceID,
 		ArchiveStorageID:        parameters.ArchiveStorageID,
+		StartIdempotencyKey:     parameters.StartIdempotencyKey,
 		FolderDiscoveryRevision: folderScope.DiscoveryRevision(),
 		FolderIDs:               folderScope.FolderIDs(),
 		SelectedBy:              parameters.SelectedBy,
@@ -134,7 +141,8 @@ func Decode(snapshot command.Snapshot) (State, error) {
 	if snapshot.TargetID == "" || snapshot.Revision == 0 || len(snapshot.State) == 0 ||
 		json.Unmarshal(snapshot.State, &state) != nil || state.ID != snapshot.TargetID || state.Revision != snapshot.Revision ||
 		strings.TrimSpace(state.WorkerID) == "" || strings.TrimSpace(state.SourceStorageID) == "" ||
-		strings.TrimSpace(state.ArchiveStorageID) == "" || state.SelectedBy.Type != command.HumanActor ||
+		strings.TrimSpace(state.SourceVolumeID) == "" || strings.TrimSpace(state.SourcePhysicalDeviceID) == "" ||
+		strings.TrimSpace(state.ArchiveStorageID) == "" || strings.TrimSpace(state.StartIdempotencyKey) == "" || state.SelectedBy.Type != command.HumanActor ||
 		strings.TrimSpace(state.SelectedBy.ID) == "" || state.CreatedAt.IsZero() || !validStageOwnerships(state.StageOwnerships) {
 		return State{}, ErrInvalidArchiveRun
 	}
@@ -173,6 +181,7 @@ func stateChange(envelope command.Envelope, state State) (command.Change, error)
 				"source_storage_id":         state.SourceStorageID,
 				"source_volume_id":          state.SourceVolumeID,
 				"archive_storage_id":        state.ArchiveStorageID,
+				"start_idempotency_key":     state.StartIdempotencyKey,
 				"folder_discovery_revision": state.FolderDiscoveryRevision,
 				"folder_count":              len(state.FolderIDs),
 				"selected_by":               state.SelectedBy.ID,

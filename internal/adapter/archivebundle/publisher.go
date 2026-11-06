@@ -2,6 +2,7 @@ package archivebundle
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/csv"
 	"encoding/hex"
@@ -138,6 +139,11 @@ func (publisher *Publisher) PublishInitial(request InitialRequest) (Package, err
 		request.Disposition == vocabulary.OrganizationHold || strings.TrimSpace(request.ProfileReference) == "" {
 		return Package{}, ErrInvalidRequest
 	}
+	lock, err := publisher.acquirePackageLock(request.PackageID)
+	if err != nil {
+		return Package{}, err
+	}
+	defer lock.Close()
 	sources, err := normalizeSources(request.Sources)
 	if err != nil {
 		return Package{}, err
@@ -167,6 +173,11 @@ func (publisher *Publisher) Revise(request RevisionRequest) (Package, error) {
 	if !packageIDPattern.MatchString(request.PackageID) || request.CreatedAt.IsZero() {
 		return Package{}, ErrInvalidRequest
 	}
+	lock, err := publisher.acquirePackageLock(request.PackageID)
+	if err != nil {
+		return Package{}, err
+	}
+	defer lock.Close()
 	current, err := publisher.readCurrent(request.PackageID)
 	if err != nil {
 		return Package{}, err
@@ -200,6 +211,14 @@ func (publisher *Publisher) Revise(request RevisionRequest) (Package, error) {
 
 func (publisher *Publisher) Commit(packageID string, evidence archive.CommitEvidence) (Package, error) {
 	packageID = strings.TrimSpace(packageID)
+	if !packageIDPattern.MatchString(packageID) {
+		return Package{}, ErrInvalidRequest
+	}
+	lock, err := publisher.acquirePackageLock(packageID)
+	if err != nil {
+		return Package{}, err
+	}
+	defer lock.Close()
 	current, err := publisher.readCurrent(packageID)
 	if err != nil {
 		return Package{}, err
@@ -213,6 +232,17 @@ func (publisher *Publisher) Commit(packageID string, evidence archive.CommitEvid
 		return Package{}, err
 	}
 	return publisher.loadPackage(current), nil
+}
+
+func (publisher *Publisher) acquirePackageLock(packageID string) (*archive.StorageLock, error) {
+	const directory = ".archive-locks/packages"
+	if publisher == nil || publisher.archive == nil || !packageIDPattern.MatchString(strings.TrimSpace(packageID)) {
+		return nil, ErrInvalidRequest
+	}
+	if err := publisher.archive.MkdirAll(directory, 0o755); err != nil {
+		return nil, err
+	}
+	return publisher.archive.AcquireExclusiveLock(context.Background(), path.Join(directory, packageID+".lock"))
 }
 
 func (publisher *Publisher) Current(packageID string) (Package, error) {
@@ -232,6 +262,7 @@ func (publisher *Publisher) publish(metadata Metadata, video FileSource, additio
 	if err := publisher.archive.MkdirAll(temporaryDirectory, 0o755); err != nil {
 		return Package{}, err
 	}
+	defer publisher.archive.RemoveAll(temporaryDirectory)
 	videoFileName := strings.TrimSpace(metadata.VideoFileName)
 	if videoFileName == "" {
 		videoFileName = path.Base(metadata.VideoPath)

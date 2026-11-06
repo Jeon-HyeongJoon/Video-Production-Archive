@@ -63,7 +63,7 @@ if (-not $healthy) {
 }
 
 $worker = Start-Process -FilePath (Join-Path $bin 'archive-worker.exe') `
-	-ArgumentList @('-config', (Join-Path $config 'worker.yaml'), '-fixture-executor', '-fixture-duration', '5s') `
+	-ArgumentList @('-config', (Join-Path $config 'worker.yaml')) `
     -RedirectStandardOutput (Join-Path $logs 'worker.stdout.log') `
     -RedirectStandardError (Join-Path $logs 'worker.stderr.log') `
     -PassThru

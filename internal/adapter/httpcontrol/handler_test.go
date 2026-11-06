@@ -24,6 +24,7 @@ import (
 	"videoarchive/internal/adapter/sqlitearchiveworkspace"
 	"videoarchive/internal/adapter/sqlitecatalog"
 	"videoarchive/internal/application/archiveintakeworkspace"
+	"videoarchive/internal/application/archiveorganization"
 	"videoarchive/internal/application/archiveworkspace"
 	"videoarchive/internal/application/archivistcontrol"
 	"videoarchive/internal/core/archive"
@@ -88,11 +89,11 @@ func TestArchiveIntakeWorkspaceProjectsSafeStateAndAcceptsOnlyExplicitCurrentCSR
 		handler.ServeHTTP(recorder, req)
 		return recorder
 	}
-	denied := postOverride(`{"command_id":"COMMAND-NO-CSRF","decision_id":"DECISION-NO-CSRF","idempotency_key":"NO-CSRF","folder":"hold","expected_revision":7,"disposition":"COMPILE_SOURCE_SEQUENCE"}`, false)
+	denied := postOverride(`{"command_id":"COMMAND-NO-CSRF","decision_id":"DECISION-NO-CSRF","idempotency_key":"NO-CSRF","archive_run_id":"ARCHIVE-RUN-1","folder":"hold","expected_revision":7,"disposition":"COMPILE_SOURCE_SEQUENCE"}`, false)
 	if denied.Code != http.StatusForbidden || drives.latest["hold"].Sequence != 1 {
 		t.Fatalf("override without CSRF changed a decision: status=%d decision=%+v", denied.Code, drives.latest["hold"])
 	}
-	stale := postOverride(`{"command_id":"COMMAND-STALE","decision_id":"DECISION-STALE","idempotency_key":"STALE","folder":"hold","expected_revision":6,"disposition":"COMPILE_SOURCE_SEQUENCE"}`, true)
+	stale := postOverride(`{"command_id":"COMMAND-STALE","decision_id":"DECISION-STALE","idempotency_key":"STALE","archive_run_id":"ARCHIVE-RUN-1","folder":"hold","expected_revision":6,"disposition":"COMPILE_SOURCE_SEQUENCE"}`, true)
 	if stale.Code != http.StatusConflict || drives.latest["hold"].Sequence != 1 {
 		t.Fatalf("stale override changed a decision: status=%d body=%s", stale.Code, stale.Body.String())
 	}
@@ -109,7 +110,7 @@ func TestArchiveIntakeWorkspaceProjectsSafeStateAndAcceptsOnlyExplicitCurrentCSR
 		{folder: "ready", decisionID: "DECISION-HOLD", disposition: "HOLD"},
 	}
 	for index, testCase := range cases {
-		payload := fmt.Sprintf(`{"command_id":"COMMAND-%d","decision_id":%q,"idempotency_key":"OVERRIDE-%d","folder":%q,"expected_revision":7,"disposition":%q,"target_video_bitrate_kbps":%d}`,
+		payload := fmt.Sprintf(`{"command_id":"COMMAND-%d","decision_id":%q,"idempotency_key":"OVERRIDE-%d","archive_run_id":"ARCHIVE-RUN-1","folder":%q,"expected_revision":7,"disposition":%q,"target_video_bitrate_kbps":%d}`,
 			index, testCase.decisionID, index, testCase.folder, testCase.disposition, testCase.target)
 		response := postOverride(payload, true)
 		if response.Code != http.StatusOK || drives.latest[testCase.folder].ID != testCase.decisionID {
@@ -137,7 +138,7 @@ func TestAssistedHoldClassificationActionCardExecutesAsHumanDecision(t *testing.
 		Actor: command.Actor{Type: vocabulary.ActorHuman, ID: "operator-local"}, RequestedVia: "archive_workspace_action_card",
 		TargetID: "hold", ExpectedRevision: 7, IdempotencyKey: "ACTION-HOLD-1", Reason: "confirmed source sequence",
 		Parameters: map[string]any{
-			"workspace_drive_id": "VOLUME-1", "decision_id": "DECISION-ACTION-HOLD",
+			"archive_run_id": "ARCHIVE-RUN-1", "workspace_drive_id": "VOLUME-1", "decision_id": "DECISION-ACTION-HOLD",
 			"disposition": string(vocabulary.OrganizationCompileSourceSequence), "target_video_bitrate_kbps": 0,
 			"basis": []string{"ASSET-A", "ASSET-B"},
 		},
@@ -165,6 +166,48 @@ func TestAssistedHoldClassificationActionCardExecutesAsHumanDecision(t *testing.
 	if recorder.Code != http.StatusOK || !archivists.completed || decision.ID != "DECISION-ACTION-HOLD" ||
 		decision.Disposition != vocabulary.OrganizationCompileSourceSequence || decision.DecidedByType != vocabulary.ActorHuman {
 		t.Fatalf("assisted HOLD ActionCard did not execute as an explicit human decision: %d %s completed=%t decision=%+v", recorder.Code, recorder.Body.String(), archivists.completed, decision)
+	}
+}
+
+func TestAssistedArchiveRunActionCardBindsStartedRunToOriginTurn(t *testing.T) {
+	archivists := &actionCardArchivistWorkspace{envelope: command.Envelope{
+		CommandID: "COMMAND-ACTION-ARCHIVE", CommandType: archiveorganization.StartActionCardCommand,
+		Actor: command.Actor{Type: vocabulary.ActorHuman, ID: "operator-local"}, RequestedVia: "archive_workspace_action_card",
+		TargetID: "ARCHIVE-RUN-ACTION-1", ExpectedRevision: 7, IdempotencyKey: "ACTION-ARCHIVE-1", Reason: "start selected archive run",
+		Parameters: map[string]any{
+			"session_id": "INTAKE-1", "source_volume_id": "VOLUME-1", "expected_candidate_revision": float64(7),
+			"archive_storage_id": "ARCHIVE-1", "input_revision": float64(7), "folder_ids": []string{"recordings"},
+			"expected_worker_id": "WORKER-1", "expected_source_storage_id": "SOURCE-1",
+			"expected_workspace_drive_id": "VOLUME-1", "selected_by": "operator-local",
+		},
+	}}
+	starter := &fixedArchiveRunStarter{result: archiveorganization.Result{Receipt: organization.ArchiveOrganizationReceipt{
+		ID: "ARCHIVE-RUN-ACTION-1", Folders: []organization.CoordinatedFolder{{Folder: "recordings"}},
+	}}}
+	handler, err := httpcontrol.New(httpcontrol.Configuration{
+		Access: security.AccessConfig{
+			Mode: security.AuthDisabled, AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")},
+		},
+		Catalog: emptyCatalogReader{}, ArchiveWorkspace: emptyArchiveWorkspaceReader{}, Notifications: http.NotFoundHandler(),
+		Commands: noopCommander{}, ArchivistAPI: http.NotFoundHandler(), Archivists: archivists,
+		ArchiveRuns: starter, AllowedOrigins: []string{"http://control.local"}, Version: "v1-test",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/action-cards/ACTION-ARCHIVE-1/execute", strings.NewReader(`{}`))
+	request.RemoteAddr = "127.0.0.1:45000"
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Origin", "http://control.local")
+	request.Header.Set("X-CSRF-Token", "csrf-action")
+	request.AddCookie(&http.Cookie{Name: "archive_csrf", Value: "csrf-action"})
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK || !archivists.completed || starter.request.ArchiveRunID != "ARCHIVE-RUN-ACTION-1" ||
+		archivists.boundCardID != "ACTION-ARCHIVE-1" || archivists.boundArchiveRunID != "ARCHIVE-RUN-ACTION-1" || archivists.boundRevision != 1 {
+		t.Fatalf("ActionCard ArchiveRun was not bound to its origin Turn: status=%d body=%s completed=%t request=%+v binding=%s/%s/%d",
+			recorder.Code, recorder.Body.String(), archivists.completed, starter.request,
+			archivists.boundCardID, archivists.boundArchiveRunID, archivists.boundRevision)
 	}
 }
 
@@ -588,8 +631,11 @@ type chatOnlyArchivistWorkspace struct{ fixedArchivistWorkspace }
 
 type actionCardArchivistWorkspace struct {
 	chatOnlyArchivistWorkspace
-	envelope  command.Envelope
-	completed bool
+	envelope          command.Envelope
+	completed         bool
+	boundCardID       string
+	boundArchiveRunID string
+	boundRevision     uint64
 }
 
 func (workspace *actionCardArchivistWorkspace) PrepareActionCard(context.Context, string, string) (command.Envelope, error) {
@@ -599,6 +645,25 @@ func (workspace *actionCardArchivistWorkspace) PrepareActionCard(context.Context
 func (workspace *actionCardArchivistWorkspace) CompleteActionCard(context.Context, string) error {
 	workspace.completed = true
 	return nil
+}
+
+func (*actionCardArchivistWorkspace) ReleaseActionCard(context.Context, string) error { return nil }
+
+func (workspace *actionCardArchivistWorkspace) BindActionCardArchiveRun(_ context.Context, cardID, archiveRunID string, revision uint64) error {
+	workspace.boundCardID = cardID
+	workspace.boundArchiveRunID = archiveRunID
+	workspace.boundRevision = revision
+	return nil
+}
+
+type fixedArchiveRunStarter struct {
+	request archiveorganization.StartRequest
+	result  archiveorganization.Result
+}
+
+func (starter *fixedArchiveRunStarter) Start(_ context.Context, request archiveorganization.StartRequest) (archiveorganization.Result, error) {
+	starter.request = request
+	return starter.result, nil
 }
 
 func (chatOnlyArchivistWorkspace) SubmitTurnWithDriveSelection(_ context.Context, sessionID, turnID, requestID, prompt string, selection *archivistruntime.DriveSelection) (archivistcontrol.TurnRecord, error) {
@@ -1029,6 +1094,14 @@ func (workspace fixedArchivistWorkspace) PrepareActionCard(context.Context, stri
 }
 
 func (workspace fixedArchivistWorkspace) CompleteActionCard(context.Context, string) error {
+	return errors.New("fixture is read-only")
+}
+
+func (workspace fixedArchivistWorkspace) ReleaseActionCard(context.Context, string) error {
+	return errors.New("fixture is read-only")
+}
+
+func (workspace fixedArchivistWorkspace) BindActionCardArchiveRun(context.Context, string, string, uint64) error {
 	return errors.New("fixture is read-only")
 }
 

@@ -12,7 +12,7 @@ import (
 	"videoarchive/internal/core/command"
 )
 
-// Requirement: OBS-001
+// Planned contract: OBS-001
 func TestCapabilityEvidenceCorrelatesSuccessfulAndFailedExecutions(t *testing.T) {
 	ctx := context.Background()
 	sink, err := sqliteevidence.Open(t.TempDir() + "/evidence.db")

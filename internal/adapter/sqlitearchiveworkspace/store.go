@@ -6,35 +6,33 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"time"
 
-	_ "modernc.org/sqlite"
-
+	"videoarchive/internal/adapter/sqlitebase"
 	"videoarchive/internal/application/archiveworkspace"
 )
 
 type Store struct {
-	db *sql.DB
+	db      *sql.DB
+	release func() error
 }
 
 var _ archiveworkspace.Reader = (*Store)(nil)
 
 func Open(path string) (*Store, error) {
-	db, err := sql.Open("sqlite", path)
+	db, release, err := sqlitebase.Acquire(path)
 	if err != nil {
 		return nil, err
 	}
-	db.SetMaxOpenConns(1)
-	store := &Store{db: db}
+	store := &Store{db: db, release: release}
 	if err := store.migrate(context.Background()); err != nil {
-		db.Close()
+		release()
 		return nil, err
 	}
 	return store, nil
 }
 
 func (store *Store) Close() error {
-	return store.db.Close()
+	return store.release()
 }
 
 func (store *Store) migrate(ctx context.Context) error {
@@ -74,7 +72,7 @@ func (store *Store) Replace(ctx context.Context, view archiveworkspace.JobView) 
 			last_event_at = excluded.last_event_at,
 			payload = excluded.payload
 	`, view.Summary.JobID, view.Summary.Revision, view.Summary.NeedsHumanIntervention,
-		view.Summary.LastEventAt.UTC().Format(time.RFC3339Nano), payload)
+		sqlitebase.FormatTime(view.Summary.LastEventAt), payload)
 	return err
 }
 

@@ -22,6 +22,8 @@ function highlight(text, query) {
 }
 
 export function mount(root, route) {
+  const requests = new AbortController();
+  let disposed = false;
   let query = route.query.get("q") || "";
   let scope = route.query.get("scope") === "text" ? "text" : "assets";
   let assets = [];
@@ -40,18 +42,20 @@ export function mount(root, route) {
   async function search() {
     if (!query) { assets = []; hits = []; searched = false; return; }
     const [foundAssets, foundHits] = await Promise.all([
-      api(`/api/v1/assets?text=${encodeURIComponent(query)}`), api(`/api/v1/transcripts/search?text=${encodeURIComponent(query)}`),
+      api(`/api/v1/assets?text=${encodeURIComponent(query)}`, { signal: requests.signal }),
+      api(`/api/v1/transcripts/search?text=${encodeURIComponent(query)}`, { signal: requests.signal }),
     ]);
     assets = foundAssets || [];
     hits = foundHits || [];
     searched = true;
     if (!assets.some((item) => item.original.id === selected)) selected = assets[0]?.original.id || hits[0]?.original_asset_id || "";
-    summaries = selected ? (await api(`/api/v1/assets/${encodeURIComponent(selected)}/summaries`)) || [] : [];
+    summaries = selected ? (await api(`/api/v1/assets/${encodeURIComponent(selected)}/summaries`, { signal: requests.signal })) || [] : [];
   }
 
   async function choose(assetID) {
     selected = assetID;
-    summaries = (await api(`/api/v1/assets/${encodeURIComponent(assetID)}/summaries`)) || [];
+    summaries = (await api(`/api/v1/assets/${encodeURIComponent(assetID)}/summaries`, { signal: requests.signal })) || [];
+    if (disposed) return;
     render();
   }
 
@@ -93,9 +97,14 @@ export function mount(root, route) {
       if (nextQuery !== query || !searched) {
         query = nextQuery;
         heading.title = query ? `“${query}”` : "검색어 없음";
-        try { await search(); } catch (error) { results.replaceChildren(emptyState(error.message)); return; }
+        try { await search(); } catch (error) { if (error.name !== "AbortError" && !disposed) results.replaceChildren(emptyState(error.message)); return; }
       }
+      if (disposed) return;
       render();
+    },
+    dispose() {
+      disposed = true;
+      requests.abort();
     },
   };
 }

@@ -29,6 +29,12 @@ func (probe fixedProbe) Snapshot(context.Context) (worker.Metrics, error) { retu
 
 type fixedVolumeProbe struct{ volumes []device.ConnectedVolume }
 
+type fixedStorageProbe struct{ observations []worker.StorageObservation }
+
+func (probe fixedStorageProbe) Observe(context.Context) ([]worker.StorageObservation, error) {
+	return append([]worker.StorageObservation(nil), probe.observations...), nil
+}
+
 func (probe fixedVolumeProbe) Poll(context.Context, string, time.Time) ([]device.VolumeAttachmentEvent, error) {
 	return nil, nil
 }
@@ -40,8 +46,9 @@ func (probe fixedVolumeProbe) Connected() []device.ConnectedVolume {
 // Requirement: WRK-006
 func TestWorkerClientResolvesCredentialAndSendsOutboundHeartbeat(t *testing.T) {
 	received := make(chan map[string]any, 1)
+	inventoryReceived := make(chan map[string]any, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if request.URL.Path != "/worker/v1/heartbeat" || request.Header.Get("Authorization") != "Bearer service-secret" ||
+		if request.Header.Get("Authorization") != "Bearer service-secret" ||
 			request.Header.Get("Content-Type") != "application/json" {
 			t.Fatalf("unexpected heartbeat request: path=%s headers=%v", request.URL.Path, request.Header)
 		}
@@ -49,7 +56,14 @@ func TestWorkerClientResolvesCredentialAndSendsOutboundHeartbeat(t *testing.T) {
 		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
 			t.Fatal(err)
 		}
-		received <- payload
+		switch request.URL.Path {
+		case "/worker/v1/heartbeat":
+			received <- payload
+		case "/worker/v1/storage-inventory":
+			inventoryReceived <- payload
+		default:
+			t.Fatalf("unexpected Worker request path: %s", request.URL.Path)
+		}
 		writer.Header().Set("Content-Type", "application/json")
 		writer.Write([]byte(`{"data":{"state":"ONLINE"}}`))
 	}))
@@ -68,7 +82,10 @@ func TestWorkerClientResolvesCredentialAndSendsOutboundHeartbeat(t *testing.T) {
 		AverageCPU5m: 12.5, AverageGPU5m: 3, IdleStableFor: 6 * time.Minute,
 		AvailableMemoryBytes: 24 << 30, AvailableVRAMBytes: 8 << 30, ScratchFreeBytes: 512 << 30,
 		HeavyRunning: 0, LightRunning: 1, BusyPhysicalDeviceIDs: map[string]bool{"disk-2": true}, AcceptingWork: true,
-	}}, func() time.Time { return time.Date(2026, 10, 29, 10, 0, 0, 0, time.UTC) }, nil, nil, fixedVolumeProbe{volumes: []device.ConnectedVolume{{
+	}}, func() time.Time { return time.Date(2026, 10, 29, 10, 0, 0, 0, time.UTC) }, nil, fixedStorageProbe{observations: []worker.StorageObservation{{
+		StorageID: "source-main", Connected: true, DiscoveryState: "READY", DiscoveryRevision: 9,
+		Folders: []worker.MediaFolderObservation{{Folder: "event-a", VideoCount: 700, InputBytes: 10 << 30}},
+	}}}, fixedVolumeProbe{volumes: []device.ConnectedVolume{{
 		PhysicalDeviceID: "PHYSICAL-USB-1", VolumeID: volumeID, StorageID: "source-usb-1", ArchiveStorageID: archiveStorageID,
 		Model: "USB DRIVE", FileSystem: "NTFS", CapacityBytes: 4 << 30, FreeBytes: 3 << 30,
 	}}}, nil, nil)
@@ -89,5 +106,18 @@ func TestWorkerClientResolvesCredentialAndSendsOutboundHeartbeat(t *testing.T) {
 	attachedVolume, ok := attached[0].(map[string]any)
 	if !ok || attachedVolume["storage_id"] != "source-usb-1" || attachedVolume["archive_storage_id"] != archiveStorageID {
 		t.Fatalf("heartbeat did not preserve role-separated attached Storage identities: %+v", attached)
+	}
+	heartbeatObservations, ok := payload["storage_observations"].([]any)
+	if !ok || len(heartbeatObservations) != 1 || heartbeatObservations[0].(map[string]any)["folders"] != nil {
+		t.Fatalf("heartbeat carried the unbounded folder inventory: %+v", heartbeatObservations)
+	}
+	inventory := <-inventoryReceived
+	inventoryObservations, ok := inventory["storage_observations"].([]any)
+	if !ok || len(inventoryObservations) != 1 {
+		t.Fatalf("separate storage inventory is incomplete: %+v", inventory)
+	}
+	folders, ok := inventoryObservations[0].(map[string]any)["folders"].([]any)
+	if !ok || len(folders) != 1 || folders[0].(map[string]any)["video_count"] != float64(700) {
+		t.Fatalf("separate storage inventory lost folder details: %+v", inventory)
 	}
 }

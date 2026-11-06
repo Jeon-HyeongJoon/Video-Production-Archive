@@ -1,6 +1,6 @@
 # 12. 취소와 보상 설계 제안
 
-> 상태: 단계적 v1 결정. `RESERVED` 취소와 실행 중 Worker stop·정리 확인 정산은 `CAN-001~004`로 구현했고, 불명확한 외부 효과 조정과 보상 항목은 아래 분할안에 따라 순차 구현한다.
+> 상태: 단계적 v1 결정. `RESERVED` 취소, 실행 중 Worker stop·정리 확인, 외부 효과 조정과 Worker 격리는 `CAN-001~005`로 구현했고 ArchivistTurn 취소와 업무 보상은 아래 분할안에 따라 순차 구현한다.
 
 ## 1. 문제를 세 가지로 분리한다
 
@@ -145,10 +145,9 @@ Control이 취소 Command 확정
 
 ## 9. 현재 구현과의 차이
 
-`CTL-004`는 `QUEUED` 현재 Step의 즉시 취소를, `CAN-001`은 `RESERVED` Step의 같은 transaction lease fence·예약 해제를 검증한다. `CAN-002~004`는 실행 중 요청의 immutable 기록, lease fence 뒤 예약 유지, Worker stop·정리 확인 정산과 완료 경합을 검증한다. 다음 계약은 아직 없다.
+`CTL-004`는 `QUEUED` 현재 Step의 즉시 취소를, `CAN-001`은 `RESERVED` Step의 같은 transaction lease fence·예약 해제를 검증한다. `CAN-002~005`는 실행 중 요청의 immutable 기록, lease fence 뒤 예약 유지, Worker stop·정리 확인 정산, 완료 경합 및 PARTIAL·UNCERTAIN 외부 효과 조정을 검증한다. 다음 계약은 아직 없다.
 
 - ArchivistTurn 취소와 완료 Tool Call 보존
-- 불명확한 외부 효과 조정과 Worker 격리
 - Command 종류별 보상 계획과 ActionCard
 
 이 제안을 승인하면 위 항목을 원자적인 요구사항과 1:1 테스트로 나눈 뒤 StepState, Command, Event와 화면 계약을 함께 수정한다.
@@ -168,4 +167,4 @@ Control이 취소 Command 확정
 | `CMP-002` | 승인된 보상은 기존 기록을 수정하지 않고 새 Command·Event·Artifact 관계만 추가한다 | integration |
 | `CMP-003` | 보상 불가능한 외부 효과는 실행 Command를 만들지 않고 예방 경계와 근거를 반환한다 | unit |
 
-`CAN-001~004` 이후에도 `CAN-005~006`, `CMP-001~003`은 계획 후보이며 구현됐다고 간주하지 않는다.
+`CAN-001~005` 이후에도 `CAN-006`, `CMP-001~003`은 계획 후보이며 구현됐다고 간주하지 않는다.

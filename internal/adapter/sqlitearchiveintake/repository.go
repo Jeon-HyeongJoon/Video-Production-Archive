@@ -9,8 +9,7 @@ import (
 	"fmt"
 	"strings"
 
-	_ "modernc.org/sqlite"
-
+	"videoarchive/internal/adapter/sqlitebase"
 	"videoarchive/internal/core/archiveintake"
 )
 
@@ -20,24 +19,24 @@ var (
 )
 
 type Repository struct {
-	db *sql.DB
+	db      *sql.DB
+	release func() error
 }
 
 func Open(databasePath string) (*Repository, error) {
-	db, err := sql.Open("sqlite", databasePath)
+	db, release, err := sqlitebase.Acquire(databasePath)
 	if err != nil {
 		return nil, err
 	}
-	db.SetMaxOpenConns(1)
-	repository := &Repository{db: db}
+	repository := &Repository{db: db, release: release}
 	if err := repository.migrate(context.Background()); err != nil {
-		db.Close()
+		release()
 		return nil, err
 	}
 	return repository, nil
 }
 
-func (repository *Repository) Close() error { return repository.db.Close() }
+func (repository *Repository) Close() error { return repository.release() }
 
 func (repository *Repository) migrate(ctx context.Context) error {
 	statements := []string{
@@ -176,13 +175,28 @@ func (repository *Repository) ListSessions(ctx context.Context) ([]archiveintake
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var sessions []archiveintake.Session
+	var payloads [][]byte
 	for rows.Next() {
 		var payload []byte
 		if err := rows.Scan(&payload); err != nil {
+			rows.Close()
 			return nil, err
 		}
+		payloads = append(payloads, append([]byte(nil), payload...))
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+
+	// Legacy session normalization may need a candidate lookup. Release the
+	// rows cursor first because this repository intentionally owns one SQLite
+	// connection; querying while the cursor is open would wait for itself.
+	var sessions []archiveintake.Session
+	for _, payload := range payloads {
 		var session archiveintake.Session
 		if err := json.Unmarshal(payload, &session); err != nil {
 			return nil, err
@@ -192,7 +206,7 @@ func (repository *Repository) ListSessions(ctx context.Context) ([]archiveintake
 		}
 		sessions = append(sessions, session)
 	}
-	return sessions, rows.Err()
+	return sessions, nil
 }
 
 // normalizeSession keeps pre-logical-drive v1 records readable. Their payload

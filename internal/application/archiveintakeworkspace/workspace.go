@@ -145,6 +145,7 @@ type OverrideCommand struct {
 	CommandID              string
 	DecisionID             string
 	IdempotencyKey         string
+	ArchiveRunID           string
 	WorkspaceDriveID       string
 	Folder                 string
 	ExpectedInputRevision  uint64

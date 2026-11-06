@@ -10,8 +10,7 @@ import (
 	"strings"
 	"time"
 
-	_ "modernc.org/sqlite"
-
+	"videoarchive/internal/adapter/sqlitebase"
 	"videoarchive/internal/application/archivistcontrol"
 	"videoarchive/internal/core/archivistruntime"
 	"videoarchive/internal/core/command"
@@ -19,26 +18,26 @@ import (
 )
 
 type Store struct {
-	db *sql.DB
+	db      *sql.DB
+	release func() error
 }
 
 var _ archivistcontrol.Store = (*Store)(nil)
 
 func Open(path string) (*Store, error) {
-	db, err := sql.Open("sqlite", path)
+	db, release, err := sqlitebase.Acquire(path)
 	if err != nil {
 		return nil, err
 	}
-	db.SetMaxOpenConns(1)
-	store := &Store{db: db}
+	store := &Store{db: db, release: release}
 	if err := store.migrate(context.Background()); err != nil {
-		db.Close()
+		release()
 		return nil, err
 	}
 	return store, nil
 }
 
-func (store *Store) Close() error { return store.db.Close() }
+func (store *Store) Close() error { return store.release() }
 
 func (store *Store) migrate(ctx context.Context) error {
 	_, err := store.db.ExecContext(ctx, `
@@ -279,6 +278,45 @@ func (store *Store) ActionCard(ctx context.Context, cardID string) (archivistcon
 	return archivistcontrol.ActionCardRecord{SessionID: sessionID, Card: card}, nil
 }
 
+func (store *Store) ClaimActionCard(ctx context.Context, cardID string) (archivistcontrol.ActionCardRecord, error) {
+	tx, err := store.db.BeginTx(ctx, nil)
+	if err != nil {
+		return archivistcontrol.ActionCardRecord{}, err
+	}
+	defer tx.Rollback()
+	var sessionID string
+	var payload []byte
+	if err := tx.QueryRowContext(ctx, `SELECT session_id, payload FROM archivist_action_cards WHERE action_card_id = ?`, cardID).Scan(&sessionID, &payload); errors.Is(err, sql.ErrNoRows) {
+		return archivistcontrol.ActionCardRecord{}, archivistcontrol.ErrInvalidRequest
+	} else if err != nil {
+		return archivistcontrol.ActionCardRecord{}, err
+	}
+	var card archivistcontrol.ActionCardProjection
+	if json.Unmarshal(payload, &card) != nil || card.State != "PENDING" {
+		return archivistcontrol.ActionCardRecord{}, archivistcontrol.ErrInvalidRequest
+	}
+	original := append([]byte(nil), payload...)
+	card.State = "EXECUTING"
+	payload, err = json.Marshal(card)
+	if err != nil {
+		return archivistcontrol.ActionCardRecord{}, err
+	}
+	result, err := tx.ExecContext(ctx, `
+		UPDATE archivist_action_cards SET payload = ? WHERE action_card_id = ? AND payload = ?
+	`, payload, cardID, original)
+	if err != nil {
+		return archivistcontrol.ActionCardRecord{}, err
+	}
+	updated, err := result.RowsAffected()
+	if err != nil || updated != 1 {
+		return archivistcontrol.ActionCardRecord{}, archivistcontrol.ErrInvalidRequest
+	}
+	if err := tx.Commit(); err != nil {
+		return archivistcontrol.ActionCardRecord{}, err
+	}
+	return archivistcontrol.ActionCardRecord{SessionID: sessionID, Card: card}, nil
+}
+
 func (store *Store) SetActionCardState(ctx context.Context, cardID, state string) error {
 	state = strings.TrimSpace(state)
 	if state != "COMPLETED" {
@@ -297,7 +335,7 @@ func (store *Store) SetActionCardState(ctx context.Context, cardID, state string
 		return err
 	}
 	var card archivistcontrol.ActionCardProjection
-	if json.Unmarshal(payload, &card) != nil || card.State != "PENDING" {
+	if json.Unmarshal(payload, &card) != nil || card.State != "EXECUTING" {
 		return archivistcontrol.ErrInvalidRequest
 	}
 	record := archivistcontrol.ActionCardRecord{SessionID: sessionID, Card: card}
@@ -315,6 +353,40 @@ func (store *Store) SetActionCardState(ctx context.Context, cardID, state string
 		return err
 	}
 	if updated != 1 {
+		return archivistcontrol.ErrInvalidRequest
+	}
+	return tx.Commit()
+}
+
+func (store *Store) ReleaseActionCard(ctx context.Context, cardID string) error {
+	tx, err := store.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var payload []byte
+	if err := tx.QueryRowContext(ctx, `SELECT payload FROM archivist_action_cards WHERE action_card_id = ?`, cardID).Scan(&payload); errors.Is(err, sql.ErrNoRows) {
+		return archivistcontrol.ErrInvalidRequest
+	} else if err != nil {
+		return err
+	}
+	var card archivistcontrol.ActionCardProjection
+	if json.Unmarshal(payload, &card) != nil || card.State != "EXECUTING" {
+		return archivistcontrol.ErrInvalidRequest
+	}
+	card.State = "PENDING"
+	updatedPayload, err := json.Marshal(card)
+	if err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, `
+		UPDATE archivist_action_cards SET payload = ? WHERE action_card_id = ? AND payload = ?
+	`, updatedPayload, cardID, payload)
+	if err != nil {
+		return err
+	}
+	updated, err := result.RowsAffected()
+	if err != nil || updated != 1 {
 		return archivistcontrol.ErrInvalidRequest
 	}
 	return tx.Commit()
@@ -701,4 +773,4 @@ func decodeTurn(payload []byte) (archivistcontrol.TurnRecord, error) {
 	return record, err
 }
 
-func formatTime(value time.Time) string { return value.UTC().Format(time.RFC3339Nano) }
+func formatTime(value time.Time) string { return sqlitebase.FormatTime(value) }

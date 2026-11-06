@@ -17,7 +17,6 @@ import (
 	"videoarchive/internal/adapter/storageinventory"
 	"videoarchive/internal/adapter/windowsvolume"
 	"videoarchive/internal/adapter/workerconfig"
-	"videoarchive/internal/adapter/workerfixture"
 	"videoarchive/internal/application/workerclient"
 	"videoarchive/internal/application/workerexecutor"
 )
@@ -28,8 +27,6 @@ func main() {
 	configurationPath := flag.String("config", "worker.yaml", "path to the Worker boot configuration")
 	check := flag.Bool("check-config", false, "validate configuration and exit")
 	showVersion := flag.Bool("version", false, "print version and exit")
-	fixtureExecutor := flag.Bool("fixture-executor", false, "enable the protocol integration fixture executor")
-	fixtureDuration := flag.Duration("fixture-duration", 100*time.Millisecond, "fixture executor duration")
 	probeAttachedVolumes := flag.Bool("probe-attached-volumes", false, "print safe attached-volume observations and exit")
 	flag.Parse()
 	if *showVersion {
@@ -80,15 +77,10 @@ func main() {
 		fmt.Printf("configuration ok: %s\n", *configurationPath)
 		return
 	}
-	var executor workerclient.StepExecutor
-	if *fixtureExecutor {
-		executor = workerfixture.NewWithDuration(*fixtureDuration)
-	} else {
-		executor, err = workerexecutor.NewProduction(configuration, storageRoots)
-		if err != nil {
-			slog.Error("initialize production Worker operations", "error", err)
-			os.Exit(1)
-		}
+	executor, err := workerexecutor.NewProduction(configuration, storageRoots)
+	if err != nil {
+		slog.Error("initialize production Worker operations", "error", err)
+		os.Exit(1)
 	}
 	storageProbe, err := storageinventory.New(configuration, storageRoots)
 	if err != nil {

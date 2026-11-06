@@ -14,7 +14,7 @@ import (
 	"videoarchive/internal/core/vocabulary"
 )
 
-// Requirement: INT-001
+// Adapter contract coverage for the planned standalone inspector.
 func TestInputInspectionHashesRegisteredStorageFileWithoutChangingIt(t *testing.T) {
 	ctx := context.Background()
 	directory := t.TempDir()

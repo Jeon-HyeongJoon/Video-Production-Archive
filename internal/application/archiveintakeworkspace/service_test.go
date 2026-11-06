@@ -96,7 +96,7 @@ func TestArchiveRunProjectionPreservesFixedStageWaitReasonsAndArchiveStates(t *t
 	jobs := workstationJobs{
 		"RUN-9": archiveRunSnapshot(t, archiverun.State{
 			ID: "RUN-9", Revision: 1, WorkerID: "WORKER-WINDOWS", SourceStorageID: "SOURCE-1",
-			ArchiveStorageID: "ARCHIVE-1", FolderDiscoveryRevision: 9,
+			SourceVolumeID: driveID, SourcePhysicalDeviceID: "DISK-1", ArchiveStorageID: "ARCHIVE-1", FolderDiscoveryRevision: 9,
 			FolderIDs:       []string{"committed-no-stt", "device-wait", "interviews", "recordings", "unclassified"},
 			SelectedBy:      command.Actor{Type: vocabulary.ActorHuman, ID: "OPERATOR-1"},
 			StageOwnerships: []archiverun.StageOwnership{{Kind: archiverun.OrganizationStage}, {Kind: archiverun.TranscriptionStage}},
@@ -216,6 +216,35 @@ func TestArchiveRunProjectionPreservesFixedStageWaitReasonsAndArchiveStates(t *t
 	if strings.Contains(string(payload), "recordings/clip-") || strings.Contains(string(payload), `C:\\`) || strings.Contains(string(payload), "/Volumes/") {
 		t.Fatalf("workstation projection exposed a file path: %s", payload)
 	}
+
+	// A newly persisted ArchiveRun must replace an older completed receipt in
+	// the workspace immediately, before the worker inspection has produced the
+	// new run's organization receipt.
+	pendingRun := archiverun.State{
+		ID: "RUN-10-PENDING", Revision: 1, WorkerID: "WORKER-WINDOWS", SourceStorageID: "SOURCE-1",
+		SourceVolumeID: driveID, SourcePhysicalDeviceID: "DISK-1", ArchiveStorageID: "ARCHIVE-1",
+		FolderDiscoveryRevision: 10, FolderIDs: []string{"new-selection"},
+		SelectedBy:      command.Actor{Type: vocabulary.ActorHuman, ID: "OPERATOR-1"},
+		StageOwnerships: []archiverun.StageOwnership{{Kind: archiverun.OrganizationStage}, {Kind: archiverun.TranscriptionStage}},
+		CreatedAt:       time.Date(2026, 10, 30, 5, 0, 0, 0, time.UTC),
+	}
+	pendingJobs := make(workstationJobs, len(jobs)+1)
+	for id, snapshot := range jobs {
+		pendingJobs[id] = snapshot
+	}
+	pendingJobs["RUN-10-PENDING"] = archiveRunSnapshot(t, pendingRun)
+	pendingService, err := archiveintakeworkspace.New(store, pendingJobs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pendingViews, err := pendingService.Projection(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pendingViews) != 1 || pendingViews[0].ArchiveRunID != pendingRun.ID || pendingViews[0].InputRevision != 10 ||
+		len(pendingViews[0].Folders) != 1 || pendingViews[0].Folders[0].Folder != "new-selection" {
+		t.Fatalf("newly persisted run was hidden behind an older completed receipt: %+v", pendingViews)
+	}
 }
 
 func TestArchiveRunProjectionCarriesPersistedTranscriptQualityAssessment(t *testing.T) {
@@ -239,6 +268,7 @@ func TestArchiveRunProjectionCarriesPersistedTranscriptQualityAssessment(t *test
 	jobs := workstationJobs{
 		"ARCHIVE-RUN-1": archiveRunSnapshot(t, archiverun.State{
 			ID: "ARCHIVE-RUN-1", Revision: 2, WorkerID: "WORKER-1", SourceStorageID: "SOURCE-1", ArchiveStorageID: "ARCHIVE-1",
+			SourceVolumeID: "VOLUME-1", SourcePhysicalDeviceID: "DISK-1",
 			FolderDiscoveryRevision: 4, FolderIDs: []string{"recording"},
 			SelectedBy:      command.Actor{Type: vocabulary.ActorHuman, ID: "OPERATOR-1"},
 			StageOwnerships: []archiverun.StageOwnership{{Kind: archiverun.OrganizationStage}, {Kind: archiverun.TranscriptionStage}},
@@ -313,6 +343,7 @@ func TestArchiveRunProjectionUsesLatestCompletedCatalogPublicationTime(t *testin
 			jobs := workstationJobs{
 				"ARCHIVE-RUN-1": archiveRunSnapshot(t, archiverun.State{
 					ID: "ARCHIVE-RUN-1", Revision: 1, WorkerID: "WORKER-1", SourceStorageID: "SOURCE-1", ArchiveStorageID: "ARCHIVE-1",
+					SourceVolumeID: "VOLUME-1", SourcePhysicalDeviceID: "DISK-1",
 					FolderDiscoveryRevision: 4, FolderIDs: []string{"recording"},
 					SelectedBy:      command.Actor{Type: vocabulary.ActorHuman, ID: "OPERATOR-1"},
 					StageOwnerships: []archiverun.StageOwnership{{Kind: archiverun.OrganizationStage}, {Kind: archiverun.TranscriptionStage}},
@@ -384,9 +415,10 @@ func TestCompletedWorkProjectionRetainsOlderPackageWithoutCountingHoldAsOutput(t
 	jobs := workstationJobs{
 		"ARCHIVE-RUN-NEW": archiveRunSnapshot(t, archiverun.State{
 			ID: "ARCHIVE-RUN-NEW", Revision: 1, WorkerID: "WORKER-1", SourceStorageID: "SOURCE-1", ArchiveStorageID: "ARCHIVE-1",
+			SourceVolumeID: driveID, SourcePhysicalDeviceID: "DISK-1",
 			FolderDiscoveryRevision: 5, FolderIDs: []string{holdDecision.Folder},
 			SelectedBy:      command.Actor{Type: vocabulary.ActorHuman, ID: "OPERATOR-1"},
-			StageOwnerships: []archiverun.StageOwnership{{Kind: archiverun.OrganizationStage}}, CreatedAt: completedAt.Add(time.Hour),
+			StageOwnerships: []archiverun.StageOwnership{{Kind: archiverun.OrganizationStage}, {Kind: archiverun.TranscriptionStage}}, CreatedAt: completedAt.Add(time.Hour),
 		}),
 		"JOB-OLD": jobSnapshot(t, job.State{
 			ID: "JOB-OLD", Revision: 6, TemplateName: "archive-intake-source-sequence", TargetTitle: oldDecision.Folder,
@@ -475,7 +507,7 @@ func TestResolvedHoldContinuesSameArchiveRunWithOneIdempotentFolderJob(t *testin
 	}
 	request := archiveintakeworkspace.OverrideCommand{
 		CommandID: "COMMAND-CLASSIFY", DecisionID: "DECISION-AS-IS", IdempotencyKey: "CLASSIFY-1",
-		WorkspaceDriveID: "VOLUME-1", Folder: "hold", ExpectedInputRevision: 7,
+		ArchiveRunID: "ARCHIVE-RUN-1", WorkspaceDriveID: "VOLUME-1", Folder: "hold", ExpectedInputRevision: 7,
 		Disposition: vocabulary.OrganizationAsIs, Actor: command.Actor{Type: vocabulary.ActorArchivist, ID: "archivist:session-1"},
 		Reason: "verified optimized rendition", Basis: []string{"ASSET-1", "INSPECTION-1"}, OccurredAt: now,
 	}
@@ -523,6 +555,9 @@ func jobSnapshot(t *testing.T, state job.State) command.Snapshot {
 
 func archiveRunSnapshot(t *testing.T, state archiverun.State) command.Snapshot {
 	t.Helper()
+	if state.StartIdempotencyKey == "" {
+		state.StartIdempotencyKey = state.ID + ":start"
+	}
 	payload, err := json.Marshal(state)
 	if err != nil {
 		t.Fatal(err)

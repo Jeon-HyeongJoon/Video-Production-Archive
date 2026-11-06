@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -15,6 +16,58 @@ import (
 	"videoarchive/internal/core/archive"
 	"videoarchive/internal/core/vocabulary"
 )
+
+func TestConcurrentPackagePublicationIsSerializedAcrossPublishers(t *testing.T) {
+	publisher, sourceRoot, archiveRoot, originalChecksum, _, _ := publisherFixture(t)
+	secondPublisher, err := NewPublisher(sourceRoot, archiveRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := InitialRequest{
+		PackageID: "VP-20261106-CONCURRENT", WorkspaceDriveID: "SOURCE-DRIVE-1", DecisionID: "DECISION-CONCURRENT",
+		MediaFolder: "recordings", Disposition: vocabulary.OrganizationAsIs,
+		ProfileReference: "archive-1080p-6mbps@v1",
+		Sources: []SourceReference{{
+			OriginalAssetID: "ASSET-CONCURRENT", OriginalName: "event.mov", RelativePath: "recordings/event.mov",
+			Checksum: originalChecksum,
+		}},
+		Video:     FileSource{Root: RootSource, Path: "recordings/event.mov", Checksum: originalChecksum},
+		CreatedAt: time.Date(2026, 11, 6, 9, 0, 0, 0, time.UTC),
+	}
+	publishers := []*Publisher{publisher, secondPublisher}
+	errorsByAttempt := make([]error, len(publishers))
+	var wait sync.WaitGroup
+	start := make(chan struct{})
+	for index, candidate := range publishers {
+		wait.Add(1)
+		go func(index int, candidate *Publisher) {
+			defer wait.Done()
+			<-start
+			_, errorsByAttempt[index] = candidate.PublishInitial(request)
+		}(index, candidate)
+	}
+	close(start)
+	wait.Wait()
+	successes := 0
+	existsFailures := 0
+	for _, publishErr := range errorsByAttempt {
+		switch {
+		case publishErr == nil:
+			successes++
+		case errors.Is(publishErr, ErrPackageExists):
+			existsFailures++
+		default:
+			t.Fatalf("concurrent publication returned an unexpected error: %v (all=%v)", publishErr, errorsByAttempt)
+		}
+	}
+	if successes != 1 || existsFailures != 1 {
+		t.Fatalf("package publication was not serialized: errors=%v", errorsByAttempt)
+	}
+	current, err := publisher.Current(request.PackageID)
+	if err != nil || current.Revision != 1 || current.State != archive.PackageStored {
+		t.Fatalf("serialized package is not recoverable: package=%+v err=%v", current, err)
+	}
+}
 
 // Requirement: ORG-008
 func TestPublisherStoresOneResultPerRecoverablePackageAndAddsStageTwoAsNewRevision(t *testing.T) {

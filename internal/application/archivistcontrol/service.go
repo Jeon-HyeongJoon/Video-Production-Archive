@@ -129,7 +129,9 @@ type Store interface {
 	PutActionCard(context.Context, ActionCardRecord) error
 	ListActionCards(context.Context, string) ([]ActionCardProjection, error)
 	ActionCard(context.Context, string) (ActionCardRecord, error)
+	ClaimActionCard(context.Context, string) (ActionCardRecord, error)
 	SetActionCardState(context.Context, string, string) error
+	ReleaseActionCard(context.Context, string) error
 	RejectActionCard(context.Context, ActionCardRejection) error
 	ClaimTurn(context.Context, string, time.Time, time.Duration) (ClaimedTurn, error)
 	PrepareDelivery(context.Context, string, string, uint64, time.Time, string) (TurnRecord, bool, error)
@@ -423,11 +425,11 @@ func (service *Service) RecordActionCard(ctx context.Context, sessionID string, 
 }
 
 func (service *Service) PrepareActionCard(ctx context.Context, cardID, actorID string) (command.Envelope, error) {
-	record, err := service.store.ActionCard(ctx, strings.TrimSpace(cardID))
+	record, err := service.store.ClaimActionCard(ctx, strings.TrimSpace(cardID))
 	if err != nil {
 		return command.Envelope{}, err
 	}
-	if record.Card.State != "PENDING" {
+	if record.Card.State != "EXECUTING" {
 		return command.Envelope{}, ErrInvalidRequest
 	}
 	decision, err := archivistruntime.ResolveActionCard(archivistruntime.ActionCard{
@@ -442,9 +444,25 @@ func (service *Service) PrepareActionCard(ctx context.Context, cardID, actorID s
 		ActorID: strings.TrimSpace(actorID), CurrentRevision: record.Card.ExpectedRevision,
 	})
 	if err != nil || decision.Command == nil {
+		_ = service.store.ReleaseActionCard(context.WithoutCancel(ctx), record.Card.ID)
+		if err == nil {
+			err = ErrInvalidRequest
+		}
 		return command.Envelope{}, err
 	}
 	return *decision.Command, nil
+}
+
+func (service *Service) ReleaseActionCard(ctx context.Context, cardID string) error {
+	return service.store.ReleaseActionCard(ctx, strings.TrimSpace(cardID))
+}
+
+func (service *Service) BindActionCardArchiveRun(ctx context.Context, cardID, archiveRunID string, revision uint64) error {
+	record, err := service.store.ActionCard(ctx, strings.TrimSpace(cardID))
+	if err != nil || record.Card.ArchivistTurnID == "" {
+		return ErrInvalidRequest
+	}
+	return service.BindArchiveRun(ctx, record.SessionID, record.Card.ArchivistTurnID, archiveRunID, revision)
 }
 
 func (service *Service) CompleteActionCard(ctx context.Context, cardID string) error {

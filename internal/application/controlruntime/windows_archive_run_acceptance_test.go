@@ -17,9 +17,9 @@ import (
 	"time"
 
 	"videoarchive/internal/adapter/bootconfig"
+	"videoarchive/internal/adapter/controlruntime"
 	"videoarchive/internal/adapter/ossecret"
 	"videoarchive/internal/adapter/sqlitecommand"
-	"videoarchive/internal/application/controlruntime"
 	"videoarchive/internal/core/archive"
 	"videoarchive/internal/core/job"
 	"videoarchive/internal/core/vocabulary"

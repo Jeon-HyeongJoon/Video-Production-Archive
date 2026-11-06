@@ -13,7 +13,7 @@ func (m *memorySecrets) Put(_ string, credential string) (string, error) {
 	return "wincred://provider/account-1", nil
 }
 
-// Requirement: AGT-001
+// Planned contract: AGT-001
 func TestAccountRegistrationSeparatesCredentialFromPersistedMetadata(t *testing.T) {
 	store := &memorySecrets{}
 	account, err := Register(Registration{ID: "account-1", Provider: "provider-a", Credential: "very-secret", MaximumDataClass: Internal}, store)
@@ -35,7 +35,7 @@ func eligibleAccount(id string, priority int) Account {
 	}
 }
 
-// Requirement: AGT-002
+// Planned contract: AGT-002
 func TestRouterFiltersByStateCooldownCapabilityDataPolicyAndBudget(t *testing.T) {
 	now := time.Now()
 	valid := eligibleAccount("valid", 9)
@@ -58,7 +58,7 @@ func TestRouterFiltersByStateCooldownCapabilityDataPolicyAndBudget(t *testing.T)
 	}
 }
 
-// Requirement: AGT-003
+// Planned contract: AGT-003
 func TestRouterKeepsEligibleStickyAccountBeforePriority(t *testing.T) {
 	accounts := []Account{eligibleAccount("primary", 1), eligibleAccount("sticky", 9)}
 	selected, err := (Router{}).Select(time.Now(), accounts, RouteRequest{RequiredCapabilities: []string{"tools"}, StickyAccountID: "sticky"})
@@ -67,7 +67,7 @@ func TestRouterKeepsEligibleStickyAccountBeforePriority(t *testing.T) {
 	}
 }
 
-// Requirement: AGT-004
+// Planned contract: AGT-004
 func TestRateLimitPlacesAccountInCooldownAndAllowsFallback(t *testing.T) {
 	now := time.Now()
 	outcome := ApplyFailure(eligibleAccount("primary", 1), TemporaryRateLimit, now, 90*time.Second)
@@ -76,7 +76,7 @@ func TestRateLimitPlacesAccountInCooldownAndAllowsFallback(t *testing.T) {
 	}
 }
 
-// Requirement: AGT-005
+// Planned contract: AGT-005
 func TestQuotaAndSpendFailuresDisableBudgetAndAllowFallback(t *testing.T) {
 	for _, kind := range []FailureKind{QuotaFailure, SpendFailure} {
 		outcome := ApplyFailure(eligibleAccount("primary", 1), kind, time.Now(), 0)
@@ -87,7 +87,7 @@ func TestQuotaAndSpendFailuresDisableBudgetAndAllowFallback(t *testing.T) {
 	}
 }
 
-// Requirement: AGT-006
+// Planned contract: AGT-006
 func TestInvalidRequestAndSafetyRefusalNeverTriggerAccountFallback(t *testing.T) {
 	for _, kind := range []FailureKind{InvalidRequest, SafetyRefusal} {
 		outcome := ApplyFailure(eligibleAccount("primary", 1), kind, time.Now(), 0)
@@ -97,7 +97,7 @@ func TestInvalidRequestAndSafetyRefusalNeverTriggerAccountFallback(t *testing.T)
 	}
 }
 
-// Requirement: AGT-007
+// Planned contract: AGT-007
 func TestRouterReturnsAIUnavailableWhenNoAccountIsEligible(t *testing.T) {
 	account := eligibleAccount("only", 1)
 	account.State = Disabled
@@ -107,7 +107,7 @@ func TestRouterReturnsAIUnavailableWhenNoAccountIsEligible(t *testing.T) {
 	}
 }
 
-// Requirement: AGT-008
+// Planned contract: AGT-008
 func TestLogFieldRedactionRemovesCredentialsButKeepsUsageCounts(t *testing.T) {
 	redacted := RedactFields(map[string]string{
 		"Authorization": "Bearer secret", "Proxy-Authorization": "secret", "apikey": "secret", "refresh_token": "secret",
@@ -123,7 +123,7 @@ func TestLogFieldRedactionRemovesCredentialsButKeepsUsageCounts(t *testing.T) {
 	}
 }
 
-// Requirement: AGT-010
+// Planned contract: AGT-010
 func TestExpiredCooldownReturnsAccountToActiveRouting(t *testing.T) {
 	now := time.Now()
 	account := eligibleAccount("primary", 1)
@@ -135,7 +135,7 @@ func TestExpiredCooldownReturnsAccountToActiveRouting(t *testing.T) {
 	}
 }
 
-// Requirement: AGT-011
+// Planned contract: AGT-011
 func TestRepeatedProviderOverloadEscalatesFromCooldownToUnhealthy(t *testing.T) {
 	now := time.Now()
 	account := eligibleAccount("primary", 1)
@@ -157,7 +157,7 @@ func TestRepeatedProviderOverloadEscalatesFromCooldownToUnhealthy(t *testing.T) 
 	}
 }
 
-// Requirement: AGT-012
+// Planned contract: AGT-012
 func TestArchivistToolCallsRequireStructuredSourceAndNarrowAllowlist(t *testing.T) {
 	allowlist := map[string]bool{"render.create_rendition": true, "run_shell": true}
 	if err := ValidateToolCall(StructuredToolCall, "render.create_rendition", allowlist); err != nil {
@@ -173,7 +173,7 @@ func TestArchivistToolCallsRequireStructuredSourceAndNarrowAllowlist(t *testing.
 	}
 }
 
-// Requirement: AGT-013
+// Planned contract: AGT-013
 func TestFallbackContextRetriesOnlyIncompleteToolCallsAndUsesCompletedSummaries(t *testing.T) {
 	context := BuildFallbackContext("JOB-1", "render", []ToolCallRecord{
 		{ID: "call-complete", Completed: true, ResultSummary: "rendition ART-1 published"},
@@ -184,7 +184,7 @@ func TestFallbackContextRetriesOnlyIncompleteToolCallsAndUsesCompletedSummaries(
 	}
 }
 
-// Requirement: AGT-009
+// Planned contract: AGT-009
 func TestAuthenticationFailureDisablesAccountAndRequiresReconnect(t *testing.T) {
 	outcome := ApplyFailure(eligibleAccount("primary", 1), AuthenticationFailure, time.Now(), 0)
 	if outcome.Account.State != AuthFailed || !outcome.Account.ReconnectRequired ||
@@ -193,7 +193,7 @@ func TestAuthenticationFailureDisablesAccountAndRequiresReconnect(t *testing.T) 
 	}
 }
 
-// Requirement: AGT-014
+// Planned contract: AGT-014
 func TestProviderSuccessResetsConsecutiveOverloadCount(t *testing.T) {
 	now := time.Now()
 	account := eligibleAccount("primary", 1)
@@ -209,7 +209,7 @@ func TestProviderSuccessResetsConsecutiveOverloadCount(t *testing.T) {
 	}
 }
 
-// Requirement: AGT-015
+// Planned contract: AGT-015
 func TestUnhealthyAccountRecoversOnlyAfterSuccessfulHealthProbe(t *testing.T) {
 	now := time.Now()
 	account := eligibleAccount("primary", 1)

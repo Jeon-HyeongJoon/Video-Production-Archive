@@ -90,11 +90,13 @@ func (service *InventoryService) Reconcile(ctx context.Context, workerID string,
 		}
 		current[observation.VolumeID] = true
 		candidate, found := byVolume[observation.VolumeID]
-		if found && (candidate.WorkerID != workerID || candidate.PhysicalDeviceID != observation.PhysicalDeviceID ||
-			candidate.StorageID != observation.StorageID) {
+		if found && (candidate.PhysicalDeviceID != observation.PhysicalDeviceID || candidate.StorageID != observation.StorageID) {
 			return ErrInvalidVolumeInventory
 		}
-		if found && candidate.Connected {
+		if found && candidate.WorkerID != workerID && !observedAt.After(candidate.ObservedAt) {
+			continue
+		}
+		if found && candidate.WorkerID == workerID && candidate.Connected {
 			continue
 		}
 		revision := uint64(1)

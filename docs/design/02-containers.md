@@ -39,7 +39,7 @@ Archive Control만 운영 DB에 직접 쓴다.
 
 HTTP와 MCP는 Domain 함수를 직접 호출하지 않고 같은 Command Bus를 사용한다. Handler는 저장 상태를 직접 바꾸지 않고 새 상태와 Event를 반환하며 Store가 상태·CommandRecord·Event·receipt를 한 번에 확정한다. Core 경계는 `CMD-001~010`, 실제 SQLite transaction은 `PER-001` integration test로 검증한다.
 
-v1 Archive Control는 strict boot YAML에서 DB·listen·CIDR·Origin·Worker·Storage topology를 읽어 시작하며 `archive-control` 실행 파일이 SQLite Command Store·카탈로그, 아카이브 작업 공간 projection과 Notification SSE를 하나의 HTTP Handler에 조립한다. Worker와 Archivist Host credential reference는 사용자 profile이 있는 서비스의 `wincred://`와 profile 없는 서비스의 절대 `dpapi://`를 모두 허용하되 raw secret·상대 DPAPI 경로는 거부한다. 정적 아카이브 작업 공간과 health, 자산·전사·요약·검수·Job 조회·명령 API는 실제 peer CIDR 검사를 공통으로 통과하고 protocol DTO에서 Storage 경로를 제외한다. 같은 boot topology의 재시작은 멱등하지만 기존 Storage ID의 물리 identity나 root 변경은 시작 오류다. 사용자는 Archivist 없이도 Job을 직접 만들 수 있고, 사람 직접 Command와 Archivist Tool Call은 같은 Command Bus를 통과한다. 상태·명령·Event·receipt가 SQLite transaction으로 확정된 다음 공통 읽기 투영을 갱신한다. `CFG-006`, `CTL-001~004`, `COL-001`
+v1 Archive Control는 strict boot YAML에서 DB·listen·CIDR·Origin·Worker·Storage topology를 읽어 시작하며 `archive-control` 실행 파일이 `internal/adapter/controlruntime` 조립 Adapter를 열어 SQLite Command Store·카탈로그, 아카이브 작업 공간 projection과 Notification SSE를 하나의 HTTP Handler에 조립한다. Application 패키지는 이 구체 Adapter 조립을 import하지 않는다. Worker와 Archivist Host credential reference는 사용자 profile이 있는 서비스의 `wincred://`와 profile 없는 서비스의 절대 `dpapi://`를 모두 허용하되 raw secret·상대 DPAPI 경로는 거부한다. 정적 아카이브 작업 공간과 health, 자산·전사·요약·검수·Job 조회·명령 API는 실제 peer CIDR 검사를 공통으로 통과하고 protocol DTO에서 Storage 경로를 제외한다. 같은 boot topology의 재시작은 멱등하지만 기존 Storage ID의 물리 identity나 root 변경은 시작 오류다. 사용자는 Archivist 없이도 Job을 직접 만들 수 있고, 사람 직접 Command와 Archivist Tool Call은 같은 Command Bus를 통과한다. 상태·명령·Event·receipt가 SQLite transaction으로 확정된 다음 공통 읽기 투영을 갱신한다. `CFG-006`, `CTL-001~004`, `COL-001`
 
 ArchivistSession·ArchivistTurn은 Control이 먼저 SQLite에 확정하고 Archivist Host가 outbound 연결로 claim한다. Host는 로컬 CLI process/PTY와 resume token만 감독하며 업무 상태나 승인 정책을 소유하지 않는다. 전체 Orca 앱은 배포 구성요소가 아니고, 최소 Embedded Core가 기본 runtime backend이며 Orca CLI 연동은 같은 Port의 선택형 Adapter다. 자세한 계약은 [11. 로컬 CLI Archivist Host 설계](11-archivist-host.md)를 따른다. `LRH-001~009`, `CTL-005~006`
 
@@ -62,12 +62,12 @@ Worker는 DB 파일을 직접 열지 않는다. Control API가 내려준 ID와 �
 
 같은 PC의 local Worker도 원격 Worker와 같은 registry·ExecutionLease 계약을 사용한다. PC를 추가할 때 Worker만 설치하고 boot config에 `worker_id`, credential reference, 처리 종류를 등록한다. 원격 Worker가 Control에 outbound 연결하므로 Worker PC에는 inbound 포트를 열지 않는다.
 
-v1 `archive-worker`는 별도 strict YAML의 identity·Control URL·Windows Credential Manager reference·heartbeat·claim 주기·접근 Storage를 읽고 Control로 outbound heartbeat와 Step claim·결과·취소 정리를 보낸다. Control의 `/worker/v1`은 아카이브 작업 공간 로그인 설정과 무관하게 매 요청의 Worker별 Bearer credential을 Resolver 값과 비교하고, 성공한 상태만 credential 없이 Archive Workspace Worker 상태 영역에 투영한다. loopback HTTP는 All-in-One 개발 구성에만 허용하고 원격 Control URL은 HTTPS만 허용한다. Resolver·HTTP 계약은 fixture 통합으로 검증하고 실제 Windows Credential Manager 호출은 격리 Windows acceptance 전까지 계획 상태다. `CFG-007`, `WRK-005~009`, `CAN-001~004`
+v1 `archive-worker`는 별도 strict YAML의 identity·Control URL·Windows Credential Manager reference·heartbeat·claim 주기·접근 Storage를 읽고 Control로 outbound bounded heartbeat·별도 folder inventory와 Step claim·lease renewal·결과·취소 정리를 보낸다. Control의 `/worker/v1`은 아카이브 작업 공간 로그인 설정과 무관하게 매 요청의 Worker별 Bearer credential을 Resolver 값과 비교하고, 성공한 상태만 credential 없이 Archive Workspace Worker 상태 영역에 투영한다. loopback HTTP는 All-in-One 개발 구성에만 허용하고 원격 Control URL은 HTTPS만 허용한다. Resolver·HTTP 계약은 fixture 통합으로 검증하고 실제 Windows Credential Manager 호출은 격리 Windows acceptance 전까지 계획 상태다. `CFG-007`, `WRK-005~015`, `CAN-001~005`
 
 ## 4. 프로세스 장애 경계
 
 - Worker 종료는 Archive Control와 아카이브 작업 공간을 종료하지 않는다.
-- Control 재시작 후 DB의 RUNNING ExecutionLease와 publish receipt를 검사하여 미게시 Step만 재대기한다. `WFL-004`, `WFL-009`, `EXE-003`
+- Control 재시작 후 DB의 RUNNING ExecutionLease·Worker 결과 receipt·completion outbox를 검사해 정산된 후속 처리를 재개한다. 게시됐지만 결과 receipt 전 중단된 파일 조정은 `EXE-003` planned다. `WFL-004`, `WFL-009`, `WRK-014`
 - subprocess 결과는 임시 경로에 쓰고 검증 전 Artifact로 게시하지 않는다. `EXE-001~002`
 - Worker는 하나의 heavy slot만 lease할 수 있다. `RES-005`
 - 같은 물리 장치 충돌은 논리 경로가 달라도 차단한다. `RES-006`

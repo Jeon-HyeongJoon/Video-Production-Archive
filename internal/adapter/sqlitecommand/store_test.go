@@ -4,12 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"videoarchive/internal/application/workercontrol"
 	"videoarchive/internal/core/command"
 	"videoarchive/internal/core/dispatch"
+	"videoarchive/internal/core/execution"
 	"videoarchive/internal/core/job"
 	"videoarchive/internal/core/vocabulary"
 	"videoarchive/internal/core/workflow"
@@ -75,6 +78,198 @@ func TestSQLiteCommitRollsBackEveryUnitOfWorkRecord(t *testing.T) {
 			t.Fatalf("%s contains %d partial records", table, count)
 		}
 	}
+}
+
+// Requirement: WRK-014
+func TestWorkerCompletionOutboxSurvivesRestartAndResultReplay(t *testing.T) {
+	ctx := context.Background()
+	databasePath := t.TempDir() + "/completion.db"
+	store, err := Open(databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 11, 6, 2, 0, 0, 0, time.UTC)
+	spec, err := execution.NewStepExecutionSpec(execution.StepExecutionSpec{
+		JobID: "JOB-OUTBOX", StepID: "organize", TemplateName: "archive-intake-as-is", Operation: execution.OperationOrganizeMedia,
+		Inputs: []execution.InputReference{{
+			OriginalAssetID: "ASSET-1", OriginalName: "clip.mp4", InspectionID: "INSPECTION-1", StorageID: "source",
+			RelativePath: "clip.mp4", Checksum: strings.Repeat("a", 64), DurationMillis: 1_000,
+		}},
+		Outputs: []execution.OutputTarget{{
+			ID: "OUTPUT-1", Kind: execution.OutputOrganizedMedia, StorageID: "archive",
+			RelativePath: "packages/output.mp4", OriginalAssetID: "ASSET-1",
+		}},
+		ProfileReference: "archive-1080p-6mbps@v1",
+		Parameters: execution.StepExecutionParameters{
+			OrganizationDecisionID: "DECISION-1", WorkspaceDriveID: "VOLUME-1", ArchiveStorageID: "archive", InputRevision: 1,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	queued := job.State{
+		ID: "JOB-OUTBOX", Revision: 1, TemplateName: "archive-intake-as-is", TargetTitle: "clip",
+		ControlMode: workflow.AssistedMode, CurrentStepID: "organize",
+		Steps: []job.Step{{
+			Workflow:     workflow.Step{ID: "organize", State: workflow.Queued, MaxAttempts: 3},
+			ExecutorKind: vocabulary.ExecutorWorker, RequiredProcessingKinds: []vocabulary.ProcessingKind{vocabulary.ProcessingOrganize},
+			ExecutionSpec: &spec,
+		}},
+	}
+	queuedPayload, _ := json.Marshal(queued)
+	if err := store.Seed(ctx, command.Snapshot{TargetID: queued.ID, Revision: queued.Revision, State: queuedPayload}); err != nil {
+		t.Fatal(err)
+	}
+	lease := workflow.ExecutionLease{
+		OwnerWorkerID: "worker-windows", AcquiredAt: now, HeartbeatAt: now,
+		ExpiresAt: now.Add(time.Minute), FencingToken: 1,
+	}
+	reserved := queued
+	reserved.Revision = 2
+	reserved.Steps[0].Workflow.State = workflow.Reserved
+	reserved.Steps[0].Workflow.ExecutionLease = &lease
+	reserved.Steps[0].Workflow.LastFencingToken = 1
+	reserved.Steps[0].WorkerID = "worker-windows"
+	reservedPayload, _ := json.Marshal(reserved)
+	dispatchChange := dispatchCommit(queued.ID, queued.ID+"/organize", "RES-OUTBOX", 1, 1, now)
+	dispatchChange.NextState = &command.Snapshot{TargetID: queued.ID, Revision: 2, State: reservedPayload}
+	dispatchChange.Lease = lease
+	if err := store.CommitDispatch("outbox:dispatch", dispatchChange); err != nil {
+		t.Fatal(err)
+	}
+	assignment, _, err := store.ClaimWorkerStep(ctx, "worker-windows", now.Add(time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, err := execution.NewStepOutputRecord(
+		spec, assignment.FencingToken, "worker-windows", now.Add(2*time.Second),
+		[]execution.StepOutput{{
+			ID: "OUTPUT-1", Kind: execution.OutputOrganizedMedia, StorageID: "archive",
+			RelativePath: "packages/output.mp4", Checksum: strings.Repeat("b", 64),
+		}}, []string{"worker://verified"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report := workercontrol.Result{
+		WorkerID: "worker-windows", JobID: queued.ID, StepID: "organize", FencingToken: 1,
+		Success: true, LogReference: "worker://complete", OutputRecord: &record,
+	}
+	settled, err := store.SettleWorkerStep(ctx, report, now.Add(2*time.Second))
+	if err != nil || settled.Steps[0].Workflow.State != workflow.Completed {
+		t.Fatalf("settle state=%+v err=%v", settled, err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := Open(databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	pending, err := reopened.PendingWorkerCompletions(ctx, 10)
+	if err != nil || len(pending) != 1 || pending[0].State.ID != queued.ID {
+		t.Fatalf("durable completion work=%+v err=%v", pending, err)
+	}
+	replayed, err := reopened.SettleWorkerStep(ctx, report, now.Add(3*time.Second))
+	if err != nil || replayed.Revision != settled.Revision {
+		t.Fatalf("identical result was not replayed: state=%+v err=%v", replayed, err)
+	}
+	if err := reopened.MarkWorkerCompletionDelivered(ctx, pending[0].ID, now.Add(4*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if remaining, err := reopened.PendingWorkerCompletions(ctx, 10); err != nil || len(remaining) != 0 {
+		t.Fatalf("delivered completion remained pending: %+v err=%v", remaining, err)
+	}
+}
+
+// Requirement: WRK-013
+func TestWorkerLeaseHeartbeatExtendsSameFenceWithoutDuplicateExecution(t *testing.T) {
+	ctx := context.Background()
+	store, err := Open(t.TempDir() + "/lease-renewal.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	now := time.Date(2026, 11, 6, 3, 0, 0, 0, time.UTC)
+	assignment := seedClaimedWorkerStep(t, store, now, "JOB-LEASE")
+	renewal, err := store.RenewWorkerLease(
+		ctx, "worker-windows", assignment.JobID, assignment.StepID, assignment.FencingToken, now.Add(40*time.Second),
+	)
+	if err != nil || !renewal.ExpiresAt.Equal(now.Add(100*time.Second)) || renewal.RenewAfter != 30*time.Second {
+		t.Fatalf("lease renewal=%+v err=%v", renewal, err)
+	}
+	if recovered, err := store.RecoverExpiredReservations(ctx, now.Add(70*time.Second)); err != nil || len(recovered) != 0 {
+		t.Fatalf("renewed execution was recovered early: %+v err=%v", recovered, err)
+	}
+	replayed, state, err := store.ClaimWorkerStep(ctx, "worker-windows", now.Add(70*time.Second))
+	if err != nil || replayed.FencingToken != assignment.FencingToken || state.Steps[0].Workflow.State != workflow.Running {
+		t.Fatalf("renewed execution acquired a new fence: assignment=%+v state=%+v err=%v", replayed, state, err)
+	}
+	if _, err := store.RenewWorkerLease(
+		ctx, "worker-other", assignment.JobID, assignment.StepID, assignment.FencingToken, now.Add(71*time.Second),
+	); !errors.Is(err, workflow.ErrStaleFencingToken) {
+		t.Fatalf("non-owner renewed the lease: %v", err)
+	}
+}
+
+func seedClaimedWorkerStep(t *testing.T, store *Store, now time.Time, jobID string) workercontrol.Assignment {
+	t.Helper()
+	ctx := context.Background()
+	spec, err := execution.NewStepExecutionSpec(execution.StepExecutionSpec{
+		JobID: jobID, StepID: "organize", TemplateName: "archive-intake-as-is", Operation: execution.OperationOrganizeMedia,
+		Inputs: []execution.InputReference{{
+			OriginalAssetID: "ASSET-1", OriginalName: "clip.mp4", InspectionID: "INSPECTION-1", StorageID: "source",
+			RelativePath: "clip.mp4", Checksum: strings.Repeat("a", 64), DurationMillis: 1_000,
+		}},
+		Outputs: []execution.OutputTarget{{
+			ID: "OUTPUT-1", Kind: execution.OutputOrganizedMedia, StorageID: "archive",
+			RelativePath: "packages/output.mp4", OriginalAssetID: "ASSET-1",
+		}},
+		ProfileReference: "archive-1080p-6mbps@v1",
+		Parameters: execution.StepExecutionParameters{
+			OrganizationDecisionID: "DECISION-1", WorkspaceDriveID: "VOLUME-1", ArchiveStorageID: "archive", InputRevision: 1,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	queued := job.State{
+		ID: jobID, Revision: 1, TemplateName: "archive-intake-as-is", TargetTitle: "clip",
+		ControlMode: workflow.AssistedMode, CurrentStepID: "organize",
+		Steps: []job.Step{{
+			Workflow:     workflow.Step{ID: "organize", State: workflow.Queued, MaxAttempts: 3},
+			ExecutorKind: vocabulary.ExecutorWorker, RequiredProcessingKinds: []vocabulary.ProcessingKind{vocabulary.ProcessingOrganize},
+			ExecutionSpec: &spec,
+		}},
+	}
+	queuedPayload, _ := json.Marshal(queued)
+	if err := store.Seed(ctx, command.Snapshot{TargetID: jobID, Revision: 1, State: queuedPayload}); err != nil {
+		t.Fatal(err)
+	}
+	lease := workflow.ExecutionLease{
+		OwnerWorkerID: "worker-windows", AcquiredAt: now, HeartbeatAt: now,
+		ExpiresAt: now.Add(time.Minute), FencingToken: 1,
+	}
+	reserved := queued
+	reserved.Revision = 2
+	reserved.Steps[0].Workflow.State = workflow.Reserved
+	reserved.Steps[0].Workflow.ExecutionLease = &lease
+	reserved.Steps[0].Workflow.LastFencingToken = 1
+	reserved.Steps[0].WorkerID = "worker-windows"
+	reservedPayload, _ := json.Marshal(reserved)
+	dispatchChange := dispatchCommit(jobID, jobID+"/organize", "RES-LEASE", 1, 1, now)
+	dispatchChange.NextState = &command.Snapshot{TargetID: jobID, Revision: 2, State: reservedPayload}
+	dispatchChange.Lease = lease
+	if err := store.CommitDispatch("lease:dispatch", dispatchChange); err != nil {
+		t.Fatal(err)
+	}
+	assignment, _, err := store.ClaimWorkerStep(ctx, "worker-windows", now.Add(time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return assignment
 }
 
 // Requirement: DSP-003

@@ -26,6 +26,7 @@ function render() {
   const route = currentRoute();
   const key = `${route.key}?${route.name === "drive" || route.name === "connections" ? route.query.toString() : ""}`;
   if (key !== activeKey) {
+    active?.dispose?.();
     activeKey = key;
     root.replaceChildren();
     root.dataset.screen = route.name;

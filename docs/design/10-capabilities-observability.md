@@ -39,7 +39,7 @@ Archive Control를 띄우지 않은 integration test와 진단 CLI에서도 같�
 
 ## 3. 실행 증적 경계
 
-모니터링은 각 도메인 모듈에 로그 코드를 흩뿌리지 않고 Capability Executor를 감싸는 Evidence Sink가 담당한다.
+목표 경계에서 모니터링은 각 도메인 모듈에 로그 코드를 흩뿌리지 않고 Capability Executor를 감싸는 Evidence Sink가 담당한다. 현재 Evidence 타입·SQLite prototype은 있으나 Archive Control의 모든 실행 Port를 감싸지 않으므로 `OBS-001`은 planned다.
 
 ```text
 CapabilityRequested
@@ -60,7 +60,7 @@ outcome, error_class
 input/output ID와 검증 증적 참조
 ```
 
-Domain Event는 업무 상태 변경 사실이고, progress·metric·process log는 증적이다. 둘을 같은 것으로 취급하지 않는다. 완료·실패 상태와 CommandRecord·Event는 DB 원장에 남고, 고빈도 metric과 원문 로그는 회전 저장하며 DB에는 요약과 참조만 남긴다. 요구사항: `OBS-001`
+Domain Event는 업무 상태 변경 사실이고, progress·metric·process log는 증적이다. 둘을 같은 것으로 취급하지 않는다. 완료·실패 상태와 CommandRecord·Event는 DB 원장에 남고, 고빈도 metric과 원문 로그는 회전 저장하며 DB에는 요약과 참조만 남긴다. 모든 Capability를 한 Evidence Sink로 묶는 요구사항은 `OBS-001` planned다.
 
 ## 4. 요구사항 테스트와 증적 묶음
 

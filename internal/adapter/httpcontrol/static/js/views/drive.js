@@ -112,7 +112,8 @@ function holdDecision(drive, folder) {
     if (!option) return;
     try {
       await mutation(`/api/v1/archive-intake/${encodeURIComponent(drive.workspace_drive_id)}/override`, {
-        command_id: newID("COMMAND"), decision_id: newID("DECISION"), idempotency_key: newID("OVERRIDE"), folder: folder.folder,
+        command_id: newID("COMMAND"), decision_id: newID("DECISION"), idempotency_key: newID("OVERRIDE"),
+        archive_run_id: drive.archive_run_id, folder: folder.folder,
         expected_revision: folder.input_revision, disposition: option[2], target_video_bitrate_kbps: option[3],
       });
       ui.hold = null;
@@ -289,9 +290,14 @@ function completedWorkSection(drive) {
 }
 
 async function startArchiveRun(drive) {
+  if (ui.runStarting) return;
+  if (!ui.archiveRunID) ui.archiveRunID = newID("ARCHIVE-RUN");
+  if (!ui.archiveRunKey) ui.archiveRunKey = newID("ARCHIVE-RUN-START");
+  ui.runStarting = true;
+  notify();
   try {
     const result = await mutation("/api/v1/archive-intake/runs", {
-      archive_run_id: newID("ARCHIVE-RUN"), idempotency_key: newID("ARCHIVE-RUN"), session_id: drive.session_id || ui.intakeSessionID,
+      archive_run_id: ui.archiveRunID, idempotency_key: ui.archiveRunKey, session_id: drive.session_id || ui.intakeSessionID,
       source_volume_id: drive.source_volume_id, expected_candidate_revision: drive.candidate_revision || drive.input_revision,
       archive_storage_id: ui.archiveID, input_revision: drive.folder_discovery_revision || drive.input_revision, folder_ids: [...ui.folders].sort(),
     });
@@ -300,15 +306,22 @@ async function startArchiveRun(drive) {
     await refresh();
   } catch (error) {
     ui.status = error.message;
+    ui.runStarting = false;
     notify();
   }
+}
+
+function resetArchiveRunIntent() {
+  ui.archiveRunID = newID("ARCHIVE-RUN");
+  ui.archiveRunKey = newID("ARCHIVE-RUN-START");
+  ui.runStarting = false;
 }
 
 function archiveOption(storage) {
   return el("button", {
     type: "button", class: "option", "aria-pressed": String(storage.storage_id === ui.archiveID), disabled: !storage.accessible,
     dataset: { storageId: storage.storage_id, accessKind: storage.access_kind || "" },
-    onclick: () => { ui.archiveID = ui.archiveID === storage.storage_id ? "" : storage.storage_id; notify(); },
+    onclick: () => { ui.archiveID = ui.archiveID === storage.storage_id ? "" : storage.storage_id; resetArchiveRunIntent(); notify(); },
   },
   el("span", { class: "option-main" }, el("b", {}, storage.label || storage.storage_id)),
   el("span", { class: "option-meta" }, `${label("storageRole", storage.role)} · ${label("storageAccess", storage.access_kind)}`,
@@ -323,11 +336,11 @@ function prepPanel(drive) {
   const selected = folders.filter((folder) => ui.folders.has(folder.folder));
   all.checked = ready && folders.length > 0 && selected.length === folders.length;
   all.indeterminate = selected.length > 0 && selected.length < folders.length;
-  all.addEventListener("change", () => { ui.folders = new Set(all.checked ? folders.map((folder) => folder.folder) : []); notify(); });
+  all.addEventListener("change", () => { ui.folders = new Set(all.checked ? folders.map((folder) => folder.folder) : []); resetArchiveRunIntent(); notify(); });
   const picks = folders.map((folder) => {
     const check = el("input", { type: "checkbox", "aria-label": `${folder.folder} 선택`, disabled: !ready });
     check.checked = ui.folders.has(folder.folder);
-    check.addEventListener("change", () => { check.checked ? ui.folders.add(folder.folder) : ui.folders.delete(folder.folder); notify(); });
+    check.addEventListener("change", () => { check.checked ? ui.folders.add(folder.folder) : ui.folders.delete(folder.folder); resetArchiveRunIntent(); notify(); });
     return el("label", { class: "folder-pick", dataset: { folderId: folder.folder } }, check,
       el("span", { class: "folder-pick-name" }, folder.folder),
       el("small", { class: "num" }, `${formatCount(folder.video_count)} 영상 · ${formatBytes(folder.estimated_output_bytes)}`));
@@ -350,7 +363,7 @@ function prepPanel(drive) {
     el("div", { class: "panel start-bar" },
       el("span", { id: "selection-summary", class: "num" }, `${selected.length} 폴더 · ${formatCount(videos)} 영상 · ${formatBytes(bytes)}`),
       el("span", { id: "start-reason", class: "start-reason" }, blocker),
-      el("button", { type: "button", class: "btn primary", id: "start-archive-run", dataset: { action: "start" }, disabled: Boolean(blocker), onclick: () => startArchiveRun(drive) }, "아카이브 실행 시작")));
+      el("button", { type: "button", class: "btn primary", id: "start-archive-run", dataset: { action: "start" }, disabled: Boolean(blocker) || ui.runStarting, onclick: () => startArchiveRun(drive) }, ui.runStarting ? "시작 중" : "아카이브 실행 시작")));
 }
 
 export function mount(root, route) {

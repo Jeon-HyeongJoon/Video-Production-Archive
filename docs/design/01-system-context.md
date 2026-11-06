@@ -48,7 +48,7 @@ Archivist 경로: Host·CLI 선택 → ArchivistSession → ArchivistTurn → MC
 - 원본은 입고 후 내용이 바뀌지 않는다. `ARC-001`
 - 상태 변경은 공통 Command 계약을 통과한다. `CMD-001~008`, `PER-001`
 - 파괴적 작업은 Archivist가 승인할 수 없다. `SEC-001`
-- 모든 AI 계정이 실패해도 수동 도메인 기능은 계속된다. `AGT-007`
+- 외부 Provider Account Router를 연결한 후에도 모든 AI 계정이 실패하면 수동 도메인 기능은 계속되어야 한다. 이 계약은 `AGT-007` planned다. v1 로컬 CLI Archivist가 unavailable이어도 사람의 직접 경로는 계속된다.
 - PC 사용 부하가 있는 동안 background heavy 단계는 새로 시작하지 않는다. `RES-001~003`
 - 대용량 파일 입고는 두 입고 사본 검증 뒤 작업 공간 드라이브를 해제하며 매체 소유권·반환 상태나 반환 승인을 만들지 않는다. `PIP-004`
 - 아카이브 작업 공간/API는 명시한 내부 CIDR에서만 접근할 수 있다. `NET-001`

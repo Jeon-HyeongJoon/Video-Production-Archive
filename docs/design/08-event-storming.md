@@ -95,7 +95,7 @@ flowchart LR
 - 같은 내용의 원본 자산: 자동 덮어쓰지 않고 중복 후보를 조회 화면에 표시한다.
 - 작업 공간 해제 요청 전에 새 Step이 같은 PhysicalDevice lock을 획득함: 해제를 거부하고 현재 Job 상태를 다시 평가한다.
 
-이 흐름의 안전 해제는 OS 장치 동작이며 매체 소유권 반환이나 사람의 반환 승인이 아니다. 연결 요구사항: `PIP-004`, `ARC-001`, `DEV-001~003`, `DEV-006`.
+이 흐름의 안전 해제는 OS 장치 동작이며 매체 소유권 반환이나 사람의 반환 승인이 아니다. `PIP-004`, `ARC-001`, `DEV-006`은 현재 계약이고 실제 장치 lock·eject의 `DEV-001~003`은 planned다.
 
 ### 5.1 Archive Intake
 
@@ -273,7 +273,7 @@ Host나 CLI가 끊기면 durable ArchivistSession은 유지하고 runtime handle
 
 Provider 실패가 계정 상태를 바꾸면 `ProviderAccountCooldownStarted`, `ProviderAccountQuotaExhausted`, `ProviderAccountAuthenticationFailed` 같은 이벤트 후보를 남긴다. 다음 계정으로 폴백하기 전 완료된 Tool Call과 실제 Job 상태를 읽고, 완료된 명령은 다시 실행하지 않는다. 모든 계정이 제외되면 AI 사용 불가 상태가 되지만 버튼·폼을 통한 도메인 명령은 계속 사용할 수 있다.
 
-연결 요구사항: `AGT-002~013`, `SEC-002`.
+외부 Provider Account Router 연결 요구사항은 `AGT-002~013` planned이고, 현재 로컬 CLI 경계는 `LRH-*`, `MCP-*`, `SEC-002`가 소유한다.
 
 ### 11.3 볼륨 포맷
 
@@ -288,7 +288,7 @@ RecordApproval(target=Volume revision)
 
 `FormatVolume`은 시스템 볼륨이 아니고, 활성 lock이 없고, 보존 대상 데이터의 필요한 사본과 checksum이 확인됐으며, boot 정책이 허용하고, 유효한 승인과 재확인이 있을 때만 수락한다. 누가 승인할 수 있는지는 권한 정책이 정하며 장치 도메인이 관리자 여부를 직접 판단하지 않는다.
 
-연결 요구사항: `DEV-004~005`, `SEC-001`, `CFG-004~005`.
+장치 포맷의 `DEV-004~005`는 planned이고, 예방 정책은 `SEC-001`, `CFG-004~005`가 소유한다.
 
 ## 12. 일관성 경계 후보
 
@@ -339,11 +339,11 @@ CommandRecord는 감사와 멱등성의 영속 기록이지만 업무 Aggregate 
 | ES-05 | SOURCE_MEDIA Storage와 논리 드라이브·물리 장치 식별자가 섞일 가능성 | SOURCE_MEDIA는 StorageRole, workspace_drive_id는 stable Volume ID, PhysicalDevice ID는 I/O 충돌 키로 분리 | `workspace-drive`, `storage-role` 용어와 `DEV-006`으로 고정 |
 | ES-06 | Job 자체 상태가 필요한지 | 초기에는 Step 투영으로 계산하고 별도 JobState를 만들지 않음 | `job` 규칙으로 고정 |
 | ES-07 | 저장하지 않는 Notification의 reconnect cursor | 이벤트 기반 알림은 event ID로 재생하고 metric 알림은 재생하지 않음 | `NTF-001`, `NTF-002`로 고정 |
-| ES-08 | DB와 파일 publish 사이 장애 | staging ID와 publish receipt를 두고 재시작 시 파일과 DB를 조정 | `WFL-009`, `EXE-002`, `EXE-003`으로 고정 |
+| ES-08 | DB와 파일 publish 사이 장애 | 결과 receipt·completion outbox는 구현. 게시 뒤 결과 receipt 전 중단 조정은 planned | `WFL-009`, `EXE-002`, `WRK-014`, `EXE-003`(planned) |
 | ES-09 | Provider 계정·요청·Tool Call 용어가 없음 | ProviderAccount Entity와 ProviderRequest·ArchivistToolCall Record를 분리 | 용어집과 로컬 Runtime 설계로 고정 |
 | ES-10 | 모든 이벤트가 command_id를 요구함 | heartbeat timeout, 장치 감지, 정책 실행도 ActorType.SYSTEM 명령을 먼저 기록 | `CMD-007`, `CMD-008`로 공통 계약 고정 |
 | ES-11 | 실패 이벤트 이름이 오류 종류마다 폭증할 수 있음 | 상태 이벤트는 StepWaiting/RetryScheduled/Failed로 제한하고 error_class를 payload로 기록 | `WFL-010`으로 분류 규칙 고정 |
-| ES-12 | ArchivePackage import가 과거 Event를 중복 생성할 위험 | import는 원래 ID의 기록을 idempotent하게 복원하고 별도 Import 결과만 현재 명령 기록에 남김 | `ARC-007`로 고정 |
+| ES-12 | ArchivePackage import가 과거 Event를 중복 생성할 위험 | import prototype을 제품 복원 명령과 실제 패키지에 연결해야 함 | `ARC-007`(planned) |
 | ES-13 | Volume, Worker, Provider 계정의 생애주기 상태 집합이 없음 | 이벤트 이름을 확정하기 전에 각 상태 집합과 허용 전이를 정의 | 결정 필요 |
 | ES-14 | ready Step이 여러 Job·Worker에 걸쳐 있을 때 순서와 자원 예약 원자성이 없음 | 영속 ready_at·aging·Job dispatch sequence로 후보를 고르고 StepReserved·ResourceReservation·ExecutionLease를 한 Unit of Work로 확정 | `dispatch-policy`, `resource-reservation`, `DSP-001~003`으로 고정 |
 

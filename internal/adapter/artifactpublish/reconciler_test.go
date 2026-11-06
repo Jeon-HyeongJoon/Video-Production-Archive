@@ -21,7 +21,7 @@ func (processor *countingProcessor) Run(context.Context, string) error {
 	return nil
 }
 
-// Requirement: EXE-003
+// Planned contract: EXE-003
 func TestRestartReconcilesPublishedArtifactWithoutRerunningProcessor(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()

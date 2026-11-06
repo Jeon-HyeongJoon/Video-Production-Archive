@@ -9,7 +9,7 @@ import (
 	"os/signal"
 
 	"videoarchive/internal/adapter/bootconfig"
-	"videoarchive/internal/application/controlruntime"
+	"videoarchive/internal/adapter/controlruntime"
 )
 
 var version = "dev"

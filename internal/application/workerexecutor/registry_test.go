@@ -14,9 +14,11 @@ import (
 
 	"videoarchive/internal/adapter/workerconfig"
 	"videoarchive/internal/application/workerclient"
+	"videoarchive/internal/core/archive"
 	"videoarchive/internal/core/execution"
 	"videoarchive/internal/core/organization"
 	"videoarchive/internal/core/vocabulary"
+	"videoarchive/internal/core/workflow"
 )
 
 // Requirement: WRK-012
@@ -136,7 +138,158 @@ func TestProductionExecutorRoutesOneTypedOperationThroughRegisteredStorageRoots(
 		t.Fatalf("duplicate operation was accepted: %v", err)
 	}
 
+	cancelSpec := spec
+	cancelSpec.JobID = "JOB-CANCEL"
+	cancelSpec.StepID = "organize-cancel"
+	cancelSpec.Outputs = []execution.OutputTarget{{
+		ID: "VP-CANCEL", Kind: execution.OutputOrganizedMedia, StorageID: "working",
+		RelativePath: "staging/cancelled.mp4", OriginalAssetID: "ASSET-1",
+	}}
+	cancelSpec, err = execution.NewStepExecutionSpec(cancelSpec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cancelExecutor, err := New(roots, &blockingPartialHandler{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cancelContext, cancel := context.WithCancel(context.Background())
+	resultChannel := make(chan workerclient.ExecutionResult, 1)
+	go func() {
+		resultChannel <- cancelExecutor.Execute(cancelContext, workerclient.Assignment{
+			JobID: cancelSpec.JobID, StepID: cancelSpec.StepID, FencingToken: 4, ExecutionSpec: cancelSpec,
+		})
+	}()
+	partial := temporaryOutputPathForToken(cancelSpec.Outputs[0].RelativePath, 4)
+	for attempt := 0; attempt < 100; attempt++ {
+		if exists, _ := roots.MustRoot("working").Exists(partial); exists {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	otherAttemptPartial := temporaryOutputPathForToken(cancelSpec.Outputs[0].RelativePath, 5)
+	if err := roots.MustRoot("working").WriteFile(otherAttemptPartial, []byte("new-attempt"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cancel()
+	cancelled := <-resultChannel
+	if cancelled.Cancellation == nil || !cancelled.Cancellation.ProcessStopped || !cancelled.Cancellation.CleanupConfirmed {
+		t.Fatalf("cancelled production operation did not prove stop and cleanup: %+v", cancelled)
+	}
+	if exists, _ := roots.MustRoot("working").Exists(partial); exists {
+		t.Fatal("cancelled production operation left its temporary output")
+	}
+	if payload, err := roots.MustRoot("working").ReadFile(otherAttemptPartial); err != nil || string(payload) != "new-attempt" {
+		t.Fatalf("cancelled operation changed another fencing token's temporary output: payload=%q err=%v", payload, err)
+	}
+
 	t.Run("actual ffmpeg source sequence", testActualSourceSequence)
+}
+
+type blockingPartialHandler struct{}
+
+func (*blockingPartialHandler) Operation() execution.Operation {
+	return execution.OperationOrganizeMedia
+}
+
+// Requirement: WRK-015
+func TestProductionExecutorClassifiesInputTransientAndStorageFailures(t *testing.T) {
+	directory := t.TempDir()
+	sourcePath := filepath.Join(directory, "source")
+	archivePath := filepath.Join(directory, "archive")
+	if err := os.Mkdir(sourcePath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(archivePath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sourcePath, "clip.mov"), []byte("input"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	roots, err := workerconfig.OpenStorageRoots(workerconfig.Configuration{
+		StorageRoots:         []workerconfig.StorageRootConfiguration{{StorageID: "source", Root: sourcePath}, {StorageID: "archive", Root: archivePath}},
+		AccessibleStorageIDs: []string{"source", "archive"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer roots.Close()
+	_, checksum, err := roots.MustRoot("source").FileSHA256("clip.mov")
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec, err := execution.NewStepExecutionSpec(execution.StepExecutionSpec{
+		JobID: "JOB-FAILURES", StepID: "organize", TemplateName: "archive-intake-as-is", Operation: execution.OperationOrganizeMedia,
+		Inputs: []execution.InputReference{{
+			OriginalAssetID: "ASSET-1", OriginalName: "clip.mov", InspectionID: "INSPECTION-1", StorageID: "source",
+			RelativePath: "clip.mov", Checksum: checksum, DurationMillis: 1_000,
+		}},
+		Outputs: []execution.OutputTarget{{
+			ID: "OUTPUT-1", Kind: execution.OutputOrganizedMedia, StorageID: "archive",
+			RelativePath: "packages/output.mp4", OriginalAssetID: "ASSET-1",
+		}},
+		ProfileReference: "archive-1080p-6mbps@v1",
+		Parameters: execution.StepExecutionParameters{
+			OrganizationDecisionID: "DECISION-1", WorkspaceDriveID: "VOLUME-1", ArchiveStorageID: "archive", InputRevision: 1,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	transientRegistry, err := New(roots, errorHandler{err: errors.New("temporary subprocess failure")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assignment := workerclient.Assignment{JobID: spec.JobID, StepID: spec.StepID, FencingToken: 1, ExecutionSpec: spec}
+	transient := transientRegistry.Execute(context.Background(), assignment)
+	if transient.FailureClass != workflow.FailureTransient || transient.ErrorClass != "STEP_EXECUTION_FAILED" {
+		t.Fatalf("temporary Adapter error was not retryable: %+v", transient)
+	}
+	badChecksum := spec
+	badChecksum.Inputs = append([]execution.InputReference(nil), spec.Inputs...)
+	badChecksum.Inputs[0].Checksum = strings.Repeat("f", 64)
+	badChecksum, err = execution.NewStepExecutionSpec(badChecksum)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assignment.ExecutionSpec = badChecksum
+	permanent := transientRegistry.Execute(context.Background(), assignment)
+	if permanent.FailureClass != workflow.FailureInput || permanent.ErrorClass != "INPUT_CHECKSUM_MISMATCH" {
+		t.Fatalf("invalid input was not permanent: %+v", permanent)
+	}
+	if err := os.Remove(filepath.Join(sourcePath, "clip.mov")); err != nil {
+		t.Fatal(err)
+	}
+	assignment.ExecutionSpec = spec
+	deviceWait := transientRegistry.Execute(context.Background(), assignment)
+	if deviceWait.FailureClass != workflow.FailureResource || deviceWait.WaitReason != vocabulary.WaitDevice ||
+		deviceWait.WaitTargetStorageID != "source" {
+		t.Fatalf("unavailable Storage did not wait without consuming an attempt: %+v", deviceWait)
+	}
+	diskWait, classified := storageFailure(errors.Join(archive.ErrStorageFull), "archive")
+	if !classified || diskWait.FailureClass != workflow.FailureResource || diskWait.WaitReason != vocabulary.WaitDisk {
+		t.Fatalf("full Storage did not become a disk resource wait: %+v classified=%v", diskWait, classified)
+	}
+}
+
+type errorHandler struct{ err error }
+
+func (errorHandler) Operation() execution.Operation { return execution.OperationOrganizeMedia }
+
+func (handler errorHandler) Execute(context.Context, execution.StepExecutionSpec, *workerconfig.StorageRoots) ([]execution.StepOutput, []string, error) {
+	return nil, nil, handler.err
+}
+
+func (*blockingPartialHandler) Execute(ctx context.Context, spec execution.StepExecutionSpec, roots *workerconfig.StorageRoots) ([]execution.StepOutput, []string, error) {
+	root := roots.MustRoot(spec.Outputs[0].StorageID)
+	if err := root.MkdirAll(filepath.Dir(spec.Outputs[0].RelativePath), 0o700); err != nil {
+		return nil, nil, err
+	}
+	if err := root.WriteFile(temporaryOutputPath(ctx, spec.Outputs[0].RelativePath), []byte("partial"), 0o600); err != nil {
+		return nil, nil, err
+	}
+	<-ctx.Done()
+	return nil, nil, ctx.Err()
 }
 
 // Requirement: CFG-011
@@ -179,6 +332,10 @@ func TestWorkerArchiveIntakeInspectionUsesLocalFFprobeAndReturnsOnlyNormalizedPa
 		t.Fatal(err)
 	}
 	defer roots.Close()
+	sourceSize, sourceChecksum, err := roots.MustRoot("source").FileSHA256("event-a/clip.mp4")
+	if err != nil {
+		t.Fatal(err)
+	}
 	requestedAt := time.Date(2026, 11, 4, 4, 0, 0, 0, time.UTC)
 	spec, err := execution.NewStepExecutionSpec(execution.StepExecutionSpec{
 		JobID: "JOB-INSPECTION-1", StepID: "inspect", TemplateName: "archive-intake-inspection",
@@ -208,6 +365,16 @@ func TestWorkerArchiveIntakeInspectionUsesLocalFFprobeAndReturnsOnlyNormalizedPa
 		result.InspectedMedia[0].Inspection.ProcessorVersion != "ffprobe-actual" {
 		t.Fatalf("Worker-side Archive Intake inspection failed: %+v", result)
 	}
+	observation := result.InspectedMedia[0].Observation
+	if observation.StorageID != "source" || observation.WorkspaceDriveID != "VOLUME-1" || observation.OriginalName != "clip.mp4" ||
+		observation.SizeBytes != sourceSize || observation.Checksum != sourceChecksum || observation.ObservedBy != "worker-inspection" ||
+		!observation.ObservedAt.Equal(requestedAt) {
+		t.Fatalf("production inspection did not create the complete input observation: %+v", observation)
+	}
+	afterSize, afterChecksum, err := roots.MustRoot("source").FileSHA256("event-a/clip.mp4")
+	if err != nil || afterSize != sourceSize || afterChecksum != sourceChecksum {
+		t.Fatalf("production inspection changed the source: before=%d/%s after=%d/%s err=%v", sourceSize, sourceChecksum, afterSize, afterChecksum, err)
+	}
 	payload, err := json.Marshal(result)
 	if err != nil {
 		t.Fatal(err)
@@ -218,6 +385,11 @@ func TestWorkerArchiveIntakeInspectionUsesLocalFFprobeAndReturnsOnlyNormalizedPa
 	if size, _, err := roots.MustRoot("archive").FileSHA256("staging/JOB-INSPECTION-1/inspection/result.json"); err != nil || size <= 0 {
 		t.Fatalf("normalized inspection evidence was not published: size=%d err=%v", size, err)
 	}
+}
+
+// Requirement: INT-001
+func TestProductionInputInspectionHashesRegisteredStorageFileReadOnly(t *testing.T) {
+	TestWorkerArchiveIntakeInspectionUsesLocalFFprobeAndReturnsOnlyNormalizedPaths(t)
 }
 
 func testActualSourceSequence(t *testing.T) {

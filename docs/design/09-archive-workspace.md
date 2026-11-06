@@ -44,7 +44,7 @@ Command·Event·실행 증적 ─> 공통 작업 상세 ─> 사용자 화면 + 
 
 ActionCard는 모든 Archivist 행동의 필수 중간 단계가 아니다. `ASSISTED` 제안과 승인 필요한 명령 후보만 기록한다. `ARCHIVIST` 모드에서 허용된 일반 처리는 ArchivistToolCall과 Command receipt로 바로 추적한다.
 
-요구사항: `SEC-001~003`, `AGT-012`, `MCP-002`, `DSH-003`, `COL-002`
+요구사항: `SEC-001~003`, `MCP-002`, `DSH-003`, `COL-002`. 외부 Provider Router의 별도 allowlist 계약인 `AGT-012`는 planned다.
 
 ## 4. 공통 읽기 모델
 
@@ -85,9 +85,9 @@ Archivist Session 영역은 Host 상태, backend, CLI, workspace label, 현재 T
 
 ActionCard의 채팅 분리는 승인 경계에만 적용한다. 채팅의 “진행”은 Archivist에게 후속 행동을 요청할 수 있지만 그 자체를 Approval 또는 ActionCard 제출로 해석하지 않는다. 명시적 카드 조작 시 현재 리비전을 다시 검사한다. `DSH-003`
 
-Archivist가 `ASSISTED` 모드에서 제안한 비승인 ActionCard도 SQLite에 먼저 저장하고 아카이브 작업 공간에 `PENDING`으로 투영한다. 사용자의 명시적 카드 실행 API는 일반 브라우저 명령과 같은 Origin·JSON·CSRF 검사를 통과한 뒤 카드에 고정된 Command·parameter·expected revision을 공통 Command Bus로 제출한다. Command 성공 뒤 카드를 `COMPLETED`로 갱신한다. 담당자는 같은 경계에서 카드를 거절할 수 있고, 거절 조작은 actor·시각·사유가 있는 immutable 기록과 `REJECTED` projection을 원자적으로 남기며 Command를 만들지 않는다. `COMPLETED`·`REJECTED` 카드는 다시 실행하거나 결정할 수 없다. 중간 projection 갱신 실패가 나면 같은 멱등 key의 Command receipt를 재사용해 카드 상태만 복구한다. `DSH-005`
+Archivist가 `ASSISTED` 모드에서 제안한 비승인 ActionCard도 SQLite에 먼저 저장하고 아카이브 작업 공간에 `PENDING`으로 투영한다. 사용자의 명시적 카드 실행·거절 API는 일반 브라우저 명령과 같은 Origin·JSON·CSRF 검사를 통과한 뒤 `PENDING → EXECUTING` compare-and-swap으로 카드를 먼저 선점한다. 한 요청만 선점에 성공하므로 실행과 거절이 경합해도 둘 다 종결될 수 없다. 실행은 카드에 고정된 Command·parameter·expected revision을 공통 Command Bus로 제출하고, ArchiveRun을 시작한 카드라면 카드가 속한 Session·Turn에 같은 ArchiveRun 업무 문맥도 묶은 뒤 `COMPLETED`로 바꾼다. 실패하면 안전하게 `PENDING`으로 돌리고 같은 멱등 receipt로 재시도한다. 거절은 actor·시각·사유가 있는 immutable 기록과 `REJECTED` projection만 남기며 Command를 만들지 않는다. `COMPLETED`·`REJECTED` 카드는 다시 조작할 수 없다. `DSH-005`
 
-초기 웹 Command API는 CSRF session을 먼저 발급하고 exact Origin·JSON Content-Type·double-submit token을 검증한다. Template 기반 Job 생성은 revision 0에서 새 Aggregate를 같은 Command Unit of Work로 만들며, 취소는 요청의 expected revision과 StepState 전이표를 모두 통과해야 한다. 미시작 Step은 즉시 정산하고 실행 중 Step은 별도 CancellationRequest와 Worker stop·정리 확인을 거친다. 성공 뒤 rebuild 가능한 projection을 갱신하고 멱등 재전송에서는 최초 명령 결과로 같은 투영을 복구한다. `CTL-003~004`, `CAN-001~004`
+초기 웹 Command API는 CSRF session을 먼저 발급하고 exact Origin·JSON Content-Type·double-submit token을 검증한다. 이미 유효한 CSRF cookie가 있는 브라우저는 같은 token을 재사용하므로 두 번째 탭이 첫 탭의 조작을 무효화하지 않는다. Template 기반 Job 생성은 revision 0에서 새 Aggregate를 같은 Command Unit of Work로 만들며, 취소는 요청의 expected revision과 StepState 전이표를 모두 통과해야 한다. 미시작 Step은 즉시 정산하고 실행 중 Step은 별도 CancellationRequest와 Worker stop·정리 확인을 거친다. 성공 뒤 rebuild 가능한 projection을 갱신하고 멱등 재전송에서는 최초 명령 결과로 같은 투영을 복구한다. `CTL-003~004`, `CAN-001~005`
 
 Provider, Worker registry, Archivist Host, 인증, Storage와 파괴적 기능 정책은 v1 아카이브 작업 공간이나 API에서 바꾸지 않는다. OS ACL로 보호된 로컬 설정 파일과 서비스 재시작이 그 책임을 가진다. `CFG-001~002`, `SEC-004`
 
@@ -99,6 +99,7 @@ Provider, Worker registry, Archivist Host, 인증, Storage와 파괴적 기능 �
 - 다음 ArchivistTurn 문맥은 현재 Job·Step 리비전과 완료 Tool Call receipt를 다시 읽어 구성한다.
 - 로그 원문은 파일에 회전·압축하고 아카이브 작업 공간에는 정제된 tail과 참조만 전달한다.
 - 현재 Notification Feed에는 아카이브 실행 event 발행자가 없다. 아카이브 작업 공간은 화면이 보이는 동안 5초마다 Worker·드라이브·Host·Archivist·Job 읽기 모델을 다시 읽는다. 상시 연결 표시나 마지막 갱신 시각은 두지 않고, 갱신이 세 번 연속 실패하면 상단 막대 아래에 연결 끊김과 마지막 갱신 시각을 한 줄로 보이며 회복될 때까지 판정·실행·취소 Command를 잠근다. 펼친 보류 판정과 선택 상태는 다시 읽어도 유지한다. `DSH-021`
+- route가 바뀌면 이전 화면의 진행 중 fetch를 취소하고 dispose된 view의 늦은 응답은 DOM을 갱신하지 않는다. 같은 상태 변경 endpoint는 첫 요청이 끝날 때까지 다시 제출하지 않아 빠른 이중 클릭이 새 idempotency key의 중복 Command를 만들지 않는다.
 - Archivist Host 상태와 ArchivistTurn event는 저장 cursor 이후 replay하며 raw PTY output을 업무 상태로 취급하지 않는다.
 
 ## 7. 화면 계약
@@ -129,7 +130,7 @@ golden은 드라이브 상세의 실행 전·1단계 진행·STT 가능·완료,
 
 화면은 기본으로 어두운 무채색 테마를 쓰고, 사이드바의 테마 전환으로 밝은 무채색 테마를 고를 수 있다. 테마 선택은 그 브라우저에만 남는 편의 설정이다. 두 테마 모두 표면 명도 차와 hairline 경계로 깊이를 구분하고, 본문 글자는 순흑·순백이 아닌 짙은 회색과 밝은 회색으로 배경 대비를 줄인다. 라틴 글자와 숫자는 내장한 Geist, 한글은 내장한 Noto Sans KR로 그린다. 일반 표면과 조작의 모서리는 2px 이하로 날카롭게 둔다. 목록은 하나의 테두리 묶음으로 그리고 항목 사이만 같은 선으로 나누며, 상태 신호 밖의 표면·본문·테두리에 유채색을 쓰지 않는다. 본문과 조작 글자는 12px 미만을 쓰지 않고 보조 글자는 배경 대비 4.5:1, 중립 도형은 3:1 이상으로 둔다. 밀도는 글자를 줄이지 않고 표·내부 scroll·세부 패널로 확보하며 큰 제목이나 넓은 여백보다 대량 작업 상태의 비교를 우선한다. 화면 글자는 한국어 명사형 label로 쓰고 원래 상태 이름은 title과 접근성 이름에 보존한다. 본문에는 기능을 서술하는 안내 문장을 두지 않으며, 짧은 명사형 label·업무 데이터·상태 token·조작 요소의 배치만으로 흐름을 드러낸다. 판단과 조작에 바로 쓰지 않는 보조 값(요약 수, Worker·아카이브 경로, 영상·폴더 수, 고정 범위, CSV 기록, 예약량, 작업 ID와 오류 종류 같은 세부)은 화면에 두지 않고 그 대상에 마우스를 올렸을 때 title로만 보인다. 꺼진 Worker처럼 문제를 알리는 값은 화면에 남긴다. Archivist 응답은 대화 내용이므로 이 규칙의 대상이 아니다. 접근성 이름과 live status는 시각 문구와 별개로 보존한다.
 
-Worker의 전체 탐색 폴더 목록과 ArchiveRun의 고정 폴더 범위는 별도 projection 필드로 유지한다. 실행 상세의 폴더 표에는 완료 시각이 가장 최근인 ArchiveRun의 고정 범위와 그 실행에 속한 판정·Job만 표시하고, 이전 실행의 같은 input revision이나 같은 폴더 판정을 섞지 않는다. 완료 내역은 이 폴더 표와 다른 projection이며 모든 ArchiveRun의 검증된 ArchivePackage 출력을 완료 시각 역순으로 유지한다. 실행 완료 뒤 새 접수에서는 최신 전체 탐색 목록을 다시 사용한다. `DSH-008`, `DSH-010`, `DSH-024`
+Worker의 전체 탐색 폴더 목록과 ArchiveRun의 고정 폴더 범위는 별도 projection 필드로 유지한다. 실행 상세의 폴더 표에는 영속 생성 시각이 가장 최근인 ArchiveRun을 검사 receipt가 생기기 전부터 즉시 선택하고, receipt가 생긴 뒤에는 그 고정 범위와 그 실행에 속한 판정·Job만 표시하며 이전 실행의 같은 input revision이나 같은 폴더 판정을 섞지 않는다. 완료 내역은 이 폴더 표와 다른 projection이며 모든 ArchiveRun의 검증된 ArchivePackage 출력을 완료 시각 역순으로 유지한다. 실행 완료 뒤 새 접수에서는 최신 전체 탐색 목록을 다시 사용한다. `DSH-008`, `DSH-010`, `DSH-024`
 
 ArchiveCatalog의 마지막 기록 시각은 receipt 생성 시각이나 실행 중 시도가 아니라 현재 ArchiveRun의 1·2단계에서 성공 완료된 가장 최근 `archive_catalog` Step의 저장 시각을 사용한다. `DSH-027`
 

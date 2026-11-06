@@ -155,6 +155,8 @@ export function mount(root, route) {
   let detail = null;
   let loadedKey = "";
   let loadError = "";
+  let disposed = false;
+  let request = null;
   ui.jobCancel = "";
   ui.status = "";
 
@@ -252,14 +254,22 @@ export function mount(root, route) {
       if (key !== loadedKey) {
         loadedKey = key;
         loadError = "";
+        request?.abort();
+        request = new AbortController();
         try {
-          detail = await api(`/api/v1/jobs/${encodeURIComponent(nextRoute.jobID)}`);
+          detail = await api(`/api/v1/jobs/${encodeURIComponent(nextRoute.jobID)}`, { signal: request.signal });
         } catch (error) {
+          if (error.name === "AbortError" || disposed) return;
           detail = null;
           loadError = error.message;
         }
       }
+      if (disposed) return;
       renderDetail(job || detail?.summary || null);
+    },
+    dispose() {
+      disposed = true;
+      request?.abort();
     },
   };
 }

@@ -2,7 +2,9 @@ package sqlitecommand
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,39 +12,44 @@ import (
 	"strings"
 	"time"
 
-	_ "modernc.org/sqlite"
-
+	"videoarchive/internal/adapter/sqlitebase"
 	"videoarchive/internal/application/workercontrol"
 	"videoarchive/internal/core/command"
 	"videoarchive/internal/core/dispatch"
-	"videoarchive/internal/core/execution"
 	"videoarchive/internal/core/job"
 	"videoarchive/internal/core/vocabulary"
 	"videoarchive/internal/core/workflow"
 )
 
 type Store struct {
-	db *sql.DB
+	db      *sql.DB
+	release func() error
+}
+
+type cancellationSettlementPayload struct {
+	ProcessStopped           bool     `json:"process_stopped"`
+	CleanupConfirmed         bool     `json:"cleanup_confirmed"`
+	ExternalEffectReferences []string `json:"external_effect_references"`
+	LogReference             string   `json:"log_reference"`
 }
 
 var _ command.Store = (*Store)(nil)
 
 func Open(path string) (*Store, error) {
-	db, err := sql.Open("sqlite", path+"?_txlock=immediate&_pragma=busy_timeout(5000)")
+	db, release, err := sqlitebase.Acquire(path)
 	if err != nil {
 		return nil, err
 	}
-	db.SetMaxOpenConns(1)
-	store := &Store{db: db}
+	store := &Store{db: db, release: release}
 	if err := store.migrate(context.Background()); err != nil {
-		db.Close()
+		release()
 		return nil, err
 	}
 	return store, nil
 }
 
 func (store *Store) Close() error {
-	return store.db.Close()
+	return store.release()
 }
 
 func (store *Store) migrate(ctx context.Context) error {
@@ -135,6 +142,27 @@ func (store *Store) migrate(ctx context.Context) error {
 			payload BLOB NOT NULL,
 			UNIQUE(cancellation_id, event_type)
 		)`,
+		`CREATE TABLE IF NOT EXISTS worker_result_receipts (
+			job_id TEXT NOT NULL,
+			step_id TEXT NOT NULL,
+			fencing_token INTEGER NOT NULL,
+			digest TEXT NOT NULL,
+			state BLOB NOT NULL,
+			settled_at TEXT NOT NULL,
+			PRIMARY KEY(job_id, step_id, fencing_token)
+		)`,
+		`CREATE TABLE IF NOT EXISTS worker_completion_outbox (
+			completion_id TEXT PRIMARY KEY,
+			job_id TEXT NOT NULL,
+			state BLOB NOT NULL,
+			created_at TEXT NOT NULL,
+			attempts INTEGER NOT NULL DEFAULT 0,
+			last_error TEXT NOT NULL DEFAULT '',
+			last_attempt_at TEXT,
+			delivered_at TEXT
+		)`,
+		`CREATE INDEX IF NOT EXISTS worker_completion_outbox_pending
+			ON worker_completion_outbox(delivered_at, created_at)`,
 	}
 	for _, statement := range statements {
 		if _, err := store.db.ExecContext(ctx, statement); err != nil {
@@ -661,7 +689,7 @@ func sqliteInteger(value uint64) (int64, error) {
 	return int64(value), nil
 }
 
-func formatTime(value time.Time) string { return value.UTC().Format(time.RFC3339Nano) }
+func formatTime(value time.Time) string { return sqlitebase.FormatTime(value) }
 
 func (store *Store) ClaimWorkerStep(ctx context.Context, workerID string, now time.Time) (workercontrol.Assignment, job.State, error) {
 	tx, err := store.db.BeginTx(ctx, nil)
@@ -670,7 +698,7 @@ func (store *Store) ClaimWorkerStep(ctx context.Context, workerID string, now ti
 	}
 	defer tx.Rollback()
 	rows, err := tx.QueryContext(ctx, `
-		SELECT r.job_id, r.step_id, l.fencing_token, l.expires_at
+		SELECT r.job_id, r.step_id, l.fencing_token, l.heartbeat_at, l.expires_at
 		FROM resource_reservations r
 		JOIN execution_leases l ON l.reservation_id = r.reservation_id
 		WHERE r.worker_id = ? AND r.released_at IS NULL
@@ -679,10 +707,10 @@ func (store *Store) ClaimWorkerStep(ctx context.Context, workerID string, now ti
 	if err != nil {
 		return workercontrol.Assignment{}, job.State{}, err
 	}
-	var jobID, compositeStepID, expiresRaw string
+	var jobID, compositeStepID, heartbeatRaw, expiresRaw string
 	var fencingToken uint64
 	for rows.Next() {
-		if err := rows.Scan(&jobID, &compositeStepID, &fencingToken, &expiresRaw); err != nil {
+		if err := rows.Scan(&jobID, &compositeStepID, &fencingToken, &heartbeatRaw, &expiresRaw); err != nil {
 			rows.Close()
 			return workercontrol.Assignment{}, job.State{}, err
 		}
@@ -721,39 +749,35 @@ func (store *Store) ClaimWorkerStep(ctx context.Context, workerID string, now ti
 		return workercontrol.Assignment{}, job.State{}, workercontrol.ErrInvalidAssignment
 	}
 	expiresAt, _ := time.Parse(time.RFC3339Nano, expiresRaw)
+	heartbeatAt, _ := time.Parse(time.RFC3339Nano, heartbeatRaw)
 	assignment := workercontrol.Assignment{
 		JobID: state.ID, StepID: step.Workflow.ID, FencingToken: fencingToken, LeaseExpiresAt: expiresAt,
-		ResourceClass: step.ResourceClass, RequiredProcessingKinds: append([]vocabulary.ProcessingKind(nil), step.RequiredProcessingKinds...),
+		LeaseRenewAfter: expiresAt.Sub(heartbeatAt) / 2,
+		ResourceClass:   step.ResourceClass, RequiredProcessingKinds: append([]vocabulary.ProcessingKind(nil), step.RequiredProcessingKinds...),
 		ExecutionSpec: *step.ExecutionSpec,
 	}
 	if step.Workflow.State == workflow.Running {
 		return assignment, state, nil
 	}
-	if step.Workflow.State != workflow.Reserved || step.Workflow.Transition(workflow.Running) != nil {
+	if step.Workflow.State != workflow.Reserved {
 		return workercontrol.Assignment{}, job.State{}, workercontrol.ErrNoWork
-	}
-	step.LastEventAt = now
-	state.CurrentStepID = step.Workflow.ID
-	state.Revision = revision + 1
-	encoded, err = json.Marshal(state)
-	if err != nil {
-		return workercontrol.Assignment{}, job.State{}, err
 	}
 	commandID := fmt.Sprintf("worker-claim:%s:%s:%d", state.ID, step.Workflow.ID, fencingToken)
 	reason := "Worker claimed reserved Step"
-	event := command.Event{
-		EventID: commandID + ":event", EventType: "StepStarted", CommandID: commandID,
+	envelope := command.Envelope{
+		CommandID: commandID, CommandType: job.StartWorkerStepCommand,
 		Actor: command.Actor{Type: command.WorkerActor, ID: workerID}, RequestedVia: "worker_api",
-		TargetID: state.ID, BeforeRevision: revision, AfterRevision: state.Revision, Reason: reason,
-		Payload: map[string]any{"step_id": step.Workflow.ID, "fencing_token": fencingToken},
+		TargetID: state.ID, ExpectedRevision: revision, IdempotencyKey: commandID, Reason: reason,
+		Parameters: lifecycleParameters(job.StartWorkerStepParameters{StepID: step.Workflow.ID, FencingToken: fencingToken}),
+	}
+	change, state, err := workerLifecycleChange(envelope, command.Snapshot{TargetID: jobID, Revision: revision, State: encoded}, now)
+	if err != nil {
+		return workercontrol.Assignment{}, job.State{}, err
 	}
 	expected := revision
 	if err := applyCommit(tx, "", command.Commit{
-		ExpectedRevision: &expected, NextState: &command.Snapshot{TargetID: state.ID, Revision: state.Revision, State: encoded},
-		Record: command.CommandRecord{Envelope: command.Envelope{
-			CommandID: commandID, CommandType: "step.start", Actor: event.Actor, RequestedVia: event.RequestedVia,
-			TargetID: state.ID, ExpectedRevision: revision, IdempotencyKey: commandID, Reason: reason,
-		}, Accepted: true}, Events: []command.Event{event},
+		ExpectedRevision: &expected, NextState: &command.Snapshot{TargetID: state.ID, Revision: change.Revision, State: change.State},
+		Record: command.CommandRecord{Envelope: envelope, Accepted: true}, Events: change.Events,
 	}); err != nil {
 		return workercontrol.Assignment{}, job.State{}, err
 	}
@@ -764,11 +788,36 @@ func (store *Store) ClaimWorkerStep(ctx context.Context, workerID string, now ti
 }
 
 func (store *Store) SettleWorkerStep(ctx context.Context, report workercontrol.Result, now time.Time) (job.State, error) {
+	reportPayload, err := json.Marshal(report)
+	if err != nil {
+		return job.State{}, workercontrol.ErrInvalidAssignment
+	}
+	reportHash := sha256.Sum256(reportPayload)
+	reportDigest := hex.EncodeToString(reportHash[:])
 	tx, err := store.db.BeginTx(ctx, nil)
 	if err != nil {
 		return job.State{}, err
 	}
 	defer tx.Rollback()
+	var receiptDigest string
+	var receiptState []byte
+	receiptErr := tx.QueryRowContext(ctx, `
+		SELECT digest, state FROM worker_result_receipts
+		WHERE job_id = ? AND step_id = ? AND fencing_token = ?
+	`, report.JobID, report.StepID, report.FencingToken).Scan(&receiptDigest, &receiptState)
+	if receiptErr == nil {
+		if receiptDigest != reportDigest {
+			return job.State{}, workflow.ErrStaleFencingToken
+		}
+		var replayed job.State
+		if json.Unmarshal(receiptState, &replayed) != nil || replayed.ID != report.JobID {
+			return job.State{}, workercontrol.ErrInvalidAssignment
+		}
+		return replayed, nil
+	}
+	if !errors.Is(receiptErr, sql.ErrNoRows) {
+		return job.State{}, receiptErr
+	}
 	compositeStepID := report.JobID + "/" + report.StepID
 	var reservationID, owner string
 	var token uint64
@@ -789,84 +838,30 @@ func (store *Store) SettleWorkerStep(ctx context.Context, report workercontrol.R
 	if err := tx.QueryRowContext(ctx, `SELECT revision, state FROM aggregate_states WHERE target_id = ?`, report.JobID).Scan(&revision, &encoded); err != nil {
 		return job.State{}, err
 	}
-	state, err := job.Decode(command.Snapshot{TargetID: report.JobID, Revision: revision, State: encoded})
-	if err != nil {
-		return job.State{}, err
+	commandID := fmt.Sprintf("worker-result:%s:%s:%d:%d", report.JobID, report.StepID, report.FencingToken, revision+1)
+	reason := "Worker settled Step execution"
+	envelope := command.Envelope{
+		CommandID: commandID, CommandType: job.SettleWorkerStepCommand,
+		Actor: command.Actor{Type: command.WorkerActor, ID: report.WorkerID}, RequestedVia: "worker_api",
+		TargetID: report.JobID, ExpectedRevision: revision, IdempotencyKey: commandID, Reason: reason,
+		Parameters: lifecycleParameters(job.SettleWorkerStepParameters{
+			StepID: report.StepID, FencingToken: report.FencingToken, Success: report.Success,
+			FailureClass: report.FailureClass, WaitReason: report.WaitReason, WaitTargetStorageID: report.WaitTargetStorageID,
+			ErrorClass: report.ErrorClass, LogReference: report.LogReference, OutputRecord: report.OutputRecord,
+		}),
 	}
-	step := stateStep(&state, compositeStepID)
-	if step == nil || step.Workflow.AcceptWorkerResult(report.WorkerID, report.FencingToken) != nil || step.Workflow.State != workflow.Running {
-		return job.State{}, workflow.ErrStaleFencingToken
-	}
-	if step.ExecutionSpec == nil || step.ExecutionSpec.Validate() != nil || step.OutputRecord != nil {
+	change, state, err := workerLifecycleChange(envelope, command.Snapshot{TargetID: report.JobID, Revision: revision, State: encoded}, now)
+	if errors.Is(err, job.ErrInvalidWorkerLifecycle) {
 		return job.State{}, workercontrol.ErrInvalidAssignment
 	}
-	eventType := "StepCompleted"
-	if report.Success {
-		if report.OutputRecord == nil || report.OutputRecord.SpecDigest != step.ExecutionSpec.Digest ||
-			report.OutputRecord.FencingToken != report.FencingToken || report.OutputRecord.WorkerID != report.WorkerID {
-			return job.State{}, workercontrol.ErrInvalidAssignment
-		}
-		outputRecord, err := execution.NewStepOutputRecordWithInspections(
-			*step.ExecutionSpec, report.FencingToken, report.WorkerID, now,
-			report.OutputRecord.Outputs, report.OutputRecord.VerificationReferences, report.OutputRecord.InspectedMedia,
-		)
-		if err != nil {
-			return job.State{}, workercontrol.ErrInvalidAssignment
-		}
-		if step.Workflow.Transition(workflow.Verifying) != nil || step.Workflow.Transition(workflow.Completed) != nil {
-			return job.State{}, workflow.ErrIllegalTransition
-		}
-		step.OutputRecord = &outputRecord
-		step.Progress = 1
-		step.WaitTargetStorageID = ""
-		if err := materializeDependentExecutionSpecs(&state); err != nil {
-			return job.State{}, err
-		}
-	} else {
-		if report.OutputRecord != nil {
-			return job.State{}, workercontrol.ErrInvalidAssignment
-		}
-		deviceWait := report.FailureClass == workflow.FailureResource && report.WaitReason == vocabulary.WaitDevice
-		if deviceWait != (strings.TrimSpace(report.WaitTargetStorageID) != "") {
-			return job.State{}, workercontrol.ErrInvalidAssignment
-		}
-		if err := step.Workflow.RecordFailure(workflow.Failure{Class: report.FailureClass, WaitReason: report.WaitReason}); err != nil {
-			return job.State{}, err
-		}
-		step.WaitTargetStorageID = strings.TrimSpace(report.WaitTargetStorageID)
-		step.ErrorClass = report.ErrorClass
-		eventType = "StepFailed"
-		if step.Workflow.State == workflow.Queued || step.Workflow.State == workflow.Waiting {
-			eventType = "StepRetryScheduled"
-		}
-	}
-	step.Workflow.ExecutionLease = nil
-	step.LogReference = report.LogReference
-	step.LastEventAt = now
-	activateNextReadyStep(&state, now)
-	state.Revision = revision + 1
-	encoded, err = json.Marshal(state)
 	if err != nil {
 		return job.State{}, err
 	}
-	commandID := fmt.Sprintf("worker-result:%s:%s:%d:%d", state.ID, step.Workflow.ID, report.FencingToken, state.Revision)
-	reason := "Worker settled Step execution"
-	event := command.Event{
-		EventID: commandID + ":event", EventType: eventType, CommandID: commandID,
-		Actor: command.Actor{Type: command.WorkerActor, ID: report.WorkerID}, RequestedVia: "worker_api",
-		TargetID: state.ID, BeforeRevision: revision, AfterRevision: state.Revision, Reason: reason,
-		Payload: map[string]any{
-			"step_id": step.Workflow.ID, "fencing_token": report.FencingToken, "success": report.Success,
-			"output_ids": stepOutputIDs(step.OutputRecord),
-		},
-	}
+	encoded = append(encoded[:0], change.State...)
 	expected := revision
 	if err := applyCommit(tx, "", command.Commit{
-		ExpectedRevision: &expected, NextState: &command.Snapshot{TargetID: state.ID, Revision: state.Revision, State: encoded},
-		Record: command.CommandRecord{Envelope: command.Envelope{
-			CommandID: commandID, CommandType: "step.settle", Actor: event.Actor, RequestedVia: event.RequestedVia,
-			TargetID: state.ID, ExpectedRevision: revision, IdempotencyKey: commandID, Reason: reason,
-		}, Accepted: true}, Events: []command.Event{event},
+		ExpectedRevision: &expected, NextState: &command.Snapshot{TargetID: state.ID, Revision: change.Revision, State: change.State},
+		Record: command.CommandRecord{Envelope: envelope, Accepted: true}, Events: change.Events,
 	}); err != nil {
 		return job.State{}, err
 	}
@@ -879,10 +874,144 @@ func (store *Store) SettleWorkerStep(ctx context.Context, report workercontrol.R
 	if _, err := tx.ExecContext(ctx, `UPDATE resource_reservations SET released_at = ? WHERE reservation_id = ? AND released_at IS NULL`, formatTime(now), reservationID); err != nil {
 		return job.State{}, err
 	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO worker_result_receipts(job_id, step_id, fencing_token, digest, state, settled_at)
+		VALUES (?, ?, ?, ?, ?, ?)
+	`, report.JobID, report.StepID, report.FencingToken, reportDigest, encoded, formatTime(now)); err != nil {
+		return job.State{}, err
+	}
+	completionID := commandID + ":completion"
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO worker_completion_outbox(completion_id, job_id, state, created_at)
+		VALUES (?, ?, ?, ?)
+	`, completionID, report.JobID, encoded, formatTime(now)); err != nil {
+		return job.State{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return job.State{}, err
 	}
 	return state, nil
+}
+
+func (store *Store) PendingWorkerCompletions(ctx context.Context, limit int) ([]workercontrol.CompletionWork, error) {
+	if limit <= 0 || limit > 256 {
+		limit = 32
+	}
+	rows, err := store.db.QueryContext(ctx, `
+		SELECT completion_id, job_id, state
+		FROM worker_completion_outbox
+		WHERE delivered_at IS NULL
+		ORDER BY created_at, completion_id
+		LIMIT ?
+	`, limit)
+	if err != nil {
+		return nil, err
+	}
+	type pending struct {
+		id, jobID string
+		state     []byte
+	}
+	pendingRows := make([]pending, 0)
+	for rows.Next() {
+		var item pending
+		if err := rows.Scan(&item.id, &item.jobID, &item.state); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		pendingRows = append(pendingRows, item)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	work := make([]workercontrol.CompletionWork, 0, len(pendingRows))
+	for _, item := range pendingRows {
+		var state job.State
+		if json.Unmarshal(item.state, &state) != nil || state.ID != item.jobID {
+			return nil, workercontrol.ErrInvalidAssignment
+		}
+		work = append(work, workercontrol.CompletionWork{ID: item.id, State: state})
+	}
+	return work, nil
+}
+
+func (store *Store) MarkWorkerCompletionDelivered(ctx context.Context, completionID string, deliveredAt time.Time) error {
+	result, err := store.db.ExecContext(ctx, `
+		UPDATE worker_completion_outbox SET delivered_at = ?, last_error = ''
+		WHERE completion_id = ? AND delivered_at IS NULL
+	`, formatTime(deliveredAt), completionID)
+	if err != nil {
+		return err
+	}
+	updated, err := result.RowsAffected()
+	if err != nil || updated != 1 {
+		return workercontrol.ErrInvalidAssignment
+	}
+	return nil
+}
+
+func (store *Store) RecordWorkerCompletionFailure(ctx context.Context, completionID, message string, attemptedAt time.Time) error {
+	result, err := store.db.ExecContext(ctx, `
+		UPDATE worker_completion_outbox
+		SET attempts = attempts + 1, last_error = ?, last_attempt_at = ?
+		WHERE completion_id = ? AND delivered_at IS NULL
+	`, strings.TrimSpace(message), formatTime(attemptedAt), completionID)
+	if err != nil {
+		return err
+	}
+	updated, err := result.RowsAffected()
+	if err != nil || updated != 1 {
+		return workercontrol.ErrInvalidAssignment
+	}
+	return nil
+}
+
+func (store *Store) RenewWorkerLease(
+	ctx context.Context,
+	workerID, jobID, stepID string,
+	fencingToken uint64,
+	now time.Time,
+) (workercontrol.LeaseRenewal, error) {
+	tx, err := store.db.BeginTx(ctx, nil)
+	if err != nil {
+		return workercontrol.LeaseRenewal{}, err
+	}
+	defer tx.Rollback()
+	compositeStepID := jobID + "/" + stepID
+	var owner, heartbeatText, expiresText string
+	var token uint64
+	if err := tx.QueryRowContext(ctx, `
+		SELECT owner_worker_id, heartbeat_at, expires_at, fencing_token
+		FROM execution_leases WHERE step_id = ?
+	`, compositeStepID).Scan(&owner, &heartbeatText, &expiresText, &token); errors.Is(err, sql.ErrNoRows) {
+		return workercontrol.LeaseRenewal{}, workflow.ErrStaleFencingToken
+	} else if err != nil {
+		return workercontrol.LeaseRenewal{}, err
+	}
+	heartbeatAt, heartbeatErr := time.Parse(time.RFC3339Nano, heartbeatText)
+	expiresAt, expiresErr := time.Parse(time.RFC3339Nano, expiresText)
+	if heartbeatErr != nil || expiresErr != nil || owner != workerID || token != fencingToken || !now.Before(expiresAt) {
+		return workercontrol.LeaseRenewal{}, workflow.ErrStaleFencingToken
+	}
+	ttl := expiresAt.Sub(heartbeatAt)
+	if ttl <= 0 {
+		return workercontrol.LeaseRenewal{}, workflow.ErrStaleFencingToken
+	}
+	renewedUntil := now.Add(ttl)
+	result, err := tx.ExecContext(ctx, `
+		UPDATE execution_leases SET heartbeat_at = ?, expires_at = ?
+		WHERE step_id = ? AND owner_worker_id = ? AND fencing_token = ? AND expires_at = ?
+	`, formatTime(now), formatTime(renewedUntil), compositeStepID, workerID, fencingToken, expiresText)
+	if err != nil {
+		return workercontrol.LeaseRenewal{}, err
+	}
+	updated, err := result.RowsAffected()
+	if err != nil || updated != 1 {
+		return workercontrol.LeaseRenewal{}, workflow.ErrStaleFencingToken
+	}
+	if err := tx.Commit(); err != nil {
+		return workercontrol.LeaseRenewal{}, err
+	}
+	return workercontrol.LeaseRenewal{ExpiresAt: renewedUntil, RenewAfter: ttl / 2}, nil
 }
 
 func (store *Store) PendingWorkerCancellation(
@@ -967,23 +1096,40 @@ func (store *Store) SettleWorkerCancellation(ctx context.Context, report workerc
 	if workerID != report.WorkerID || jobID != report.JobID || stepID != report.StepID || fencingToken != report.FencingToken {
 		return job.State{}, workflow.ErrStaleFencingToken
 	}
-	var settled int
-	if err := tx.QueryRowContext(ctx, `
-		SELECT COUNT(*) FROM worker_cancellation_events
+	var settledPayload []byte
+	settledErr := tx.QueryRowContext(ctx, `
+		SELECT payload FROM worker_cancellation_events
 		WHERE cancellation_id = ? AND event_type = 'CancellationSettled'
-	`, report.CancellationID).Scan(&settled); err != nil {
-		return job.State{}, err
+	`, report.CancellationID).Scan(&settledPayload)
+	if settledErr == nil {
+		if !sameCancellationPayload(settledPayload, report) {
+			return job.State{}, workflow.ErrStaleFencingToken
+		}
+		var revision uint64
+		var encoded []byte
+		if err := tx.QueryRowContext(ctx, `SELECT revision, state FROM aggregate_states WHERE target_id = ?`, report.JobID).Scan(&revision, &encoded); err != nil {
+			return job.State{}, err
+		}
+		return job.Decode(command.Snapshot{TargetID: report.JobID, Revision: revision, State: encoded})
 	}
-	if settled != 0 {
-		return job.State{}, workflow.ErrStaleFencingToken
+	if !errors.Is(settledErr, sql.ErrNoRows) {
+		return job.State{}, settledErr
 	}
-	if !report.ProcessStopped || !report.CleanupConfirmed || len(report.ExternalEffectReferences) != 0 {
-		payload, marshalErr := json.Marshal(map[string]any{
-			"process_stopped": report.ProcessStopped, "cleanup_confirmed": report.CleanupConfirmed,
-			"external_effect_references": report.ExternalEffectReferences, "log_reference": report.LogReference,
-		})
+	if !report.ProcessStopped {
+		payload, marshalErr := json.Marshal(cancellationPayload(report))
 		if marshalErr != nil {
 			return job.State{}, marshalErr
+		}
+		var previous []byte
+		previousErr := tx.QueryRowContext(ctx, `
+			SELECT payload FROM worker_cancellation_events
+			WHERE cancellation_id = ? AND event_type = 'ExternalEffectUncertain'
+		`, report.CancellationID).Scan(&previous)
+		if previousErr == nil && !sameCancellationPayload(previous, report) {
+			return job.State{}, workflow.ErrStaleFencingToken
+		}
+		if previousErr != nil && !errors.Is(previousErr, sql.ErrNoRows) {
+			return job.State{}, previousErr
 		}
 		if _, err := tx.ExecContext(ctx, `
 			INSERT OR IGNORE INTO worker_cancellation_events(cancellation_id, event_type, observed_at, payload)
@@ -1000,58 +1146,39 @@ func (store *Store) SettleWorkerCancellation(ctx context.Context, report workerc
 		}
 		return job.Decode(snapshot)
 	}
+	partial := !report.CleanupConfirmed || len(report.ExternalEffectReferences) != 0
 
 	var revision uint64
 	var encoded []byte
 	if err := tx.QueryRowContext(ctx, `SELECT revision, state FROM aggregate_states WHERE target_id = ?`, report.JobID).Scan(&revision, &encoded); err != nil {
 		return job.State{}, err
 	}
-	state, err := job.Decode(command.Snapshot{TargetID: report.JobID, Revision: revision, State: encoded})
-	if err != nil {
-		return job.State{}, err
-	}
-	step := stateStep(&state, state.ID+"/"+report.StepID)
-	if step == nil || (step.Workflow.State != workflow.Running && step.Workflow.State != workflow.Verifying && step.Workflow.State != workflow.Paused) ||
-		step.Workflow.ExecutionLease != nil {
-		return job.State{}, workflow.ErrStaleFencingToken
-	}
-	if err := step.Workflow.Transition(workflow.Cancelled); err != nil {
-		return job.State{}, err
-	}
-	step.LastEventAt = now
-	step.LogReference = report.LogReference
-	for index := range state.Steps {
-		candidate := &state.Steps[index]
-		switch candidate.Workflow.State {
-		case workflow.Queued, workflow.Waiting, workflow.Reserved:
-			if err := candidate.Workflow.Transition(workflow.Cancelled); err != nil {
-				return job.State{}, err
-			}
-			candidate.Workflow.ExecutionLease = nil
-			candidate.LastEventAt = now
-		}
-	}
-	state.CurrentStepID = step.Workflow.ID
-	state.Revision = revision + 1
-	encoded, err = json.Marshal(state)
-	if err != nil {
-		return job.State{}, err
-	}
-	commandID := fmt.Sprintf("worker-cancellation:%s:%s:%d:%d", state.ID, step.Workflow.ID, report.FencingToken, state.Revision)
+	commandID := fmt.Sprintf("worker-cancellation:%s:%s:%d:%d", report.JobID, report.StepID, report.FencingToken, revision+1)
 	reason := "Worker confirmed process stop and temporary output cleanup"
-	event := command.Event{
-		EventID: commandID + ":event", EventType: "StepCancellationSettled", CommandID: commandID,
+	if partial {
+		reason = "Worker confirmed process stop with remaining external effects"
+	}
+	envelope := command.Envelope{
+		CommandID: commandID, CommandType: job.SettleWorkerCancellationCommand,
 		Actor: command.Actor{Type: command.WorkerActor, ID: report.WorkerID}, RequestedVia: "worker_api",
-		TargetID: state.ID, BeforeRevision: revision, AfterRevision: state.Revision, Reason: reason,
-		Payload: map[string]any{"step_id": step.Workflow.ID, "cancellation_id": report.CancellationID, "fencing_token": report.FencingToken},
+		TargetID: report.JobID, ExpectedRevision: revision, IdempotencyKey: commandID, Reason: reason,
+		Parameters: lifecycleParameters(job.SettleWorkerCancellationParameters{
+			StepID: report.StepID, CancellationID: report.CancellationID, FencingToken: report.FencingToken,
+			CleanupConfirmed: report.CleanupConfirmed, ExternalEffectReferences: report.ExternalEffectReferences,
+			LogReference: report.LogReference,
+		}),
+	}
+	change, state, err := workerLifecycleChange(envelope, command.Snapshot{TargetID: report.JobID, Revision: revision, State: encoded}, now)
+	if errors.Is(err, job.ErrInvalidWorkerLifecycle) {
+		return job.State{}, workercontrol.ErrNoCancellation
+	}
+	if err != nil {
+		return job.State{}, err
 	}
 	expected := revision
 	if err := applyCommit(tx, "", command.Commit{
-		ExpectedRevision: &expected, NextState: &command.Snapshot{TargetID: state.ID, Revision: state.Revision, State: encoded},
-		Record: command.CommandRecord{Envelope: command.Envelope{
-			CommandID: commandID, CommandType: "step.settle_cancellation", Actor: event.Actor, RequestedVia: event.RequestedVia,
-			TargetID: state.ID, ExpectedRevision: revision, IdempotencyKey: commandID, Reason: reason,
-		}, Accepted: true}, Events: []command.Event{event},
+		ExpectedRevision: &expected, NextState: &command.Snapshot{TargetID: state.ID, Revision: change.Revision, State: change.State},
+		Record: command.CommandRecord{Envelope: envelope, Accepted: true}, Events: change.Events,
 	}); err != nil {
 		return job.State{}, err
 	}
@@ -1077,9 +1204,7 @@ func (store *Store) SettleWorkerCancellation(ctx context.Context, report workerc
 			return job.State{}, err
 		}
 	}
-	payload, err := json.Marshal(map[string]any{
-		"process_stopped": true, "cleanup_confirmed": true, "log_reference": report.LogReference,
-	})
+	payload, err := json.Marshal(cancellationPayload(report))
 	if err != nil {
 		return job.State{}, err
 	}
@@ -1089,10 +1214,42 @@ func (store *Store) SettleWorkerCancellation(ctx context.Context, report workerc
 	`, report.CancellationID, formatTime(now), payload); err != nil {
 		return job.State{}, err
 	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO worker_completion_outbox(completion_id, job_id, state, created_at)
+		VALUES (?, ?, ?, ?)
+	`, commandID+":completion", report.JobID, change.State, formatTime(now)); err != nil {
+		return job.State{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return job.State{}, err
 	}
 	return state, nil
+}
+
+func cancellationPayload(report workercontrol.CancellationResult) cancellationSettlementPayload {
+	return cancellationSettlementPayload{
+		ProcessStopped: report.ProcessStopped, CleanupConfirmed: report.CleanupConfirmed,
+		ExternalEffectReferences: append([]string(nil), report.ExternalEffectReferences...),
+		LogReference:             strings.TrimSpace(report.LogReference),
+	}
+}
+
+func sameCancellationPayload(payload []byte, report workercontrol.CancellationResult) bool {
+	var stored cancellationSettlementPayload
+	if json.Unmarshal(payload, &stored) != nil {
+		return false
+	}
+	want := cancellationPayload(report)
+	if stored.ProcessStopped != want.ProcessStopped || stored.CleanupConfirmed != want.CleanupConfirmed ||
+		stored.LogReference != want.LogReference || len(stored.ExternalEffectReferences) != len(want.ExternalEffectReferences) {
+		return false
+	}
+	for index := range stored.ExternalEffectReferences {
+		if stored.ExternalEffectReferences[index] != want.ExternalEffectReferences[index] {
+			return false
+		}
+	}
+	return true
 }
 
 func stateStep(state *job.State, compositeStepID string) *job.Step {
@@ -1104,73 +1261,45 @@ func stateStep(state *job.State, compositeStepID string) *job.Step {
 	return nil
 }
 
-func stepOutputIDs(record *execution.StepOutputRecord) []string {
-	if record == nil {
+func lifecycleParameters(value any) map[string]any {
+	payload, err := json.Marshal(value)
+	if err != nil {
 		return nil
 	}
-	ids := make([]string, 0, len(record.Outputs))
-	for _, output := range record.Outputs {
-		ids = append(ids, output.ID)
-	}
-	return ids
-}
-
-func materializeDependentExecutionSpecs(state *job.State) error {
-	if state == nil || !(strings.HasPrefix(state.TemplateName, "archive-intake-") || state.TemplateName == "archive-transcription") {
+	var parameters map[string]any
+	if json.Unmarshal(payload, &parameters) != nil {
 		return nil
 	}
-	workflowSteps := make(map[string]*workflow.Step, len(state.Steps))
-	completed := make([]execution.CompletedStep, 0, len(state.Steps))
-	for index := range state.Steps {
-		step := &state.Steps[index]
-		workflowSteps[step.Workflow.ID] = &step.Workflow
-		if step.Workflow.State == workflow.Completed && step.ExecutionSpec != nil && step.OutputRecord != nil {
-			completed = append(completed, execution.CompletedStep{
-				StepID: step.Workflow.ID, Spec: *step.ExecutionSpec, OutputRecord: *step.OutputRecord,
-			})
-		}
-	}
-	for index := range state.Steps {
-		step := &state.Steps[index]
-		if step.ExecutorKind != vocabulary.ExecutorWorker || step.Workflow.State != workflow.Queued || step.ExecutionSpec != nil ||
-			!step.Workflow.Ready(workflowSteps) {
-			continue
-		}
-		spec, err := execution.MaterializeDependentStepExecutionSpec(execution.MaterializeRequest{
-			JobID: state.ID, TemplateName: state.TemplateName, StepID: step.Workflow.ID, Completed: completed,
-		})
-		if err != nil {
-			return err
-		}
-		step.ExecutionSpec = &spec
-	}
-	return nil
+	return parameters
 }
 
-func activateNextReadyStep(state *job.State, now time.Time) {
-	steps := make(map[string]*workflow.Step, len(state.Steps))
-	for index := range state.Steps {
-		steps[state.Steps[index].Workflow.ID] = &state.Steps[index].Workflow
+func workerLifecycleChange(
+	envelope command.Envelope,
+	snapshot command.Snapshot,
+	now time.Time,
+) (command.Change, job.State, error) {
+	handler, err := job.NewWorkerLifecycleHandler(func() time.Time { return now })
+	if err != nil {
+		return command.Change{}, job.State{}, err
 	}
-	for index := range state.Steps {
-		step := &state.Steps[index]
-		if step.Workflow.State == workflow.Queued && step.Workflow.Ready(steps) {
-			if step.ReadyAt.IsZero() {
-				step.ReadyAt = now
-			}
-			state.CurrentStepID = step.Workflow.ID
-			return
-		}
+	change, err := handler.Handle(envelope, snapshot)
+	if err != nil {
+		return command.Change{}, job.State{}, err
 	}
+	state, ok := change.Value.(job.State)
+	if !ok || state.ID != snapshot.TargetID || state.Revision != change.Revision {
+		return command.Change{}, job.State{}, command.ErrInvalidChange
+	}
+	return change, state, nil
 }
 
 func (store *Store) RecoverExpiredReservations(ctx context.Context, now time.Time) ([]job.State, error) {
 	rows, err := store.db.QueryContext(ctx, `
-		SELECT r.job_id, r.step_id, r.reservation_id
+		SELECT r.job_id, r.step_id, r.reservation_id, l.expires_at
 		FROM resource_reservations r JOIN execution_leases l ON l.reservation_id = r.reservation_id
-		WHERE r.released_at IS NULL AND l.expires_at <= ?
+		WHERE r.released_at IS NULL
 		ORDER BY r.created_at, r.reservation_id
-	`, formatTime(now))
+	`)
 	if err != nil {
 		return nil, err
 	}
@@ -1178,11 +1307,19 @@ func (store *Store) RecoverExpiredReservations(ctx context.Context, now time.Tim
 	var values []expired
 	for rows.Next() {
 		var value expired
-		if err := rows.Scan(&value.jobID, &value.stepID, &value.reservationID); err != nil {
+		var expiresRaw string
+		if err := rows.Scan(&value.jobID, &value.stepID, &value.reservationID, &expiresRaw); err != nil {
 			rows.Close()
 			return nil, err
 		}
-		values = append(values, value)
+		expiresAt, parseErr := time.Parse(time.RFC3339Nano, expiresRaw)
+		if parseErr != nil {
+			rows.Close()
+			return nil, parseErr
+		}
+		if !expiresAt.After(now) {
+			values = append(values, value)
+		}
 	}
 	if err := rows.Close(); err != nil {
 		return nil, err
@@ -1209,51 +1346,35 @@ func (store *Store) RecoverExpiredReservations(ctx context.Context, now time.Tim
 			tx.Rollback()
 			continue
 		}
-		eventType := "StepReservationExpired"
-		commandType := "step.recover_reservation"
+		commandType := job.RecoverWorkerReservationCommand
 		commandIDPrefix := "recover-reservation"
 		reason := "expired unstarted Worker reservation"
 		switch step.Workflow.State {
 		case workflow.Reserved:
-			if err := step.Workflow.Transition(workflow.Queued); err != nil {
-				tx.Rollback()
-				return nil, err
-			}
 		case workflow.Running:
-			if !step.Workflow.RecoverExpiredLease(now) {
-				tx.Rollback()
-				continue
-			}
-			eventType = "StepExecutionLeaseExpired"
-			commandType = "step.recover_execution_lease"
+			commandType = job.RecoverWorkerExecutionLeaseCommand
 			commandIDPrefix = "recover-execution-lease"
 			reason = "expired running Worker execution lease"
 		default:
 			tx.Rollback()
 			continue
 		}
-		step.WorkerID = ""
-		step.LastEventAt = now
-		state.Revision = revision + 1
-		encoded, err = json.Marshal(state)
+		commandID := fmt.Sprintf("%s:%s:%s:%d", commandIDPrefix, state.ID, step.Workflow.ID, revision+1)
+		envelope := command.Envelope{
+			CommandID: commandID, CommandType: commandType,
+			Actor: command.Actor{Type: command.SystemActor, ID: "worker-recovery"}, RequestedVia: "worker_recovery",
+			TargetID: state.ID, ExpectedRevision: revision, IdempotencyKey: commandID, Reason: reason,
+			Parameters: lifecycleParameters(job.RecoverWorkerStepParameters{StepID: step.Workflow.ID}),
+		}
+		change, nextState, err := workerLifecycleChange(envelope, command.Snapshot{TargetID: value.jobID, Revision: revision, State: encoded}, now)
 		if err != nil {
 			tx.Rollback()
 			return nil, err
 		}
-		commandID := fmt.Sprintf("%s:%s:%s:%d", commandIDPrefix, state.ID, step.Workflow.ID, state.Revision)
-		event := command.Event{
-			EventID: commandID + ":event", EventType: eventType, CommandID: commandID,
-			Actor: command.Actor{Type: command.SystemActor, ID: "worker-recovery"}, RequestedVia: "worker_recovery",
-			TargetID: state.ID, BeforeRevision: revision, AfterRevision: state.Revision, Reason: reason,
-			Payload: map[string]any{"step_id": step.Workflow.ID},
-		}
 		expected := revision
 		if err := applyCommit(tx, "", command.Commit{
-			ExpectedRevision: &expected, NextState: &command.Snapshot{TargetID: state.ID, Revision: state.Revision, State: encoded},
-			Record: command.CommandRecord{Envelope: command.Envelope{
-				CommandID: commandID, CommandType: commandType, Actor: event.Actor, RequestedVia: event.RequestedVia,
-				TargetID: state.ID, ExpectedRevision: revision, IdempotencyKey: commandID, Reason: reason,
-			}, Accepted: true}, Events: []command.Event{event},
+			ExpectedRevision: &expected, NextState: &command.Snapshot{TargetID: nextState.ID, Revision: change.Revision, State: change.State},
+			Record: command.CommandRecord{Envelope: envelope, Accepted: true}, Events: change.Events,
 		}); err != nil {
 			tx.Rollback()
 			return nil, err
@@ -1273,7 +1394,7 @@ func (store *Store) RecoverExpiredReservations(ctx context.Context, now time.Tim
 		if err := tx.Commit(); err != nil {
 			return nil, err
 		}
-		recovered = append(recovered, state)
+		recovered = append(recovered, nextState)
 	}
 	return recovered, nil
 }

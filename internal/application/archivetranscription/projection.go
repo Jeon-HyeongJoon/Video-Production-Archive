@@ -6,6 +6,7 @@ import (
 	"path"
 	"strings"
 
+	"videoarchive/internal/application/archiveorganization"
 	"videoarchive/internal/core/archive"
 	"videoarchive/internal/core/archiverun"
 	"videoarchive/internal/core/command"
@@ -20,6 +21,7 @@ var ErrStageOneProjection = errors.New("archive run stage-one projection is inco
 
 type OrganizationRuns interface {
 	Receipts(context.Context) ([]organization.ArchiveOrganizationReceipt, error)
+	LatestDecisionForArchiveRun(context.Context, string, string) (organization.OrganizationDecision, error)
 }
 
 type JobSnapshots interface {
@@ -68,9 +70,15 @@ func (projection *JobStageOneProjection) StageOne(ctx context.Context, archiveRu
 			return nil, nil, ErrStageOneProjection
 		}
 		seen[folder.Folder] = true
-		if folder.Decision.Disposition == vocabulary.OrganizationHold {
+		decision, err := projection.runs.LatestDecisionForArchiveRun(ctx, receipt.ID, folder.Folder)
+		if err != nil {
+			return nil, nil, err
+		}
+		folder.Decision = decision
+		folder.JobID = archiveorganization.FolderJobID(receipt.ID, receipt.SessionID, receipt.InputRevision, folder.Folder)
+		if decision.Disposition == vocabulary.OrganizationHold {
 			progress = append(progress, archiverun.FolderProgress{
-				FolderID: folder.Folder, Disposition: folder.Decision.Disposition, StageOne: workflow.Waiting,
+				FolderID: folder.Folder, Disposition: decision.Disposition, StageOne: workflow.Waiting,
 			})
 			continue
 		}

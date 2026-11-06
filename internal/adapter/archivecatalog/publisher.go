@@ -2,6 +2,7 @@ package archivecatalog
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/csv"
 	"encoding/hex"
@@ -11,7 +12,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"videoarchive/internal/core/archive"
@@ -55,13 +55,6 @@ var header = []string{
 	"output_profile", "output_video_path", "transcript_path", "transcript_text_path", "subtitle_path",
 	"workspace_drive_id", "original_asset_id", "source_checksum", "organization_decision_id", "archive_package_id", "output_media_id",
 }
-
-type catalogLockKey struct {
-	root *archive.StorageRoot
-	path string
-}
-
-var catalogLocks sync.Map
 
 func NewPublisher(root *archive.StorageRoot) (*Publisher, error) {
 	if root == nil {
@@ -150,8 +143,8 @@ func (publisher *Publisher) publish(request Request, requireTriggerDrive bool) (
 
 // PublishMerged reads the last verified current projection, replaces rows for
 // the supplied source-drive/OriginalAsset pairs, and republishes the complete
-// archive-root CSV atomically. The lock prevents concurrent Jobs in one Worker
-// process from losing each other's rows.
+// archive-root CSV atomically. The StorageRoot lock prevents concurrent Jobs
+// in different Worker processes from losing each other's rows.
 func (publisher *Publisher) PublishMerged(request Request) (organization.ArchiveCatalog, error) {
 	request.WorkspaceDriveID = strings.TrimSpace(request.WorkspaceDriveID)
 	publishedPath, publishedOK := normalizePath(request.PublishedPath)
@@ -164,10 +157,18 @@ func (publisher *Publisher) PublishMerged(request Request) (organization.Archive
 			return organization.ArchiveCatalog{}, ErrInvalidRequest
 		}
 	}
-	lockValue, _ := catalogLocks.LoadOrStore(catalogLockKey{root: publisher.root, path: publishedPath}, &sync.Mutex{})
-	lock := lockValue.(*sync.Mutex)
-	lock.Lock()
-	defer lock.Unlock()
+	directory := path.Dir(publishedPath)
+	if directory != "." {
+		if err := publisher.root.MkdirAll(directory, 0o755); err != nil {
+			return organization.ArchiveCatalog{}, errors.Join(ErrPublishFailed, err)
+		}
+	}
+	lockPath := path.Join(directory, "."+path.Base(publishedPath)+".lock")
+	lock, err := publisher.root.AcquireExclusiveLock(context.Background(), lockPath)
+	if err != nil {
+		return organization.ArchiveCatalog{}, errors.Join(ErrPublishFailed, err)
+	}
+	defer lock.Close()
 
 	existing, err := publisher.currentRows(publishedPath)
 	if err != nil {

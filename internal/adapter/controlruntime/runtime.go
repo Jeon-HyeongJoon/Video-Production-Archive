@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
 	"time"
 
 	"videoarchive/internal/adapter/bootconfig"
@@ -81,8 +82,11 @@ type Runtime struct {
 	archiveIntake          *sqlitearchiveintake.Repository
 	archivists             *archivistcontrol.Service
 	archiveIntakeWorkspace *archiveintakeworkspace.Service
+	workerExecution        *workercontrol.Service
 	handler                *httpcontrol.Handler
 	mcpHandler             *httpmcp.Handler
+	backgroundCancel       context.CancelFunc
+	backgroundWait         sync.WaitGroup
 }
 
 func Open(ctx context.Context, configuration bootconfig.Configuration, version string) (*Runtime, error) {
@@ -270,6 +274,7 @@ func OpenWithDependencies(ctx context.Context, configuration bootconfig.Configur
 	if err != nil {
 		return fail(err)
 	}
+	runtime.workerExecution = workerExecution
 	volumeInventory, err := archiveintake.NewInventoryService(archiveIntakeRepository)
 	if err != nil {
 		return fail(err)
@@ -319,6 +324,13 @@ func OpenWithDependencies(ctx context.Context, configuration bootconfig.Configur
 		return fail(err)
 	}
 	runtime.handler = handler
+	backgroundContext, backgroundCancel := context.WithCancel(ctx)
+	runtime.backgroundCancel = backgroundCancel
+	runtime.backgroundWait.Add(1)
+	go func() {
+		defer runtime.backgroundWait.Done()
+		runtime.monitorWorkerCompletions(backgroundContext)
+	}()
 	return runtime, nil
 }
 
@@ -404,7 +416,30 @@ func (runtime *Runtime) monitorArchiveRunRecalls(ctx context.Context) {
 	}
 }
 
+func (runtime *Runtime) monitorWorkerCompletions(ctx context.Context) {
+	if runtime == nil || runtime.workerExecution == nil {
+		return
+	}
+	reconcile := func() { _ = runtime.workerExecution.ReconcileCompletions(ctx) }
+	reconcile()
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			reconcile()
+		}
+	}
+}
+
 func (runtime *Runtime) Close() error {
+	if runtime.backgroundCancel != nil {
+		runtime.backgroundCancel()
+		runtime.backgroundCancel = nil
+		runtime.backgroundWait.Wait()
+	}
 	var combined error
 	if runtime.archiveIntake != nil {
 		combined = errors.Join(combined, runtime.archiveIntake.Close())

@@ -308,7 +308,11 @@ func stateChange(envelope command.Envelope, state State, eventType string, paylo
 	}
 	return command.Change{
 		Revision: state.Revision, State: encoded, Value: state,
-		Events: []command.Event{{EventID: envelope.CommandID + ":event", EventType: eventType, Payload: payload}},
+		Events: []command.Event{{
+			EventID: envelope.CommandID + ":event", EventType: eventType, CommandID: envelope.CommandID,
+			Actor: envelope.Actor, RequestedVia: envelope.RequestedVia, TargetID: envelope.TargetID,
+			BeforeRevision: envelope.ExpectedRevision, AfterRevision: state.Revision, Reason: envelope.Reason, Payload: payload,
+		}},
 	}, nil
 }
 

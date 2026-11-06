@@ -392,7 +392,7 @@ func (handler *Handler) classifyOrganizationHold(writer http.ResponseWriter, req
 			ExpectedRevision: folder.InputRevision, State: "PENDING", CommandID: call.CommandID,
 			IdempotencyKey: call.IdempotencyKey, Reason: input.Reason,
 			Basis: append([]string(nil), input.Basis...), Parameters: map[string]any{
-				"workspace_drive_id": selection.WorkspaceDriveID, "decision_id": decisionID,
+				"archive_run_id": selection.ArchiveRunID, "workspace_drive_id": selection.WorkspaceDriveID, "decision_id": decisionID,
 				"disposition": disposition, "target_video_bitrate_kbps": input.TargetVideoBitRateKbps,
 			},
 		}
@@ -401,7 +401,7 @@ func (handler *Handler) classifyOrganizationHold(writer http.ResponseWriter, req
 	}
 	decision, err := handler.drives.Override(request.Context(), archiveintakeworkspace.OverrideCommand{
 		CommandID: call.CommandID, DecisionID: decisionID, IdempotencyKey: call.IdempotencyKey,
-		WorkspaceDriveID: selection.WorkspaceDriveID, Folder: folder.Folder,
+		ArchiveRunID: selection.ArchiveRunID, WorkspaceDriveID: selection.WorkspaceDriveID, Folder: folder.Folder,
 		ExpectedInputRevision: input.ExpectedInputRevision, Disposition: disposition,
 		TargetVideoBitRateKbps: input.TargetVideoBitRateKbps,
 		Actor:                  command.Actor{Type: vocabulary.ActorArchivist, ID: "archivist:" + call.SessionID},

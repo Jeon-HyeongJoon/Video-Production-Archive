@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"videoarchive/internal/application/controlruntime"
+	"videoarchive/internal/adapter/controlruntime"
 )
 
 func TestWindowsCredentialManagerAuthenticatesOnlyMatchingControlAndWorkerProcesses(t *testing.T) {

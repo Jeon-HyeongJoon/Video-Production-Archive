@@ -5,7 +5,9 @@
 export const byId = (id) => document.getElementById(id);
 
 let csrfToken = "";
+let csrfRequest = null;
 let locked = false;
+const pendingMutations = new Set();
 
 // setLocked holds every Command while the screen is no longer refreshed, so a
 // decision is never made from stale state.
@@ -13,8 +15,8 @@ export function setLocked(value) {
   locked = value;
 }
 
-export async function api(path) {
-  const response = await fetch(path, { headers: { Accept: "application/json" } });
+export async function api(path, options = {}) {
+  const response = await fetch(path, { ...options, headers: { Accept: "application/json", ...(options.headers || {}) } });
   const payload = await response.json();
   if (!response.ok) throw new Error(payload.error?.code || `HTTP_${response.status}`);
   return payload && typeof payload === "object" && "data" in payload ? payload.data : payload;
@@ -22,15 +24,27 @@ export async function api(path) {
 
 export async function mutation(path, payload) {
   if (locked) throw new Error("연결 끊김");
-  if (!csrfToken) csrfToken = (await api("/api/v1/session")).csrf_token;
-  const response = await fetch(path, {
-    method: "POST", credentials: "same-origin",
-    headers: { Accept: "application/json", "Content-Type": "application/json", "X-CSRF-Token": csrfToken },
-    body: JSON.stringify(payload),
-  });
-  const result = await response.json();
-  if (!response.ok) throw new Error(result.error?.code || `HTTP_${response.status}`);
-  return result.data;
+  if (pendingMutations.has(path)) throw new Error("요청 처리 중");
+  pendingMutations.add(path);
+  try {
+    if (!csrfToken) {
+      if (!csrfRequest) csrfRequest = api("/api/v1/session").then((session) => {
+        csrfToken = session.csrf_token;
+        return csrfToken;
+      }).finally(() => { csrfRequest = null; });
+      await csrfRequest;
+    }
+    const response = await fetch(path, {
+      method: "POST", credentials: "same-origin",
+      headers: { Accept: "application/json", "Content-Type": "application/json", "X-CSRF-Token": csrfToken },
+      body: JSON.stringify(payload),
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error?.code || `HTTP_${response.status}`);
+    return result.data;
+  } finally {
+    pendingMutations.delete(path);
+  }
 }
 
 function uuidV4() {

@@ -1,6 +1,7 @@
 package archive
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -13,6 +14,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"videoarchive/internal/core/approval"
@@ -25,6 +27,8 @@ var (
 	ErrInvalidProvenance  = errors.New("derived artifact provenance is incomplete")
 	ErrCommitPrecondition = errors.New("archive commit precondition failed")
 	ErrUnsafeStoragePath  = errors.New("storage path escapes registered root")
+	ErrStorageUnavailable = errors.New("registered storage is unavailable")
+	ErrStorageFull        = errors.New("registered storage has insufficient space")
 	ErrInvalidSnapshot    = errors.New("archive snapshot is invalid")
 )
 
@@ -311,6 +315,21 @@ type StorageRoot struct {
 	root *os.Root
 }
 
+type StorageLock struct {
+	file         *os.File
+	releaseLocal func()
+}
+
+type processStorageLockEntry struct {
+	semaphore  chan struct{}
+	references int
+}
+
+var processStorageLocks = struct {
+	sync.Mutex
+	entries map[string]*processStorageLockEntry
+}{entries: make(map[string]*processStorageLockEntry)}
+
 // ReadOnlyStorageRoot deliberately exposes no write or rename operations. It
 // is the filesystem capability handed to a selected ArchiveIntakeSession.
 type ReadOnlyStorageRoot struct {
@@ -324,7 +343,7 @@ func OpenStorageRoot(root string) (*StorageRoot, error) {
 	}
 	handle, err := os.OpenRoot(rootResolved)
 	if err != nil {
-		return nil, ErrUnsafeStoragePath
+		return nil, storageIOError(err)
 	}
 	return &StorageRoot{root: handle}, nil
 }
@@ -414,7 +433,7 @@ func (root *StorageRoot) Open(requested string) (*os.File, error) {
 	}
 	file, err := root.root.Open(clean)
 	if err != nil {
-		return nil, ErrUnsafeStoragePath
+		return nil, storageIOError(err)
 	}
 	return file, nil
 }
@@ -442,12 +461,12 @@ func (root *StorageRoot) ReadDir(requested string) ([]os.DirEntry, error) {
 	}
 	directory, err := root.root.Open(clean)
 	if err != nil {
-		return nil, ErrUnsafeStoragePath
+		return nil, storageIOError(err)
 	}
 	defer directory.Close()
 	entries, err := directory.ReadDir(-1)
 	if err != nil {
-		return nil, ErrUnsafeStoragePath
+		return nil, storageIOError(err)
 	}
 	return entries, nil
 }
@@ -459,14 +478,23 @@ func (root *StorageRoot) WriteFile(requested string, data []byte, permission os.
 	}
 	file, err := root.root.OpenFile(clean, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, permission)
 	if err != nil {
-		return ErrUnsafeStoragePath
+		return storageIOError(err)
 	}
 	written, writeErr := file.Write(data)
-	closeErr := file.Close()
-	if writeErr != nil || written != len(data) || closeErr != nil {
-		return ErrUnsafeStoragePath
+	syncErr := error(nil)
+	if writeErr == nil && written == len(data) {
+		syncErr = file.Sync()
 	}
-	return nil
+	closeErr := file.Close()
+	if writeErr != nil || written != len(data) || syncErr != nil || closeErr != nil {
+		_ = root.root.Remove(clean)
+		cause := errors.Join(writeErr, syncErr, closeErr)
+		if written != len(data) {
+			cause = errors.Join(cause, io.ErrShortWrite)
+		}
+		return storageIOError(cause)
+	}
+	return root.syncParent(clean)
 }
 
 func (root *StorageRoot) CopyFileFrom(source *StorageRoot, sourcePath, destinationPath string, permission os.FileMode) (int64, string, error) {
@@ -484,14 +512,21 @@ func (root *StorageRoot) CopyFileFrom(source *StorageRoot, sourcePath, destinati
 	}
 	output, err := root.root.OpenFile(destination, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, permission)
 	if err != nil {
-		return 0, "", ErrUnsafeStoragePath
+		return 0, "", storageIOError(err)
 	}
 	hash := sha256.New()
 	size, copyErr := io.Copy(io.MultiWriter(output, hash), input)
+	syncErr := error(nil)
+	if copyErr == nil {
+		syncErr = output.Sync()
+	}
 	closeErr := output.Close()
-	if copyErr != nil || closeErr != nil {
+	if copyErr != nil || syncErr != nil || closeErr != nil {
 		_ = root.root.Remove(destination)
-		return 0, "", ErrUnsafeStoragePath
+		return 0, "", storageIOError(errors.Join(copyErr, syncErr, closeErr))
+	}
+	if err := root.syncParent(destination); err != nil {
+		return 0, "", err
 	}
 	return size, hex.EncodeToString(hash.Sum(nil)), nil
 }
@@ -505,7 +540,7 @@ func (root *StorageRoot) FileSHA256(requested string) (int64, string, error) {
 	hash := sha256.New()
 	size, err := io.Copy(hash, file)
 	if err != nil {
-		return 0, "", ErrUnsafeStoragePath
+		return 0, "", storageIOError(err)
 	}
 	return size, hex.EncodeToString(hash.Sum(nil)), nil
 }
@@ -555,10 +590,47 @@ func (root *StorageRoot) Rename(oldPath, newPath string) error {
 	if _, err := root.root.Stat(oldClean); err != nil {
 		return ErrUnsafeStoragePath
 	}
-	oldResolved := filepath.Join(root.root.Name(), oldClean)
-	newResolved := filepath.Join(root.root.Name(), newClean)
-	if err := os.Rename(oldResolved, newResolved); err != nil {
+	if err := root.syncRelative(oldClean); err != nil {
+		return err
+	}
+	if err := root.root.Rename(oldClean, newClean); err != nil {
+		return storageIOError(err)
+	}
+	if err := root.syncParent(newClean); err != nil {
+		return err
+	}
+	if filepath.Dir(oldClean) != filepath.Dir(newClean) {
+		if err := root.syncParent(oldClean); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (root *StorageRoot) syncParent(clean string) error {
+	parent := filepath.Dir(clean)
+	if parent == "" {
+		parent = "."
+	}
+	return root.syncRelative(parent)
+}
+
+func (root *StorageRoot) syncRelative(clean string) error {
+	if root == nil || root.root == nil {
 		return ErrUnsafeStoragePath
+	}
+	file, err := root.root.Open(clean)
+	if err != nil {
+		return storageIOError(err)
+	}
+	info, statErr := file.Stat()
+	syncErr := error(nil)
+	if statErr == nil {
+		syncErr = syncStorageFile(file, info.IsDir())
+	}
+	closeErr := file.Close()
+	if statErr != nil || syncErr != nil || closeErr != nil {
+		return storageIOError(errors.Join(statErr, syncErr, closeErr))
 	}
 	return nil
 }
@@ -569,6 +641,103 @@ func (root *StorageRoot) Remove(requested string) error {
 		return err
 	}
 	if err := root.root.Remove(clean); err != nil {
+		return storageIOError(err)
+	}
+	return nil
+}
+
+func (root *StorageRoot) RemoveAll(requested string) error {
+	clean, err := root.safeRelative(requested)
+	if err != nil {
+		return err
+	}
+	if err := root.root.RemoveAll(clean); err != nil {
+		return storageIOError(err)
+	}
+	return nil
+}
+
+func (root *StorageRoot) AcquireExclusiveLock(ctx context.Context, requested string) (*StorageLock, error) {
+	clean, err := root.safeRelative(requested)
+	if err != nil {
+		return nil, err
+	}
+	key := filepath.Join(root.root.Name(), clean)
+	releaseLocal, err := acquireProcessStorageLock(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	file, err := root.root.OpenFile(clean, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		releaseLocal()
+		return nil, ErrUnsafeStoragePath
+	}
+	for {
+		locked, lockErr := tryExclusiveFileLock(file)
+		if lockErr != nil {
+			file.Close()
+			releaseLocal()
+			return nil, ErrUnsafeStoragePath
+		}
+		if locked {
+			return &StorageLock{file: file, releaseLocal: releaseLocal}, nil
+		}
+		select {
+		case <-ctx.Done():
+			file.Close()
+			releaseLocal()
+			return nil, ctx.Err()
+		case <-time.After(25 * time.Millisecond):
+		}
+	}
+}
+
+func acquireProcessStorageLock(ctx context.Context, key string) (func(), error) {
+	processStorageLocks.Lock()
+	entry := processStorageLocks.entries[key]
+	if entry == nil {
+		entry = &processStorageLockEntry{semaphore: make(chan struct{}, 1)}
+		entry.semaphore <- struct{}{}
+		processStorageLocks.entries[key] = entry
+	}
+	entry.references++
+	processStorageLocks.Unlock()
+	select {
+	case <-ctx.Done():
+		releaseProcessStorageLockReference(key, entry)
+		return nil, ctx.Err()
+	case <-entry.semaphore:
+		var once sync.Once
+		return func() {
+			once.Do(func() {
+				entry.semaphore <- struct{}{}
+				releaseProcessStorageLockReference(key, entry)
+			})
+		}, nil
+	}
+}
+
+func releaseProcessStorageLockReference(key string, entry *processStorageLockEntry) {
+	processStorageLocks.Lock()
+	defer processStorageLocks.Unlock()
+	entry.references--
+	if entry.references == 0 && processStorageLocks.entries[key] == entry {
+		delete(processStorageLocks.entries, key)
+	}
+}
+
+func (lock *StorageLock) Close() error {
+	if lock == nil || lock.file == nil {
+		return ErrUnsafeStoragePath
+	}
+	unlockErr := unlockFile(lock.file)
+	closeErr := lock.file.Close()
+	lock.file = nil
+	if lock.releaseLocal != nil {
+		lock.releaseLocal()
+		lock.releaseLocal = nil
+	}
+	if unlockErr != nil || closeErr != nil {
 		return ErrUnsafeStoragePath
 	}
 	return nil

@@ -145,7 +145,7 @@ func TestWorkerResultAtomicallyStoresOnlyExpectedStepOutputRecord(t *testing.T) 
 		t.Fatalf("accepted output was not stored with completion: %+v", step)
 	}
 	revision := state.Revision
-	if replay := workerResult(handler, record); replay.Code != http.StatusConflict {
+	if replay := workerResult(handler, record); replay.Code != http.StatusOK {
 		t.Fatalf("duplicate output returned %d: %s", replay.Code, replay.Body.String())
 	}
 	after, err := store.Load("JOB-SPEC")

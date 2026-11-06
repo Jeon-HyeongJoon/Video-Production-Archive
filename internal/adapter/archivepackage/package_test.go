@@ -15,7 +15,7 @@ import (
 	"videoarchive/internal/core/vocabulary"
 )
 
-// Requirement: ARC-007
+// Planned contract: ARC-007
 func TestArchivePackageRestoresSameRecordsIdempotently(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()

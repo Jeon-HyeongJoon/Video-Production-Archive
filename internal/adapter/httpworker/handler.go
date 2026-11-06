@@ -55,6 +55,12 @@ type heartbeatRequest struct {
 	AttachedVolumes       []worker.AttachedVolumeObservation `json:"attached_volumes"`
 }
 
+type storageInventoryRequest struct {
+	WorkerID            string                      `json:"worker_id"`
+	SnapshotID          uint64                      `json:"snapshot_id"`
+	StorageObservations []worker.StorageObservation `json:"storage_observations"`
+}
+
 func New(registry *worker.Registry, now func() time.Time) (*Handler, error) {
 	return NewWithDispatcher(registry, now, nil)
 }
@@ -78,8 +84,12 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 	switch {
 	case request.Method == http.MethodPost && request.URL.Path == "/worker/v1/heartbeat":
 		handler.heartbeat(writer, request)
+	case request.Method == http.MethodPost && request.URL.Path == "/worker/v1/storage-inventory":
+		handler.storageInventory(writer, request)
 	case request.Method == http.MethodPost && request.URL.Path == "/worker/v1/steps/claim" && handler.execution != nil:
 		handler.claim(writer, request)
+	case request.Method == http.MethodPost && request.URL.Path == "/worker/v1/steps/lease-renewal" && handler.execution != nil:
+		handler.renewLease(writer, request)
 	case request.Method == http.MethodPost && request.URL.Path == "/worker/v1/steps/result" && handler.execution != nil:
 		handler.result(writer, request)
 	case request.Method == http.MethodPost && request.URL.Path == "/worker/v1/steps/cancellation" && handler.execution != nil:
@@ -89,6 +99,73 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 	default:
 		writeError(writer, http.StatusNotFound, "NOT_FOUND")
 	}
+}
+
+type leaseRenewalRequest struct {
+	JobID        string `json:"job_id"`
+	StepID       string `json:"step_id"`
+	FencingToken uint64 `json:"fencing_token"`
+}
+
+func (handler *Handler) renewLease(writer http.ResponseWriter, request *http.Request) {
+	workerID, credential, ok := workerIdentity(request)
+	if !ok || handler.registry.Authenticate(workerID, credential) != nil {
+		writeError(writer, http.StatusUnauthorized, "WORKER_AUTHENTICATION_FAILED")
+		return
+	}
+	var payload leaseRenewalRequest
+	if !decodeWorkerJSON(writer, request, &payload) || strings.TrimSpace(payload.JobID) == "" ||
+		strings.TrimSpace(payload.StepID) == "" || payload.FencingToken == 0 {
+		writeError(writer, http.StatusBadRequest, "INVALID_LEASE_RENEWAL")
+		return
+	}
+	renewal, err := handler.execution.RenewLease(
+		request.Context(), workerID, strings.TrimSpace(payload.JobID), strings.TrimSpace(payload.StepID), payload.FencingToken,
+	)
+	if errors.Is(err, workflow.ErrStaleFencingToken) {
+		writeError(writer, http.StatusConflict, "STALE_FENCING_TOKEN")
+		return
+	}
+	if err != nil {
+		writeError(writer, http.StatusServiceUnavailable, "LEASE_RENEWAL_FAILED")
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"data": map[string]any{
+		"lease_expires_at": renewal.ExpiresAt, "renew_after_millis": renewal.RenewAfter.Milliseconds(),
+	}})
+}
+
+func (handler *Handler) storageInventory(writer http.ResponseWriter, request *http.Request) {
+	workerID, credential, ok := workerIdentity(request)
+	if !ok || handler.registry.Authenticate(workerID, credential) != nil {
+		writeError(writer, http.StatusUnauthorized, "WORKER_AUTHENTICATION_FAILED")
+		return
+	}
+	if mediaType := strings.ToLower(strings.TrimSpace(strings.Split(request.Header.Get("Content-Type"), ";")[0])); mediaType != "application/json" {
+		writeError(writer, http.StatusUnsupportedMediaType, "JSON_REQUIRED")
+		return
+	}
+	decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 32<<20))
+	decoder.DisallowUnknownFields()
+	var payload storageInventoryRequest
+	if err := decoder.Decode(&payload); err != nil || strings.TrimSpace(payload.WorkerID) != workerID || payload.SnapshotID == 0 {
+		writeError(writer, http.StatusBadRequest, "INVALID_STORAGE_INVENTORY")
+		return
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		writeError(writer, http.StatusBadRequest, "INVALID_STORAGE_INVENTORY")
+		return
+	}
+	if err := handler.registry.UpdateStorageInventory(workerID, payload.SnapshotID, payload.StorageObservations); err != nil {
+		if errors.Is(err, worker.ErrStaleSnapshot) {
+			writeError(writer, http.StatusConflict, "STALE_RESOURCE_SNAPSHOT")
+			return
+		}
+		writeError(writer, http.StatusBadRequest, "INVALID_STORAGE_INVENTORY")
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"data": map[string]string{"state": "STORED"}})
 }
 
 func (handler *Handler) heartbeat(writer http.ResponseWriter, request *http.Request) {
@@ -200,7 +277,8 @@ func (handler *Handler) claim(writer http.ResponseWriter, request *http.Request)
 	writeJSON(writer, http.StatusOK, map[string]any{"data": map[string]any{
 		"job_id": assignment.JobID, "step_id": assignment.StepID,
 		"fencing_token": assignment.FencingToken, "lease_expires_at": assignment.LeaseExpiresAt,
-		"resource_class": assignment.ResourceClass, "processing_kinds": assignment.RequiredProcessingKinds,
+		"renew_after_millis": assignment.LeaseRenewAfter.Milliseconds(),
+		"resource_class":     assignment.ResourceClass, "processing_kinds": assignment.RequiredProcessingKinds,
 		"execution_spec": assignment.ExecutionSpec,
 	}})
 }

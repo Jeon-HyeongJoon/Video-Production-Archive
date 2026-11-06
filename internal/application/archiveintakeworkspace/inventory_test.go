@@ -106,7 +106,8 @@ func TestWorkerInventoryProjectsUnclassifiedFoldersAndRoleCapacityStorageCandida
 		ID: "ARCHIVE-RUN-1", Revision: 1, WorkerID: "WORKER-WINDOWS", SourceVolumeID: "SOURCE-VOLUME",
 		SourcePhysicalDeviceID: "SOURCE-PHYSICAL", SourceStorageID: "source-main", ArchiveStorageID: "archive-local",
 		FolderDiscoveryRevision: 41, FolderIDs: []string{"event-a"},
-		SelectedBy: command.Actor{Type: vocabulary.ActorHuman, ID: "operator-1"}, CreatedAt: now,
+		SelectedBy:      command.Actor{Type: vocabulary.ActorHuman, ID: "operator-1"},
+		StageOwnerships: []archiverun.StageOwnership{{Kind: archiverun.OrganizationStage}, {Kind: archiverun.TranscriptionStage}}, CreatedAt: now,
 	})}, archiveintakeworkspace.WithInventory(candidates, storages, statuses, func() time.Time { return now }))
 	if err != nil {
 		t.Fatal(err)

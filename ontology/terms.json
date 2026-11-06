@@ -530,6 +530,7 @@
       "rules": [
         "Step 하나에는 유효한 실행 리스가 최대 하나 있다.",
         "만료 전에는 같은 Step의 실행 리스를 다른 Worker에 주지 않는다.",
+        "실행 중인 Worker만 현재 owner와 펜싱 토큰으로 리스를 갱신할 수 있고 갱신은 토큰을 바꾸지 않는다.",
         "제어 모드를 바꿔도 실행 리스는 바뀌지 않는다."
       ],
       "forbidden": {
@@ -550,6 +551,76 @@
       "decided": "2026-10-19"
     },
     {
+      "id": "worker-result-receipt",
+      "layer": "product",
+      "kind": "record",
+      "name": {
+        "ko": "Worker 결과 영수증",
+        "en": "Worker Result Receipt"
+      },
+      "code_name": "WorkerResultReceipt",
+      "definition": "Worker가 보고한 Step 결과의 내용 digest와 정산된 Job 상태를 Step·펜싱 토큰에 묶어 보존하는 변경 불가능한 기록.",
+      "rules": [
+        "같은 Step과 펜싱 토큰의 동일 결과 재전송은 최초 정산 상태를 반환한다.",
+        "같은 키에서 내용 digest가 다르면 오래되거나 변조된 결과로 거부한다.",
+        "결과 영수증, StepState, Event, ResourceReservation과 ExecutionLease 해제는 같은 SQLite transaction에서 확정한다."
+      ],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "step"
+        },
+        {
+          "type": "refers-to",
+          "target": "fencing-token"
+        }
+      ],
+      "sources": [
+        "docs/design/07-worker-fleet.md §4",
+        "requirements WRK-009"
+      ],
+      "decided": "2026-11-06"
+    },
+    {
+      "id": "worker-completion-outbox",
+      "layer": "product",
+      "kind": "record",
+      "name": {
+        "ko": "Worker 완료 아웃박스",
+        "en": "Worker Completion Outbox"
+      },
+      "code_name": "WorkerCompletionOutbox",
+      "definition": "Worker 결과 또는 process 종료가 확인된 취소 정산 뒤 후속 Application 조정을 HTTP 요청과 분리해 재시작 후에도 수행하도록 같은 transaction에 남기는 전달 기록.",
+      "rules": [
+        "결과 또는 process 종료가 확인된 취소 정산과 같은 SQLite transaction에서 생성한다.",
+        "후속 조정이 성공한 뒤에만 전달됨으로 표시한다.",
+        "재시작 뒤 pending 기록을 다시 처리해도 같은 업무 효과를 중복 생성하지 않는다."
+      ],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "worker-result-receipt"
+        },
+        {
+          "type": "refers-to",
+          "target": "job"
+        }
+      ],
+      "sources": [
+        "docs/design/07-worker-fleet.md §4.1",
+        "requirements WRK-014, CAN-005"
+      ],
+      "decided": "2026-11-06"
+    },
+    {
       "id": "fencing-token",
       "layer": "product",
       "kind": "value",
@@ -561,7 +632,8 @@
       "definition": "같은 Step의 실행 리스가 새로 발급될 때마다 증가하는 번호. Worker의 보고가 현재 실행 리스에서 나온 것인지 확인하는 데 쓴다.",
       "rules": [
         "Worker의 결과 보고는 펜싱 토큰을 함께 보낸다. 현재 값과 다르면 거부한다.",
-        "heartbeat도 펜싱 토큰을 함께 보낸다. 현재 값과 다르면 거부해, 리스를 잃은 Worker가 새 리스를 연장하지 못하게 한다."
+        "heartbeat도 펜싱 토큰을 함께 보낸다. 현재 값과 다르면 거부해, 리스를 잃은 Worker가 새 리스를 연장하지 못하게 한다.",
+        "Worker의 임시 출력은 펜싱 토큰별로 격리하고 취소 정리는 자기 토큰의 임시 출력만 지운다."
       ],
       "forbidden": {
         "words": [],
@@ -575,7 +647,8 @@
       ],
       "sources": [
         "사용자 결정: 펜싱 토큰을 실행 리스 정의에 포함",
-        "요구사항 검토 '빠진 핵심 규칙' 3번"
+        "요구사항 검토 '빠진 핵심 규칙' 3번",
+        "requirements WRK-012"
       ],
       "decided": "2026-10-19"
     },
@@ -733,7 +806,9 @@
       "rules": [
         "StepState.RESERVED, ResourceReservation과 ExecutionLease는 같은 Command Store Unit of Work에서 전부 확정하거나 전부 폐기한다.",
         "snapshot 뒤에 확정된 예약량은 다음 dispatch의 가용 자원에서 차감한다.",
-        "실행 중 취소에서는 process와 출력 정리가 확인되기 전에 예약을 해제하지 않는다."
+        "실행 중 취소에서는 process와 출력 정리가 확인되기 전에 예약을 해제하지 않는다.",
+        "process 종료 여부가 불명확하면 예약을 유지하고 해당 Worker를 새 dispatch에서 격리한다.",
+        "process 종료가 확인됐지만 외부 효과가 남으면 효과 참조를 보존한 PARTIAL로 종결하고 예약을 해제한다."
       ],
       "forbidden": {
         "words": [],
@@ -4439,8 +4514,10 @@
       "definition": "담당자가 고른 Worker·원본 Storage·아카이브 Storage와 한 탐색 revision에서 고정한 폴더 범위 및 1·2단계 소유권을 함께 보존하는 영속 aggregate.",
       "rules": [
         "기존 run은 시작 Command의 영수증이며 ArchiveRun의 identity나 상태를 대신하지 않는다.",
+        "최초 시작 멱등성 key를 고정하며 같은 ArchiveRun ID는 같은 key로만 재전송할 수 있다.",
         "Worker·원본 Storage·아카이브 Storage·폴더 범위는 생성할 때 고정하고 Archivist나 자동 정책이 선택하지 않는다.",
         "완료된 같은 원본 범위를 새 ArchiveRun으로 다시 선택할 수 있으며 원본 Observation·OriginalAsset identity는 재사용하고 검사·판정·Folder Job identity는 새 ArchiveRun에 분리한다.",
+        "아카이브 작업 공간은 같은 논리 Volume에서 영속 생성 시각이 가장 최근인 ArchiveRun을 검사 receipt가 생기기 전부터 현재 실행으로 투영한다.",
         "ArchiveRun의 전사 게이트는 자신의 1단계 실행 가능 작업만 보며 2단계는 별도 STT Job으로 실행한다.",
         "실행 가능한 작업이 없으면 완료로 보고하되 HOLD 수와 명시적 분류 필요 상태를 별도로 보존한다."
       ],
@@ -4851,6 +4928,7 @@
         "원본 생성 시각과 원본 영상명, 아카이브 처리일과 결과 영상명을 각각 인접한 앞 열에 두고 날짜를 합치거나 대체하지 않는다.",
         "추적용 ID와 checksum은 사람 중심 열 뒤에 둔다.",
         "판정이 추가되거나 1·2단계 결과가 보관될 때 기존 행과 병합한 현재 전체 투영을 임시 파일로 검증한 뒤 원자 교체한다.",
+        "동일한 ARCHIVE_PRIMARY의 동시 게시자는 StorageRoot 배타 잠금 아래 현재 파일을 다시 읽고 병합해 행 유실을 막는다.",
         "작업 공간의 마지막 기록 시각은 성공 완료된 가장 최근 archive_catalog Step의 영속 완료 시각이다."
       ],
       "forbidden": {

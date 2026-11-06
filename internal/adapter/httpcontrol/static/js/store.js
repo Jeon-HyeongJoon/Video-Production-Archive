@@ -10,12 +10,14 @@ export const model = { workers: [], drives: [], hosts: [], sessions: [], jobs: [
 
 // Screen-local choices that must survive the 5 second refresh.
 export const ui = {
-  prepDriveID: "", archiveID: "", intakeSessionID: newID("INTAKE"), folders: new Set(), prepFolderScroll: 0, hold: null,
+  prepDriveID: "", prepRevision: 0, archiveID: "", intakeSessionID: newID("INTAKE"), archiveRunID: "", archiveRunKey: "", runStarting: false,
+  folders: new Set(), prepFolderScroll: 0, hold: null,
   folderView: "", openFolder: "", openSteps: "", jobSteps: false, jobCancel: "", jobAttentionOpen: true, jobCompletedOpen: true,
   sessionID: "", focusCard: "", fresh: "", status: "", alertOpen: false, agentOpen: false,
 };
 
 const listeners = new Set();
+let refreshSequence = 0;
 
 export function subscribe(listener) {
   listeners.add(listener);
@@ -30,14 +32,17 @@ export function isStale() {
 }
 
 export async function refresh() {
+  const sequence = ++refreshSequence;
   try {
     const [workers, drives, hosts, sessions, jobs] = await Promise.all([
       api("/api/v1/workers"), api("/api/v1/archive-intake"), api("/api/v1/archivist-hosts"),
       api("/api/v1/archivist-sessions"), api("/api/v1/jobs"),
     ]);
+    if (sequence !== refreshSequence) return;
     Object.assign(model, { workers, drives, hosts, sessions, jobs: jobs || [], refreshedAt: Date.now(), failures: 0, error: "" });
     trackProblems();
   } catch (error) {
+    if (sequence !== refreshSequence) return;
     model.failures += 1;
     model.error = error.message;
   }
@@ -119,10 +124,14 @@ export function archiveCandidates(drive) {
 // volume choice to an ArchiveIntakeSession when the drive has none yet.
 export async function prepareDrive(drive) {
   ui.prepDriveID = drive.workspace_drive_id;
+  ui.prepRevision = drive.folder_discovery_revision || 0;
   ui.archiveID = "";
   ui.folders = new Set();
   ui.prepFolderScroll = 0;
   ui.intakeSessionID = drive.session_id || newID("INTAKE");
+  ui.archiveRunID = newID("ARCHIVE-RUN");
+  ui.archiveRunKey = newID("ARCHIVE-RUN-START");
+  ui.runStarting = false;
   ui.status = "";
   notify();
   if (drive.session_id || !drive.source_volume_id || !drive.candidate_revision) return;
@@ -145,6 +154,13 @@ export function preparing(drive) {
 
 export function syncPreparation(drive) {
   if (!preparing(drive)) return;
+  if (folderDiscoveryReady(drive) && ui.prepRevision && ui.prepRevision !== drive.folder_discovery_revision) {
+    ui.prepRevision = drive.folder_discovery_revision;
+    ui.folders = new Set();
+    ui.archiveRunID = newID("ARCHIVE-RUN");
+    ui.archiveRunKey = newID("ARCHIVE-RUN-START");
+    ui.runStarting = false;
+  }
   if (!folderDiscoveryReady(drive)) {
     ui.folders = new Set();
   } else {

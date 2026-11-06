@@ -45,8 +45,8 @@ Archive Workspace Chat
 → Archivist Gateway
 → ArchivistSession / ArchivistTurn
 → Runtime Backend 선택
-   ├── Archivist Host → Codex / Claude CLI
-   └── Account Router → Provider Adapter → 외부 Provider
+   ├── Archivist Host → Codex / Claude CLI                 # v1
+   └── Account Router → Provider Adapter → 외부 Provider   # planned
 
 Archivist Tool Call
 → Archivist Host loopback proxy 또는 Provider MCP Client Adapter
@@ -58,6 +58,8 @@ Archivist Tool Call
 외부 Codex·Claude MCP client는 자체 계정으로 인증하며 서버가 해당 로그인 세션이나 브라우저 cookie를 저장하지 않는다.
 
 v1 기본 경로는 특정 PC의 Archivist Host가 감독하는 CLI다. Host는 Archivist가 아니며 CLI process/PTY와 resume reference만 소유한다. 전체 Orca 앱은 필수 의존성이 아니고 Embedded Core backend를 기본으로 사용한다. Orca CLI 연동은 필요할 때만 선택형 backend로 추가한다. `LRH-001~009`
+
+아래 §3~5의 외부 Provider 계정 저장·Router·폴백은 Core prototype만 있고 Archive Control runtime, 영속 계정 저장소와 Provider Adapter에 연결되지 않았다. 따라서 `AGT-001~015`는 v1 완료 범위가 아니라 planned 계약이다. 로컬 CLI Archivist의 Session·Turn·Tool Call 경계는 `LRH-*`, `MCP-*`가 별도로 소유한다.
 
 ## 3. 계정 저장
 
@@ -97,7 +99,7 @@ credential은 Windows Credential Manager 또는 DPAPI 기반 Secret Store에 저
 | SAFETY_REFUSAL | 불가 | 불가 | 우회 금지 |
 | MCP DOMAIN FAILURE | Provider 대상 아님 | Provider 대상 아님 | Workflow 처리 |
 
-`AGT-004~006`, `AGT-009~015`가 오류별 동작과 cooldown 복귀·반복 overload 격리·성공 시 연속 횟수 초기화·health probe 복구를 검증한다. UNHEALTHY 계정은 cooldown 시각만으로 복구하지 않는다. 사용 가능한 계정이 없으면 AI 사용 불가를 반환하고 나머지 업무 기능을 유지한다. `AGT-007`
+`AGT-004~006`, `AGT-009~015`는 Provider Adapter 연결 뒤 검증할 planned 계약이다. UNHEALTHY 계정은 cooldown 시각만으로 복구하지 않는다. 사용 가능한 계정이 없으면 AI 사용 불가를 반환하고 나머지 업무 기능을 유지한다. `AGT-007`
 
 ## 6. Tool Call 안전성
 
@@ -116,7 +118,7 @@ Archive Intake에서 ArchivistTurn의 메시지 본문은 실행 대상을 정�
 - 로컬 CLI에는 Host의 loopback MCP proxy만 제공하고 proxy가 Session·Turn·Tool Call·fencing·멱등 상관관계를 붙인다.
 - MCP 도구는 Capability allowlist만 노출하며 raw terminal 입력이나 runtime handle을 업무 도구로 제공하지 않는다.
 
-구조화된 좁은 allowlist 검증은 `AGT-012`, 완료 호출을 요약으로만 전달하고 미완료 호출만 재시도하는 폴백 문맥은 `AGT-013`이 소유한다.
+외부 Provider Router의 구조화된 좁은 allowlist 검증은 planned `AGT-012`, 완료 호출을 요약으로만 전달하고 미완료 호출만 재시도하는 Provider 폴백 문맥은 planned `AGT-013`이 소유한다. 현재 로컬 CLI 경로의 도구 allowlist와 완료 Tool Call 반복 방지는 아래 `MCP-*`, `LRH-006`이 소유한다.
 
 실제 MCP Adapter와 로컬 proxy 및 HOLD 검토·분류 계약은 `MCP-001~005`, runtime 재시작에서 완료 Tool Call을 반복하지 않는 계약은 `LRH-006`이 소유한다. 실행 중 표시는 raw terminal 수집이 아니라 Runtime Adapter가 명시적으로 생성한 정제된 ArchivistTurnEntry만 사용한다. 비공개 추론·stdout·stderr·credential·filesystem path를 항목 schema에 넣지 않고 정규화 실패는 code와 사용자용 summary만 남긴다. `LRH-013~014`
 
@@ -140,7 +142,7 @@ Archivist의 채팅 응답은 어떤 표현을 포함해도 Approval이 아니�
 
 ## 8. 데이터 반출
 
-각 Archivist 요청은 `public`, `internal`, `confidential` 데이터 등급을 가진다. Account의 허용 등급보다 높은 원문은 해당 Provider로 보내지 않는다. 새 Provider로 폴백할 때 전체 대화를 복사하지 않고 다음만 전달한다.
+외부 Provider 경로를 연결할 때 각 Archivist 요청은 `public`, `internal`, `confidential` 데이터 등급을 가진다. Account의 허용 등급보다 높은 원문은 해당 Provider로 보내지 않는다. 새 Provider로 폴백할 때 전체 대화를 복사하지 않고 다음만 전달한다.
 
 - 민감값이 제거된 구조화 요약
 - 필요한 Job/Step 상태
@@ -149,6 +151,6 @@ Archivist의 채팅 응답은 어떤 표현을 포함해도 Approval이 아니�
 
 ## 9. 로그 정제
 
-Archivist 원장에는 request ID, 계정 ID, model, input/output/cached token, 가격 기준, 정규화 오류 등 허용 목록의 필드만 원문으로 저장한다. Authorization, Proxy-Authorization, API key, password, cookie, access/refresh token을 비롯한 나머지 필드는 제거한다. `AGT-008`
+외부 Provider 원장을 연결할 때는 request ID, 계정 ID, model, input/output/cached token, 가격 기준, 정규화 오류 등 허용 목록의 필드만 원문으로 저장한다. Authorization, Proxy-Authorization, API key, password, cookie, access/refresh token을 비롯한 나머지 필드는 제거한다. 이 경계는 `AGT-008` planned다. 현재 로컬 CLI 원장은 정제된 ArchivistTurnEntry만 저장하는 `LRH-013`을 적용한다.
 
 로그 화면은 raw Provider 오류 본문을 기본 노출하지 않고 정규화 코드, 시각, account alias와 추적 ID를 표시한다.

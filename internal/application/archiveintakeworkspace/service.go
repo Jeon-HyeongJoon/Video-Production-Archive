@@ -36,7 +36,6 @@ type projectionDriveState struct {
 
 type Store interface {
 	Receipts(context.Context) ([]organization.ArchiveOrganizationReceipt, error)
-	LatestDecision(context.Context, string, string) (organization.OrganizationDecision, error)
 	LatestDecisionForArchiveRun(context.Context, string, string) (organization.OrganizationDecision, error)
 	FindOverrideReceipt(context.Context, string) (organization.OrganizationDecision, string, bool, error)
 	AppendOverride(context.Context, string, string, string, organization.OrganizationDecision) error
@@ -125,7 +124,43 @@ func (service *Service) Projection(ctx context.Context) ([]DriveView, error) {
 		return nil, err
 	}
 	drives := make(map[string]*projectionDriveState)
-	receiptRunIDs := make(map[string]bool, len(receipts))
+	receiptsByRunID := make(map[string]organization.ArchiveOrganizationReceipt, len(receipts))
+	for _, receipt := range receipts {
+		receiptsByRunID[receipt.ID] = receipt
+	}
+	archiveRunsByDrive := make(map[string]archiverun.State)
+	if snapshots, listErr := listSnapshots(service.jobs); listErr != nil {
+		return nil, listErr
+	} else {
+		for _, snapshot := range snapshots {
+			run, decodeErr := archiverun.Decode(snapshot)
+			if decodeErr != nil {
+				continue
+			}
+			driveID := run.SourceVolumeID
+			current, found := archiveRunsByDrive[driveID]
+			if !found || run.CreatedAt.After(current.CreatedAt) ||
+				(run.CreatedAt.Equal(current.CreatedAt) && run.ID > current.ID) {
+				archiveRunsByDrive[driveID] = run
+			}
+		}
+	}
+	selectedReceipts := make([]organization.ArchiveOrganizationReceipt, 0, len(archiveRunsByDrive))
+	selectedDrives := make(map[string]bool, len(archiveRunsByDrive))
+	for driveID, run := range archiveRunsByDrive {
+		selectedDrives[driveID] = true
+		if receipt, found := receiptsByRunID[run.ID]; found {
+			selectedReceipts = append(selectedReceipts, receipt)
+		}
+	}
+	for _, receipt := range latestArchiveRunReceipts(receipts) {
+		if !selectedDrives[receipt.WorkspaceDriveID] {
+			selectedReceipts = append(selectedReceipts, receipt)
+		}
+	}
+	sort.Slice(selectedReceipts, func(i, j int) bool {
+		return selectedReceipts[i].WorkspaceDriveID < selectedReceipts[j].WorkspaceDriveID
+	})
 	transcriptionJobs, err := service.transcriptionJobs()
 	if err != nil {
 		return nil, err
@@ -138,8 +173,7 @@ func (service *Service) Projection(ctx context.Context) ([]DriveView, error) {
 	if err != nil {
 		return nil, err
 	}
-	for _, receipt := range latestArchiveRunReceipts(receipts) {
-		receiptRunIDs[receipt.ID] = true
+	for _, receipt := range selectedReceipts {
 		state := drives[receipt.WorkspaceDriveID]
 		if state == nil {
 			state = &projectionDriveState{view: DriveView{
@@ -252,34 +286,28 @@ func (service *Service) Projection(ctx context.Context) ([]DriveView, error) {
 			}
 		}
 	}
-	if snapshots, listErr := listSnapshots(service.jobs); listErr != nil {
-		return nil, listErr
-	} else {
-		for _, snapshot := range snapshots {
-			run, decodeErr := archiverun.Decode(snapshot)
-			if decodeErr != nil || receiptRunIDs[run.ID] {
-				continue
-			}
-			state := drives[run.SourceVolumeID]
-			if state != nil && state.view.ArchiveRunID != "" {
-				continue
-			}
-			if state == nil {
-				state = &projectionDriveState{folders: make(map[string]FolderView), discoveredFolders: make(map[string]FolderView)}
-				drives[run.SourceVolumeID] = state
-			}
-			state.view.WorkspaceDriveID = run.SourceVolumeID
-			state.view.ArchiveRunID = run.ID
-			state.view.ArchiveRunRevision = run.Revision
-			state.view.WorkerID = run.WorkerID
-			state.view.SourceVolumeID = run.SourceVolumeID
-			state.view.SourceStorageID = run.SourceStorageID
-			state.view.ArchiveStorageID = run.ArchiveStorageID
-			state.view.InputRevision = run.FolderDiscoveryRevision
-			state.view.State = "IN_PROGRESS"
-			for _, folderID := range run.FolderIDs {
-				state.folders[folderID] = FolderView{Folder: folderID, InputRevision: run.FolderDiscoveryRevision}
-			}
+	for driveID, run := range archiveRunsByDrive {
+		if _, found := receiptsByRunID[run.ID]; found {
+			continue
+		}
+		state := drives[driveID]
+		if state == nil {
+			state = &projectionDriveState{folders: make(map[string]FolderView), discoveredFolders: make(map[string]FolderView)}
+			drives[driveID] = state
+		} else {
+			state.folders = make(map[string]FolderView)
+		}
+		state.view.WorkspaceDriveID = driveID
+		state.view.ArchiveRunID = run.ID
+		state.view.ArchiveRunRevision = run.Revision
+		state.view.WorkerID = run.WorkerID
+		state.view.SourceVolumeID = driveID
+		state.view.SourceStorageID = run.SourceStorageID
+		state.view.ArchiveStorageID = run.ArchiveStorageID
+		state.view.InputRevision = run.FolderDiscoveryRevision
+		state.view.State = "IN_PROGRESS"
+		for _, folderID := range run.FolderIDs {
+			state.folders[folderID] = FolderView{Folder: folderID, InputRevision: run.FolderDiscoveryRevision}
 		}
 	}
 	if err := service.mergeInventory(ctx, drives); err != nil {
@@ -979,7 +1007,7 @@ func driveStateName(view DriveView) string {
 
 func (service *Service) Override(ctx context.Context, request OverrideCommand) (organization.OrganizationDecision, error) {
 	if strings.TrimSpace(request.CommandID) == "" || strings.TrimSpace(request.DecisionID) == "" ||
-		strings.TrimSpace(request.IdempotencyKey) == "" || strings.TrimSpace(request.WorkspaceDriveID) == "" ||
+		strings.TrimSpace(request.IdempotencyKey) == "" || strings.TrimSpace(request.ArchiveRunID) == "" || strings.TrimSpace(request.WorkspaceDriveID) == "" ||
 		strings.TrimSpace(request.Folder) == "" || request.ExpectedInputRevision == 0 ||
 		(request.Actor.Type != vocabulary.ActorHuman && request.Actor.Type != vocabulary.ActorArchivist) ||
 		strings.TrimSpace(request.Actor.ID) == "" || request.OccurredAt.IsZero() || !request.Disposition.Valid() {
@@ -997,12 +1025,12 @@ func (service *Service) Override(ctx context.Context, request OverrideCommand) (
 		if storedDigest != digest {
 			return organization.OrganizationDecision{}, command.ErrIdempotencyConflict
 		}
-		if err := service.continueResolvedFolder(ctx, request.IdempotencyKey, stored, request.OccurredAt); err != nil {
+		if err := service.continueResolvedFolder(ctx, request.ArchiveRunID, request.IdempotencyKey, stored, request.OccurredAt); err != nil {
 			return organization.OrganizationDecision{}, err
 		}
 		return stored, nil
 	}
-	latest, err := service.store.LatestDecision(ctx, request.WorkspaceDriveID, request.Folder)
+	latest, err := service.store.LatestDecisionForArchiveRun(ctx, request.ArchiveRunID, request.Folder)
 	if err != nil {
 		return organization.OrganizationDecision{}, err
 	}
@@ -1032,13 +1060,13 @@ func (service *Service) Override(ctx context.Context, request OverrideCommand) (
 	if err := service.store.AppendOverride(ctx, request.IdempotencyKey, digest, latest.ID, decision); err != nil {
 		return organization.OrganizationDecision{}, err
 	}
-	if err := service.continueResolvedFolder(ctx, request.IdempotencyKey, decision, request.OccurredAt); err != nil {
+	if err := service.continueResolvedFolder(ctx, request.ArchiveRunID, request.IdempotencyKey, decision, request.OccurredAt); err != nil {
 		return organization.OrganizationDecision{}, err
 	}
 	return decision, nil
 }
 
-func (service *Service) continueResolvedFolder(ctx context.Context, idempotencyKey string, decision organization.OrganizationDecision, occurredAt time.Time) error {
+func (service *Service) continueResolvedFolder(ctx context.Context, archiveRunID, idempotencyKey string, decision organization.OrganizationDecision, occurredAt time.Time) error {
 	if decision.Disposition == vocabulary.OrganizationHold {
 		return nil
 	}
@@ -1050,7 +1078,7 @@ func (service *Service) continueResolvedFolder(ctx context.Context, idempotencyK
 		return err
 	}
 	for _, receipt := range receipts {
-		if receipt.WorkspaceDriveID != decision.WorkspaceDriveID || receipt.InputRevision != decision.InputRevision {
+		if receipt.ID != archiveRunID || receipt.WorkspaceDriveID != decision.WorkspaceDriveID || receipt.InputRevision != decision.InputRevision {
 			continue
 		}
 		containsFolder := false
@@ -1080,6 +1108,7 @@ func (service *Service) continueResolvedFolder(ctx context.Context, idempotencyK
 func overrideDigest(request OverrideCommand) (string, error) {
 	payload, err := json.Marshal(struct {
 		DecisionID             string                             `json:"decision_id"`
+		ArchiveRunID           string                             `json:"archive_run_id"`
 		WorkspaceDriveID       string                             `json:"workspace_drive_id"`
 		Folder                 string                             `json:"folder"`
 		ExpectedInputRevision  uint64                             `json:"expected_input_revision"`
@@ -1089,7 +1118,7 @@ func overrideDigest(request OverrideCommand) (string, error) {
 		Reason                 string                             `json:"reason"`
 		Basis                  []string                           `json:"basis"`
 	}{
-		DecisionID: request.DecisionID, WorkspaceDriveID: request.WorkspaceDriveID, Folder: request.Folder,
+		DecisionID: request.DecisionID, ArchiveRunID: request.ArchiveRunID, WorkspaceDriveID: request.WorkspaceDriveID, Folder: request.Folder,
 		ExpectedInputRevision: request.ExpectedInputRevision, Disposition: request.Disposition,
 		TargetVideoBitRateKbps: request.TargetVideoBitRateKbps, Actor: request.Actor,
 		Reason: strings.TrimSpace(request.Reason), Basis: append([]string(nil), request.Basis...),

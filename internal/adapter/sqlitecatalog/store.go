@@ -8,10 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
-	_ "modernc.org/sqlite"
-
+	"videoarchive/internal/adapter/sqlitebase"
 	"videoarchive/internal/core/asset"
 	"videoarchive/internal/core/catalog"
 	"videoarchive/internal/core/contentreview"
@@ -28,25 +26,25 @@ var (
 )
 
 type Store struct {
-	db *sql.DB
+	db      *sql.DB
+	release func() error
 }
 
 func Open(path string) (*Store, error) {
-	db, err := sql.Open("sqlite", path)
+	db, release, err := sqlitebase.Acquire(path)
 	if err != nil {
 		return nil, err
 	}
-	db.SetMaxOpenConns(1)
-	store := &Store{db: db}
+	store := &Store{db: db, release: release}
 	if err := store.migrate(context.Background()); err != nil {
-		db.Close()
+		release()
 		return nil, err
 	}
 	return store, nil
 }
 
 func (store *Store) Close() error {
-	return store.db.Close()
+	return store.release()
 }
 
 func (store *Store) migrate(ctx context.Context) error {
@@ -269,7 +267,7 @@ func (store *Store) AppendInspection(ctx context.Context, inspection mediaanalys
 	return store.appendImmutable(ctx,
 		`INSERT INTO media_inspections(inspection_id, original_asset_id, original_checksum, inspected_at, payload) VALUES (?, ?, ?, ?, ?)`,
 		`SELECT payload FROM media_inspections WHERE inspection_id = ?`,
-		normalized.ID, payload, normalized.OriginalAssetID, normalized.OriginalChecksum, normalized.InspectedAt.UTC().Format(time.RFC3339Nano))
+		normalized.ID, payload, normalized.OriginalAssetID, normalized.OriginalChecksum, sqlitebase.FormatTime(normalized.InspectedAt))
 }
 
 func (store *Store) InspectionsByOriginal(ctx context.Context, originalAssetID string) ([]mediaanalysis.MediaInspection, error) {
@@ -444,7 +442,7 @@ func (store *Store) AppendTranscript(ctx context.Context, transcript transcripti
 	return store.appendImmutable(ctx,
 		`INSERT INTO transcripts(transcript_id, original_asset_id, created_at, payload) VALUES (?, ?, ?, ?)`,
 		`SELECT payload FROM transcripts WHERE transcript_id = ?`,
-		transcript.Artifact.ID, payload, transcript.Artifact.Origin.OriginalAssetID, transcript.Artifact.Origin.CreatedAt.UTC().Format(time.RFC3339Nano))
+		transcript.Artifact.ID, payload, transcript.Artifact.Origin.OriginalAssetID, sqlitebase.FormatTime(transcript.Artifact.Origin.CreatedAt))
 }
 
 func (store *Store) TranscriptsByOriginal(ctx context.Context, originalAssetID string) ([]transcription.Transcript, error) {
@@ -551,7 +549,7 @@ func (store *Store) AppendSummary(ctx context.Context, value summary.Summary) er
 		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		`SELECT payload FROM summary_revisions WHERE artifact_id = ?`,
 		value.Artifact.ID, payload, value.ID, value.Revision, value.Artifact.Origin.OriginalAssetID, value.TranscriptID,
-		value.Artifact.Origin.CreatedAt.UTC().Format(time.RFC3339Nano))
+		sqlitebase.FormatTime(value.Artifact.Origin.CreatedAt))
 }
 
 func (store *Store) SummariesByOriginal(ctx context.Context, originalAssetID string) ([]summary.Summary, error) {

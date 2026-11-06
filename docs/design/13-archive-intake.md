@@ -11,7 +11,7 @@
 - 로컬 Storage, 연결된 네트워크 공유, 원본과 다른 새 외장 드라이브 및 검증된 FTP·SFTP 원격 파일 서비스 Storage를 허용한다. SMTP는 아카이브 저장소가 아니라 전달 채널이다.
 - 담당자만 Worker·원본 드라이브·아카이브 저장소·폴더 범위·STT 시작 시점을 고른다. Archivist와 자동 정책은 Storage나 처리 범위를 고르지 않는다. 담당자가 고정한 범위 안의 HOLD는 허용된 제어 모드에서 Archivist가 구조화된 근거로 명시적으로 분류할 수 있다.
 - ARCHIVE_PRIMARY에 한 벌을 검증해 게시하면 “보관됨”이다. `ARC-004`의 복제본 검증과 사람 승인을 충족하면 “확정됨”이다.
-- 기록물은 중앙 DB 없이 복원 가능한 `ARC-007` ArchivePackage 형식을 따른다.
+- 기록물은 중앙 DB 없이 복원 가능한 ArchivePackage 형식을 따른다. 패키지 게시 형식은 현재 수직 경로에 연결되어 있지만, 패키지만으로 DB를 복원하는 명령과 acceptance test인 `ARC-007`은 planned다.
 - 원본 드라이브 분리와 네트워크 아카이브 저장소 끊김은 `WaitReason.DEVICE`다. 기다리는 동안 실행 시도 횟수를 소비하지 않는다.
 - 폴더별 단계 표시는 드라이브당 단계 상태 행렬과 진행 피드백으로 표시한다. 분기·선택 gate·독립 기록을 하나의 순차선으로 잇지 않으며 단계별 세부는 노드와 폴더 행 세부 설명에서 확인한다.
 
@@ -27,11 +27,11 @@ Windows에서 외부 data bus Volume이 연결되면 Worker는 파일을 읽지 
 
 Worker는 현재 연결된 외장 Volume의 두 역할 ID를 로컬 `StorageRoot` capability로만 해석하고 root 경로를 Control에 보내지 않는다. capability를 여는 것만으로 파일을 읽거나 쓰지 않으며, 담당자가 선택한 뒤 생성된 fenced 실행 명세만 archive ID에 게시할 수 있다. 분리 시 실행 중 handle을 닫지 않고 유휴 조정에서 동적 capability를 제거한다. `DEV-013`
 
-폴더 탐색과 FFprobe 검사는 원본에 접근하는 Worker에서 실행한다. 선택 직후 folder inventory는 background에서 실행해 대용량 탐색 중에도 heartbeat와 자원 수용 판정을 멈추지 않는다. 지원 regular file만 즉시 상위 정규화 상대 폴더로 묶고, 보호·숨김 항목, symlink, junction·reparse 후보, irregular entry와 root 밖 대상은 따라가지 않는다. 실행 전 heartbeat inventory는 `FolderDiscoveryState`와 지금까지 찾은 폴더 ID·영상 수를 보내고, `READY`일 때 전체 집합의 입력 byte와 0이 아닌 탐색 revision을 보낸다. `SCANNING` 부분 집계는 화면에 점진적으로 표시하지만 선택 범위로 고정하지 않으며 `FAILED`는 빈 결과와 구분한다. 아카이브 실행 검사는 각 영상의 정규화한 기술정보를 추가한다. Control에는 Worker의 절대경로와 executable 경로를 보내지 않는다. `DEV-010~011`, `DSH-022`, `ORG-001`, `CFG-011`, `ORG-010`
+폴더 탐색과 FFprobe 검사는 원본에 접근하는 Worker에서 실행한다. 선택 직후 folder inventory는 background에서 실행해 대용량 탐색 중에도 heartbeat와 자원 수용 판정을 멈추지 않는다. 지원 regular file만 즉시 상위 정규화 상대 폴더로 묶고, 보호·숨김 항목, symlink, junction·reparse 후보, irregular entry와 root 밖 대상은 따라가지 않는다. 실행 전 bounded heartbeat는 `FolderDiscoveryState`와 revision 집계만 보내고, 크기가 늘어나는 폴더 ID·영상 수·입력 byte 목록은 같은 snapshot ID의 별도 inventory 요청으로 보낸다. `SCANNING` 부분 집계는 화면에 점진적으로 표시하지만 선택 범위로 고정하지 않으며 `READY`만 0이 아닌 전체 탐색 revision을 갖고 `FAILED`는 빈 결과와 구분한다. 아카이브 실행 검사는 각 영상의 정규화한 기술정보를 추가한다. Control에는 Worker의 절대경로와 executable 경로를 보내지 않는다. `DEV-010~011`, `WRK-006`, `DSH-022`, `ORG-001`, `CFG-011`, `ORG-010`
 
 탐색 결과는 단조 revision을 가진다. 일부 선택과 전체 선택 모두 시작 시점 revision의 폴더 ID 집합으로 고정한다. 이후 파일 추가·삭제가 감지되면 오래된 시작·override를 거부하고 원본 드라이브 상태를 “내용 바뀜”으로 투영한다. `ORG-011`, `APP-002`
 
-완료된 ArchiveRun은 최신 탐색 목록을 소비하지 않는다. 담당자는 같은 원본 revision의 폴더를 새 ArchiveRun ID로 다시 선택할 수 있다. 이때 checksum·상대경로가 같은 입력의 Observation과 OriginalAsset identity는 재사용하지만 새 검사는 새 MediaInspection으로 기록하고 OrganizationDecision·Folder Job·예상 출력은 새 ArchiveRun identity를 포함해 이전 실행과 분리한다. 같은 ArchiveRun ID와 멱등성 key의 재전송만 기존 receipt를 반환한다. `APP-002`
+완료된 ArchiveRun은 최신 탐색 목록을 소비하지 않는다. 담당자는 같은 원본 revision의 폴더를 새 ArchiveRun ID로 다시 선택할 수 있다. 이때 checksum·상대경로가 같은 입력의 Observation과 OriginalAsset identity는 재사용하지만 새 검사는 새 MediaInspection으로 기록하고 OrganizationDecision·Folder Job·예상 출력은 새 ArchiveRun identity를 포함해 이전 실행과 분리한다. 최초 시작 멱등성 key는 ArchiveRun에 고정하며 같은 ArchiveRun ID와 같은 key의 재전송만 기존 receipt를 반환하고 다른 key는 충돌로 거부한다. `APP-002`, `ORG-012`
 
 ## 3. 규칙 기반 분류
 
@@ -44,7 +44,7 @@ Worker는 현재 연결된 외장 Volume의 두 역할 ID를 로컬 `StorageRoot
 | `COMPILE_SOURCE_SEQUENCE` | 짧은 여러 Clip의 소스 폴더 | 입력 순서·CutMarker를 고정해 1080p 20Mbps 통합 |
 | `HOLD` | 하나의 결정으로 수렴하지 않음 | `WAITING/INPUT`, 외부 실행 없음 |
 
-HOLD도 OriginalAsset별 ArchiveCatalog 행과 보류 사유를 만든다. 사람 또는 Archivist의 명시적 분류는 최신 탐색 revision을 요구하며 기존 OrganizationDecision을 수정하지 않고 ActorType·행위자 ID·사유·근거가 있는 새 sequence를 추가한다. 자동 분류는 계속 결정적으로 유지하고 Archivist 추론을 입력으로 섞지 않는다. 구조화된 근거로도 판정할 수 없으면 새 결정을 만들지 않고 HOLD를 유지한다. 비HOLD 결정이 추가되면 같은 ArchiveRun의 고정 Worker·Storage·PhysicalDevice·입력 revision으로 후속 1단계 Folder Job을 멱등하게 연결한다. timeout 재전송은 결정과 Job 효과를 중복하지 않는다. 다른 폴더는 HOLD와 독립적으로 계속 실행한다. `ORG-003`, `ORG-014`
+HOLD도 OriginalAsset별 ArchiveCatalog 행과 보류 사유를 만든다. 사람 또는 Archivist의 명시적 분류는 대상 ArchiveRun ID와 최신 탐색 revision을 요구하며 기존 OrganizationDecision을 수정하지 않고 같은 ArchiveRun에 ActorType·행위자 ID·사유·근거가 있는 새 sequence를 추가한다. 저장 transaction 안에서 이전 decision ID가 해당 ArchiveRun·폴더의 최신인지 비교·교체하므로 동시 분류 둘이 같은 sequence로 확정되지 않는다. 자동 분류는 계속 결정적으로 유지하고 Archivist 추론을 입력으로 섞지 않는다. 구조화된 근거로도 판정할 수 없으면 새 결정을 만들지 않고 HOLD를 유지한다. 비HOLD 결정이 추가되면 같은 ArchiveRun의 고정 Worker·Storage·PhysicalDevice·입력 revision으로 후속 1단계 Folder Job을 멱등하게 연결한다. Folder Job ID와 STT 게이트는 실행 ID가 같은 최신 결정만 읽으며, 같은 드라이브·폴더의 다른 ArchiveRun 판정을 섞지 않는다. timeout 재전송은 결정과 Job 효과를 중복하지 않는다. 다른 폴더는 HOLD와 독립적으로 계속 실행한다. `ORG-003`, `ORG-014`
 
 Archivist의 정리 검토 단위는 현재 HOLD인 MediaFolder 하나다. 목록에는 선택 범위 안의 HOLD만 두고, 단일 상세에는 최신 decision ID·입력 revision·보류 사유와 원본별 정규화 상대경로·checksum·duration·codec·해상도·bitrate를 제공한다. Storage root, credential, 임의 path 읽기 도구는 제공하지 않는다. 파일명과 미디어에서 파생된 내용은 분류 근거일 수 있지만 지시나 Approval로 해석하지 않는다. `MCP-004`
 
@@ -69,7 +69,7 @@ Worker는 외부 subprocess에 executable과 argument 배열만 넘기고 Storag
 
 ## 5. 2단계: STT
 
-STT 시작은 별도 Command다. 해당 ArchiveRun의 1단계에 실행 중이거나 재시도 예정인 작업이 없을 때만 받는다. HOLD는 명시적 분류 입력을 기다리므로 남은 실행 가능 작업 수와 2단계 대상에서 제외한다. 다른 ArchiveRun와 시스템 전체 queue는 이 게이트에 포함하지 않고 자원 경합은 Scheduler가 처리한다. `PIP-008`
+STT 시작은 별도 Command다. 해당 ArchiveRun ID에 속한 최신 판정과 결정적 Folder Job만 투영해, 1단계에 실행 중이거나 재시도 예정인 작업이 없을 때만 받는다. HOLD는 명시적 분류 입력을 기다리므로 남은 실행 가능 작업 수와 2단계 대상에서 제외한다. 다른 ArchiveRun와 시스템 전체 queue는 이 게이트에 포함하지 않고 자원 경합은 Scheduler가 처리한다. `PIP-008`
 
 대상은 1단계에서 보관됨이 되고 원본 기술정보에 오디오가 있는 `ORGANIZE_AS_IS`·`RENDER_RECORDINGS` 녹화영상뿐이다. 무음 영상, 소스 시퀀스, HOLD, 실패 입력은 제외한다. `ORG-007`
 
@@ -104,13 +104,13 @@ Transcript 게시가 성공하면 Worker는 versioned 결정 규칙으로 구간
 └── archive-catalog.csv
 ```
 
-패키지는 `metadata.json`, `files.csv`, `events.jsonl`, manifest와 README만으로 DB 없이 복원할 수 있어야 한다. Storage 절대 root, mount path, credential과 executable 경로를 넣지 않는다. `ARC-007`
+패키지는 `metadata.json`, `files.csv`, `events.jsonl`, manifest와 README만으로 DB 없이 복원할 수 있는 형식을 유지한다. Storage 절대 root, mount path, credential과 executable 경로를 넣지 않는다. 실제 제품 복원 명령과 실제 패키지 acceptance test는 `ARC-007` planned다.
 
 새 패키지는 처리 날짜로 나뉜 상대경로에 둔다. 결과 영상 파일명은 단일 입력이면 원래 영상명, 여러 컷 통합이면 MediaFolder의 마지막 이름에서 만들며 Windows에서 안전하도록 정규화한다. 패키지 ID는 이름과 별개인 불변 identity로 유지하고, metadata와 ArchiveCatalog에는 원래 이름과 전체 상대경로도 함께 남긴다. 화면은 처리 날짜·결과 영상명을 주 정보로, 패키지 ID를 추적용 보조 정보로 보여준다. 완료된 Folder Job의 `ORGANIZED_MEDIA` 출력은 원본 드라이브의 완료 내역에 ArchiveRun을 넘어 유지한다. ArchiveRun 상태만으로 완료 내역을 만들지 않으며 실제 ArchivePackage 출력과 출력 기록 시각을 기준으로 한다. `ARC-013`, `DSH-023~024`
 
 ArchiveCatalog는 아카이브 저장소 최상단의 `archive-catalog.csv` 하나이며 원본 영상 하나당 한 행이다. 다른 ArchiveRun이나 원본 드라이브라도 같은 `ARCHIVE_PRIMARY`를 대상으로 하면 이 파일에 이어서 기록한다. 행 identity는 원본 드라이브 ID와 OriginalAsset ID의 조합이다. 앞 열은 사람이 읽는 `원본 생성 시각 | 원본 영상명`과 `아카이브 처리일 | 결과 영상명` 쌍이고, 두 날짜를 합치거나 서로 대체하지 않는다. 뒤에는 원본 상대경로·상태·판정, 길이·크기·컨테이너·전체 bitrate, video/audio stream 규격, 결과 Profile과 영상·Transcript·TranscriptText·Subtitle 상대경로를 두며 추적용 드라이브·자산·판정·패키지 ID와 checksum은 마지막에 둔다. 값이 관찰되지 않은 메타데이터는 추정하지 않고 빈 칸으로 남긴다.
 
-상태 후보는 분류됨·보류·처리 중·보관됨·STT 완료·확정됨·실패다. 판정 추가와 결과 보관 때 기존 행과 새 행을 병합한 전체 현재 투영을 `archive-catalog.csv.partial`에 쓰고 검증한 뒤 원자 교체한다. 기존 드라이브별 CSV는 최상단 파일의 첫 게시에서 병합하되 복구 근거로 남긴다. `ORG-009`, `MED-007`
+상태 후보는 분류됨·보류·처리 중·보관됨·STT 완료·확정됨·실패다. 판정 추가와 결과 보관 때 StorageRoot의 배타 잠금을 잡고 기존 행과 새 행을 병합한 전체 현재 투영을 `archive-catalog.csv.partial`에 쓰고 파일 동기화·검증한 뒤 root-relative rename으로 원자 교체한다. process와 Worker가 달라도 같은 아카이브 Storage를 대상으로 한 두 게시가 서로의 행을 덮어쓰지 않는다. 기존 드라이브별 CSV는 최상단 파일의 첫 게시에서 병합하되 복구 근거로 남긴다. `ORG-009`, `MED-007`
 
 아카이브 작업 공간의 ArchiveCatalog 마지막 기록 시각은 해당 ArchiveRun에서 성공 완료된 1·2단계 `archive_catalog` Step 중 가장 최근의 영속 완료 시각이다. 실행 중이거나 실패한 게시 시도는 성공 기록 시각을 앞당기지 않는다. `DSH-027`
 

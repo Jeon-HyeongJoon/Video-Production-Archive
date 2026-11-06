@@ -24,9 +24,20 @@ type Assignment struct {
 	StepID                  string
 	FencingToken            uint64
 	LeaseExpiresAt          time.Time
+	LeaseRenewAfter         time.Duration
 	ResourceClass           vocabulary.ResourceClass
 	RequiredProcessingKinds []vocabulary.ProcessingKind
 	ExecutionSpec           execution.StepExecutionSpec
+}
+
+type LeaseRenewal struct {
+	ExpiresAt  time.Time
+	RenewAfter time.Duration
+}
+
+type CompletionWork struct {
+	ID    string
+	State job.State
 }
 
 type Result struct {
@@ -66,10 +77,21 @@ type CancellationResult struct {
 
 type Store interface {
 	ClaimWorkerStep(context.Context, string, time.Time) (Assignment, job.State, error)
+	RenewWorkerLease(context.Context, string, string, string, uint64, time.Time) (LeaseRenewal, error)
 	SettleWorkerStep(context.Context, Result, time.Time) (job.State, error)
+	PendingWorkerCompletions(context.Context, int) ([]CompletionWork, error)
+	MarkWorkerCompletionDelivered(context.Context, string, time.Time) error
+	RecordWorkerCompletionFailure(context.Context, string, string, time.Time) error
 	RecoverExpiredReservations(context.Context, time.Time) ([]job.State, error)
 	PendingWorkerCancellation(context.Context, string, string, string, uint64, time.Time) (Cancellation, error)
 	SettleWorkerCancellation(context.Context, CancellationResult, time.Time) (job.State, error)
+}
+
+func (service *Service) RenewLease(ctx context.Context, workerID, jobID, stepID string, fencingToken uint64) (LeaseRenewal, error) {
+	if workerID == "" || jobID == "" || stepID == "" || fencingToken == 0 {
+		return LeaseRenewal{}, ErrInvalidAssignment
+	}
+	return service.store.RenewWorkerLease(ctx, workerID, jobID, stepID, fencingToken, service.now().UTC())
 }
 
 type ProjectionWriter interface {
@@ -137,15 +159,46 @@ func (service *Service) Report(ctx context.Context, result Result) error {
 	if err != nil {
 		return err
 	}
-	if err := service.project(ctx, state); err != nil {
+	// Settlement and its completion outbox are the only required synchronous boundary.
+	// The small read-model refresh and dispatch keep claim/UI latency low, but
+	// they are best-effort and cannot reject the committed report. Potentially
+	// large per-file observers run only in ReconcileCompletions.
+	_ = service.project(ctx, state)
+	_ = service.dispatcher.DispatchAvailable(ctx)
+	return nil
+}
+
+func (service *Service) ReconcileCompletions(ctx context.Context) error {
+	work, err := service.store.PendingWorkerCompletions(ctx, 32)
+	if err != nil {
 		return err
 	}
-	for _, observer := range service.observers {
-		if err := observer.ObserveCompletion(ctx, state); err != nil {
-			return err
+	var combined error
+	for _, item := range work {
+		reconcileErr := service.project(ctx, item.State)
+		if reconcileErr == nil {
+			for _, observer := range service.observers {
+				if err := observer.ObserveCompletion(ctx, item.State); err != nil {
+					reconcileErr = err
+					break
+				}
+			}
+		}
+		if reconcileErr == nil {
+			reconcileErr = service.dispatcher.DispatchAvailable(ctx)
+		}
+		if reconcileErr != nil {
+			if recordErr := service.store.RecordWorkerCompletionFailure(ctx, item.ID, reconcileErr.Error(), service.now().UTC()); recordErr != nil {
+				combined = errors.Join(combined, recordErr)
+			}
+			combined = errors.Join(combined, reconcileErr)
+			continue
+		}
+		if err := service.store.MarkWorkerCompletionDelivered(ctx, item.ID, service.now().UTC()); err != nil {
+			combined = errors.Join(combined, err)
 		}
 	}
-	return service.dispatcher.DispatchAvailable(ctx)
+	return combined
 }
 
 func (service *Service) PendingCancellation(ctx context.Context, workerID, jobID, stepID string, fencingToken uint64) (Cancellation, error) {
@@ -157,10 +210,12 @@ func (service *Service) ReportCancellation(ctx context.Context, result Cancellat
 	if err != nil {
 		return err
 	}
-	if err := service.project(ctx, state); err != nil {
-		return err
-	}
-	return service.dispatcher.DispatchAvailable(ctx)
+	// Cancellation settlement uses the same durable completion outbox as a
+	// normal Worker result. Once committed, projection or dispatch failure must
+	// not make the Worker retry a state change that already succeeded.
+	_ = service.project(ctx, state)
+	_ = service.dispatcher.DispatchAvailable(ctx)
+	return nil
 }
 
 func (service *Service) project(ctx context.Context, state job.State) error {

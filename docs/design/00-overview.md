@@ -74,18 +74,18 @@ Worker가 다른 PC로 이동해도 Domain 계약과 Control API는 바뀌지 �
 | Archive Domain | 원본·파생본·manifest·확정·DB 없는 복원 | ARC-001~007 |
 | Subprocess Boundary | 인수 배열, 임시 출력, publish 복구 | EXE-001~003 |
 | Notification | 저장 Event replay와 HTTP/SSE 재연결 | NTF-001~002 |
-| Device Management | 볼륨 lock, 제거, 포맷 | DEV-001~005 |
-| Archivist Gateway | 계정, 라우팅, 폴백, 도구 안전, 비밀 제거 | AGT-001~015 |
+| Device Management (planned) | 볼륨 lock, 제거, 포맷의 후속 장치 경계 | DEV-001~005 |
+| Provider Account Router (planned) | 외부 Provider 계정, 라우팅, 폴백, 도구 안전, 비밀 제거 | AGT-001~015 |
 | Archivist Host | 로컬 CLI 세션, turn 전달·재개, cursor event와 fencing | LRH-001~009 |
 | MCP Adapter | 업무 의미 도구, Tool Call 멱등성과 Command 상관관계 | MCP-001~002 |
 | Network Access | 내부 CIDR, v1 무로그인 접근, 후속 인증 경계, MCP 노출, CSRF | NET-001~007 |
 | Authorization | 역할과 파괴적 작업 승인 | SEC-001~004 |
 | Boot Configuration | 무관리 UI, 시작 설정, listen·파괴적 기능 정책, Secret reference | CFG-001~005 |
 | Worker Fleet | 사전 등록, service 인증, 자원 snapshot heartbeat, 배정·실행 정산 | WRK-001~009 |
-| Cancellation | 미시작 취소, 실행 중 lease fence, Worker stop·정리 확인, 완료 경합 | CAN-001~004 |
+| Cancellation | 미시작 취소, 실행 중 lease fence, Worker stop·정리 확인, 완료 경합과 PARTIAL·UNCERTAIN 조정 | CAN-001~005 |
 | Archive Workspace | 사람 직접 실행과 Archivist 도구 호출의 공통 업무 문맥, ActionCard, Archive Workspace 상태 투영 | COL-001~002, DSH-001~004 |
 | Application Capabilities | Adapter와 무관한 도메인 기능 직접 실행 | APP-001 |
-| Observability | 기능 실행과 모든 테스트의 구조화 증적 | OBS-001, TST-001 |
+| Observability | 테스트의 구조화 증적. 모든 운영 Capability의 공통 Sink는 planned | TST-001, OBS-001(planned) |
 
 도메인 명령과 이벤트의 시간 순서, 일관성 경계 후보와 아직 결정되지 않은 핫스팟은 [이벤트 스토밍](08-event-storming.md)에 정리한다. 핫스팟을 결정한 뒤 요구사항 카탈로그로 내린다.
 
@@ -118,6 +118,6 @@ Archivist Host의 세션·재시작·도구 경계와 Orca 최소 활용 결정�
 7. 실제 Windows Host의 로컬 CLI 재시작 acceptance
 8. Windows 장치/포맷 Adapter와 VJ 편집
 
-모든 수직 슬라이스는 Storage를 논리 Volume 작업 공간으로 해석하고 PhysicalDevice는 별도 I/O 충돌 키로 보존하며, Application Capability를 직접 실행하고 운영·테스트 증적을 남기는 공통 경계를 함께 구현한다. `DEV-006`, `APP-001`, `OBS-001`, `TST-001`
+모든 수직 슬라이스는 Storage를 논리 Volume 작업 공간으로 해석하고 PhysicalDevice는 별도 I/O 충돌 키로 보존하며 Application Capability를 직접 실행한다. 테스트 증적은 `TST-001`이 구현했고, 모든 운영 Capability를 공통 Evidence Sink로 감싸는 `OBS-001`은 planned다. `DEV-006`, `APP-001`, `TST-001`
 
 각 슬라이스도 요구사항과 테스트를 먼저 추가하며, 외부 프로그램이 필요한 검증은 fixture 기반 integration test와 실제 장비 acceptance test를 구분한다.

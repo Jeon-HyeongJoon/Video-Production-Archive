@@ -24,6 +24,7 @@ var (
 	ErrCredentialUnavailable = errors.New("worker credential is unavailable")
 	ErrHeartbeatRejected     = errors.New("worker heartbeat was rejected")
 	ErrInvalidAssignment     = errors.New("worker assignment is invalid")
+	ErrLeaseRenewalRejected  = errors.New("worker execution lease renewal was rejected")
 )
 
 type SecretResolver interface {
@@ -52,6 +53,7 @@ type Assignment struct {
 	StepID                  string                      `json:"step_id"`
 	FencingToken            uint64                      `json:"fencing_token"`
 	LeaseExpiresAt          time.Time                   `json:"lease_expires_at"`
+	LeaseRenewAfterMillis   int64                       `json:"renew_after_millis"`
 	ResourceClass           vocabulary.ResourceClass    `json:"resource_class"`
 	RequiredProcessingKinds []vocabulary.ProcessingKind `json:"processing_kinds"`
 	ExecutionSpec           execution.StepExecutionSpec `json:"execution_spec"`
@@ -195,6 +197,11 @@ func (client *Client) Heartbeat(ctx context.Context) error {
 	accessibleStorageIDs = uniqueSorted(accessibleStorageIDs)
 	snapshotID := client.nextSnapshotID(observedAt)
 	busyDevices := trueKeys(snapshot.BusyPhysicalDeviceIDs)
+	heartbeatStorage := make([]worker.StorageObservation, 0, len(snapshot.StorageObservations))
+	for _, observation := range snapshot.StorageObservations {
+		observation.Folders = nil
+		heartbeatStorage = append(heartbeatStorage, observation)
+	}
 	payload, err := json.Marshal(map[string]any{
 		"worker_id": client.configuration.ID, "snapshot_id": snapshotID, "observed_at": observedAt,
 		"cpu_average_5m": snapshot.AverageCPU5m, "gpu_average_5m": snapshot.AverageGPU5m,
@@ -203,7 +210,7 @@ func (client *Client) Heartbeat(ctx context.Context) error {
 		"scratch_free_bytes": snapshot.ScratchFreeBytes, "heavy_running": snapshot.HeavyRunning,
 		"light_running": snapshot.LightRunning, "busy_physical_device_ids": busyDevices,
 		"accepting_work": snapshot.AcceptingWork, "accessible_storage_ids": accessibleStorageIDs,
-		"storage_observations": snapshot.StorageObservations,
+		"storage_observations": heartbeatStorage,
 		"attached_volumes":     snapshot.AttachedVolumes,
 	})
 	if err != nil {
@@ -237,6 +244,38 @@ func (client *Client) Heartbeat(ctx context.Context) error {
 		return ErrHeartbeatRejected
 	}
 	client.setSelectedSourceIDs(heartbeatResponse.Data.SelectedSourceStorageIDs)
+	if len(snapshot.StorageObservations) == 0 {
+		return nil
+	}
+	return client.reportStorageInventory(ctx, credential, snapshotID, snapshot.StorageObservations)
+}
+
+func (client *Client) reportStorageInventory(ctx context.Context, credential string, snapshotID uint64, observations []worker.StorageObservation) error {
+	payload, err := json.Marshal(map[string]any{
+		"worker_id": client.configuration.ID, "snapshot_id": snapshotID, "storage_observations": observations,
+	})
+	if err != nil {
+		return err
+	}
+	endpoint := *client.configuration.ControlURL
+	endpoint.Path = "/worker/v1/storage-inventory"
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint.String(), bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	request.Header.Set("Accept", "application/json")
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Authorization", "Bearer "+credential)
+	request.Header.Set("X-Worker-ID", client.configuration.ID)
+	response, err := client.http.Do(request)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	io.Copy(io.Discard, io.LimitReader(response.Body, 64<<10))
+	if response.StatusCode != http.StatusOK {
+		return fmt.Errorf("%w: storage inventory HTTP %d", ErrHeartbeatRejected, response.StatusCode)
+	}
 	return nil
 }
 
@@ -326,7 +365,9 @@ func (client *Client) Run(ctx context.Context, report func(error)) error {
 				assignment, err := client.claim(ctx)
 				if err != nil {
 					client.endExecution()
-					report(err)
+					if ctx.Err() == nil && !errors.Is(err, context.Canceled) {
+						report(err)
+					}
 				} else if assignment == nil {
 					client.endExecution()
 				} else {
@@ -400,6 +441,12 @@ func (client *Client) execute(ctx context.Context, assignment Assignment, report
 	go func() { resultChannel <- client.executor.Execute(executionContext, assignment) }()
 	ticker := time.NewTicker(client.configuration.ClaimInterval)
 	defer ticker.Stop()
+	renewAfter := time.Duration(assignment.LeaseRenewAfterMillis) * time.Millisecond
+	if renewAfter <= 0 {
+		renewAfter = 30 * time.Second
+	}
+	nextLeaseRenewal := time.Now().Add(renewAfter)
+	leaseDeadline := time.Now().Add(renewAfter * 2)
 	for {
 		select {
 		case <-ctx.Done():
@@ -411,6 +458,21 @@ func (client *Client) execute(ctx context.Context, assignment Assignment, report
 			}
 			return
 		case <-ticker.C:
+			if !time.Now().Before(nextLeaseRenewal) {
+				renewedAfter, err := client.renewLease(ctx, assignment)
+				if err != nil {
+					reportError(err)
+					if !time.Now().Before(leaseDeadline) {
+						cancelExecution()
+						<-resultChannel
+						return
+					}
+				} else {
+					renewAfter = renewedAfter
+					nextLeaseRenewal = time.Now().Add(renewAfter)
+					leaseDeadline = time.Now().Add(renewAfter * 2)
+				}
+			}
 			pending, err := client.pendingCancellation(ctx, assignment)
 			if err != nil {
 				reportError(err)
@@ -420,10 +482,28 @@ func (client *Client) execute(ctx context.Context, assignment Assignment, report
 				continue
 			}
 			cancelExecution()
-			result := <-resultChannel
-			settlement := result.Cancellation
-			if settlement == nil {
-				settlement = &CancellationExecutionResult{ProcessStopped: true, CleanupConfirmed: false, LogReference: result.LogReference}
+			settlement := &CancellationExecutionResult{ProcessStopped: false, CleanupConfirmed: false}
+			confirmationTimer := time.NewTimer(client.cancellationConfirmationTimeout())
+			select {
+			case result := <-resultChannel:
+				if result.Cancellation != nil {
+					settlement = result.Cancellation
+				} else {
+					settlement = &CancellationExecutionResult{ProcessStopped: true, CleanupConfirmed: false, LogReference: result.LogReference}
+				}
+				if !confirmationTimer.Stop() {
+					select {
+					case <-confirmationTimer.C:
+					default:
+					}
+				}
+			case <-confirmationTimer.C:
+				// A subprocess that ignores cancellation must never let the Worker
+				// silently release itself for new work. Reporting uncertainty keeps
+				// the reservation and quarantines this Worker until reconciliation.
+			case <-ctx.Done():
+				confirmationTimer.Stop()
+				return
 			}
 			if err := client.reportCancellation(ctx, assignment, *pending, *settlement); err != nil && !errors.Is(err, context.Canceled) {
 				reportError(err)
@@ -431,6 +511,45 @@ func (client *Client) execute(ctx context.Context, assignment Assignment, report
 			return
 		}
 	}
+}
+
+func (client *Client) cancellationConfirmationTimeout() time.Duration {
+	timeout := client.configuration.ClaimInterval * 2
+	if timeout < 100*time.Millisecond {
+		return 100 * time.Millisecond
+	}
+	if timeout > 10*time.Second {
+		return 10 * time.Second
+	}
+	return timeout
+}
+
+func (client *Client) renewLease(ctx context.Context, assignment Assignment) (time.Duration, error) {
+	payload, err := json.Marshal(map[string]any{
+		"job_id": assignment.JobID, "step_id": assignment.StepID, "fencing_token": assignment.FencingToken,
+	})
+	if err != nil {
+		return 0, err
+	}
+	response, err := client.workerRequest(ctx, "/worker/v1/steps/lease-renewal", payload)
+	if err != nil {
+		return 0, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		io.Copy(io.Discard, io.LimitReader(response.Body, 64<<10))
+		return 0, fmt.Errorf("%w: HTTP %d", ErrLeaseRenewalRejected, response.StatusCode)
+	}
+	var result struct {
+		Data struct {
+			LeaseExpiresAt   time.Time `json:"lease_expires_at"`
+			RenewAfterMillis int64     `json:"renew_after_millis"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(io.LimitReader(response.Body, 64<<10)).Decode(&result); err != nil || result.Data.LeaseExpiresAt.IsZero() || result.Data.RenewAfterMillis <= 0 {
+		return 0, ErrLeaseRenewalRejected
+	}
+	return time.Duration(result.Data.RenewAfterMillis) * time.Millisecond, nil
 }
 
 func (client *Client) pendingCancellation(ctx context.Context, assignment Assignment) (*cancellation, error) {
@@ -480,6 +599,10 @@ func (client *Client) reportCancellation(
 	pending cancellation,
 	result CancellationExecutionResult,
 ) error {
+	credential, err := client.secrets.Resolve(client.configuration.CredentialReference)
+	if err != nil || credential == "" {
+		return ErrCredentialUnavailable
+	}
 	payload, err := json.Marshal(map[string]any{
 		"cancellation_id": pending.ID, "job_id": assignment.JobID, "step_id": assignment.StepID,
 		"fencing_token": assignment.FencingToken, "process_stopped": result.ProcessStopped,
@@ -489,16 +612,45 @@ func (client *Client) reportCancellation(
 	if err != nil {
 		return err
 	}
-	response, err := client.workerRequest(ctx, "/worker/v1/steps/cancellation-result", payload)
+	for {
+		retry, reportErr := client.postCancellationResult(ctx, credential, payload)
+		if reportErr == nil || !retry {
+			return reportErr
+		}
+		timer := time.NewTimer(client.configuration.ClaimInterval)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
+func (client *Client) postCancellationResult(ctx context.Context, credential string, payload []byte) (bool, error) {
+	endpoint := *client.configuration.ControlURL
+	endpoint.Path = "/worker/v1/steps/cancellation-result"
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint.String(), bytes.NewReader(payload))
 	if err != nil {
-		return err
+		return false, err
 	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(response.Body, 64<<10))
-		return fmt.Errorf("Worker cancellation result HTTP %d: %s", response.StatusCode, body)
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Authorization", "Bearer "+credential)
+	request.Header.Set("X-Worker-ID", client.configuration.ID)
+	response, err := client.http.Do(request)
+	if err != nil {
+		return !errors.Is(err, context.Canceled), err
 	}
-	return nil
+	body, readErr := io.ReadAll(io.LimitReader(response.Body, 64<<10))
+	closeErr := response.Body.Close()
+	if readErr != nil || closeErr != nil {
+		return true, errors.Join(readErr, closeErr)
+	}
+	if response.StatusCode == http.StatusOK {
+		return false, nil
+	}
+	retry := response.StatusCode == http.StatusRequestTimeout || response.StatusCode == http.StatusTooManyRequests || response.StatusCode >= 500
+	return retry, fmt.Errorf("Worker cancellation result HTTP %d: %s", response.StatusCode, body)
 }
 
 func (client *Client) workerRequest(ctx context.Context, path string, payload []byte) (*http.Response, error) {
@@ -543,23 +695,59 @@ func (client *Client) reportResult(ctx context.Context, assignment Assignment, r
 	if err != nil {
 		return err
 	}
+	renewAfter := time.Duration(assignment.LeaseRenewAfterMillis) * time.Millisecond
+	if renewAfter <= 0 {
+		renewAfter = 30 * time.Second
+	}
+	nextLeaseRenewal := time.Now().Add(renewAfter)
+	for {
+		retry, reportErr := client.postResult(ctx, credential, payload)
+		if reportErr == nil || !retry {
+			return reportErr
+		}
+		if !time.Now().Before(nextLeaseRenewal) {
+			renewedAfter, renewalErr := client.renewLease(ctx, assignment)
+			if renewalErr == nil {
+				renewAfter = renewedAfter
+				nextLeaseRenewal = time.Now().Add(renewAfter)
+			}
+		}
+		wait := client.configuration.ClaimInterval
+		if untilRenewal := time.Until(nextLeaseRenewal); untilRenewal > 0 && untilRenewal < wait {
+			wait = untilRenewal
+		}
+		timer := time.NewTimer(wait)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
+func (client *Client) postResult(ctx context.Context, credential string, payload []byte) (bool, error) {
 	endpoint := *client.configuration.ControlURL
 	endpoint.Path = "/worker/v1/steps/result"
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint.String(), bytes.NewReader(payload))
 	if err != nil {
-		return err
+		return false, err
 	}
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Authorization", "Bearer "+credential)
 	request.Header.Set("X-Worker-ID", client.configuration.ID)
 	response, err := client.http.Do(request)
 	if err != nil {
-		return err
+		return !errors.Is(err, context.Canceled), err
 	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(response.Body, 64<<10))
-		return fmt.Errorf("Worker result HTTP %d: %s", response.StatusCode, body)
+	body, readErr := io.ReadAll(io.LimitReader(response.Body, 64<<10))
+	closeErr := response.Body.Close()
+	if readErr != nil || closeErr != nil {
+		return true, errors.Join(readErr, closeErr)
 	}
-	return nil
+	if response.StatusCode == http.StatusOK {
+		return false, nil
+	}
+	retry := response.StatusCode == http.StatusRequestTimeout || response.StatusCode == http.StatusTooManyRequests || response.StatusCode >= 500
+	return retry, fmt.Errorf("Worker result HTTP %d: %s", response.StatusCode, body)
 }

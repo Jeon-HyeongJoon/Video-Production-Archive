@@ -9,32 +9,31 @@ import (
 	"fmt"
 	"strings"
 
-	_ "modernc.org/sqlite"
-
+	"videoarchive/internal/adapter/sqlitebase"
 	"videoarchive/internal/core/organization"
 )
 
 var ErrRecordConflict = errors.New("organization record conflicts with stored content")
 
 type Store struct {
-	db *sql.DB
+	db      *sql.DB
+	release func() error
 }
 
 func Open(databasePath string) (*Store, error) {
-	db, err := sql.Open("sqlite", databasePath)
+	db, release, err := sqlitebase.Acquire(databasePath)
 	if err != nil {
 		return nil, err
 	}
-	db.SetMaxOpenConns(1)
-	store := &Store{db: db}
+	store := &Store{db: db, release: release}
 	if err := store.migrate(context.Background()); err != nil {
-		db.Close()
+		release()
 		return nil, err
 	}
 	return store, nil
 }
 
-func (store *Store) Close() error { return store.db.Close() }
+func (store *Store) Close() error { return store.release() }
 
 func (store *Store) migrate(ctx context.Context) error {
 	statements := []string{
@@ -145,35 +144,6 @@ func (store *Store) Receipts(ctx context.Context) ([]organization.ArchiveOrganiz
 	return receipts, rows.Err()
 }
 
-func (store *Store) LatestDecision(ctx context.Context, workspaceDriveID, folder string) (organization.OrganizationDecision, error) {
-	rows, err := store.db.QueryContext(ctx, `SELECT payload FROM organization_decisions`)
-	if err != nil {
-		return organization.OrganizationDecision{}, err
-	}
-	defer rows.Close()
-	var latest organization.OrganizationDecision
-	for rows.Next() {
-		var payload []byte
-		if err := rows.Scan(&payload); err != nil {
-			return organization.OrganizationDecision{}, err
-		}
-		var decision organization.OrganizationDecision
-		if err := json.Unmarshal(payload, &decision); err != nil {
-			return organization.OrganizationDecision{}, err
-		}
-		if decision.WorkspaceDriveID == workspaceDriveID && decision.Folder == folder && decision.Sequence > latest.Sequence {
-			latest = decision
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return organization.OrganizationDecision{}, err
-	}
-	if latest.ID == "" {
-		return organization.OrganizationDecision{}, sql.ErrNoRows
-	}
-	return latest, nil
-}
-
 func (store *Store) LatestDecisionForArchiveRun(ctx context.Context, archiveRunID, folder string) (organization.OrganizationDecision, error) {
 	rows, err := store.db.QueryContext(ctx, `SELECT payload FROM organization_decisions WHERE archive_run_id = ?`, strings.TrimSpace(archiveRunID))
 	if err != nil {
@@ -248,6 +218,33 @@ func (store *Store) AppendOverride(ctx context.Context, idempotencyKey, inputDig
 	var runID string
 	if err := tx.QueryRowContext(ctx, `SELECT archive_run_id FROM organization_decisions WHERE decision_id = ?`, previousDecisionID).Scan(&runID); err != nil {
 		return err
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT payload FROM organization_decisions WHERE archive_run_id = ?`, runID)
+	if err != nil {
+		return err
+	}
+	var latest organization.OrganizationDecision
+	for rows.Next() {
+		var storedPayload []byte
+		if err := rows.Scan(&storedPayload); err != nil {
+			rows.Close()
+			return err
+		}
+		var stored organization.OrganizationDecision
+		if json.Unmarshal(storedPayload, &stored) != nil {
+			rows.Close()
+			return ErrRecordConflict
+		}
+		if stored.Folder == decision.Folder && stored.Sequence > latest.Sequence {
+			latest = stored
+		}
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if latest.ID != previousDecisionID || decision.Sequence != latest.Sequence+1 ||
+		decision.WorkspaceDriveID != latest.WorkspaceDriveID || decision.InputRevision != latest.InputRevision {
+		return ErrRecordConflict
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO organization_decisions(decision_id, archive_run_id, payload) VALUES (?, ?, ?)`, decision.ID, runID, payload); err != nil {
 		return err

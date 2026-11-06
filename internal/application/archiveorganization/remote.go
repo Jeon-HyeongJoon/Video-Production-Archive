@@ -130,7 +130,7 @@ func (service *RemoteStartService) Start(ctx context.Context, request StartReque
 	replayed := false
 	if snapshot, loadErr := service.states.Load(request.ArchiveRunID); loadErr == nil {
 		run, decodeErr := archiverun.Decode(snapshot)
-		if decodeErr != nil || !sameRunSelection(run, candidate.WorkerID, candidate.StorageID, candidate.VolumeID, candidate.PhysicalDeviceID, archiveStorage.StorageID, folderScope, request.SelectedBy) {
+		if decodeErr != nil || !sameRunSelection(run, request.IdempotencyKey, candidate.WorkerID, candidate.StorageID, candidate.VolumeID, candidate.PhysicalDeviceID, archiveStorage.StorageID, folderScope, request.SelectedBy) {
 			return Result{}, command.ErrIdempotencyConflict
 		}
 		replayed = true
@@ -139,7 +139,8 @@ func (service *RemoteStartService) Start(ctx context.Context, request StartReque
 		Actor: request.SelectedBy, RequestedVia: "APPLICATION", TargetID: request.ArchiveRunID, ExpectedRevision: 0,
 		IdempotencyKey: request.IdempotencyKey + ":archive-run",
 		Parameters: map[string]any{
-			"worker_id": candidate.WorkerID, "source_storage_id": candidate.StorageID,
+			"start_idempotency_key": request.IdempotencyKey,
+			"worker_id":             candidate.WorkerID, "source_storage_id": candidate.StorageID,
 			"source_volume_id": candidate.VolumeID, "source_physical_device_id": candidate.PhysicalDeviceID,
 			"archive_storage_id": archiveStorage.StorageID, "folder_discovery_revision": request.InputRevision,
 			"folder_ids": folderScope.FolderIDs(), "selected_by": request.SelectedBy,
@@ -148,6 +149,17 @@ func (service *RemoteStartService) Start(ctx context.Context, request StartReque
 		return Result{}, errors.Join(ErrStartRejected, executeErr)
 	}
 	inspectionJobID := stableID("JOB-INSPECTION", request.ArchiveRunID)
+	if replayed {
+		if existing, loadErr := service.states.Load(inspectionJobID); loadErr == nil {
+			state, decodeErr := job.Decode(existing)
+			if decodeErr != nil || state.TemplateName != pipeline.ArchiveIntakeInspection().Name {
+				return Result{}, command.ErrIdempotencyConflict
+			}
+			return Result{Receipt: pendingOrganizationReceipt(request, storedSession, candidate, folderScope), Replayed: true}, nil
+		} else if !errors.Is(loadErr, command.ErrTargetNotFound) {
+			return Result{}, loadErr
+		}
+	}
 	template := pipeline.ArchiveIntakeInspection()
 	manifestID := stableID("MEDIA-INSPECTION", request.ArchiveRunID)
 	spec, err := execution.NewStepExecutionSpec(execution.StepExecutionSpec{
@@ -181,14 +193,19 @@ func (service *RemoteStartService) Start(ctx context.Context, request StartReque
 	}); err != nil {
 		return Result{}, err
 	}
+	pending := pendingOrganizationReceipt(request, storedSession, candidate, folderScope)
+	return Result{Receipt: pending, Replayed: replayed}, nil
+}
+
+func pendingOrganizationReceipt(request StartRequest, session coreintake.Session, candidate coreintake.Candidate, scope organization.FolderScope) organization.ArchiveOrganizationReceipt {
 	pending := organization.ArchiveOrganizationReceipt{
-		ID: request.ArchiveRunID, IdempotencyKey: request.IdempotencyKey, SessionID: storedSession.ID,
+		ID: request.ArchiveRunID, IdempotencyKey: request.IdempotencyKey, SessionID: session.ID,
 		InputRevision: request.InputRevision, WorkspaceDriveID: candidate.VolumeID, WorkerID: candidate.WorkerID,
 	}
-	for _, folderID := range folderScope.FolderIDs() {
+	for _, folderID := range scope.FolderIDs() {
 		pending.Folders = append(pending.Folders, organization.CoordinatedFolder{Folder: folderID})
 	}
-	return Result{Receipt: pending, Replayed: replayed}, nil
+	return pending
 }
 
 func (service *RemoteStartService) validateLiveScope(workerID, sourceStorageID, archiveStorageID string, revision uint64, selected []string) ([]string, uint64, uint64, error) {
@@ -254,8 +271,8 @@ func validateStartRequest(request StartRequest) error {
 	return nil
 }
 
-func sameRunSelection(run archiverun.State, workerID, sourceStorageID, volumeID, physicalDeviceID, archiveStorageID string, scope organization.FolderScope, selectedBy command.Actor) bool {
-	return run.WorkerID == workerID && run.SourceStorageID == sourceStorageID && run.SourceVolumeID == volumeID &&
+func sameRunSelection(run archiverun.State, startIdempotencyKey, workerID, sourceStorageID, volumeID, physicalDeviceID, archiveStorageID string, scope organization.FolderScope, selectedBy command.Actor) bool {
+	return run.StartIdempotencyKey == startIdempotencyKey && run.WorkerID == workerID && run.SourceStorageID == sourceStorageID && run.SourceVolumeID == volumeID &&
 		run.SourcePhysicalDeviceID == physicalDeviceID && run.ArchiveStorageID == archiveStorageID &&
 		run.FolderDiscoveryRevision == scope.DiscoveryRevision() && equalStrings(run.FolderIDs, scope.FolderIDs()) && run.SelectedBy == selectedBy
 }

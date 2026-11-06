@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"videoarchive/internal/application/archiveworkspace"
@@ -123,6 +124,29 @@ func (coordinator *Coordinator) dispatchOnce(ctx context.Context, ignored map[st
 		return dispatchEmpty, "", err
 	}
 	candidates := coordinator.workers.DispatchCandidates()
+	quarantinedWorkers := make(map[string]bool)
+	for _, reservation := range reservations {
+		state, found := states[reservation.JobID]
+		if !found {
+			continue
+		}
+		stepID := strings.TrimPrefix(reservation.StepID, reservation.JobID+"/")
+		reservedStep := findStep(&state, stepID)
+		if reservedStep == nil || reservedStep.Workflow.ExecutionLease != nil {
+			continue
+		}
+		switch reservedStep.Workflow.State {
+		case workflow.Running, workflow.Verifying, workflow.Paused:
+			quarantinedWorkers[reservation.WorkerID] = true
+		}
+	}
+	filteredCandidates := candidates[:0]
+	for _, candidate := range candidates {
+		if !quarantinedWorkers[candidate.Definition.ID] {
+			filteredCandidates = append(filteredCandidates, candidate)
+		}
+	}
+	candidates = filteredCandidates
 	for index := range candidates {
 		candidates[index].Metrics, _ = workercapacity.Account(candidates[index].Metrics, reservations, candidates[index].Definition.ID)
 	}

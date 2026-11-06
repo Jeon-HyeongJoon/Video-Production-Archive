@@ -369,7 +369,7 @@ func (coordinator *Coordinator) createFolderJob(request Request, decision organi
 	if err != nil {
 		return "", err
 	}
-	jobID := stableID("JOB", request.ArchiveRunID, request.Session.Session.ID, strconv.FormatUint(request.InputRevision, 10), decision.Folder)
+	jobID := FolderJobID(request.ArchiveRunID, request.Session.Session.ID, request.InputRevision, decision.Folder)
 	spec, err := firstWorkerSpec(request.ArchiveRunID, jobID, template.Name, request.Session.Session.StorageID, request.ArchiveStorageID, decision)
 	if err != nil {
 		return "", err
@@ -396,6 +396,13 @@ func (coordinator *Coordinator) createFolderJob(request Request, decision organi
 		return "", err
 	}
 	return result.TargetID, nil
+}
+
+// FolderJobID is the stable identity of the stage-one Job owned by one folder
+// in one ArchiveRun. Resolved HOLD decisions reuse this identity so projections
+// never have to choose a Job from a different run by recency or list order.
+func FolderJobID(archiveRunID, intakeSessionID string, inputRevision uint64, folder string) string {
+	return stableID("JOB", strings.TrimSpace(archiveRunID), strings.TrimSpace(intakeSessionID), strconv.FormatUint(inputRevision, 10), strings.TrimSpace(folder))
 }
 
 func firstWorkerSpec(archiveRunID, jobID, templateName, sourceStorageID, workingStorageID string, decision organization.OrganizationDecision) (execution.StepExecutionSpec, error) {

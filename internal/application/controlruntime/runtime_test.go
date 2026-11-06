@@ -20,12 +20,12 @@ import (
 	"time"
 
 	"videoarchive/internal/adapter/bootconfig"
+	"videoarchive/internal/adapter/controlruntime"
 	"videoarchive/internal/adapter/mcpproxy"
 	"videoarchive/internal/adapter/sqlitecommand"
 	"videoarchive/internal/adapter/sqlitestorage"
 	"videoarchive/internal/adapter/workerconfig"
 	"videoarchive/internal/application/archiveorganization"
-	"videoarchive/internal/application/controlruntime"
 	"videoarchive/internal/application/workerclient"
 	"videoarchive/internal/core/archive"
 	"videoarchive/internal/core/asset"
@@ -178,6 +178,14 @@ storage:
 	if created.Code != http.StatusCreated || !strings.Contains(created.Body.String(), `"folder_count":1`) {
 		t.Fatalf("remote Archive Run start returned %d: %s", created.Code, created.Body.String())
 	}
+	pendingReplay := runtimeRequest(runtime.Handler(), http.MethodPost, "/api/v1/archive-intake/runs", requestBody, cookie, csrfToken, "http://127.0.0.1:8080")
+	if pendingReplay.Code != http.StatusOK || !strings.Contains(pendingReplay.Body.String(), `"replayed":true`) {
+		t.Fatalf("pending Archive Run replay returned %d: %s", pendingReplay.Code, pendingReplay.Body.String())
+	}
+	wrongKey := strings.Replace(requestBody, `"idempotency_key":"remote:start:1"`, `"idempotency_key":"remote:start:other"`, 1)
+	if conflict := runtimeRequest(runtime.Handler(), http.MethodPost, "/api/v1/archive-intake/runs", wrongKey, cookie, csrfToken, "http://127.0.0.1:8080"); conflict.Code != http.StatusConflict {
+		t.Fatalf("same ArchiveRun ID with another idempotency key was replayed: %d %s", conflict.Code, conflict.Body.String())
+	}
 	pending := runtimeRequest(runtime.Handler(), http.MethodGet, "/api/v1/archive-intake", "", nil, "", "")
 	if pending.Code != http.StatusOK || !strings.Contains(pending.Body.String(), `"archive_run_id":"RUN-REMOTE-1"`) ||
 		!strings.Contains(pending.Body.String(), `"archive_run_state":"STAGE_ONE_RUNNING"`) ||
@@ -251,6 +259,11 @@ storage:
 		t.Fatalf("Worker inspection result returned %d: %s job=%s workspace=%s", settled.Code, settled.Body.String(), detail.Body.String(), workspace.Body.String())
 	}
 	jobs := runtimeRequest(runtime.Handler(), http.MethodGet, "/api/v1/jobs", "", nil, "", "")
+	for deadline := time.Now().Add(3 * time.Second); time.Now().Before(deadline) &&
+		strings.Count(jobs.Body.String(), `"template_name":"archive-intake-as-is"`) != 1; {
+		time.Sleep(20 * time.Millisecond)
+		jobs = runtimeRequest(runtime.Handler(), http.MethodGet, "/api/v1/jobs", "", nil, "", "")
+	}
 	if jobs.Code != http.StatusOK || strings.Count(jobs.Body.String(), `"template_name":"archive-intake-inspection"`) != 1 ||
 		strings.Count(jobs.Body.String(), `"template_name":"archive-intake-as-is"`) != 1 || strings.Contains(jobs.Body.String(), "event-b") {
 		t.Fatalf("selected Folder Job was not created exactly once: %d %s", jobs.Code, jobs.Body.String())
@@ -495,6 +508,14 @@ func TestBrowserCommandCreatesPersistentJobWithCSRFAndIdempotency(t *testing.T) 
 		t.Fatalf("mutation without browser proof returned %d: %s", denied.Code, denied.Body.String())
 	}
 	cookie, token := runtimeSession(t, runtime.Handler())
+	secondTab := httptest.NewRequest(http.MethodGet, "/api/v1/session", nil)
+	secondTab.RemoteAddr = "127.0.0.1:45000"
+	secondTab.AddCookie(cookie)
+	secondSession := httptest.NewRecorder()
+	runtime.Handler().ServeHTTP(secondSession, secondTab)
+	if secondSession.Code != http.StatusOK || !strings.Contains(secondSession.Body.String(), token) || len(secondSession.Result().Cookies()) != 0 {
+		t.Fatalf("second tab rotated the shared CSRF session: %d %s cookies=%v", secondSession.Code, secondSession.Body.String(), secondSession.Result().Cookies())
+	}
 	created := runtimeRequest(runtime.Handler(), http.MethodPost, "/api/v1/jobs", create, cookie, token, "http://127.0.0.1:8080")
 	if created.Code != http.StatusCreated || !strings.Contains(created.Body.String(), `"revision":1`) {
 		t.Fatalf("create returned %d: %s", created.Code, created.Body.String())
@@ -928,6 +949,48 @@ func TestExplicitActionCardExecutionRunsProposedCommandAndUpdatesProjection(t *t
 		rejectedJob.Code != http.StatusNotFound || refusedExecution.Code == http.StatusOK {
 		t.Fatalf("rejected card changed domain state: sessions=%s job=%d execute=%d %s", afterReject.Body.String(), rejectedJob.Code, refusedExecution.Code, refusedExecution.Body.String())
 	}
+
+	raceProposal := `{"session_id":"SESSION-ACTION-1","turn_id":"TURN-ACTION-1","fencing_token":1,"tool_call_id":"CALL-ACTION-RACE-1","command_id":"COMMAND-ACTION-RACE-1","idempotency_key":"CALL-ACTION-RACE-1","input_digest":"sha256:action-race","tool":"archive.jobs.create.v1","input":{"job_id":"JOB-ACTION-RACE-1","template_name":"final-edit","target_title":"경합 카드 작업","control_mode":"ARCHIVIST","reason":"race action card"}}`
+	if proposed = mcpRequest(runtime.MCPHandler(), http.MethodPost, "/mcp/v1/call", raceProposal, "runtime-service-secret"); proposed.Code != http.StatusAccepted {
+		t.Fatalf("race proposal returned %d: %s", proposed.Code, proposed.Body.String())
+	}
+	start := make(chan struct{})
+	responses := make(chan *httptest.ResponseRecorder, 2)
+	var wait sync.WaitGroup
+	for _, request := range []struct {
+		path string
+		body string
+	}{
+		{path: "/api/v1/action-cards/ACTION-CALL-ACTION-RACE-1/execute", body: `{}`},
+		{path: "/api/v1/action-cards/ACTION-CALL-ACTION-RACE-1/reject", body: `{"reason":"경합 거절"}`},
+	} {
+		request := request
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			<-start
+			responses <- runtimeRequest(runtime.Handler(), http.MethodPost, request.path, request.body, cookie, token, "http://127.0.0.1:8080")
+		}()
+	}
+	close(start)
+	wait.Wait()
+	close(responses)
+	successes := 0
+	for response := range responses {
+		if response.Code == http.StatusOK {
+			successes++
+		}
+	}
+	if successes != 1 {
+		t.Fatalf("execute and reject were not mutually exclusive: successes=%d", successes)
+	}
+	raceProjection := runtimeRequest(runtime.Handler(), http.MethodGet, "/api/v1/archivist-sessions", "", nil, "", "")
+	raceJob := runtimeRequest(runtime.Handler(), http.MethodGet, "/api/v1/jobs/JOB-ACTION-RACE-1", "", nil, "", "")
+	completed := strings.Contains(raceProjection.Body.String(), `"target_id":"JOB-ACTION-RACE-1","expected_revision":0,"state":"COMPLETED"`)
+	rejectedState := strings.Contains(raceProjection.Body.String(), `"target_id":"JOB-ACTION-RACE-1","expected_revision":0,"state":"REJECTED"`)
+	if completed == rejectedState || (completed && raceJob.Code != http.StatusOK) || (rejectedState && raceJob.Code != http.StatusNotFound) {
+		t.Fatalf("ActionCard race produced inconsistent effect: sessions=%s job=%d", raceProjection.Body.String(), raceJob.Code)
+	}
 }
 
 type runtimeSecret string
@@ -992,8 +1055,12 @@ func TestWorkerClaimsReservedStepAndAtomicallySettlesResultReservationAndProject
 	if settled.Code != http.StatusOK {
 		t.Fatalf("result returned %d: %s", settled.Code, settled.Body.String())
 	}
-	if stale := workerProtocolRequest(runtime.Handler(), "/worker/v1/steps/result", result, "service-secret"); stale.Code != http.StatusConflict {
-		t.Fatalf("stale result returned %d: %s", stale.Code, stale.Body.String())
+	if replayed := workerProtocolRequest(runtime.Handler(), "/worker/v1/steps/result", result, "service-secret"); replayed.Code != http.StatusOK {
+		t.Fatalf("identical result replay returned %d: %s", replayed.Code, replayed.Body.String())
+	}
+	changedResult := strings.Replace(result, "evidence://worker-loop", "evidence://changed", 1)
+	if stale := workerProtocolRequest(runtime.Handler(), "/worker/v1/steps/result", changedResult, "service-secret"); stale.Code != http.StatusConflict {
+		t.Fatalf("changed result replay returned %d: %s", stale.Code, stale.Body.String())
 	}
 	detail := runtimeRequest(runtime.Handler(), http.MethodGet, "/api/v1/jobs/JOB-WORKER-LOOP-1", "", nil, "", "")
 	if detail.Code != http.StatusOK || !strings.Contains(detail.Body.String(), `"id":"inspect_inputs","state":"COMPLETED"`) ||
@@ -1169,6 +1236,66 @@ func TestWorkerCancellationStopAndCleanupSettlesJobRemainderAtomically(t *testin
 	case runErr := <-errorsSeen:
 		t.Fatalf("Worker cancellation loop reported error: %v", runErr)
 	default:
+	}
+}
+
+// Requirement: CAN-005
+func TestCancellationPartialReleasesStoppedProcessAndUncertainProcessQuarantinesWorker(t *testing.T) {
+	configuration := runtimeTestConfiguration(t)
+	now := time.Date(2026, 10, 29, 13, 45, 0, 0, time.UTC)
+	runtime, err := controlruntime.OpenWithDependencies(context.Background(), configuration, "v1-test", controlruntime.Dependencies{
+		Secrets: runtimeSecret("service-secret"), Now: func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer runtime.Close()
+	cookie, token := runtimeSession(t, runtime.Handler())
+
+	createRunningWorkerJob(t, runtime.Handler(), configuration.DatabasePath, cookie, token, "JOB-CANCEL-PARTIAL", 1, now)
+	partialCancel := `{"command_id":"COMMAND-CANCEL-PARTIAL","idempotency_key":"JOB-CANCEL-PARTIAL:cancel","reason":"stop with known published effect","expected_revision":3}`
+	if response := runtimeRequest(runtime.Handler(), http.MethodPost, "/api/v1/jobs/JOB-CANCEL-PARTIAL/cancel", partialCancel, cookie, token, "http://127.0.0.1:8080"); response.Code != http.StatusOK {
+		t.Fatalf("partial cancellation request returned %d: %s", response.Code, response.Body.String())
+	}
+	partialResult := `{"cancellation_id":"COMMAND-CANCEL-PARTIAL:inspect_inputs","job_id":"JOB-CANCEL-PARTIAL","step_id":"inspect_inputs","fencing_token":1,"process_stopped":true,"cleanup_confirmed":false,"external_effect_references":["scratch-main:staging/published.mp4"],"log_reference":"worker://partial"}`
+	if response := workerProtocolRequest(runtime.Handler(), "/worker/v1/steps/cancellation-result", partialResult, "service-secret"); response.Code != http.StatusOK {
+		t.Fatalf("partial cancellation result returned %d: %s", response.Code, response.Body.String())
+	}
+	if response := workerProtocolRequest(runtime.Handler(), "/worker/v1/steps/cancellation-result", partialResult, "service-secret"); response.Code != http.StatusOK {
+		t.Fatalf("identical cancellation result replay returned %d: %s", response.Code, response.Body.String())
+	}
+	partialDetail := runtimeRequest(runtime.Handler(), http.MethodGet, "/api/v1/jobs/JOB-CANCEL-PARTIAL", "", nil, "", "")
+	if !strings.Contains(partialDetail.Body.String(), `"state":"CANCELLED"`) ||
+		!strings.Contains(partialDetail.Body.String(), `"error_class":"CANCELLATION_PARTIAL"`) {
+		t.Fatalf("known remaining effect was not projected as partial cancellation: %s", partialDetail.Body.String())
+	}
+
+	createRunningWorkerJob(t, runtime.Handler(), configuration.DatabasePath, cookie, token, "JOB-CANCEL-UNCERTAIN", 2, now.Add(time.Minute))
+	uncertainCancel := `{"command_id":"COMMAND-CANCEL-UNCERTAIN","idempotency_key":"JOB-CANCEL-UNCERTAIN:cancel","reason":"process state unknown","expected_revision":3}`
+	if response := runtimeRequest(runtime.Handler(), http.MethodPost, "/api/v1/jobs/JOB-CANCEL-UNCERTAIN/cancel", uncertainCancel, cookie, token, "http://127.0.0.1:8080"); response.Code != http.StatusOK {
+		t.Fatalf("uncertain cancellation request returned %d: %s", response.Code, response.Body.String())
+	}
+	uncertainResult := `{"cancellation_id":"COMMAND-CANCEL-UNCERTAIN:inspect_inputs","job_id":"JOB-CANCEL-UNCERTAIN","step_id":"inspect_inputs","fencing_token":1,"process_stopped":false,"cleanup_confirmed":false,"external_effect_references":[],"log_reference":"worker://uncertain"}`
+	if response := workerProtocolRequest(runtime.Handler(), "/worker/v1/steps/cancellation-result", uncertainResult, "service-secret"); response.Code != http.StatusOK {
+		t.Fatalf("uncertain cancellation result returned %d: %s", response.Code, response.Body.String())
+	}
+	queuedCreate := `{"job_id":"JOB-AFTER-UNCERTAIN","command_id":"COMMAND-AFTER-UNCERTAIN","idempotency_key":"JOB-AFTER-UNCERTAIN:create","reason":"must remain queued while Worker is isolated","template_name":"large-file-intake","target_title":"격리 뒤 작업","control_mode":"ARCHIVIST","expected_revision":0}`
+	if response := runtimeRequest(runtime.Handler(), http.MethodPost, "/api/v1/jobs", queuedCreate, cookie, token, "http://127.0.0.1:8080"); response.Code != http.StatusCreated {
+		t.Fatalf("queued job creation returned %d: %s", response.Code, response.Body.String())
+	}
+	if claim := workerProtocolRequest(runtime.Handler(), "/worker/v1/steps/claim", "", "service-secret"); claim.Code != http.StatusNoContent {
+		t.Fatalf("quarantined Worker received new execution: %d %s", claim.Code, claim.Body.String())
+	}
+	ledger := openLedger(t, configuration.DatabasePath)
+	defer ledger.Close()
+	var partialReservations, uncertainReservations, partialEvents, uncertainEvents, partialCompletions int
+	ledger.QueryRow(`SELECT COUNT(*) FROM resource_reservations WHERE job_id = 'JOB-CANCEL-PARTIAL' AND released_at IS NULL`).Scan(&partialReservations)
+	ledger.QueryRow(`SELECT COUNT(*) FROM resource_reservations WHERE job_id = 'JOB-CANCEL-UNCERTAIN' AND released_at IS NULL`).Scan(&uncertainReservations)
+	ledger.QueryRow(`SELECT COUNT(*) FROM domain_events WHERE CAST(payload AS TEXT) LIKE '%StepCancellationPartiallySettled%'`).Scan(&partialEvents)
+	ledger.QueryRow(`SELECT COUNT(*) FROM worker_cancellation_events WHERE cancellation_id = 'COMMAND-CANCEL-UNCERTAIN:inspect_inputs' AND event_type = 'ExternalEffectUncertain'`).Scan(&uncertainEvents)
+	ledger.QueryRow(`SELECT COUNT(*) FROM worker_completion_outbox WHERE job_id = 'JOB-CANCEL-PARTIAL'`).Scan(&partialCompletions)
+	if partialReservations != 0 || uncertainReservations != 1 || partialEvents != 1 || uncertainEvents != 1 || partialCompletions != 1 {
+		t.Fatalf("cancellation reconciliation partial_reservations=%d uncertain_reservations=%d partial_events=%d uncertain_events=%d completions=%d", partialReservations, uncertainReservations, partialEvents, uncertainEvents, partialCompletions)
 	}
 }
 

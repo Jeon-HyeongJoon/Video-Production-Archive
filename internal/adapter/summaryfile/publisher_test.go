@@ -19,7 +19,7 @@ import (
 
 const checksumA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
-// Requirement: SUM-002
+// Planned contract: SUM-002
 func TestSummaryPublisherVerifiesHumanFallbackJSONInsideStorageRootBeforePublishing(t *testing.T) {
 	directory := t.TempDir()
 	root, err := archive.OpenStorageRoot(directory)

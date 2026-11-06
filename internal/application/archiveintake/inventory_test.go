@@ -43,4 +43,11 @@ func TestInventoryReconcilesWorkerObservedCandidatesWithoutChangingRevisionForFr
 	if err != nil || candidate.Revision != 2 || candidate.Connected {
 		t.Fatalf("detachment was not reconciled: candidate=%+v err=%v", candidate, err)
 	}
+	if err := service.Reconcile(context.Background(), "worker-secondary", now.Add(3*time.Minute), attached); err != nil {
+		t.Fatal(err)
+	}
+	candidate, err = repository.Candidate(context.Background(), "volume-usb")
+	if err != nil || candidate.Revision != 3 || !candidate.Connected || candidate.WorkerID != "worker-secondary" {
+		t.Fatalf("same physical volume was not reassigned to its current Worker: candidate=%+v err=%v", candidate, err)
+	}
 }

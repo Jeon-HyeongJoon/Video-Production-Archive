@@ -3,6 +3,7 @@ package archivecatalog
 import (
 	"encoding/csv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -13,7 +14,8 @@ import (
 
 // Requirement: ORG-009
 func TestPublisherWritesVerifiedRFC4180CatalogWithEveryOriginalInDeterministicOrder(t *testing.T) {
-	root, err := archive.OpenStorageRoot(t.TempDir())
+	rootDirectory := t.TempDir()
+	root, err := archive.OpenStorageRoot(rootDirectory)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,6 +79,47 @@ func TestPublisherWritesVerifiedRFC4180CatalogWithEveryOriginalInDeterministicOr
 	}
 	if _, err := root.ReadFile("archive-catalog.csv.partial"); err == nil {
 		t.Fatal("temporary catalog remained after publish")
+	}
+
+	secondRoot, err := archive.OpenStorageRoot(rootDirectory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer secondRoot.Close()
+	secondPublisher, err := NewPublisher(secondRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	concurrentRows := []organization.ArchiveCatalogRow{
+		catalogRow("DRIVE-3", "event-c", "ASSET-5", "five.mp4", vocabulary.OrganizationAsIs, "DECISION-6", "MEDIA-5"),
+		catalogRow("DRIVE-4", "event-d", "ASSET-6", "six.mp4", vocabulary.OrganizationAsIs, "DECISION-7", "MEDIA-6"),
+	}
+	publishers := []*Publisher{publisher, secondPublisher}
+	var wait sync.WaitGroup
+	errorsFound := make(chan error, 2)
+	for index := range concurrentRows {
+		index := index
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			_, publishErr := publishers[index].PublishMerged(request(concurrentRows[index].WorkspaceDriveID, []organization.ArchiveCatalogRow{concurrentRows[index]}))
+			errorsFound <- publishErr
+		}()
+	}
+	wait.Wait()
+	close(errorsFound)
+	for publishErr := range errorsFound {
+		if publishErr != nil {
+			t.Fatal(publishErr)
+		}
+	}
+	mergedPayload, err := root.ReadFile("archive-catalog.csv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mergedRecords, err := csv.NewReader(strings.NewReader(string(mergedPayload))).ReadAll()
+	if err != nil || len(mergedRecords) != 7 {
+		t.Fatalf("concurrent StorageRoot publishers lost catalog rows: records=%d err=%v", len(mergedRecords), err)
 	}
 }
 
