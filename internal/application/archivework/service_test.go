@@ -14,6 +14,7 @@ import (
 	"videoarchive/internal/core/command"
 	"videoarchive/internal/core/execution"
 	"videoarchive/internal/core/job"
+	"videoarchive/internal/core/mediaanalysis"
 	"videoarchive/internal/core/vocabulary"
 	"videoarchive/internal/core/workflow"
 )
@@ -124,7 +125,20 @@ func TestArchiveWorkReadsPersistedSourceVideoFactsForOneJob(t *testing.T) {
 	}
 	state.Steps[0].ExecutionSpec = &execution.StepExecutionSpec{Parameters: execution.StepExecutionParameters{SourceInputs: inputs}}
 	state.Steps = append(state.Steps, job.Step{ExecutionSpec: &execution.StepExecutionSpec{Parameters: execution.StepExecutionParameters{SourceInputs: inputs}}})
-	service, err := New(fixedSnapshots{snapshots: []command.Snapshot{snapshotOf(t, state.ID, state.Revision, state)}}, fixedJobs{}, fixedDrives{})
+	inspection := linkedJob("JOB-INSPECTION-MEDIA", "archive-intake-inspection", "volume-e", "ARCHIVE-RUN-MEDIA", "", workflow.Completed, now)
+	drives := fixedDrives{views: []archiveintakeworkspace.DriveView{{
+		ArchiveRunID: "ARCHIVE-RUN-MEDIA", Folders: []archiveintakeworkspace.FolderView{{
+			Folder: "event-a", ClassificationAssets: []archiveintakeworkspace.ClassificationAssetView{{
+				OriginalAssetID: "ASSET-1", RelativePath: "event-a/A001.mp4", Checksum: strings.Repeat("a", 64),
+				DurationMillis: 60_000, SizeBytes: 45_000_000, BitRate: 6_000_000, Containers: []string{"mp4"},
+				VideoStreams: []mediaanalysis.VideoStream{{Codec: "h264", Width: 1920, Height: 1080, BitRate: 5_700_000}},
+				AudioStreams: []mediaanalysis.AudioStream{{Codec: "aac", BitRate: 192_000, SampleRateHz: 48_000, Channels: 2}},
+			}},
+		}},
+	}}}
+	service, err := New(fixedSnapshots{snapshots: []command.Snapshot{
+		snapshotOf(t, state.ID, state.Revision, state), snapshotOf(t, inspection.ID, inspection.Revision, inspection),
+	}}, fixedJobs{}, drives)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,6 +152,11 @@ func TestArchiveWorkReadsPersistedSourceVideoFactsForOneJob(t *testing.T) {
 		media[0].Container != "mp4" || media[0].VideoCodec != "h264" || media[0].Width != 1920 || media[0].Height != 1080 ||
 		media[0].VideoBitRateBPS != 5_700_000 || media[0].AudioCodec != "aac" {
 		t.Fatalf("persisted source video facts were not projected without duplicates: %+v", media)
+	}
+	inspected, err := service.Media(context.Background(), inspection.ID)
+	if err != nil || len(inspected) != 1 || inspected[0].OriginalName != "A001.mp4" || inspected[0].SizeBytes != 45_000_000 ||
+		inspected[0].Container != "mp4" || inspected[0].VideoCodec != "h264" || inspected[0].AudioCodec != "aac" {
+		t.Fatalf("inspection Job did not reuse persisted ArchiveRun observations: media=%+v err=%v", inspected, err)
 	}
 }
 

@@ -168,7 +168,7 @@ func (service *Service) Detail(ctx context.Context, workID string) (View, error)
 // Media returns video facts only when a caller asks for one addressable Job.
 // The ordinary work list and detail projections therefore stay small even
 // when an ArchiveRun contains many source videos.
-func (service *Service) Media(_ context.Context, jobID string) ([]VideoInfo, error) {
+func (service *Service) Media(ctx context.Context, jobID string) ([]VideoInfo, error) {
 	jobID = strings.TrimSpace(jobID)
 	if jobID == "" {
 		return nil, ErrJobNotFound
@@ -182,7 +182,26 @@ func (service *Service) Media(_ context.Context, jobID string) ([]VideoInfo, err
 		if decodeErr != nil || state.ID != jobID {
 			continue
 		}
-		return mediaFromJob(state), nil
+		media := mediaFromJob(state)
+		if len(media) > 0 || state.TemplateName != "archive-intake-inspection" {
+			return media, nil
+		}
+		runID := jobArchiveRunID(state)
+		drives, projectionErr := service.drives.Projection(ctx)
+		if projectionErr != nil {
+			return nil, projectionErr
+		}
+		for _, drive := range drives {
+			if drive.ArchiveRunID != runID {
+				continue
+			}
+			assets := make([]archiveintakeworkspace.ClassificationAssetView, 0)
+			for _, folder := range drive.Folders {
+				assets = append(assets, folder.ClassificationAssets...)
+			}
+			return mediaFromClassificationAssets(assets), nil
+		}
+		return media, nil
 	}
 	return nil, ErrJobNotFound
 }
@@ -233,13 +252,51 @@ func mediaFromJob(state job.State) []VideoInfo {
 			AudioChannelLayout: input.AudioChannelLayout, ProfileReference: input.ProfileReference,
 		})
 	}
+	sortVideoInfo(result)
+	return result
+}
+
+func mediaFromClassificationAssets(assets []archiveintakeworkspace.ClassificationAssetView) []VideoInfo {
+	seen := make(map[string]bool, len(assets))
+	result := make([]VideoInfo, 0, len(assets))
+	for _, asset := range assets {
+		identity := strings.TrimSpace(asset.OriginalAssetID)
+		if identity == "" {
+			identity = strings.TrimSpace(asset.RelativePath)
+		}
+		if identity == "" || seen[identity] {
+			continue
+		}
+		seen[identity] = true
+		info := VideoInfo{
+			OriginalAssetID: asset.OriginalAssetID, OriginalName: path.Base(asset.RelativePath), RelativePath: asset.RelativePath,
+			Checksum: asset.Checksum, DurationMillis: asset.DurationMillis, SizeBytes: asset.SizeBytes,
+			Container: strings.Join(asset.Containers, ","), BitRateBPS: asset.BitRate,
+		}
+		if len(asset.VideoStreams) > 0 {
+			video := asset.VideoStreams[0]
+			info.VideoCodec, info.VideoProfile, info.Width, info.Height = video.Codec, video.Profile, video.Width, video.Height
+			info.FrameRateNumerator, info.FrameRateDenominator = video.FrameRate.Numerator, video.FrameRate.Denominator
+			info.VideoPixelFormat, info.VideoBitRateBPS = video.PixelFormat, video.BitRate
+		}
+		if len(asset.AudioStreams) > 0 {
+			audio := asset.AudioStreams[0]
+			info.AudioCodec, info.AudioProfile, info.AudioBitRateBPS = audio.Codec, audio.Profile, audio.BitRate
+			info.AudioSampleRateHz, info.AudioChannels, info.AudioChannelLayout = audio.SampleRateHz, audio.Channels, audio.ChannelLayout
+		}
+		result = append(result, info)
+	}
+	sortVideoInfo(result)
+	return result
+}
+
+func sortVideoInfo(result []VideoInfo) {
 	sort.Slice(result, func(i, j int) bool {
 		if result[i].RelativePath != result[j].RelativePath {
 			return result[i].RelativePath < result[j].RelativePath
 		}
 		return result[i].OriginalAssetID < result[j].OriginalAssetID
 	})
-	return result
 }
 
 func (service *Service) project(ctx context.Context) ([]View, error) {
