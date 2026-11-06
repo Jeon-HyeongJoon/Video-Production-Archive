@@ -7,7 +7,7 @@ from typing import Any
 from playwright.sync_api import expect, sync_playwright
 
 # Per-scene projection facts the screens must show without inference.
-MENUS = ["상태", "드라이브", "Worker"]
+MENUS = ["작업 관리", "연결 관리"]
 DRIVE = "#/drives/VOLUME-1"
 SCENES: dict[str, dict[str, Any]] = {
     "pre-run": {"route": DRIVE, "problems": ("3", "fault"), "phase": "intake", "prepare": "아카이브 실행 준비"},
@@ -29,8 +29,9 @@ SCENES: dict[str, dict[str, Any]] = {
         "words": {"INPUT": "분류 확인 필요"}, "panels": ["broken", "hold", "ready"], "stored": 5, "committed": 1,
         "detail": ("ready", ["분류", "QC", "보관", "오디오 추출", "STT", "자막", "전사 텍스트", "패키지 추가"]),
     },
-    # DSH-004: the 상태 screen of the 1단계 scene beside the Agent pane.
-    "status": {"route": "#/status", "problems": ("6", "fault"), "cards": 6},
+    # DSH-004/025: primary Job management and one addressable detail for JOB-SOURCE.
+    "jobs": {"route": "#/jobs", "menu": "jobs", "problems": ("6", "fault"), "rows": 3},
+    "job-detail": {"route": "#/jobs/JOB-SOURCE", "menu": "jobs", "problems": ("6", "fault")},
 }
 
 
@@ -61,12 +62,16 @@ def check_contract(page) -> None:
       const visibleText = []; const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
       while (walker.nextNode()) { const parent = walker.currentNode.parentElement; if (walker.currentNode.textContent.trim() && parent && parent.getClientRects().length && !parent.closest('.sr-only')) visibleText.push(walker.currentNode); }
       const box = (selector) => document.querySelector(selector).getBoundingClientRect();
+      const rgb = (value) => (value.match(/\d+(?:\.\d+)?/g) || []).slice(0, 3).map(Number);
       return {
         theme: html.dataset.theme, dark: theme('dark'), light: theme('light'), maxRadius: Math.max(0, ...radii),
         minTextSize: Math.min(...visibleText.map((text)=>parseFloat(getComputedStyle(text.parentElement).fontSize))),
         menus: [...document.querySelectorAll('#menu .menu-link .menu-label')].map((label)=>label.textContent.trim()),
-        side: box('.sidebar').right <= box('#view').left + 1 && document.querySelectorAll('#tree .tree-group').length > 0,
+        side: box('.sidebar').right <= box('#view').left + 1 && document.querySelectorAll('#tree .workspace-card').length > 0,
+        sideDetail: {sidebarRight: box('.sidebar').right, viewLeft: box('#view').left, workspaces: document.querySelectorAll('#tree .workspace-card').length},
         pane: (() => { const pane = box('#archivist-pane'); return pane.width > 0 && pane.left >= box('#view').right - 1 && pane.top <= 1; })(),
+        agentDark: (() => { const rgbValue=rgb(getComputedStyle(document.querySelector('.pane-body')).backgroundColor); return rgbValue.length === 3 && Math.max(...rgbValue) <= 12; })(),
+        agentHead: rgb(getComputedStyle(document.querySelector('.pane-head')).backgroundColor),
         viewWidth: box('#view').width,
         explanatory: visibleText.filter((text)=>!text.parentElement.closest('#archivist-pane')).some((text)=>/했습니다|입니다|하세요/.test(text.textContent)),
       };
@@ -75,7 +80,7 @@ def check_contract(page) -> None:
     if (
         contract["theme"] != "dark" or dark["canvas"] > 40 or light["canvas"] < 200
         or max(dark["chroma"], light["chroma"]) > 12 or min(dark["text"], light["text"]) < 4.5 or min(dark["mark"], light["mark"]) < 3
-        or contract["maxRadius"] > 2 or contract["minTextSize"] < 12
+        or contract["maxRadius"] > 2 or contract["minTextSize"] < 12 or not contract["agentDark"] or contract["agentHead"] != [27, 27, 27]
         or contract["menus"] != MENUS or not contract["side"] or not contract["pane"] or contract["viewWidth"] > 1440 or contract["explanatory"]
     ):
         raise AssertionError(f"Archive Workspace visual contract failed: {contract}")
@@ -135,18 +140,30 @@ def check_drive(page, scene) -> None:
     detail.locator(".steps-toggle").click()
 
 
-def check_status(page, scene) -> None:
-    expect(page.locator("#problem-cards .problem-card")).to_have_count(scene["cards"])
-    expect(page.locator("#doing-rows .overview")).to_have_count(1)
-    expect(page.locator("#doing-rows .doing-jobs .doing-item")).to_have_count(2)
-    work = page.locator('#doing-rows .overview[data-drive-id="VOLUME-1"]')
-    expect(work.locator('[data-fact="progress"] .progress-pct')).to_have_text("24%")
-    expect(work.locator('[data-fact="worker"]')).to_contain_text("WORKER-1")
-    render = work.locator('.flow-node[data-step="render"]')
-    expect(render).to_have_attribute("data-state", "now")
-    expect(render.locator('.flow-badge[data-signal="fault"]')).to_have_text("1")
-    expect(page.locator("#archivist-availability")).to_have_text("처리 중")
-    expect(page.locator(".pane-refs")).to_be_hidden()
+def check_jobs(page, scene) -> None:
+    expect(page.locator('#active-jobs .job-row[data-job-id="JOB-RUNNING"]')).to_have_count(1)
+    expect(page.locator('#queued-jobs .job-row[data-job-id="JOB-QUEUED"]')).to_have_count(1)
+    expect(page.locator("#attention-jobs")).to_have_attribute("open", "")
+    expect(page.locator("#attention-jobs > summary")).to_have_text("확인 필요1")
+    expect(page.locator('#attention-jobs .job-row[data-job-id="JOB-REVIEW"]')).to_have_count(1)
+    expect(page.locator("#completed-jobs")).to_have_attribute("open", "")
+    expect(page.locator("#completed-jobs > summary")).to_have_text("완료1")
+    completed = page.locator('#completed-jobs .completed-row[data-job-id="JOB-SOURCE"]')
+    expect(completed).to_have_attribute("href", "#/jobs/JOB-SOURCE")
+    expect(completed).to_contain_text("source.mp4")
+    expect(completed).to_contain_text("86 → 1")
+    expect(completed).to_contain_text("archive-main")
+
+
+def check_job_detail(page, _scene) -> None:
+    expect(page.locator("#job-title")).to_have_text("source.mp4")
+    expect(page.locator("#job-summary")).to_contain_text("JOB-SOURCE")
+    expect(page.locator('#job-steps .stage-row[data-step="organize"] .stage-state')).to_contain_text("COMPLETED · 100%")
+    result = page.locator('#job-result[data-package-id="VP-20261030-SOURCE"]')
+    expect(result).to_contain_text("source.mp4")
+    expect(result).to_contain_text("86 → 1")
+    expect(result).to_contain_text("archive-main")
+    expect(result).to_contain_text("ARCHIVE-RUN-1")
 
 
 def main() -> None:
@@ -163,12 +180,15 @@ def main() -> None:
             viewport={"width": 1440, "height": 900}, color_scheme="dark", device_scale_factor=1,
             locale="ko-KR", timezone_id="Asia/Seoul",
         )
+        page_errors = []
+        page.on("pageerror", lambda error: page_errors.append(str(error)))
         page.clock.set_fixed_time(datetime(2026, 10, 30, 12, 0, 5, tzinfo=timezone.utc))
         page.goto(url + "/" + scene["route"], wait_until="networkidle")
-        menu = "status" if scene["route"] == "#/status" else "drives"
+        menu = scene.get("menu", "connections")
         expect(page.locator("#menu .menu-link[aria-current=page]")).to_have_attribute("data-menu", menu)
-        expect(page.locator("#drive-count")).to_have_text("2")
-        expect(page.locator("#worker-count")).to_have_text("2")
+        expect(page.locator("#job-count")).to_have_text("4")
+        expect(page.locator("#connection-count")).to_have_text("5")
+        expect(page.locator('#tree .workspace-card[data-job-id="JOB-RUNNING"]')).to_contain_text("JOB-RUNNING")
         count, signal = scene["problems"]
         expect(page.locator("#alert-count")).to_have_text(count)
         expect(page.locator("#alert-count")).to_have_attribute("data-signal", signal)
@@ -176,8 +196,12 @@ def main() -> None:
         expect(page.locator("#stale-banner")).to_be_hidden()
         expect(page.locator("#fresh-banner")).to_be_hidden()
         expect(page.locator("#archivist-panel")).to_be_visible()
-        if menu == "status":
-            check_status(page, scene)
+        if page_errors:
+            raise AssertionError(f"Archive Workspace page error: {page_errors}")
+        if scene_name == "jobs":
+            check_jobs(page, scene)
+        elif scene_name == "job-detail":
+            check_job_detail(page, scene)
         else:
             check_drive(page, scene)
         check_contract(page)
@@ -192,6 +216,10 @@ def main() -> None:
         page.reload(wait_until="networkidle")
         expect(page.locator("html")).to_have_attribute("data-theme", "light")
         expect(page.locator('#theme-switch [data-theme-choice="light"]')).to_have_attribute("aria-pressed", "true")
+        expect(page.locator(".pane-head")).to_have_css("background-color", "rgb(255, 255, 255)")
+        expect(page.locator(".pane-head")).to_have_css("color", "rgb(51, 51, 51)")
+        expect(page.locator(".pane-body")).to_have_css("background-color", "rgb(10, 10, 10)")
+        expect(page.locator(".pane-body")).to_have_css("color", "rgb(218, 218, 218)")
         browser.close()
 
 

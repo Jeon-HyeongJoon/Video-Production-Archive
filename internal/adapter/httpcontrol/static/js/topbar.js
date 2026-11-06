@@ -7,7 +7,7 @@ import { byId, el, svgIcon, icons, statusIcon, setStatusIcon, clockTime } from "
 import { model, ui, notify, isStale, problemItems, sortedProblems, problemPath, problemSubject, newProblems, findDrive, driveName } from "./store.js";
 import { go } from "./router.js";
 
-const PLACE = { status: "상태", drives: "드라이브", drive: "드라이브", workers: "Worker", search: "검색", settings: "설정" };
+const PLACE = { drive: "연결 관리", jobs: "작업 관리", job: "작업 관리", connections: "연결 관리", search: "검색", settings: "설정" };
 
 function resolve(item) {
   newProblems.delete(item.key);
@@ -31,12 +31,12 @@ function alertItem(item) {
 
 // crumbs names the menu and, below it, the drive, Worker or Job in view.
 function crumbs(route) {
-  const items = [[PLACE[route.name] || "상태", route.name === "drive" || (route.name === "workers" && (route.query.get("worker") || route.query.get("job"))) ? `#/${route.menu}` : ""]];
+  const items = [[PLACE[route.name] || "작업 관리", route.name === "drive" || route.name === "job" || (route.name === "connections" && route.query.get("worker")) ? `#/${route.menu}` : ""]];
   if (route.name === "drive") items.push([driveName(findDrive(route.driveID) || { workspace_drive_id: route.driveID }), ""]);
-  if (route.name === "workers" && route.query.get("worker")) items.push([route.query.get("worker"), ""]);
-  if (route.name === "workers" && route.query.get("job")) {
-    const job = model.jobs.find((entry) => entry.job_id === route.query.get("job"));
-    items.push([job?.target_title || route.query.get("job"), ""]);
+  if (route.name === "connections" && route.query.get("worker")) items.push([route.query.get("worker"), ""]);
+  if (route.name === "job") {
+    const job = model.jobs.find((entry) => entry.job_id === route.jobID);
+    items.push([job?.target_title || route.jobID, ""]);
   }
   return items.flatMap(([text, href], index) => [
     svgIcon(icons.slash, "0 0 24 24", "crumb-sep"),
@@ -102,8 +102,7 @@ export function mountTopbar() {
       if (ui.alertOpen) {
         alertPanel.replaceChildren(
           el("div", { class: "alert-head" }, el("b", {}, "알림"), el("span", { class: "num" }, `실패 ${faults} · 확인 필요 ${items.length - faults}`)),
-          el("div", { class: "alert-list" }, ...(items.length ? items.map(alertItem) : [el("p", { class: "empty" }, "확인할 것 없음")])),
-          el("a", { class: "alert-foot", href: "#/status", onclick: () => { ui.alertOpen = false; } }, "상태에서 모두 보기"));
+          el("div", { class: "alert-list" }, ...(items.length ? items.map(alertItem) : [el("p", { class: "empty" }, "확인할 것 없음")])));
       }
 
       const stale = byId("stale-banner");

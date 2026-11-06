@@ -2,11 +2,13 @@ package workerexecutor
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	osexec "os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -97,10 +99,10 @@ func TestProductionExecutorRoutesOneTypedOperationThroughRegisteredStorageRoots(
 	}
 
 	unsupported := spec
-	unsupported.Operation = execution.OperationInspectMedia
-	unsupported.StepID = "inspect"
+	unsupported.Operation = execution.OperationCreateThumbnail
+	unsupported.StepID = "thumbnail"
 	unsupported.Outputs = []execution.OutputTarget{{
-		ID: "INSPECTION-2", Kind: execution.OutputMediaInspection, StorageID: "working", RelativePath: "staging/inspection.json",
+		ID: "THUMBNAIL-2", Kind: execution.OutputThumbnail, StorageID: "working", RelativePath: "staging/thumbnail.jpg",
 	}}
 	unsupported, err = execution.NewStepExecutionSpec(unsupported)
 	if err != nil {
@@ -112,7 +114,7 @@ func TestProductionExecutorRoutesOneTypedOperationThroughRegisteredStorageRoots(
 	if rejected.Success || rejected.ErrorClass != "UNSUPPORTED_STEP_OPERATION" {
 		t.Fatalf("unsupported operation reached an Adapter: result=%+v", rejected)
 	}
-	if _, err := roots.MustRoot("working").ReadFile("staging/inspection.json"); err == nil {
+	if _, err := roots.MustRoot("working").ReadFile("staging/thumbnail.jpg"); err == nil {
 		t.Fatal("unsupported operation changed the filesystem")
 	}
 
@@ -137,6 +139,87 @@ func TestProductionExecutorRoutesOneTypedOperationThroughRegisteredStorageRoots(
 	t.Run("actual ffmpeg source sequence", testActualSourceSequence)
 }
 
+// Requirement: CFG-011
+func TestWorkerArchiveIntakeInspectionUsesLocalFFprobeAndReturnsOnlyNormalizedPaths(t *testing.T) {
+	ffmpegPath, ffmpegErr := osexec.LookPath("ffmpeg")
+	ffprobePath, ffprobeErr := osexec.LookPath("ffprobe")
+	if ffmpegErr != nil || ffprobeErr != nil {
+		t.Skip("actual FFmpeg toolchain is not installed")
+	}
+	directory := t.TempDir()
+	sourcePath := filepath.Join(directory, "source")
+	archivePath := filepath.Join(directory, "archive")
+	if err := os.MkdirAll(filepath.Join(sourcePath, "event-a"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(archivePath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	clipPath := filepath.Join(sourcePath, "event-a", "clip.mp4")
+	command := osexec.Command(
+		ffmpegPath, "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
+		"-f", "lavfi", "-i", "testsrc=size=320x180:rate=30", "-t", "1",
+		"-c:v", "libx264", "-pix_fmt", "yuv420p", clipPath,
+	)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("create inspection fixture: %v: %s", err, output)
+	}
+	configuration := workerconfig.Configuration{
+		ID: "worker-inspection", StorageRoots: []workerconfig.StorageRootConfiguration{
+			{StorageID: "source", Root: sourcePath}, {StorageID: "archive", Root: archivePath},
+		},
+		AccessibleStorageIDs: []string{"source", "archive"},
+		Tools: workerconfig.MediaTools{
+			FFmpeg:  workerconfig.LocalTool{Executable: ffmpegPath, Version: "ffmpeg-actual"},
+			FFprobe: workerconfig.LocalTool{Executable: ffprobePath, Version: "ffprobe-actual"},
+		},
+	}
+	roots, err := workerconfig.OpenStorageRoots(configuration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer roots.Close()
+	requestedAt := time.Date(2026, 11, 4, 4, 0, 0, 0, time.UTC)
+	spec, err := execution.NewStepExecutionSpec(execution.StepExecutionSpec{
+		JobID: "JOB-INSPECTION-1", StepID: "inspect", TemplateName: "archive-intake-inspection",
+		Operation: execution.OperationInspectMedia,
+		Outputs: []execution.OutputTarget{{
+			ID: "MEDIA-INSPECTION-1", Kind: execution.OutputMediaInspection, StorageID: "archive",
+			RelativePath: "staging/JOB-INSPECTION-1/inspection/result.json",
+		}},
+		Parameters: execution.StepExecutionParameters{
+			ArchiveRunID: "RUN-1", ArchiveIntakeSessionID: "SESSION-1", StartIdempotencyKey: "start:1",
+			SourceStorageID: "source", ArchiveStorageID: "archive", WorkspaceDriveID: "VOLUME-1",
+			InputRevision: 7, FolderIDs: []string{"event-a"}, RequestedBy: "operator-1", RequestedAt: requestedAt,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry, err := NewProduction(configuration, roots)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := registry.Execute(context.Background(), workerclient.Assignment{
+		JobID: spec.JobID, StepID: spec.StepID, FencingToken: 1, LeaseExpiresAt: time.Now().Add(time.Minute), ExecutionSpec: spec,
+	})
+	if !result.Success || len(result.Outputs) != 1 || len(result.InspectedMedia) != 1 ||
+		result.InspectedMedia[0].Folder != "event-a" || result.InspectedMedia[0].Observation.RelativePath != "event-a/clip.mp4" ||
+		result.InspectedMedia[0].Inspection.ProcessorVersion != "ffprobe-actual" {
+		t.Fatalf("Worker-side Archive Intake inspection failed: %+v", result)
+	}
+	payload, err := json.Marshal(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(payload), sourcePath) || strings.Contains(string(payload), archivePath) || strings.Contains(string(payload), ffprobePath) {
+		t.Fatalf("Worker-local source or executable path crossed the result protocol: %s", payload)
+	}
+	if size, _, err := roots.MustRoot("archive").FileSHA256("staging/JOB-INSPECTION-1/inspection/result.json"); err != nil || size <= 0 {
+		t.Fatalf("normalized inspection evidence was not published: size=%d err=%v", size, err)
+	}
+}
+
 func testActualSourceSequence(t *testing.T) {
 	ffmpegPath, ffmpegErr := osexec.LookPath("ffmpeg")
 	ffprobePath, ffprobeErr := osexec.LookPath("ffprobe")
@@ -153,9 +236,13 @@ func testActualSourceSequence(t *testing.T) {
 	}
 	for index := 1; index <= 3; index++ {
 		outputPath := filepath.Join(sourcePath, fmt.Sprintf("C%04d.mp4", index))
+		frameRate := 30
+		if index == 3 {
+			frameRate = 120
+		}
 		command := osexec.Command(
 			ffmpegPath, "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
-			"-f", "lavfi", "-i", "testsrc=size=320x180:rate=30",
+			"-f", "lavfi", "-i", fmt.Sprintf("testsrc=size=320x180:rate=%d", frameRate),
 			"-f", "lavfi", "-i", fmt.Sprintf("sine=frequency=%d:sample_rate=48000", 400+index*100),
 			"-t", "1", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", outputPath,
 		)

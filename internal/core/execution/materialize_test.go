@@ -54,7 +54,7 @@ func TestMaterializeArchiveTranscriptionUsesVerifiedOutputsAndArchivePackageRevi
 	completed = append(completed, completeSpec(t, revision, "1"))
 	catalog := materialize(t, "archive_catalog", completed)
 	if catalog.Operation != OperationWriteArchiveCatalog || catalog.Inputs[0].Kind != OutputArchiveRevision ||
-		catalog.Outputs[0].StorageID != "ARCHIVE-1" || catalog.Outputs[0].RelativePath != "catalog/DRIVE-1.csv" {
+		catalog.Outputs[0].StorageID != "ARCHIVE-1" || catalog.Outputs[0].RelativePath != "archive-catalog.csv" {
 		t.Fatalf("stage-two ArchiveCatalog spec is invalid: %+v", catalog)
 	}
 }

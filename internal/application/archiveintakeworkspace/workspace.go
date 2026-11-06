@@ -24,6 +24,7 @@ type FolderView struct {
 	Disposition          vocabulary.OrganizationDisposition
 	ProfileReference     string
 	HoldReasons          []vocabulary.OrganizationHoldReason
+	WorkOptions          []WorkOptionView
 	ClassificationAssets []ClassificationAssetView
 	VideoCount           int
 	EstimatedOutputBytes uint64
@@ -39,6 +40,11 @@ type FolderView struct {
 	ArchiveState         archive.PackageState
 	CanAddTranscription  bool
 	TranscriptQualities  []TranscriptQualityView
+}
+
+type WorkOptionView struct {
+	Disposition            vocabulary.OrganizationDisposition
+	TargetVideoBitRateKbps int
 }
 
 type TranscriptQualityView struct {
@@ -85,6 +91,25 @@ type StageView struct {
 	TotalCount          int
 }
 
+// CompletedWorkView is one immutable ArchivePackage output from a completed
+// stage-one Folder Job. It is retained independently of the latest ArchiveRun
+// so a later intake does not hide work that has already been stored.
+type CompletedWorkView struct {
+	ArchiveRunID         string
+	Folder               string
+	JobID                string
+	Disposition          vocabulary.OrganizationDisposition
+	ProfileReference     string
+	SourceVideoCount     int
+	ArchiveStorageID     string
+	ArchivePackageID     string
+	ArchiveDate          string
+	ArchiveDisplayName   string
+	ArchiveVideoFileName string
+	ArchiveState         archive.PackageState
+	CompletedAt          time.Time
+}
+
 type DriveView struct {
 	WorkspaceDriveID           string
 	ArchiveRunID               string
@@ -113,6 +138,7 @@ type DriveView struct {
 	DiscoveredFolderCount      int
 	DiscoveredFolders          []FolderView
 	StorageCandidates          []StorageView
+	CompletedWork              []CompletedWorkView
 }
 
 type OverrideCommand struct {

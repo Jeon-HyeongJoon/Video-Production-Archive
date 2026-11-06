@@ -7,7 +7,7 @@ with sync_playwright() as playwright:
     browser = playwright.chromium.launch()
     page = browser.new_page(viewport={"width": 1440, "height": 900}, color_scheme="light", locale="ko-KR")
     # Search starts from the box in the top bar on any screen.
-    page.goto(sys.argv[1] + "/#/status", wait_until="networkidle")
+    page.goto(sys.argv[1] + "/#/jobs", wait_until="networkidle")
     expect(page.locator('#menu [data-menu="search"]')).to_have_count(0)
     page.locator("#search-text").fill("가을")
     page.locator("#search-text").press("Enter")

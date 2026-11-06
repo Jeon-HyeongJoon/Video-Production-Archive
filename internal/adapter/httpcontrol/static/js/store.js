@@ -10,8 +10,8 @@ export const model = { workers: [], drives: [], hosts: [], sessions: [], jobs: [
 
 // Screen-local choices that must survive the 5 second refresh.
 export const ui = {
-  prepDriveID: "", archiveID: "", intakeSessionID: newID("INTAKE"), folders: new Set(), hold: null,
-  folderView: "", openFolder: "", openSteps: "", jobSteps: false, jobCancel: "",
+  prepDriveID: "", archiveID: "", intakeSessionID: newID("INTAKE"), folders: new Set(), prepFolderScroll: 0, hold: null,
+  folderView: "", openFolder: "", openSteps: "", jobSteps: false, jobCancel: "", jobAttentionOpen: true, jobCompletedOpen: true,
   sessionID: "", focusCard: "", fresh: "", status: "", alertOpen: false, agentOpen: false,
 };
 
@@ -121,6 +121,7 @@ export async function prepareDrive(drive) {
   ui.prepDriveID = drive.workspace_drive_id;
   ui.archiveID = "";
   ui.folders = new Set();
+  ui.prepFolderScroll = 0;
   ui.intakeSessionID = drive.session_id || newID("INTAKE");
   ui.status = "";
   notify();
@@ -316,9 +317,9 @@ export function sortedProblems() {
 // problemPath is the route where a person resolves the problem.
 export function problemPath(item) {
   if (item.driveID) return `#/drives/${encodeURIComponent(item.driveID)}${item.folder ? `?folder=${encodeURIComponent(item.folder)}` : ""}`;
-  if (item.kind === "worker") return `#/workers?worker=${encodeURIComponent(item.workerID)}`;
-  if (item.kind === "job") return `#/workers?job=${encodeURIComponent(item.jobID)}`;
-  if (item.kind === "host") return "#/settings";
+  if (item.kind === "worker") return `#/connections?worker=${encodeURIComponent(item.workerID)}`;
+  if (item.kind === "job") return `#/jobs/${encodeURIComponent(item.jobID)}`;
+  if (item.kind === "host") return `#/connections?host=${encodeURIComponent(item.hostID)}`;
   return "";
 }
 

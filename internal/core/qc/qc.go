@@ -84,10 +84,13 @@ func Evaluate(assessmentID string, rendition rendering.Rendition, profile render
 	if err != nil || normalizedSource.OriginalAssetID != rendition.Artifact.Origin.OriginalAssetID {
 		return QCAssessment{}, ErrInvalidAssessment
 	}
-	return evaluateExpectedDuration(assessmentID, rendition, normalizedProfile, normalizedSource.ID, "", normalizedSource.DurationMillis, output, policy, workerID, createdAt)
+	return evaluateExpectedDuration(
+		assessmentID, rendition, normalizedProfile, normalizedSource.ID, "", normalizedSource.DurationMillis,
+		len(normalizedSource.AudioStreams) > 0, output, policy, workerID, createdAt,
+	)
 }
 
-func EvaluateTimeline(assessmentID string, rendition rendering.Rendition, profile rendering.Profile, timeline organization.SourceTimeline, output OutputObservation, policy Policy, workerID string, createdAt time.Time) (QCAssessment, error) {
+func EvaluateTimeline(assessmentID string, rendition rendering.Rendition, profile rendering.Profile, timeline organization.SourceTimeline, expectedAudio bool, output OutputObservation, policy Policy, workerID string, createdAt time.Time) (QCAssessment, error) {
 	normalizedProfile, err := rendering.NewProfile(profile)
 	if err != nil {
 		return QCAssessment{}, ErrInvalidAssessment
@@ -108,10 +111,10 @@ func EvaluateTimeline(assessmentID string, rendition rendering.Rendition, profil
 			return QCAssessment{}, ErrInvalidAssessment
 		}
 	}
-	return evaluateExpectedDuration(assessmentID, rendition, normalizedProfile, "", timeline.ID, timeline.DurationMillis(), output, policy, workerID, createdAt)
+	return evaluateExpectedDuration(assessmentID, rendition, normalizedProfile, "", timeline.ID, timeline.DurationMillis(), expectedAudio, output, policy, workerID, createdAt)
 }
 
-func evaluateExpectedDuration(assessmentID string, rendition rendering.Rendition, profile rendering.Profile, sourceInspectionID, sourceTimelineID string, expectedDuration int64, output OutputObservation, policy Policy, workerID string, createdAt time.Time) (QCAssessment, error) {
+func evaluateExpectedDuration(assessmentID string, rendition rendering.Rendition, profile rendering.Profile, sourceInspectionID, sourceTimelineID string, expectedDuration int64, expectedAudio bool, output OutputObservation, policy Policy, workerID string, createdAt time.Time) (QCAssessment, error) {
 	output = normalizeOutput(output)
 	if strings.TrimSpace(assessmentID) == "" || strings.TrimSpace(workerID) == "" || createdAt.IsZero() ||
 		policy.DurationToleranceMillis < 0 || expectedDuration <= 0 || output.Checksum == "" || output.SizeBytes <= 0 ||
@@ -123,13 +126,23 @@ func evaluateExpectedDuration(assessmentID string, rendition rendering.Rendition
 	if durationDelta < 0 {
 		durationDelta = -durationDelta
 	}
+	audioExpected := "aac"
+	audioActual := output.AudioCodec
+	audioPassed := output.AudioCodec == "aac"
+	if !expectedAudio {
+		audioExpected = "absent"
+		audioPassed = output.AudioCodec == ""
+		if audioActual == "" {
+			audioActual = "absent"
+		}
+	}
 	checks := []Check{
 		{Kind: CheckDecodable, Passed: output.Decodable, Expected: "true", Actual: strconv.FormatBool(output.Decodable)},
 		{Kind: CheckChecksum, Passed: output.Checksum == rendition.Artifact.Checksum, Expected: rendition.Artifact.Checksum, Actual: output.Checksum},
 		{Kind: CheckFileSize, Passed: output.SizeBytes == rendition.Artifact.Size, Expected: strconv.FormatInt(rendition.Artifact.Size, 10), Actual: strconv.FormatInt(output.SizeBytes, 10)},
 		{Kind: CheckContainer, Passed: contains(output.Containers, profile.Container), Expected: profile.Container, Actual: strings.Join(output.Containers, ",")},
 		{Kind: CheckVideoCodec, Passed: output.VideoCodec == "h264", Expected: "h264", Actual: output.VideoCodec},
-		{Kind: CheckAudioCodec, Passed: output.AudioCodec == "aac", Expected: "aac", Actual: output.AudioCodec},
+		{Kind: CheckAudioCodec, Passed: audioPassed, Expected: audioExpected, Actual: audioActual},
 		{Kind: CheckDimensions, Passed: output.Width <= profile.MaxWidth && output.Height <= profile.MaxHeight && output.Width%2 == 0 && output.Height%2 == 0,
 			Expected: fmt.Sprintf("even <= %dx%d", profile.MaxWidth, profile.MaxHeight), Actual: fmt.Sprintf("%dx%d", output.Width, output.Height)},
 		{Kind: CheckDuration, Passed: durationDelta <= policy.DurationToleranceMillis,

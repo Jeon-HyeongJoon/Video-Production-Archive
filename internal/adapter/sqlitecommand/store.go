@@ -806,9 +806,9 @@ func (store *Store) SettleWorkerStep(ctx context.Context, report workercontrol.R
 			report.OutputRecord.FencingToken != report.FencingToken || report.OutputRecord.WorkerID != report.WorkerID {
 			return job.State{}, workercontrol.ErrInvalidAssignment
 		}
-		outputRecord, err := execution.NewStepOutputRecord(
+		outputRecord, err := execution.NewStepOutputRecordWithInspections(
 			*step.ExecutionSpec, report.FencingToken, report.WorkerID, now,
-			report.OutputRecord.Outputs, report.OutputRecord.VerificationReferences,
+			report.OutputRecord.Outputs, report.OutputRecord.VerificationReferences, report.OutputRecord.InspectedMedia,
 		)
 		if err != nil {
 			return job.State{}, workercontrol.ErrInvalidAssignment
@@ -1205,15 +1205,33 @@ func (store *Store) RecoverExpiredReservations(ctx context.Context, now time.Tim
 			return nil, err
 		}
 		step := stateStep(&state, value.stepID)
-		if step == nil || step.Workflow.State != workflow.Reserved {
+		if step == nil {
 			tx.Rollback()
 			continue
 		}
-		if err := step.Workflow.Transition(workflow.Queued); err != nil {
+		eventType := "StepReservationExpired"
+		commandType := "step.recover_reservation"
+		commandIDPrefix := "recover-reservation"
+		reason := "expired unstarted Worker reservation"
+		switch step.Workflow.State {
+		case workflow.Reserved:
+			if err := step.Workflow.Transition(workflow.Queued); err != nil {
+				tx.Rollback()
+				return nil, err
+			}
+		case workflow.Running:
+			if !step.Workflow.RecoverExpiredLease(now) {
+				tx.Rollback()
+				continue
+			}
+			eventType = "StepExecutionLeaseExpired"
+			commandType = "step.recover_execution_lease"
+			commandIDPrefix = "recover-execution-lease"
+			reason = "expired running Worker execution lease"
+		default:
 			tx.Rollback()
-			return nil, err
+			continue
 		}
-		step.Workflow.ExecutionLease = nil
 		step.WorkerID = ""
 		step.LastEventAt = now
 		state.Revision = revision + 1
@@ -1222,10 +1240,9 @@ func (store *Store) RecoverExpiredReservations(ctx context.Context, now time.Tim
 			tx.Rollback()
 			return nil, err
 		}
-		commandID := fmt.Sprintf("recover-reservation:%s:%s:%d", state.ID, step.Workflow.ID, state.Revision)
-		reason := "expired unstarted Worker reservation"
+		commandID := fmt.Sprintf("%s:%s:%s:%d", commandIDPrefix, state.ID, step.Workflow.ID, state.Revision)
 		event := command.Event{
-			EventID: commandID + ":event", EventType: "StepReservationExpired", CommandID: commandID,
+			EventID: commandID + ":event", EventType: eventType, CommandID: commandID,
 			Actor: command.Actor{Type: command.SystemActor, ID: "worker-recovery"}, RequestedVia: "worker_recovery",
 			TargetID: state.ID, BeforeRevision: revision, AfterRevision: state.Revision, Reason: reason,
 			Payload: map[string]any{"step_id": step.Workflow.ID},
@@ -1234,7 +1251,7 @@ func (store *Store) RecoverExpiredReservations(ctx context.Context, now time.Tim
 		if err := applyCommit(tx, "", command.Commit{
 			ExpectedRevision: &expected, NextState: &command.Snapshot{TargetID: state.ID, Revision: state.Revision, State: encoded},
 			Record: command.CommandRecord{Envelope: command.Envelope{
-				CommandID: commandID, CommandType: "step.recover_reservation", Actor: event.Actor, RequestedVia: event.RequestedVia,
+				CommandID: commandID, CommandType: commandType, Actor: event.Actor, RequestedVia: event.RequestedVia,
 				TargetID: state.ID, ExpectedRevision: revision, IdempotencyKey: commandID, Reason: reason,
 			}, Accepted: true}, Events: []command.Event{event},
 		}); err != nil {

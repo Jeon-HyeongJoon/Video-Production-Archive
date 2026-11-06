@@ -3,7 +3,9 @@ package controlruntime_test
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -29,6 +31,7 @@ import (
 	"videoarchive/internal/core/asset"
 	"videoarchive/internal/core/command"
 	"videoarchive/internal/core/execution"
+	"videoarchive/internal/core/intake"
 	"videoarchive/internal/core/job"
 	"videoarchive/internal/core/mediaanalysis"
 	"videoarchive/internal/core/resource"
@@ -114,6 +117,164 @@ storage:
 	if _, err := controlruntime.Open(context.Background(), conflictingConfiguration, "v1-test"); !errors.Is(err, sqlitestorage.ErrTopologyConflict) {
 		t.Fatalf("conflicting boot topology was accepted: %v", err)
 	}
+}
+
+// Requirement: APP-006
+func TestArchiveRunStartQueuesWorkerInspectionAndCreatesSelectedFolderJobsOnce(t *testing.T) {
+	directory := t.TempDir()
+	archiveRoot := filepath.Join(directory, "archive")
+	if err := os.MkdirAll(archiveRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	configurationPath := filepath.Join(directory, "control.yaml")
+	payload := fmt.Sprintf(`schema_version: 1
+database: {path: data/control.db}
+server:
+  listen_address: 127.0.0.1:0
+  allowed_cidrs: [127.0.0.0/8]
+  allowed_origins: [http://127.0.0.1:8080]
+  trusted_proxies: []
+security: {auth_mode: disabled, mcp_listen_address: 127.0.0.1:0}
+features: {}
+provider_accounts: []
+workers:
+  heartbeat_ttl: 30s
+  definitions:
+    - id: worker-main
+      enabled: true
+      credential_ref: wincred://worker/main
+      processing_kinds: [INSPECT, RENDER, QC, ORGANIZE]
+      allowed_storage_ids: [archive-main]
+storage:
+  - id: archive-main
+    role: ARCHIVE_PRIMARY
+    physical_device_id: archive-drive
+    partition_id: archive-partition
+    volume_id: archive-volume
+    root: %s
+`, archiveRoot)
+	if err := os.WriteFile(configurationPath, []byte(payload), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	configuration, err := bootconfig.Load(configurationPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 11, 4, 3, 0, 0, 0, time.UTC)
+	runtime, err := controlruntime.OpenWithDependencies(context.Background(), configuration, "v1-test", controlruntime.Dependencies{
+		Secrets: runtimeSecret("service-secret"), Now: func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer runtime.Close()
+	heartbeat := `{"worker_id":"worker-main","snapshot_id":1,"observed_at":"2026-11-04T03:00:00Z","cpu_average_5m":2,"gpu_average_5m":0,"idle_stable_millis":60000,"available_memory_bytes":34359738368,"available_vram_bytes":8589934592,"scratch_free_bytes":536870912000,"heavy_running":0,"light_running":0,"busy_physical_device_ids":[],"accepting_work":true,"accessible_storage_ids":["source-attached","source-attached-archive","archive-main"],"attached_volumes":[{"physical_device_id":"source-device","volume_id":"source-volume","storage_id":"source-attached","archive_storage_id":"source-attached-archive","model":"TEST DISK","label":"10GB 선택","file_system":"NTFS","capacity_bytes":2000000000000,"free_bytes":1000000000000}],"storage_observations":[{"storage_id":"source-attached","connected":true,"access_kind":"ATTACHED_VOLUME","discovery_state":"READY","capacity_bytes":2000000000000,"free_bytes":1000000000000,"discovery_revision":41,"folders":[{"folder":"event-a","video_count":1,"input_bytes":10000000000},{"folder":"event-b","video_count":2,"input_bytes":20000000000}]},{"storage_id":"archive-main","connected":true,"access_kind":"LOCAL","discovery_state":"READY","capacity_bytes":500000000000,"free_bytes":300000000000,"discovery_revision":1,"folders":[]}]}`
+	if response := workerHeartbeatRequest(runtime.Handler(), heartbeat, "service-secret"); response.Code != http.StatusOK {
+		t.Fatalf("dynamic Worker inventory returned %d: %s", response.Code, response.Body.String())
+	}
+	cookie, csrfToken := runtimeSession(t, runtime.Handler())
+	requestBody := `{"archive_run_id":"RUN-REMOTE-1","idempotency_key":"remote:start:1","session_id":"SESSION-REMOTE-1","source_volume_id":"source-volume","expected_candidate_revision":1,"archive_storage_id":"archive-main","input_revision":41,"folder_ids":["event-a"]}`
+	created := runtimeRequest(runtime.Handler(), http.MethodPost, "/api/v1/archive-intake/runs", requestBody, cookie, csrfToken, "http://127.0.0.1:8080")
+	if created.Code != http.StatusCreated || !strings.Contains(created.Body.String(), `"folder_count":1`) {
+		t.Fatalf("remote Archive Run start returned %d: %s", created.Code, created.Body.String())
+	}
+	pending := runtimeRequest(runtime.Handler(), http.MethodGet, "/api/v1/archive-intake", "", nil, "", "")
+	if pending.Code != http.StatusOK || !strings.Contains(pending.Body.String(), `"archive_run_id":"RUN-REMOTE-1"`) ||
+		!strings.Contains(pending.Body.String(), `"archive_run_state":"STAGE_ONE_RUNNING"`) ||
+		!strings.Contains(pending.Body.String(), `"folder_count":1`) || !strings.Contains(pending.Body.String(), `"discovered_folder_count":2`) {
+		t.Fatalf("fixed pending scope was not projected: %d %s", pending.Code, pending.Body.String())
+	}
+	claimResponse := workerProtocolRequest(runtime.Handler(), "/worker/v1/steps/claim", "", "service-secret")
+	if claimResponse.Code != http.StatusOK || strings.Contains(claimResponse.Body.String(), archiveRoot) {
+		t.Fatalf("Worker inspection claim returned %d: %s", claimResponse.Code, claimResponse.Body.String())
+	}
+	var claim struct {
+		Data workerclient.Assignment `json:"data"`
+	}
+	if err := json.Unmarshal(claimResponse.Body.Bytes(), &claim); err != nil || claim.Data.ExecutionSpec.Operation != execution.OperationInspectMedia ||
+		len(claim.Data.ExecutionSpec.Inputs) != 0 || len(claim.Data.ExecutionSpec.Parameters.FolderIDs) != 1 || claim.Data.ExecutionSpec.Parameters.FolderIDs[0] != "event-a" {
+		t.Fatalf("invalid remote inspection assignment: %+v err=%v", claim.Data, err)
+	}
+	checksum := strings.Repeat("a", 64)
+	identity := []string{claim.Data.ExecutionSpec.Parameters.ArchiveIntakeSessionID, "41", "event-a/clip.mp4"}
+	observation, err := intake.NewInputFileObservation(intake.InputFileObservation{
+		ID: runtimeStableID("OBSERVATION", identity...), StorageID: "source-attached", WorkspaceDriveID: "source-volume",
+		RelativePath: "event-a/clip.mp4", OriginalName: "clip.mp4", SizeBytes: 1_024, Checksum: checksum,
+		ObservedBy: "worker-main", ObservedAt: now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	original, err := asset.RegisterOriginalAsset(
+		runtimeStableID("ASSET", identity...), observation, claim.Data.ExecutionSpec.Parameters.RequestedBy, now,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inspection, err := mediaanalysis.NewMediaInspection(mediaanalysis.MediaInspection{
+		ID:              runtimeStableID("INSPECTION", append([]string{"RUN-REMOTE-1"}, identity...)...),
+		OriginalAssetID: original.ID, OriginalChecksum: checksum, Containers: []string{"mp4"},
+		DurationMillis: 60_000, SizeBytes: 1_024, BitRate: 6_000_000,
+		VideoStreams: []mediaanalysis.VideoStream{{
+			Index: 0, Codec: "h264", Width: 1920, Height: 1080,
+			FrameRate: mediaanalysis.Rational{Numerator: 30, Denominator: 1}, BitRate: 6_000_000,
+		}}, ProcessorVersion: strings.Repeat("ffprobe-test-v1-", 5_000), ObservedBy: "worker-main", InspectedAt: now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := claim.Data.ExecutionSpec.Outputs[0]
+	output := execution.StepOutput{ID: target.ID, Kind: target.Kind, StorageID: target.StorageID, RelativePath: target.RelativePath, Checksum: strings.Repeat("b", 64)}
+	record, err := execution.NewStepOutputRecordWithInspections(
+		claim.Data.ExecutionSpec, claim.Data.FencingToken, "worker-main", now.Add(time.Second),
+		[]execution.StepOutput{output}, []string{"worker://inspection/verified"},
+		[]execution.InspectedMedia{{Folder: "event-a", Observation: observation, Original: original, Inspection: inspection}},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resultPayload, err := json.Marshal(map[string]any{
+		"job_id": claim.Data.JobID, "step_id": claim.Data.StepID, "fencing_token": claim.Data.FencingToken,
+		"success": true, "failure_class": "", "wait_reason": "", "error_class": "",
+		"log_reference": "worker://inspection/completed", "output_record": record,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resultPayload) <= 64<<10 {
+		t.Fatalf("large Worker inspection result fixture is too small: %d", len(resultPayload))
+	}
+	settled := workerProtocolRequest(runtime.Handler(), "/worker/v1/steps/result", string(resultPayload), "service-secret")
+	if settled.Code != http.StatusOK {
+		detail := runtimeRequest(runtime.Handler(), http.MethodGet, "/api/v1/jobs/"+claim.Data.JobID, "", nil, "", "")
+		workspace := runtimeRequest(runtime.Handler(), http.MethodGet, "/api/v1/archive-intake", "", nil, "", "")
+		t.Fatalf("Worker inspection result returned %d: %s job=%s workspace=%s", settled.Code, settled.Body.String(), detail.Body.String(), workspace.Body.String())
+	}
+	jobs := runtimeRequest(runtime.Handler(), http.MethodGet, "/api/v1/jobs", "", nil, "", "")
+	if jobs.Code != http.StatusOK || strings.Count(jobs.Body.String(), `"template_name":"archive-intake-inspection"`) != 1 ||
+		strings.Count(jobs.Body.String(), `"template_name":"archive-intake-as-is"`) != 1 || strings.Contains(jobs.Body.String(), "event-b") {
+		t.Fatalf("selected Folder Job was not created exactly once: %d %s", jobs.Code, jobs.Body.String())
+	}
+	replayed := runtimeRequest(runtime.Handler(), http.MethodPost, "/api/v1/archive-intake/runs", requestBody, cookie, csrfToken, "http://127.0.0.1:8080")
+	if replayed.Code != http.StatusOK || !strings.Contains(replayed.Body.String(), `"replayed":true`) {
+		t.Fatalf("Archive Run replay returned %d: %s", replayed.Code, replayed.Body.String())
+	}
+	invalid := strings.Replace(requestBody, `"archive_run_id":"RUN-REMOTE-1"`, `"archive_run_id":"RUN-REMOTE-BAD"`, 1)
+	invalid = strings.Replace(invalid, `"idempotency_key":"remote:start:1"`, `"idempotency_key":"remote:start:bad"`, 1)
+	invalid = strings.Replace(invalid, `"input_revision":41`, `"input_revision":40`, 1)
+	rejected := runtimeRequest(runtime.Handler(), http.MethodPost, "/api/v1/archive-intake/runs", invalid, cookie, csrfToken, "http://127.0.0.1:8080")
+	if rejected.Code != http.StatusBadRequest {
+		t.Fatalf("stale folder revision returned %d: %s", rejected.Code, rejected.Body.String())
+	}
+	after := runtimeRequest(runtime.Handler(), http.MethodGet, "/api/v1/jobs", "", nil, "", "")
+	if strings.Count(after.Body.String(), `"template_name":"archive-intake-inspection"`) != 1 {
+		t.Fatalf("invalid start changed the Job queue: %s", after.Body.String())
+	}
+}
+
+func runtimeStableID(prefix string, values ...string) string {
+	digest := sha256.Sum256([]byte(strings.Join(values, "\x00")))
+	return prefix + "-" + hex.EncodeToString(digest[:12])
 }
 
 // Requirement: DSH-006
@@ -374,6 +535,57 @@ func TestBrowserCommandCreatesPersistentJobWithCSRFAndIdempotency(t *testing.T) 
 	if jobView.Code != http.StatusOK || !strings.Contains(jobView.Body.String(), `"template_name":"occasion-recording"`) ||
 		!strings.Contains(jobView.Body.String(), `"target_title":"가을 행사"`) || !strings.Contains(jobView.Body.String(), `"step_state":"QUEUED"`) {
 		t.Fatalf("persistent job view returned %d: %s", jobView.Code, jobView.Body.String())
+	}
+}
+
+// Requirement: CTL-007
+func TestControlRebuildsMissingJobProjectionFromAuthoritativeLedgerAtStartup(t *testing.T) {
+	configuration := runtimeTestConfiguration(t)
+	runtime, err := controlruntime.Open(context.Background(), configuration, "v1-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cookie, token := runtimeSession(t, runtime.Handler())
+	create := `{"job_id":"JOB-REBUILD-1","command_id":"COMMAND-REBUILD-1","idempotency_key":"JOB-REBUILD-1:create","reason":"create rebuild fixture","template_name":"occasion-recording","target_title":"재구축 작업","control_mode":"MANUAL","expected_revision":0}`
+	created := runtimeRequest(runtime.Handler(), http.MethodPost, "/api/v1/jobs", create, cookie, token, "http://127.0.0.1:8080")
+	if created.Code != http.StatusCreated {
+		runtime.Close()
+		t.Fatalf("create rebuild fixture returned %d: %s", created.Code, created.Body.String())
+	}
+	if err := runtime.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	database, err := sql.Open("sqlite", configuration.DatabasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`DELETE FROM archive_workspace_job_projections WHERE job_id = ?`, "JOB-REBUILD-1"); err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`INSERT INTO aggregate_states(target_id, revision, state) VALUES (?, ?, ?)`,
+		"ARCHIVE-RUN-NOT-A-JOB", 1, []byte(`{"id":"ARCHIVE-RUN-NOT-A-JOB","revision":1,"worker_id":"WORKER-1"}`)); err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	restarted, err := controlruntime.Open(context.Background(), configuration, "v1-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restarted.Close()
+	detail := runtimeRequest(restarted.Handler(), http.MethodGet, "/api/v1/jobs/JOB-REBUILD-1", "", nil, "", "")
+	if detail.Code != http.StatusOK || !strings.Contains(detail.Body.String(), `"target_title":"재구축 작업"`) ||
+		!strings.Contains(detail.Body.String(), `"step_state":"QUEUED"`) {
+		t.Fatalf("rebuilt Job projection returned %d: %s", detail.Code, detail.Body.String())
+	}
+	inbox := runtimeRequest(restarted.Handler(), http.MethodGet, "/api/v1/jobs", "", nil, "", "")
+	if inbox.Code != http.StatusOK || strings.Contains(inbox.Body.String(), "ARCHIVE-RUN-NOT-A-JOB") {
+		t.Fatalf("non-Job aggregate entered the Job projection: %d %s", inbox.Code, inbox.Body.String())
 	}
 }
 

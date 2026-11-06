@@ -14,6 +14,10 @@
 ## 2. 논리 데이터 모델
 
 ```text
+ArchiveRun 1 ── N OrganizationDecision 1 ── 0..1 Folder Job
+                                            └── 1..N Step ── Event / ExecutionLease
+                                                     └── organize 출력 ── ArchivePackage
+
 Job 1 ── N Step 1 ── N Event
  │          └────── Approval / ExecutionLease / ArchivistToolCall
  └── N OriginalAsset 1 ── N MediaInspection
@@ -33,6 +37,20 @@ ArchiveRun 1 ── 1 OrganizationStageOwnership / 1 TranscriptionStageOwnership
 ```
 
 ArchiveRun는 기존 run 명령 영수증과 다른 영속 aggregate다. 생성할 때 담당자가 고른 참조와 고정 FolderScope를 저장하며, 단계의 시작 조건·Job 구성·완료 의미는 ArchiveRun 생성 계약에 섞지 않고 각 단계 요구사항에서 정한다. `ORG-012`
+
+영속 객체와 조회 projection은 다음처럼 구분한다. 같은 ID를 화면마다 새 객체로 복제하지 않는다. 특히 `job_id`는 Job의 identity이므로 작업 관리·Worker·드라이브 완료 내역은 모두 같은 작업 상세 route를 참조한다.
+
+| 영속 객체 | identity와 원장 | 주요 참조 | 조회·복구 계약 | 검증 |
+|---|---|---|---|---|
+| Job | `job_id`, Command Store `aggregate_states`의 revisioned `job.State` | Step, 실행 명세의 ArchiveRun·OrganizationDecision, 출력 ArchivePackage | `archive_workspace_job_projections`는 폐기 가능한 읽기 모델이며 Control 시작 시 원장에서 재구성 | `PER-001`, `DSH-001`, `CTL-003~004`, `CTL-007` |
+| ArchiveRun | `archive_run_id`, Command Store의 `archiverun.State`와 멱등 Organization receipt | Worker, source/archive Storage, FolderScope, Folder Job | 드라이브 projection은 최신 실행과 전체 완료 결과를 서로 다른 범위로 계산 | `ORG-012~014`, `APP-002`, `DSH-008`, `DSH-024` |
+| ArchivePackage | `package_id`, ARCHIVE_PRIMARY의 metadata·events·manifest와 import sidecar | 원본 자산, Artifact, 생산 Job Event | 중앙 DB 없이 package 자체로 복원하고 같은 ID·digest만 멱등 병합 | `ARC-003`, `ARC-007`, `ARC-011`, `ARC-013` |
+| Storage·Volume·PhysicalDevice | 각 stable ID, 정규화한 topology table | Storage → Volume → Partition → PhysicalDevice | 경로는 공개 identity가 아니며 StorageRoot capability로만 접근 | `DEV-006~008`, `CFG-006` |
+| OriginalAsset | `asset_id`, checksum과 최초 observation을 가진 catalog table | InputFileObservation, MediaInspection, Artifact | 추가 전용 기록과 최신 검색 projection을 분리 | `INT-002~004`, `MED-004`, `CAT-002` |
+| OrganizationDecision | `decision_id`와 sequence, `archive_run_id` FK 및 immutable payload | MediaFolder input revision, 원본·검사, 선택 Profile | 최신 판정은 sequence로 선택하고 과거 판정을 수정하지 않음 | `ORG-002~003` |
+| ArchivistSession·Turn | `session_id`·`turn_id`, 정규화한 Archivist table과 FK | Host, ToolCall, ActionCard, ArchiveRun 업무 문맥 | 비밀과 raw terminal을 제외한 대화 projection | `LRH-001`, `LRH-012~013`, `DSH-002`, `DSH-011` |
+
+Command Store는 서로 다른 aggregate를 같은 `aggregate_states` 표에 JSON 상태로 보관하므로 ArchiveRun과 Job 사이를 SQL foreign key로 묶지 않는다. 이 경계의 참조 무결성은 생성 Command, 결정적 stable ID, 저장된 실행 명세와 출력 기록으로 검증한다. 반면 한 aggregate 안의 구성과 정규화 저장소 내부 관계는 FK 또는 Core validation으로 강제한다. 읽기 projection 손실을 원장 손실로 취급하지 않으며 Job projection은 시작 시 복구한다. `CTL-007`
 
 Archivist 계층은 `ArchivistSession → ArchivistTurn → ProviderRequest → ArchivistToolCall`로 연결하며 Tool Call은 같은 `command_id`를 사용한다.
 
@@ -55,7 +73,7 @@ Storage는 로컬 root, 연결된 네트워크 공유 root, 새 외장 data volu
 
 원본은 `InputFileObservation`에서 최초 검증한 checksum·원래 이름·크기와 관찰 기록 ID를 고정한 immutable `OriginalAsset`이다. Storage와 상대경로는 관찰 기록 또는 사본 기록이 소유하며 OriginalAsset에 복제하지 않는다. 체크섬이나 원래 이름을 고쳐야 하면 새 OriginalAsset과 대체 관계를 만든다. `INT-002`, `ARC-001`
 
-`MediaInspection`은 `OriginalAsset` ID뿐 아니라 확정 checksum에도 묶인 추가 전용 Record다. 파일 경로나 ffprobe 원문을 검색 기준으로 삼지 않고 정규화한 컨테이너, 길이, 크기, 전체 bitrate와 stream별 기술정보·bitrate를 저장한다. `MED-001`, `MED-005`
+`MediaInspection`은 `OriginalAsset` ID뿐 아니라 확정 checksum에도 묶인 추가 전용 Record다. 파일 경로나 ffprobe 원문을 검색 기준으로 삼지 않고 정규화한 컨테이너, 길이, 크기, 전체 bitrate와 컨테이너 생성 시각, stream별 codec·profile·frame rate·pixel format·bitrate·audio 규격을 저장한다. 컨테이너 생성 시각이 없거나 잘못됐으면 stream tag나 파일시스템 날짜로 대체하지 않는다. `MED-001`, `MED-005~007`
 
 `OrganizationDecision`은 작업 공간 드라이브와 MediaFolder 입력 revision, policy version, 정렬된 OriginalAsset·MediaInspection 참조, OrganizationDisposition, 선택 Profile, CutMarker, STT 가능 여부와 보류 사유를 가진 추가 전용 Record다. 사람 또는 Archivist의 명시적 분류는 기존 Record를 고치지 않고 ActorType·행위자 ID·사유·근거가 있는 새 sequence를 추가한다. `ORG-002~003`
 
@@ -92,7 +110,7 @@ size + sha256
 - migration은 단조 증가 버전과 checksum을 가지며 시작 시 적용 상태를 검사한다.
 - backup은 SQLite Online Backup 방식으로 만들고 복원 시험을 운영 절차에 포함한다.
 
-SQLite Command Store는 `PER-001` integration test로 transaction rollback을 검증한다. 전체 projection, migration, backup/restore는 다음 수직 슬라이스에서 별도 요구사항으로 내린다.
+SQLite Command Store는 `PER-001` integration test로 transaction rollback을 검증한다. Job 읽기 projection은 Control 시작 때 원장의 모든 유효 Job aggregate에서 다시 만들며 다른 aggregate를 Job으로 오인하지 않는다. DB 전체 migration과 backup/restore는 다음 수직 슬라이스에서 별도 요구사항으로 내린다. `CTL-007`
 
 Archive Control 시작 시 boot 설정의 Storage topology를 같은 SQLite DB에 등록한다. 동일한 physical device·partition·volume·Storage ID·root 재등록은 재시작으로 보고 멱등하게 허용하지만 기존 ID의 parent나 root가 달라지면 시작을 중단한다. `CFG-006`, `CTL-002`
 
@@ -120,8 +138,7 @@ Archive Intake의 ArchivePackage는 결과 영상 하나당 하나다. SOURCE_ME
 │           ├── events.jsonl
 │           ├── manifest-sha256.txt
 │           └── README.md
-└── catalog/
-    └── <원본 드라이브 ID>.csv
+└── archive-catalog.csv
 ```
 
 패키지 ID는 멱등성과 참조 무결성을 위한 불변 기계 식별자이고 디렉터리는 ID의 처리 날짜로 `YYYY/MM/DD`까지 나눈다. 결과 영상은 단일 입력이면 원래 영상명의 확장자를 `.mp4`로 바꾸고, 여러 컷 통합이면 MediaFolder의 마지막 이름을 사용한다. Windows 금지문자·예약어·후행 점과 공백·과도한 길이는 결정적으로 안전한 이름으로 정규화한다. `metadata.json`은 처리 날짜, MediaFolder, 표시명, 실제 결과 영상 파일명과 함께 원래 이름·전체 상대경로·패키지 ID를 보존하므로 사람이 읽는 이름을 바꾸어도 identity를 잃지 않는다. `ARC-013`
@@ -132,7 +149,7 @@ Archive Intake의 ArchivePackage는 결과 영상 하나당 하나다. SOURCE_ME
 - `manifest-sha256.txt`: 정렬된 상대경로와 SHA-256
 - `README.md`: 도구가 없어도 읽을 수 있는 설명
 
-Archive Intake의 1단계 결과는 담당자가 고른 `ARCHIVE_PRIMARY`에 ArchivePackage로 게시한다. 한 벌이 manifest까지 검증되면 `STORED`, 즉 보관됨이다. 2단계 Transcript·TranscriptText·Subtitle은 확정 전 패키지에 manifest가 다른 새 리비전으로 추가한다. ArchiveCatalog는 전체 투영을 임시 파일로 작성·검증한 뒤 `catalog/<원본 드라이브 ID>.csv`로 원자 교체하며 ArchivePackage의 `files.csv`를 대체하지 않는다. `ORG-008~009`, `ARC-011`
+Archive Intake의 1단계 결과는 담당자가 고른 `ARCHIVE_PRIMARY`에 ArchivePackage로 게시한다. 한 벌이 manifest까지 검증되면 `STORED`, 즉 보관됨이다. 2단계 Transcript·TranscriptText·Subtitle은 확정 전 패키지에 manifest가 다른 새 리비전으로 추가한다. ArchiveCatalog는 같은 `ARCHIVE_PRIMARY`를 쓰는 작업과 원본 드라이브를 가리지 않고 최상단 `archive-catalog.csv` 하나에 누적한다. 현재 전체 투영을 `archive-catalog.csv.partial`에 작성·검증한 뒤 원자 교체하며 ArchivePackage의 `files.csv`를 대체하지 않는다. 기존 `catalog/<원본 드라이브 ID>.csv`가 있고 최상단 파일이 없으면 첫 게시에서 행을 병합하고 기존 파일은 복구 근거로 유지한다. `ORG-008~009`, `ARC-011`
 
 Core 메타데이터 round-trip 계약은 `ARC-005`, 실제 SQLite와 디렉터리를 사용하는 sidecar package import 계약은 `ARC-007`, manifest 계약은 `ARC-003`이다.
 

@@ -4,6 +4,7 @@ import (
 	"encoding/csv"
 	"strings"
 	"testing"
+	"time"
 
 	"videoarchive/internal/core/archive"
 	"videoarchive/internal/core/organization"
@@ -12,8 +13,7 @@ import (
 
 // Requirement: ORG-009
 func TestPublisherWritesVerifiedRFC4180CatalogWithEveryOriginalInDeterministicOrder(t *testing.T) {
-	directory := t.TempDir()
-	root, err := archive.OpenStorageRoot(directory)
+	root, err := archive.OpenStorageRoot(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -22,22 +22,37 @@ func TestPublisherWritesVerifiedRFC4180CatalogWithEveryOriginalInDeterministicOr
 	if err != nil {
 		t.Fatal(err)
 	}
-	rows := []organization.ArchiveCatalogRow{
+
+	driveOne := []organization.ArchiveCatalogRow{
 		catalogRow("DRIVE-1", "recordings", "ASSET-4", "Independent.mp4", vocabulary.OrganizationAsIs, "DECISION-3", "MEDIA-2"),
 		catalogRow("DRIVE-1", "source", "ASSET-2", "CAM, \"B\" 0002.MP4", vocabulary.OrganizationCompileSourceSequence, "DECISION-1", "MEDIA-1"),
-		catalogRow("DRIVE-1", "source", "ASSET-1", "CAM 0001.MP4", vocabulary.OrganizationCompileSourceSequence, "DECISION-1", "MEDIA-1"),
-		catalogRow("DRIVE-1", "unknown", "ASSET-3", "보류, 원본.mov", vocabulary.OrganizationHold, "DECISION-2", ""),
 	}
-	rows[3].OutputVideoPath = ""
-	rows[3].ArchivePackageID = ""
-	rows[3].OutputProfile = ""
-	rows[3].Status = "HOLD"
-	rows[3].HoldReason = string(vocabulary.OrganizationHoldMissingInspection)
-	result, err := publisher.Publish(Request{
-		WorkspaceDriveID: "DRIVE-1", Rows: rows,
-		TemporaryPath: "catalog/DRIVE-1.csv.partial",
-		PublishedPath: "catalog/DRIVE-1.csv",
-	})
+	driveOne[0].SourceCreatedAt = time.Date(2026, 3, 29, 8, 0, 0, 0, time.UTC)
+	driveOne[1].SourceCreatedAt = time.Date(2026, 3, 28, 8, 54, 54, 0, time.UTC)
+	driveTwo := []organization.ArchiveCatalogRow{
+		catalogRow("DRIVE-2", "source", "ASSET-1", "CAM 0001.MP4", vocabulary.OrganizationCompileSourceSequence, "DECISION-4", "MEDIA-3"),
+		catalogRow("DRIVE-2", "unknown", "ASSET-3", "보류, 원본.mov", vocabulary.OrganizationHold, "DECISION-5", ""),
+	}
+	driveTwo[0].SourceCreatedAt = time.Date(2026, 3, 30, 8, 0, 0, 0, time.UTC)
+	driveTwo[1].ArchiveDate = ""
+	driveTwo[1].OutputVideoName = ""
+	driveTwo[1].OutputVideoPath = ""
+	driveTwo[1].ArchivePackageID = ""
+	driveTwo[1].OutputMediaID = ""
+	driveTwo[1].OutputProfile = ""
+	driveTwo[1].Status = "HOLD"
+	driveTwo[1].HoldReason = string(vocabulary.OrganizationHoldMissingInspection)
+
+	request := func(workspaceDriveID string, rows []organization.ArchiveCatalogRow) Request {
+		return Request{
+			WorkspaceDriveID: workspaceDriveID, Rows: rows,
+			TemporaryPath: "archive-catalog.csv.partial", PublishedPath: "archive-catalog.csv",
+		}
+	}
+	if _, err := publisher.PublishMerged(request("DRIVE-1", driveOne)); err != nil {
+		t.Fatal(err)
+	}
+	result, err := publisher.PublishMerged(request("DRIVE-2", driveTwo))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,23 +64,18 @@ func TestPublisherWritesVerifiedRFC4180CatalogWithEveryOriginalInDeterministicOr
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantHeader := []string{
-		"workspace_drive_id", "media_folder", "original_asset_id", "source_name", "source_relative_path", "source_checksum",
-		"source_duration_ms", "source_video_codec", "source_width", "source_height", "source_video_bitrate_bps",
-		"organization_disposition", "organization_decision_id", "archive_package_id", "output_media_id", "output_video_path", "output_profile",
-		"transcript_path", "transcript_text_path", "subtitle_path", "status", "hold_reason",
-	}
-	if len(records) != 5 || !equalRecord(records[0], wantHeader) || result.RowCount != 4 {
+	if len(records) != 5 || !equalRecord(records[0], header) || result.RowCount != 4 || result.Path != "archive-catalog.csv" {
 		t.Fatalf("catalog shape mismatch: result=%+v records=%q", result, records)
 	}
-	order := []string{records[1][2], records[2][2], records[3][2], records[4][2]}
-	if !equalRecord(order, []string{"ASSET-4", "ASSET-1", "ASSET-2", "ASSET-3"}) ||
-		records[2][13] != "VP-20261031-MEDIA-1" || records[3][13] != "VP-20261031-MEDIA-1" || records[3][3] != "CAM, \"B\" 0002.MP4" ||
-		records[4][20] != "HOLD" || records[4][21] != string(vocabulary.OrganizationHoldMissingInspection) ||
-		strings.Contains(string(payload), directory) {
+	// The human-facing date/name pairs lead the sheet while machine IDs remain at the tail.
+	if !equalRecord(records[1][:4], []string{"2026-03-28T08:54:54Z", "CAM, \"B\" 0002.MP4", "20261031", "CAM, \"B\" 0002.mp4"}) ||
+		records[1][31] != "DRIVE-1" || records[1][32] != "ASSET-2" ||
+		records[2][1] != "Independent.mp4" || records[3][31] != "DRIVE-2" || records[3][32] != "ASSET-1" ||
+		records[4][6] != "HOLD" || records[4][8] != string(vocabulary.OrganizationHoldMissingInspection) ||
+		strings.Contains(string(payload), "C:\\ArchiveStorage") {
 		t.Fatalf("catalog values or ordering mismatch: %q", records)
 	}
-	if _, err := root.ReadFile("catalog/DRIVE-1.csv.partial"); err == nil {
+	if _, err := root.ReadFile("archive-catalog.csv.partial"); err == nil {
 		t.Fatal("temporary catalog remained after publish")
 	}
 }
@@ -85,7 +95,7 @@ func TestPublishMergedKeepsUnchangedRowsAndReplacesCurrentOriginalProjection(t *
 	request := func(rows []organization.ArchiveCatalogRow) Request {
 		return Request{
 			WorkspaceDriveID: "DRIVE-1", Rows: rows,
-			TemporaryPath: "catalog/DRIVE-1.csv.partial", PublishedPath: "catalog/DRIVE-1.csv",
+			TemporaryPath: "archive-catalog.csv.partial", PublishedPath: "archive-catalog.csv",
 		}
 	}
 	if _, err := publisher.PublishMerged(request([]organization.ArchiveCatalogRow{first})); err != nil {
@@ -101,26 +111,71 @@ func TestPublishMergedKeepsUnchangedRowsAndReplacesCurrentOriginalProjection(t *
 	if result, err := publisher.PublishMerged(request([]organization.ArchiveCatalogRow{second})); err != nil || result.RowCount != 2 {
 		t.Fatalf("merged projection failed: result=%+v err=%v", result, err)
 	}
-	payload, err := root.ReadFile("catalog/DRIVE-1.csv")
+	payload, err := root.ReadFile("archive-catalog.csv")
 	if err != nil {
 		t.Fatal(err)
 	}
 	records, err := csv.NewReader(strings.NewReader(string(payload))).ReadAll()
-	if err != nil || len(records) != 3 || records[1][2] != "ASSET-1" || records[1][20] != "STORED" ||
-		records[2][2] != "ASSET-2" || records[2][20] != "STT_COMPLETED" || records[2][18] == "" {
+	if err != nil || len(records) != 3 || records[1][32] != "ASSET-1" || records[1][6] != "STORED" ||
+		records[2][32] != "ASSET-2" || records[2][6] != "STT_COMPLETED" || records[2][29] == "" {
 		t.Fatalf("merged catalog lost or duplicated rows: records=%q err=%v", records, err)
 	}
 }
 
+func TestPublishMergedMigratesLegacyPerDriveCatalogOnFirstRootPublish(t *testing.T) {
+	root, err := archive.OpenStorageRoot(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	legacy := catalogRow("DRIVE-OLD", "old", "ASSET-OLD", "old.mov", vocabulary.OrganizationAsIs, "DECISION-OLD", "MEDIA-OLD")
+	legacyRecord := []string{
+		legacy.WorkspaceDriveID, legacy.MediaFolder, legacy.OriginalAssetID, legacy.SourceName, legacy.SourceRelativePath, legacy.SourceChecksum,
+		"10000", legacy.SourceVideoCodec, "1920", "1080", "6000000", string(legacy.Disposition), legacy.DecisionID,
+		legacy.ArchivePackageID, legacy.OutputMediaID, legacy.OutputVideoPath, legacy.OutputProfile, "", "", "", legacy.Status, "",
+	}
+	var payload strings.Builder
+	writer := csv.NewWriter(&payload)
+	writer.WriteAll([][]string{legacyHeader, legacyRecord})
+	if err := root.MkdirAll("catalog", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := root.WriteFile("catalog/DRIVE-OLD.csv", []byte(payload.String()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	publisher, err := NewPublisher(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current := catalogRow("DRIVE-NEW", "new", "ASSET-NEW", "new.mp4", vocabulary.OrganizationAsIs, "DECISION-NEW", "MEDIA-NEW")
+	result, err := publisher.PublishMerged(Request{
+		WorkspaceDriveID: "DRIVE-NEW", Rows: []organization.ArchiveCatalogRow{current},
+		TemporaryPath: "archive-catalog.csv.partial", PublishedPath: "archive-catalog.csv",
+	})
+	if err != nil || result.RowCount != 2 {
+		t.Fatalf("legacy migration failed: result=%+v err=%v", result, err)
+	}
+	if _, err := root.ReadFile("catalog/DRIVE-OLD.csv"); err != nil {
+		t.Fatal("legacy recovery source must remain intact")
+	}
+}
+
 func catalogRow(workspaceDriveID, folder, assetID, name string, disposition vocabulary.OrganizationDisposition, decisionID, mediaID string) organization.ArchiveCatalogRow {
+	outputName := strings.TrimSuffix(name, ".MP4")
+	outputName = strings.TrimSuffix(outputName, ".mp4") + ".mp4"
 	return organization.ArchiveCatalogRow{
+		SourceName: name, ArchiveDate: "20261031", OutputVideoName: outputName,
 		WorkspaceDriveID: workspaceDriveID, MediaFolder: folder, OriginalAssetID: assetID,
-		SourceName: name, SourceRelativePath: folder + "/" + name,
+		SourceRelativePath:   folder + "/" + name,
 		SourceChecksum:       "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-		SourceDurationMillis: 10_000, SourceVideoCodec: "h264", SourceWidth: 1920, SourceHeight: 1080, SourceVideoBitRateBPS: 6_000_000,
+		SourceDurationMillis: 10_000, SourceSizeBytes: 8_000_000, SourceContainer: "mov,mp4", SourceBitRateBPS: 6_300_000,
+		SourceVideoCodec: "h264", SourceVideoProfile: "High", SourceWidth: 1920, SourceHeight: 1080,
+		SourceFrameRateNumerator: 30_000, SourceFrameRateDenominator: 1_001, SourceVideoPixelFormat: "yuv420p",
+		SourceVideoBitRateBPS: 6_000_000, SourceAudioCodec: "aac", SourceAudioProfile: "LC",
+		SourceAudioBitRateBPS: 256_000, SourceAudioSampleRateHz: 48_000, SourceAudioChannels: 2, SourceAudioChannelLayout: "stereo",
 		Disposition: disposition, DecisionID: decisionID, OutputMediaID: mediaID,
 		ArchivePackageID: "VP-20261031-" + mediaID,
-		OutputVideoPath:  "packages/VP-20261031-" + mediaID + "/revisions/000001/video.mp4",
+		OutputVideoPath:  "packages/VP-20261031-" + mediaID + "/revisions/000001/" + outputName,
 		OutputProfile:    "archive-1080p-6mbps@v1", Status: "STORED",
 	}
 }

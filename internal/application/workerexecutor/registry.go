@@ -21,6 +21,11 @@ type Handler interface {
 	Execute(context.Context, execution.StepExecutionSpec, *workerconfig.StorageRoots) ([]execution.StepOutput, []string, error)
 }
 
+type detailedHandler interface {
+	Handler
+	ExecuteDetailed(context.Context, execution.StepExecutionSpec, *workerconfig.StorageRoots) ([]execution.StepOutput, []string, []execution.InspectedMedia, error)
+}
+
 type Registry struct {
 	roots    *workerconfig.StorageRoots
 	handlers map[execution.Operation]Handler
@@ -69,19 +74,31 @@ func (registry *Registry) Execute(ctx context.Context, assignment workerclient.A
 			return inputFailure("UNREGISTERED_STORAGE")
 		}
 	}
-	outputs, verificationReferences, err := handler.Execute(ctx, spec, registry.roots)
+	var outputs []execution.StepOutput
+	var verificationReferences []string
+	var inspectedMedia []execution.InspectedMedia
+	var err error
+	if detailed, ok := handler.(detailedHandler); ok {
+		outputs, verificationReferences, inspectedMedia, err = detailed.ExecuteDetailed(ctx, spec, registry.roots)
+	} else {
+		outputs, verificationReferences, err = handler.Execute(ctx, spec, registry.roots)
+	}
 	if err != nil {
 		return workerclient.ExecutionResult{
 			FailureClass: workflow.FailureInput, ErrorClass: "STEP_EXECUTION_FAILED", LogReference: "worker://operation-failed",
 		}
 	}
-	if _, err := execution.NewStepOutputRecord(
-		spec, assignment.FencingToken, "registry-validation", time.Now().UTC(), outputs, verificationReferences,
+	validationWorkerID := "registry-validation"
+	if len(inspectedMedia) > 0 {
+		validationWorkerID = inspectedMedia[0].Observation.ObservedBy
+	}
+	if _, err := execution.NewStepOutputRecordWithInspections(
+		spec, assignment.FencingToken, validationWorkerID, time.Now().UTC(), outputs, verificationReferences, inspectedMedia,
 	); err != nil {
 		return inputFailure("INVALID_ADAPTER_OUTPUT")
 	}
 	return workerclient.ExecutionResult{
-		Success: true, Outputs: outputs, VerificationReferences: verificationReferences,
+		Success: true, Outputs: outputs, VerificationReferences: verificationReferences, InspectedMedia: inspectedMedia,
 		LogReference: "worker://operation-completed",
 	}
 }

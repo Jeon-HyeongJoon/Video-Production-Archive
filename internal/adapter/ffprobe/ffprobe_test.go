@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 const ffprobeFixtureProcess = "ARCHIVE_FFPROBE_FIXTURE_PROCESS"
@@ -134,5 +135,52 @@ func TestFFprobeAdapterMapsFormatAndVideoStreamBitratesSeparately(t *testing.T) 
 	if inspection.BitRate != 6_300_000 || len(inspection.VideoStreams) != 2 ||
 		inspection.VideoStreams[0].BitRate != 6_000_000 || inspection.VideoStreams[1].BitRate != 0 {
 		t.Fatalf("format and stream bitrates were conflated: %+v", inspection)
+	}
+}
+
+// Requirement: MED-007
+func TestFFprobeAdapterPreservesHumanCatalogMetadataWithoutInferringCreationTime(t *testing.T) {
+	tests := []struct {
+		name          string
+		creationTime  string
+		wantCreatedAt time.Time
+	}{
+		{
+			name:          "container creation time",
+			creationTime:  `"creation_time":"2026-03-28T08:54:54.4735904Z"`,
+			wantCreatedAt: time.Date(2026, 3, 28, 8, 54, 54, 473590400, time.UTC),
+		},
+		{name: "malformed creation time remains absent", creationTime: `"creation_time":"camera-local-date"`},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			payload := []byte(`{
+  "format": {"format_name":"mov,mp4", "duration":"19.119104", "size":"51518075", "bit_rate":"21556690",
+    "tags": {` + test.creationTime + `}},
+  "streams": [
+    {"index":0, "codec_type":"video", "codec_name":"h264", "profile":"High", "width":1920, "height":1080,
+     "avg_frame_rate":"30000/1001", "r_frame_rate":"30000/1001", "pix_fmt":"yuv420p", "bit_rate":"21223414",
+     "tags":{"creation_time":"2025-01-01T00:00:00Z"}},
+    {"index":1, "codec_type":"audio", "codec_name":"aac", "profile":"LC", "sample_rate":"48000", "channels":2,
+     "channel_layout":"stereo", "bit_rate":"317311"}
+  ]
+}`)
+			inspector, err := NewInspector("ffprobe", "ffprobe-8.0", "WORKER-1", fixedProbeRunner{payload: payload})
+			if err != nil {
+				t.Fatal(err)
+			}
+			inspection, err := inspector.Inspect(context.Background(), Request{
+				InspectionID: "INSPECTION-METADATA", OriginalAssetID: "ASSET-1",
+				OriginalChecksum: strings.Repeat("a", 64), ResolvedInputPath: "/resolved/input.mp4",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !inspection.ContainerCreatedAt.Equal(test.wantCreatedAt) || inspection.VideoStreams[0].Profile != "High" ||
+				inspection.VideoStreams[0].PixelFormat != "yuv420p" || inspection.AudioStreams[0].Profile != "LC" ||
+				inspection.AudioStreams[0].BitRate != 317_311 || inspection.AudioStreams[0].ChannelLayout != "stereo" {
+				t.Fatalf("human catalog metadata was lost or inferred: %+v", inspection)
+			}
+		})
 	}
 }

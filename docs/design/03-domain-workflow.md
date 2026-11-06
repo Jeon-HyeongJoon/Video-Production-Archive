@@ -36,7 +36,7 @@ Summary는 Transcript와 분리된 리비전 대상 Artifact subtype이다. Summ
 
 Rendering은 versioned Profile만 실행한다. v1 `archive-event-1080p`는 호환성을 우선한 H.264/AAC MP4, 최대 1920×1080, 짝수 크기, 제한된 thread 수를 사용한다. FFmpeg는 인수 배열로 실행하고 같은 출력 디렉터리의 임시 파일을 검증한 뒤 원자적으로 게시하며, 게시된 파일의 checksum과 Profile·처리기·Worker를 Rendition provenance에 기록한다. 실제 Windows FFmpeg 검증 전까지 하드웨어 encoder는 허용 목록에 넣지 않는다. `RND-001~003`
 
-QC는 렌더 요청값을 그대로 신뢰하지 않는다. 게시 파일을 ffprobe와 SHA-256으로 다시 관찰한 `OutputObservation`을 원본 `MediaInspection`, 렌더 Profile 및 Rendition과 비교한다. decodable·checksum·크기·container·video/audio codec·해상도·길이 검사가 모두 통과한 `QCAssessment`만 PASSED이며 각 검사의 기대값과 실제값을 보존한다. 이 평가는 다음 단계에서 provenance를 가진 `QCReport` sidecar로 게시한다. `QCT-001~002`
+QC는 렌더 요청값을 그대로 신뢰하지 않는다. 게시 파일을 ffprobe와 SHA-256으로 다시 관찰한 `OutputObservation`을 원본 `MediaInspection`, 렌더 Profile 및 Rendition과 비교한다. decodable·checksum·크기·container·video codec·해상도·길이와 원본의 오디오 유무가 요구하는 audio codec 검사가 모두 통과한 `QCAssessment`만 PASSED다. 원본에 오디오가 있으면 AAC를, 없으면 오디오 스트림 부재를 기대값으로 보존한다. 이 평가는 다음 단계에서 provenance를 가진 `QCReport` sidecar로 게시한다. `QCT-001~002`
 
 Catalog는 파일을 이동하거나 경로를 검색 키로 사용하지 않는다. 사람 또는 Archivist가 작성한 제목·설명·키워드는 OriginalAsset별 추가 전용 `CatalogRecord` 리비전으로 남긴다. 자산 검색은 최신 CatalogRecord와 최신 MediaInspection을 결합해 text·video codec·길이 조건을 적용하며 OriginalAsset 콘텐츠 정체성을 반환한다. 전사 검색은 별도 segment hit 모델로 최신 Transcript의 timecode를 반환한다. `CAT-001~003`
 
@@ -169,7 +169,7 @@ inspect_inputs → register_original_assets
 2단계 Command: stored recording → audio → transcript → subtitle → package revision → archive_catalog
 ```
 
-SOURCE_MEDIA 원본은 이동하거나 이름을 바꾸지 않는다. 1단계 Folder Job은 검사·분류·렌더·QC·보관만 포함하고 STT를 넣지 않는다. 1단계에 실행 가능한 작업이 없을 때만 별도 2단계 Command가 보관됨 녹화영상에 오디오·STT·자막·패키지 추가를 만든다. HOLD는 명시적 입력 대기이므로 게이트의 남은 실행 작업과 STT 대상에서 제외한다. 사람 또는 Archivist의 분류는 최신 입력 revision을 고정한 새 OrganizationDecision으로 기록한다. 게이트 범위와 STT Job 모델은 Q2·Q3 결정 전 구현하지 않는다. 요구사항: `PIP-007~009`, `APP-002`, `MCP-004~005`
+SOURCE_MEDIA 원본은 이동하거나 이름을 바꾸지 않는다. 1단계 Folder Job은 검사·분류·렌더·QC·보관만 포함하고 STT를 넣지 않는다. 1단계에 실행 가능한 작업이 없을 때만 별도 2단계 Command가 보관됨 녹화영상 중 원본 기술정보에 오디오가 있는 대상에 오디오·STT·자막·패키지 추가를 만든다. 무음 영상·소스 시퀀스·HOLD는 STT 대상에서 제외하고, HOLD만 게이트의 남은 실행 작업에서도 제외한다. 사람 또는 Archivist의 분류는 최신 입력 revision을 고정한 새 OrganizationDecision으로 기록한다. 요구사항: `ORG-007`, `PIP-007~009`, `APP-002`, `MCP-004~005`
 
 ## 7. 사람 개입
 

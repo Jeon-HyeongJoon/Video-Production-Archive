@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -227,10 +228,11 @@ func (handler *Handler) result(writer http.ResponseWriter, request *http.Request
 		writeError(writer, http.StatusUnsupportedMediaType, "JSON_REQUIRED")
 		return
 	}
-	decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 64<<10))
+	decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 32<<20))
 	decoder.DisallowUnknownFields()
 	var payload resultRequest
 	if err := decoder.Decode(&payload); err != nil {
+		slog.Warn("reject invalid Worker result payload", "error", err)
 		writeError(writer, http.StatusBadRequest, "INVALID_WORKER_RESULT")
 		return
 	}
@@ -239,6 +241,9 @@ func (handler *Handler) result(writer http.ResponseWriter, request *http.Request
 		strings.TrimSpace(payload.StepID) == "" || payload.FencingToken == 0 ||
 		(!payload.Success && payload.FailureClass == "") || (payload.Success && payload.OutputRecord == nil) ||
 		(!payload.Success && payload.OutputRecord != nil) {
+		slog.Warn("reject structurally invalid Worker result", "trailing_error", err, "job_id_present", strings.TrimSpace(payload.JobID) != "",
+			"step_id_present", strings.TrimSpace(payload.StepID) != "", "fencing_token_present", payload.FencingToken != 0,
+			"success", payload.Success, "output_record_present", payload.OutputRecord != nil)
 		writeError(writer, http.StatusBadRequest, "INVALID_WORKER_RESULT")
 		return
 	}

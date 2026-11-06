@@ -7,7 +7,7 @@ from playwright.sync_api import expect, sync_playwright
 with sync_playwright() as playwright:
     browser = playwright.chromium.launch()
     page = browser.new_page(viewport={"width": 1440, "height": 900}, color_scheme="light", locale="ko-KR")
-    page.goto(sys.argv[1] + "/#/workers", wait_until="networkidle")
+    page.goto(sys.argv[1] + "/#/connections", wait_until="networkidle")
 
     capacity = page.locator('#worker-list [data-worker-id="WORKER-1"] .capacity-grid')
     expect(capacity).to_contain_text("CPU38%")

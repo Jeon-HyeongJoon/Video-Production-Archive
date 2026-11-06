@@ -735,6 +735,16 @@ func (handler *Handler) archiveIntakeProjection(writer http.ResponseWriter, requ
 			CatalogRowCount: value.CatalogRowCount, CatalogUpdatedAt: value.CatalogUpdatedAt,
 			DiscoveredFileCount: value.DiscoveredFileCount, DiscoveredFolderCount: value.DiscoveredFolderCount,
 		}
+		for _, completed := range value.CompletedWork {
+			projected.CompletedWork = append(projected.CompletedWork, driveCompletedWorkView{
+				ArchiveRunID: completed.ArchiveRunID, Folder: completed.Folder, JobID: completed.JobID,
+				Disposition: string(completed.Disposition), ProfileReference: completed.ProfileReference,
+				SourceVideoCount: completed.SourceVideoCount, ArchiveStorageID: completed.ArchiveStorageID,
+				ArchivePackageID: completed.ArchivePackageID, ArchiveDate: completed.ArchiveDate,
+				ArchiveDisplayName: completed.ArchiveDisplayName, ArchiveVideoFileName: completed.ArchiveVideoFileName,
+				ArchiveState: string(completed.ArchiveState), CompletedAt: completed.CompletedAt,
+			})
+		}
 		for _, candidate := range value.StorageCandidates {
 			projected.StorageCandidates = append(projected.StorageCandidates, driveStorageView{
 				StorageID: candidate.StorageID, Role: string(candidate.Role), WorkspaceDriveID: candidate.WorkspaceDriveID,
@@ -779,10 +789,16 @@ func projectDriveFolder(folder archiveintakeworkspace.FolderView) driveFolderVie
 			SegmentCount: quality.SegmentCount, TextCharacterCount: quality.TextCharacterCount,
 		})
 	}
+	workOptions := make([]driveWorkOptionView, 0, len(folder.WorkOptions))
+	for _, option := range folder.WorkOptions {
+		workOptions = append(workOptions, driveWorkOptionView{
+			Disposition: string(option.Disposition), TargetVideoBitRateKbps: option.TargetVideoBitRateKbps,
+		})
+	}
 	return driveFolderView{
 		Folder: folder.Folder, DecisionID: folder.DecisionID, InputRevision: folder.InputRevision,
 		DecisionSequence: folder.DecisionSequence, Disposition: string(folder.Disposition),
-		ProfileReference: folder.ProfileReference, HoldReasons: holdReasons, VideoCount: folder.VideoCount,
+		ProfileReference: folder.ProfileReference, HoldReasons: holdReasons, WorkOptions: workOptions, VideoCount: folder.VideoCount,
 		EstimatedOutputBytes: folder.EstimatedOutputBytes, JobID: folder.JobID,
 		TranscriptionJobID: folder.TranscriptionJobID, CurrentStepID: folder.CurrentStepID,
 		StepState: string(folder.StepState), Stages: stages, ArchivePackageID: folder.ArchivePackageID,
@@ -1214,33 +1230,50 @@ type archivistHostStatusView struct {
 }
 
 type driveView struct {
-	WorkspaceDriveID           string             `json:"workspace_drive_id"`
-	ArchiveRunID               string             `json:"archive_run_id"`
-	ArchiveRunRevision         uint64             `json:"archive_run_revision"`
-	CandidateRevision          uint64             `json:"candidate_revision"`
-	FolderDiscoveryRevision    uint64             `json:"folder_discovery_revision"`
-	FolderDiscoveryState       string             `json:"folder_discovery_state"`
-	SessionID                  string             `json:"session_id"`
-	WorkerID                   string             `json:"worker_id"`
-	SourceVolumeID             string             `json:"source_volume_id"`
-	SourceStorageID            string             `json:"source_storage_id"`
-	ArchiveStorageID           string             `json:"archive_storage_id"`
-	State                      string             `json:"state"`
-	ArchiveRunState            string             `json:"archive_run_state"`
-	InputRevision              uint64             `json:"input_revision"`
-	FileCount                  int                `json:"file_count"`
-	FolderCount                int                `json:"folder_count"`
-	StageOneRemaining          int                `json:"stage_one_remaining"`
-	StageTwoRemaining          int                `json:"stage_two_remaining"`
-	HoldCount                  int                `json:"hold_count"`
-	EligibleTranscriptionCount int                `json:"eligible_transcription_count"`
-	CatalogRowCount            int                `json:"catalog_row_count"`
-	CatalogUpdatedAt           time.Time          `json:"catalog_updated_at,omitempty"`
-	Folders                    []driveFolderView  `json:"folders"`
-	DiscoveredFileCount        int                `json:"discovered_file_count"`
-	DiscoveredFolderCount      int                `json:"discovered_folder_count"`
-	DiscoveredFolders          []driveFolderView  `json:"discovered_folders"`
-	StorageCandidates          []driveStorageView `json:"storage_candidates"`
+	WorkspaceDriveID           string                   `json:"workspace_drive_id"`
+	ArchiveRunID               string                   `json:"archive_run_id"`
+	ArchiveRunRevision         uint64                   `json:"archive_run_revision"`
+	CandidateRevision          uint64                   `json:"candidate_revision"`
+	FolderDiscoveryRevision    uint64                   `json:"folder_discovery_revision"`
+	FolderDiscoveryState       string                   `json:"folder_discovery_state"`
+	SessionID                  string                   `json:"session_id"`
+	WorkerID                   string                   `json:"worker_id"`
+	SourceVolumeID             string                   `json:"source_volume_id"`
+	SourceStorageID            string                   `json:"source_storage_id"`
+	ArchiveStorageID           string                   `json:"archive_storage_id"`
+	State                      string                   `json:"state"`
+	ArchiveRunState            string                   `json:"archive_run_state"`
+	InputRevision              uint64                   `json:"input_revision"`
+	FileCount                  int                      `json:"file_count"`
+	FolderCount                int                      `json:"folder_count"`
+	StageOneRemaining          int                      `json:"stage_one_remaining"`
+	StageTwoRemaining          int                      `json:"stage_two_remaining"`
+	HoldCount                  int                      `json:"hold_count"`
+	EligibleTranscriptionCount int                      `json:"eligible_transcription_count"`
+	CatalogRowCount            int                      `json:"catalog_row_count"`
+	CatalogUpdatedAt           time.Time                `json:"catalog_updated_at,omitempty"`
+	Folders                    []driveFolderView        `json:"folders"`
+	DiscoveredFileCount        int                      `json:"discovered_file_count"`
+	DiscoveredFolderCount      int                      `json:"discovered_folder_count"`
+	DiscoveredFolders          []driveFolderView        `json:"discovered_folders"`
+	StorageCandidates          []driveStorageView       `json:"storage_candidates"`
+	CompletedWork              []driveCompletedWorkView `json:"completed_work"`
+}
+
+type driveCompletedWorkView struct {
+	ArchiveRunID         string    `json:"archive_run_id"`
+	Folder               string    `json:"folder"`
+	JobID                string    `json:"job_id"`
+	Disposition          string    `json:"disposition"`
+	ProfileReference     string    `json:"profile_reference,omitempty"`
+	SourceVideoCount     int       `json:"source_video_count"`
+	ArchiveStorageID     string    `json:"archive_storage_id"`
+	ArchivePackageID     string    `json:"archive_package_id"`
+	ArchiveDate          string    `json:"archive_date"`
+	ArchiveDisplayName   string    `json:"archive_display_name"`
+	ArchiveVideoFileName string    `json:"archive_video_file_name"`
+	ArchiveState         string    `json:"archive_state"`
+	CompletedAt          time.Time `json:"completed_at"`
 }
 
 type driveStorageView struct {
@@ -1264,6 +1297,7 @@ type driveFolderView struct {
 	Disposition          string                  `json:"disposition"`
 	ProfileReference     string                  `json:"profile_reference,omitempty"`
 	HoldReasons          []string                `json:"hold_reasons"`
+	WorkOptions          []driveWorkOptionView   `json:"work_options"`
 	VideoCount           int                     `json:"video_count"`
 	EstimatedOutputBytes uint64                  `json:"estimated_output_bytes"`
 	JobID                string                  `json:"job_id,omitempty"`
@@ -1278,6 +1312,11 @@ type driveFolderView struct {
 	ArchiveState         string                  `json:"archive_state,omitempty"`
 	CanAddTranscription  bool                    `json:"can_add_transcription"`
 	TranscriptQualities  []transcriptQualityView `json:"transcript_qualities"`
+}
+
+type driveWorkOptionView struct {
+	Disposition            string `json:"disposition"`
+	TargetVideoBitRateKbps int    `json:"target_video_bitrate_kbps,omitempty"`
 }
 
 type transcriptQualityView struct {

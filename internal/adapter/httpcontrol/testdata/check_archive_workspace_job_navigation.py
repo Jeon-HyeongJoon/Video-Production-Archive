@@ -1,0 +1,58 @@
+import sys
+
+from playwright.sync_api import expect, sync_playwright
+
+
+with sync_playwright() as playwright:
+    browser = playwright.chromium.launch(headless=True)
+    page = browser.new_page(viewport={"width": 1440, "height": 960}, locale="ko-KR")
+    base_url = sys.argv[1]
+
+    page.goto(base_url + "/#/jobs", wait_until="networkidle")
+    expect(page.locator('#menu [data-menu="jobs"]')).to_have_attribute("aria-current", "page")
+    expect(page.locator('#menu [data-menu="jobs"] .menu-label')).to_have_text("작업 관리")
+    expect(page.locator('#menu [data-menu="status"]')).to_have_count(0)
+    expect(page.locator("#job-count")).to_have_text("4")
+    expect(page.locator('#active-jobs .job-row[data-job-id="JOB-RUNNING"]')).to_have_count(1)
+    expect(page.locator('#queued-jobs .job-row[data-job-id="JOB-QUEUED"]')).to_have_count(1)
+    attention = page.locator("#attention-jobs")
+    expect(attention).to_have_attribute("open", "")
+    expect(attention.locator("summary")).to_have_text("확인 필요1")
+    expect(attention.locator('.job-row[data-job-id="JOB-REVIEW"]')).to_be_visible()
+    attention.locator("summary").click()
+    expect(attention).not_to_have_attribute("open", "")
+    attention.locator("summary").click()
+    expect(attention).to_have_attribute("open", "")
+    completed_section = page.locator("#completed-jobs")
+    expect(completed_section).to_have_attribute("open", "")
+    expect(completed_section.locator(":scope > summary")).to_have_text("완료1")
+    completed = completed_section.locator('.completed-row[data-job-id="JOB-SOURCE"]')
+    expect(completed).to_have_attribute("href", "#/jobs/JOB-SOURCE")
+    expect(completed).to_contain_text("source.mp4")
+    expect(completed).to_contain_text("소스 시퀀스")
+    expect(completed).to_contain_text("86 → 1")
+    expect(completed).to_contain_text("archive-main")
+    completed_section.locator(":scope > summary").click()
+    expect(completed_section).not_to_have_attribute("open", "")
+    completed_section.locator(":scope > summary").click()
+    expect(completed_section).to_have_attribute("open", "")
+    completed.click()
+
+    expect(page).to_have_url(base_url + "/#/jobs/JOB-SOURCE")
+    expect(page.locator("#job-title")).to_have_text("source.mp4")
+    expect(page.locator("#job-summary")).to_contain_text("JOB-SOURCE")
+    expect(page.locator('#job-steps .stage-row[data-step="organize"] .stage-state')).to_contain_text("COMPLETED · 100%")
+    result = page.locator('#job-result[data-package-id="VP-20261030-SOURCE"]')
+    expect(result).to_contain_text("source.mp4")
+    expect(result).to_contain_text("소스 시퀀스")
+    expect(result).to_contain_text("86 → 1")
+    expect(result).to_contain_text("archive-main")
+    expect(result).to_contain_text("ARCHIVE-RUN-1")
+
+    page.goto(base_url + "/#/drives/VOLUME-1", wait_until="networkidle")
+    entry = page.locator('#completed-work a.completed-row[data-job-id="JOB-SOURCE"]')
+    expect(entry).to_have_attribute("href", "#/jobs/JOB-SOURCE")
+    entry.click()
+    expect(page).to_have_url(base_url + "/#/jobs/JOB-SOURCE")
+    expect(page.locator('#job-result[data-package-id="VP-20261030-SOURCE"]')).to_be_visible()
+    browser.close()

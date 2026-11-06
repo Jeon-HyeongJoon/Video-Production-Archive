@@ -165,6 +165,9 @@ func OpenWithDependencies(ctx context.Context, configuration bootconfig.Configur
 	if err != nil {
 		return fail(err)
 	}
+	if err := jobcontrol.RebuildProjections(ctx, commandStore, archiveWorkspaceStore); err != nil {
+		return fail(err)
+	}
 	workerRegistry := worker.NewRegistry(configuration.Workers, credentialVerifier{resolver: dependencies.Secrets}, configuration.HeartbeatTTL)
 	archiveIntakeSelection, err := archiveintake.NewService(archiveIntakeRepository)
 	if err != nil {
@@ -184,36 +187,35 @@ func OpenWithDependencies(ctx context.Context, configuration bootconfig.Configur
 		return fail(err)
 	}
 	runtime.archiveIntakeWorkspace = archiveIntakeWorkspace
+	batchHandler, batchErr := archiverun.NewHandler(dependencies.Now)
+	if batchErr != nil {
+		return fail(batchErr)
+	}
+	batchCommands := command.NewAuthorizedCreatingExecutor(commandStore, func(envelope command.Envelope) error {
+		if envelope.Actor.Type != vocabulary.ActorHuman || envelope.RequestedVia != "APPLICATION" {
+			return errors.New("archive run command is not authorized")
+		}
+		return nil
+	}, batchHandler.Handle)
+	for _, topology := range configuration.Storages {
+		if topology.Role != vocabulary.StorageSourceMedia {
+			continue
+		}
+		workerID := sourceWorkerID(configuration.Workers, topology.StorageID)
+		candidate, buildErr := archiveorganization.BuildStaticCandidate(topology, workerID, dependencies.Now())
+		if buildErr != nil {
+			return fail(buildErr)
+		}
+		if _, candidateErr := archiveIntakeRepository.Candidate(ctx, topology.VolumeID); errors.Is(candidateErr, sqlitearchiveintake.ErrRecordNotFound) {
+			if saveErr := archiveIntakeRepository.SaveCandidate(ctx, candidate); saveErr != nil {
+				return fail(saveErr)
+			}
+		} else if candidateErr != nil {
+			return fail(candidateErr)
+		}
+	}
 	var archiveRuns archiveorganization.Starter
-	var archiveTranscriptions *archivetranscription.Service
 	if configuration.ArchiveOrganization != nil {
-		batchHandler, batchErr := archiverun.NewHandler(dependencies.Now)
-		if batchErr != nil {
-			return fail(batchErr)
-		}
-		batchCommands := command.NewAuthorizedCreatingExecutor(commandStore, func(envelope command.Envelope) error {
-			if envelope.Actor.Type != vocabulary.ActorHuman || envelope.RequestedVia != "APPLICATION" {
-				return errors.New("archive run command is not authorized")
-			}
-			return nil
-		}, batchHandler.Handle)
-		for _, topology := range configuration.Storages {
-			if topology.Role != vocabulary.StorageSourceMedia {
-				continue
-			}
-			workerID := sourceWorkerID(configuration.Workers, topology.StorageID)
-			candidate, buildErr := archiveorganization.BuildStaticCandidate(topology, workerID, dependencies.Now())
-			if buildErr != nil {
-				return fail(buildErr)
-			}
-			if _, candidateErr := archiveIntakeRepository.Candidate(ctx, topology.VolumeID); errors.Is(candidateErr, sqlitearchiveintake.ErrRecordNotFound) {
-				if saveErr := archiveIntakeRepository.SaveCandidate(ctx, candidate); saveErr != nil {
-					return fail(saveErr)
-				}
-			} else if candidateErr != nil {
-				return fail(candidateErr)
-			}
-		}
 		analyzerFactory := archiveorganization.AnalyzerFactory(localArchiveIntakeAnalyzerFactory{
 			executable: configuration.ArchiveOrganization.FFprobe.Executable,
 			version:    configuration.ArchiveOrganization.FFprobe.Version,
@@ -229,14 +231,23 @@ func OpenWithDependencies(ctx context.Context, configuration bootconfig.Configur
 			return fail(startErr)
 		}
 		archiveRuns = starter
-		stageOneProjection, projectionErr := archivetranscription.NewJobStageOneProjection(organizationStore, commandStore)
-		if projectionErr != nil {
-			return fail(projectionErr)
+	} else {
+		starter, startErr := archiveorganization.NewRemoteStartService(
+			archiveIntakeRepository, storageRepository, workerRegistry, organizationStore,
+			coordinatorJobBus{service: jobCommands}, executorCommandBus{executor: batchCommands}, commandStore, dependencies.Now,
+		)
+		if startErr != nil {
+			return fail(startErr)
 		}
-		archiveTranscriptions, projectionErr = archivetranscription.New(commandStore, stageOneProjection, coordinatorJobBus{service: jobCommands})
-		if projectionErr != nil {
-			return fail(projectionErr)
-		}
+		archiveRuns = starter
+	}
+	stageOneProjection, projectionErr := archivetranscription.NewJobStageOneProjection(organizationStore, commandStore)
+	if projectionErr != nil {
+		return fail(projectionErr)
+	}
+	archiveTranscriptions, projectionErr := archivetranscription.New(commandStore, stageOneProjection, coordinatorJobBus{service: jobCommands})
+	if projectionErr != nil {
+		return fail(projectionErr)
 	}
 	dispatcher, err := dispatchcoordinator.New(commandStore, workerRegistry, archiveWorkspaceStore, dependencies.Now, configuration.HeartbeatTTL, time.Minute)
 	if err != nil {
@@ -249,7 +260,13 @@ func OpenWithDependencies(ctx context.Context, configuration bootconfig.Configur
 	if err := jobCommands.SetDispatcher(dispatcher); err != nil {
 		return fail(err)
 	}
-	workerExecution, err := workercontrol.New(commandStore, archiveWorkspaceStore, dispatcher, dependencies.Now)
+	inspectionCompletion, err := archiveorganization.NewInspectionCompletionCoordinator(
+		catalogStore, organizationStore, coordinatorJobBus{service: jobCommands}, commandStore,
+	)
+	if err != nil {
+		return fail(err)
+	}
+	workerExecution, err := workercontrol.New(commandStore, archiveWorkspaceStore, dispatcher, dependencies.Now, inspectionCompletion)
 	if err != nil {
 		return fail(err)
 	}

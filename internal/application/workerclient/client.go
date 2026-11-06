@@ -66,6 +66,7 @@ type ExecutionResult struct {
 	LogReference           string
 	Outputs                []execution.StepOutput
 	VerificationReferences []string
+	InspectedMedia         []execution.InspectedMedia
 	Cancellation           *CancellationExecutionResult
 }
 
@@ -524,9 +525,9 @@ func (client *Client) reportResult(ctx context.Context, assignment Assignment, r
 	}
 	var outputRecord *execution.StepOutputRecord
 	if result.Success {
-		record, recordErr := execution.NewStepOutputRecord(
+		record, recordErr := execution.NewStepOutputRecordWithInspections(
 			assignment.ExecutionSpec, assignment.FencingToken, client.configuration.ID, client.now().UTC(),
-			result.Outputs, result.VerificationReferences,
+			result.Outputs, result.VerificationReferences, result.InspectedMedia,
 		)
 		if recordErr != nil {
 			return recordErr

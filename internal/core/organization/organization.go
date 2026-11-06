@@ -366,8 +366,13 @@ func cloneInputs(source []Input) []Input {
 }
 
 func PlanFollowUp(decision OrganizationDecision, qcPassed bool) []Action {
-	if !qcPassed || (decision.Disposition != vocabulary.OrganizationAsIs && decision.Disposition != vocabulary.OrganizationRenderRecordings) {
+	if !TranscriptionEligible(decision, qcPassed) {
 		return nil
 	}
 	return []Action{ActionAudioExtract, ActionTranscribe, ActionSubtitle}
+}
+
+func TranscriptionEligible(decision OrganizationDecision, qcPassed bool) bool {
+	return qcPassed && len(decision.Inputs) == 1 && len(decision.Inputs[0].Inspection.AudioStreams) > 0 &&
+		(decision.Disposition == vocabulary.OrganizationAsIs || decision.Disposition == vocabulary.OrganizationRenderRecordings)
 }

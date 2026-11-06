@@ -97,6 +97,7 @@ export const icons = {
   expand: "m6 9 6 6 6-6",
   status: "M3 12h4l2.5-6 5 12 2.5-6h4",
   drives: "M3 6.5h18v11H3zM7 12h.01M10.5 12h6.5",
+  jobs: "M7 4h10v3h3v14H4V7h3zM9 4v3h6V4M8 12h8M8 16h8",
   workers: "M4 4h16v6H4zM4 14h16v6H4zM8 7h.01M8 17h.01",
   slash: "M15 4 9 20",
   close: "M6 6l12 12M18 6 6 18",
@@ -122,7 +123,7 @@ export const labels = {
     NONCONSECUTIVE_SEQUENCE: "시퀀스 불연속", INCOMPATIBLE_SEQUENCE: "시퀀스 불일치", INVALID_OVERRIDE: "판정 무효",
   },
   stage: {
-    classification: "분류", markers: "소스 타임라인", render: "렌더", qc: "QC", archive: "보관", gate: "STT 승인", audio: "오디오 추출",
+    classification: "분류", markers: "소스 타임라인", render: "렌더", qc: "QC", archive: "보관", gate: "STT 시작", audio: "오디오 추출",
     transcript: "STT", transcript_text: "전사 텍스트", subtitle: "자막", add: "패키지 추가", catalog: "CSV", job_pending: "작업 생성",
   },
   step: { QUEUED: "대기열", WAITING: "대기", RESERVED: "예약", RUNNING: "실행 중", VERIFYING: "검증 중", PAUSED: "일시 정지", FAILED: "실패", COMPLETED: "완료", CANCELLED: "취소" },

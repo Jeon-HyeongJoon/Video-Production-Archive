@@ -1,14 +1,13 @@
-// Worker: what each Worker processes now — drives as the unit of work and Jobs
-// that belong to no drive — with its archive storage access and the
-// reservation-adjusted capacity. Registration stays in local configuration.
+// 연결 관리: Worker PC, logical drives and Agent/Host connections in one
+// operational screen. Registration and credentials remain local-config work;
+// this screen shows live state and links to the owning detail.
 
 import {
-  el, token, statusIcon, workerIcon, label, stateSignal, stageSignal, finishedSteps, formatBytes, formatPercent, formatCount, shortTime, clockTime, meter,
-  api, mutation, newID, emptyState,
+  el, statusIcon, workerIcon, label, stateSignal, formatBytes, formatPercent, formatCount, clockTime, meter, emptyState,
 } from "../core.js";
-import { model, ui, notify, refresh, drivePhase, driveName, driveProgress, driveProblemCounts, driveFreeJobs, jobLane, PHASE_LABEL, PHASE_ICON } from "../store.js";
-
-const LANE = { fault: ["실패", "fault"], decide: ["사람 대기", "decide"], work: ["실행 중", "work"], resource: ["자원 대기", "resource"], queue: ["대기열", "idle"] };
+import {
+  model, drivePhase, driveName, driveProgress, driveProblemCounts, PHASE_LABEL, PHASE_ICON, hostFor, activeTurn,
+} from "../store.js";
 
 function admissionLabel(admission) {
   if (admission?.available) return "추가 가능";
@@ -16,10 +15,9 @@ function admissionLabel(admission) {
   return `보류 · ${label("admission", admission?.code)}`;
 }
 
-// capacityItem keeps the value and its admission on the page; a reservation
-// amount behind a value waits on hover.
 function capacityItem(name, value, detail = "", signal = "idle", hover = "") {
-  return el("div", { class: "capacity-item", title: hover || undefined, dataset: { signal } }, el("span", {}, name), el("strong", { class: "num" }, value), detail ? el("small", {}, detail) : null);
+  return el("div", { class: "capacity-item", title: hover || undefined, dataset: { signal } },
+    el("span", {}, name), el("strong", { class: "num" }, value), detail ? el("small", {}, detail) : null);
 }
 
 function capacity(worker) {
@@ -35,34 +33,12 @@ function capacity(worker) {
     capacityItem("관측", clockTime(worker.observed_at || worker.last_heartbeat, true), worker.additional_work_possible ? "수용 가능" : "보류", worker.additional_work_possible ? "done" : "decide"));
 }
 
-// table lays one item per row under fixed column heads so no cell wraps; a
-// cell cut short on a narrow screen keeps its full text as its title.
 function table(kind, heads, rows, empty) {
-  for (const row of rows) {
-    if (!row.classList.contains("data-row")) continue;
-    for (const cell of row.children) if (cell.textContent && !cell.title) cell.title = cell.textContent;
-  }
   return el("div", { class: `data-table ${kind}`, role: "table" },
     el("div", { class: "data-row data-head", role: "row" }, ...heads.map((head) => el("span", { role: "columnheader" }, head))),
     ...(rows.length ? rows : [el("p", { class: "empty" }, empty)]));
 }
 
-function driveRow(drive) {
-  const phase = drivePhase(drive);
-  const progress = driveProgress(drive);
-  const { fault: faults, decide: decisions } = driveProblemCounts(drive);
-  const issues = [faults ? `실패 ${faults}` : "", decisions ? `확인 ${decisions}` : ""].filter(Boolean).join(" · ");
-  return el("a", { class: "data-row", role: "row", href: `#/drives/${encodeURIComponent(drive.workspace_drive_id)}`, dataset: { driveId: drive.workspace_drive_id } },
-    el("b", { class: "cell-main" }, driveName(drive)),
-    el("span", { class: "cell-state" }, statusIcon(PHASE_ICON[phase]), PHASE_LABEL[phase]),
-    phase === "intake" ? el("span", { class: "muted" }, "—")
-      : el("span", { class: "cell-meter" }, meter(progress.pct), el("span", { class: "num" }, `${progress.pct}% · ${formatCount(progress.stored)} / ${formatCount(progress.total)}`)),
-    el("span", {}, drive.archive_storage_id || "—"),
-    el("span", { class: "cell-issue", dataset: { signal: faults ? "fault" : decisions ? "decide" : undefined } }, issues || "—"));
-}
-
-// storageRows lists the archive storages this Worker's drives can use, as
-// reported by the Worker; an offline Worker's access cannot be confirmed.
 function storageRows(worker) {
   const seen = new Map();
   for (const drive of model.drives.filter((item) => item.worker_id === worker.worker_id)) {
@@ -79,138 +55,95 @@ function storageRows(worker) {
       el("span", { class: "num" }, !offline && storage.accessible && storage.capacity_bytes ? `${formatBytes(storage.free_bytes)} / ${formatBytes(storage.capacity_bytes)}` : "—")));
 }
 
-function laneText(job) {
-  const lane = jobLane(job);
-  if (lane === "decide") return job.wait_reason ? `${label("wait", job.wait_reason)} 대기` : "사람 대기";
-  if (lane === "work" || lane === "resource") return `${Math.round((job.progress || 0) * 100)}%`;
-  return LANE[lane]?.[0] || label("step", job.step_state);
+function workerCard(worker, focusWorker) {
+  const signal = stateSignal(worker.state);
+  const offline = signal === "fault";
+  return el("section", { class: "worker-row", "aria-label": worker.worker_id, dataset: { workerId: worker.worker_id, signal: offline ? "fault" : undefined, focus: String(focusWorker === worker.worker_id) } },
+    el("div", { class: "worker-head", title: `heartbeat ${clockTime(worker.last_heartbeat, true)}` },
+      workerIcon(worker.state), el("b", { class: "worker-name" }, worker.worker_id),
+      el("span", { class: "state", dataset: { signal } }, label("worker", worker.state)),
+      offline ? el("span", { class: "worker-seen num" }, `마지막 응답 ${clockTime(worker.last_heartbeat)}`) : null),
+    el("div", { class: "worker-body" },
+      table("storage-table", ["아카이브 저장소", "접근 방식", "접근", "여유 / 용량"], storageRows(worker), "저장소 없음"),
+      capacity(worker)));
 }
 
-function stepRow(step) {
-  const signal = stageSignal({ state: step.state, wait_reason: step.wait_reason });
-  const detail = [
-    step.state === "WAITING" && step.wait_reason ? `WAITING · ${step.wait_reason}` : step.state,
-    step.progress ? formatPercent(Math.round(step.progress * 100)) : "",
-    step.worker_id, step.error_class, step.log_reference ? `로그 ${step.log_reference}` : "",
-  ].filter(Boolean).join(" · ");
-  return el("div", { class: "stage-row", dataset: { step: step.id, signal } }, el("i", { class: "step-dot", dataset: { signal } }), el("b", {}, step.id), el("span", { class: "stage-state" }, detail));
+function driveRow(drive) {
+  const phase = drivePhase(drive);
+  const progress = driveProgress(drive);
+  const { fault: faults, decide: decisions } = driveProblemCounts(drive);
+  const issues = [faults ? `실패 ${faults}` : "", decisions ? `확인 ${decisions}` : ""].filter(Boolean).join(" · ");
+  return el("a", { class: "data-row", role: "row", href: `#/drives/${encodeURIComponent(drive.workspace_drive_id)}`, dataset: { driveId: drive.workspace_drive_id } },
+    el("b", { class: "cell-main" }, driveName(drive)),
+    el("span", { class: "num" }, drive.worker_id || "배정 없음"),
+    el("span", { class: "cell-state" }, statusIcon(PHASE_ICON[phase]), PHASE_LABEL[phase]),
+    phase === "intake" ? el("span", { class: "muted" }, "—")
+      : el("span", { class: "cell-meter" }, meter(progress.pct), el("span", { class: "num" }, `${progress.pct}% · ${formatCount(progress.stored)} / ${formatCount(progress.total)}`)),
+    el("span", {}, drive.archive_storage_id || "—"),
+    el("span", { class: "cell-issue", dataset: { signal: faults ? "fault" : decisions ? "decide" : undefined } }, issues || "—"));
+}
+
+function availability(session) {
+  const host = hostFor(session);
+  if (host?.state !== "ONLINE") return ["Host 꺼짐", "fault"];
+  if (activeTurn(session)) return ["처리 중", "work"];
+  return ["사용 가능", "online"];
+}
+
+function agentRow(session) {
+  const [text, signal] = availability(session);
+  return el("div", { class: "data-row", role: "row", dataset: { sessionId: session.session_id } },
+    el("b", { class: "cell-main" }, session.name || session.session_id),
+    el("span", { class: "num" }, session.archivist_host_id),
+    el("span", { class: "num" }, session.cli_id),
+    el("span", {}, label("mode", session.control_mode || "ASSISTED")),
+    el("span", { class: "cell-state", dataset: { signal } }, statusIcon(signal), text));
+}
+
+function hostRow(host, focusHost) {
+  const signal = stateSignal(host.state);
+  return el("div", { class: "data-row", role: "row", dataset: { hostId: host.archivist_host_id, focus: String(focusHost === host.archivist_host_id) } },
+    el("b", { class: "cell-main num" }, host.archivist_host_id),
+    el("span", { class: "cell-state", dataset: { signal } }, workerIcon(host.state), label("host", host.state)),
+    el("span", { class: "num" }, (host.detected_cli_ids || []).join(" · ") || "감지된 CLI 없음"),
+    el("span", { class: "num muted" }, clockTime(host.last_heartbeat, true)));
 }
 
 export function mount(root, route) {
-  let openJob = route.query.get("job") || "";
   const focusWorker = route.query.get("worker") || "";
-  ui.jobSteps = false;
-  ui.jobCancel = "";
-  ui.status = "";
-  let detail = null;
-  let loadedKey = "";
+  const focusHost = route.query.get("host") || "";
   let scrolled = false;
-  const heading = el("h1", { id: "workers-title" }, "Worker");
-  const list = el("div", { class: "worker-list", id: "worker-list" });
-  const others = el("div", {});
-  root.append(el("div", { class: "page-head" }, el("div", { class: "page-title" }, heading)), list, others);
-
-  async function cancel(job) {
-    try {
-      await mutation(`/api/v1/jobs/${encodeURIComponent(job.job_id)}/cancel`, { command_id: newID("COMMAND"), idempotency_key: newID("CANCEL"), reason: "담당자 취소", expected_revision: job.revision });
-      ui.jobCancel = "";
-      ui.status = `${job.job_id} 취소 요청`;
-      loadedKey = "";
-      await refresh();
-    } catch (error) {
-      ui.status = error.message;
-      notify();
-    }
-  }
-
-  function jobDetail(job) {
-    const summaryView = detail?.summary?.job_id === job.job_id ? detail.summary : job;
-    const lane = jobLane(summaryView);
-    const facts = [
-      ["Template", summaryView.template_name], ["제어 모드", summaryView.control_mode], ["리비전", `r${summaryView.revision}`],
-      ["Worker", summaryView.worker_id || "배정 없음"], ["시작 주체", summaryView.actor_id || "—"],
-      ["사람 개입", summaryView.needs_human_intervention ? summaryView.intervention_reason || "필요" : "없음"], ["최근", shortTime(summaryView.last_event_at)],
-    ];
-    const steps = detail?.summary?.job_id === job.job_id ? detail.steps || [] : [];
-    const cancellable = !finishedSteps.has(summaryView.step_state);
-    const confirm = ui.jobCancel === job.job_id;
-    return el("div", { class: "job-detail", id: "job-detail", dataset: { jobId: job.job_id } },
-      el("div", { class: "detail-head" }, el("b", { title: facts.map(([key, value]) => `${key} ${value}`).join("\n") }, summaryView.target_title || job.job_id),
-        token(`${LANE[lane]?.[0] || label("step", summaryView.step_state)} · ${summaryView.step_state === "WAITING" && summaryView.wait_reason ? summaryView.wait_reason : summaryView.step_state}`, LANE[lane]?.[1] || stateSignal(summaryView.step_state))),
-      el("div", { class: "detail-actions" },
-        el("button", { type: "button", class: "btn btn-sm steps-toggle", "aria-expanded": String(ui.jobSteps), onclick: () => { ui.jobSteps = !ui.jobSteps; notify(); } }, ui.jobSteps ? "세부 단계 숨기기" : "세부 단계 보기"),
-        cancellable && !confirm ? el("button", { type: "button", class: "btn btn-sm danger", id: "cancel-job", dataset: { action: "cancel" }, onclick: () => { ui.jobCancel = job.job_id; notify(); } }, "작업 취소…") : null),
-      ui.jobSteps ? el("div", { class: "stage-list" }, ...(steps.length ? steps.map(stepRow) : [emptyState("단계 없음")])) : null,
-      confirm ? el("div", { class: "confirm-box", title: "대기 단계 즉시 취소 · 실행 중 단계는 정지·정리 확인 뒤 취소" },
-        el("span", {}, "작업 취소 확인"),
-        el("div", { class: "detail-actions" },
-          el("button", { type: "button", class: "btn danger-solid", id: "cancel-job-confirm", dataset: { action: "cancel-confirm" }, onclick: () => cancel(summaryView) }, "취소 확정"),
-          el("button", { type: "button", class: "btn", onclick: () => { ui.jobCancel = ""; notify(); } }, "돌아가기"))) : null);
-  }
-
-  function jobRow(job, showWorker) {
-    const open = openJob === job.job_id;
-    const lane = jobLane(job);
-    const pct = Math.round((job.progress || 0) * 100);
-    const row = el("button", { type: "button", class: "data-row job-row", role: "row", "aria-expanded": String(open), dataset: { jobId: job.job_id, lane },
-      onclick: () => { openJob = open ? "" : job.job_id; ui.jobSteps = false; ui.jobCancel = ""; loadedKey = ""; notify(); } },
-    el("b", { class: "cell-main" }, job.target_title || job.job_id),
-    el("span", {}, job.template_name || "—"),
-    showWorker ? el("span", {}, job.worker_id || "배정 없음") : null,
-    el("span", { class: "cell-state" }, statusIcon(lane === "queue" ? "idle" : lane || "done"),
-      el("span", { class: "job-state", dataset: { signal: lane === "fault" || lane === "decide" ? lane : undefined } }, lane === "decide" ? laneText(job) : LANE[lane]?.[0] || label("step", job.step_state))),
-    el("span", { class: "cell-meter" }, meter(pct, false), el("span", { class: "num job-progress" }, `${pct}%`)));
-    return open ? [row, jobDetail(job)] : [row];
-  }
-
-  function jobTable(jobs, showWorker) {
-    const heads = showWorker ? ["작업", "Template", "Worker", "상태", "진행"] : ["드라이브 밖 작업", "Template", "상태", "진행"];
-    return table(showWorker ? "job-table with-worker" : "job-table", heads, jobs.flatMap((job) => jobRow(job, showWorker)), "없음");
-  }
-
-  function workerRow(worker, freeJobs) {
-    const signal = stateSignal(worker.state);
-    const mine = model.drives.filter((drive) => drive.worker_id === worker.worker_id);
-    const jobs = freeJobs.filter((job) => job.worker_id === worker.worker_id);
-    const offline = signal === "fault";
-    return el("section", { class: "worker-row", "aria-label": worker.worker_id, dataset: { workerId: worker.worker_id, signal: offline ? "fault" : undefined, focus: String(focusWorker === worker.worker_id) } },
-      el("div", { class: "worker-head", title: `heartbeat ${clockTime(worker.last_heartbeat, true)}` },
-        workerIcon(worker.state),
-        el("b", { class: "worker-name" }, worker.worker_id),
-        el("span", { class: "state", dataset: { signal } }, label("worker", worker.state)),
-        offline ? el("span", { class: "worker-seen num" }, `마지막 응답 ${clockTime(worker.last_heartbeat)}`) : null),
-      el("div", { class: "worker-body" },
-        table("drive-table", ["드라이브", "단계", "보관 진행", "아카이브", "확인 필요"], mine.map(driveRow), "연결된 드라이브 없음"),
-        jobs.length ? jobTable(jobs, false) : null,
-        table("storage-table", ["저장소", "접근 방식", "접근", "여유 / 용량"], storageRows(worker), "없음"),
-        capacity(worker)));
-  }
+  const heading = el("h1", { id: "connections-title" }, "연결 관리");
+  const workers = el("div", { class: "worker-list", id: "worker-list" });
+  const drives = el("div", { id: "connection-drive-list" });
+  const agents = el("div", { id: "connection-agent-list" });
+  const hosts = el("div", { id: "connection-host-list" });
+  root.append(
+    el("div", { class: "page-head" }, el("div", { class: "page-title" }, heading),
+      el("a", { class: "btn", href: "#/settings" }, "Agent 추가")),
+    el("div", { class: "connection-sections" },
+      el("section", { class: "section", id: "connection-workers" },
+        el("h2", { class: "section-title" }, "Worker PC ", el("span", { class: "num muted", id: "connection-worker-count" })), workers),
+      el("section", { class: "section", id: "connection-drives" },
+        el("h2", { class: "section-title" }, "드라이브 ", el("span", { class: "num muted", id: "connection-drive-count" })), drives),
+      el("section", { class: "section", id: "connection-agents" },
+        el("h2", { class: "section-title" }, "Agent ", el("span", { class: "num muted", id: "connection-agent-count" })), agents,
+        el("h3", { class: "connection-subtitle" }, "Agent Host"), hosts)));
 
   return {
-    async update() {
-      const freeJobs = driveFreeJobs();
+    update() {
       const online = model.workers.filter((worker) => stateSignal(worker.state) !== "fault").length;
-      heading.title = `Worker ${model.workers.length} · 연결 ${online} · 꺼짐 ${model.workers.length - online} · 드라이브 밖 작업 ${freeJobs.length}`;
-      if (openJob && !model.jobs.some((job) => job.job_id === openJob)) openJob = "";
-      const job = model.jobs.find((item) => item.job_id === openJob);
-      const key = job ? `${job.job_id}@${job.revision}@${job.last_event_at}` : "";
-      if (key !== loadedKey) {
-        loadedKey = key;
-        try {
-          detail = job ? await api(`/api/v1/jobs/${encodeURIComponent(job.job_id)}`) : null;
-        } catch {
-          detail = null;
-        }
-      }
-      list.replaceChildren(...(model.workers.length ? model.workers.map((worker) => workerRow(worker, freeJobs)) : [emptyState("Worker 없음")]));
-      const known = new Set(model.workers.map((worker) => worker.worker_id));
-      const rest = freeJobs.filter((item) => !known.has(item.worker_id));
-      others.replaceChildren(...(rest.length ? [el("section", { class: "section", id: "other-jobs", "aria-label": "그 밖의 작업" },
-        el("h2", { class: "section-title" }, "그 밖의 작업 ", el("span", { class: "num muted" }, String(rest.length))),
-        jobTable(rest, true))] : []));
-      if (ui.status) others.append(el("p", { class: "status-line", role: "status", id: "command-status" }, ui.status));
-      if (!scrolled && (focusWorker || openJob)) {
-        const target = root.querySelector(openJob ? `[data-job-id="${CSS.escape(openJob)}"]` : `[data-worker-id="${CSS.escape(focusWorker)}"]`);
+      heading.title = `Worker PC ${model.workers.length} · 연결 ${online} · 드라이브 ${model.drives.length} · Agent ${model.sessions.length}`;
+      root.querySelector("#connection-worker-count").textContent = String(model.workers.length);
+      root.querySelector("#connection-drive-count").textContent = String(model.drives.length);
+      root.querySelector("#connection-agent-count").textContent = String(model.sessions.length);
+      workers.replaceChildren(...(model.workers.length ? model.workers.map((worker) => workerCard(worker, focusWorker)) : [emptyState("Worker PC 없음")]));
+      drives.replaceChildren(table("connection-drive-table", ["드라이브", "Worker", "단계", "보관 진행", "아카이브", "확인 필요"], model.drives.map(driveRow), "드라이브 없음"));
+      agents.replaceChildren(table("connection-agent-table", ["Agent", "Agent Host", "CLI", "제어 모드", "상태"], model.sessions.map(agentRow), "Agent 없음"));
+      hosts.replaceChildren(table("connection-host-table", ["Agent Host", "상태", "감지된 CLI", "heartbeat"], model.hosts.map((host) => hostRow(host, focusHost)), "Agent Host 없음"));
+      if (!scrolled && (focusWorker || focusHost)) {
+        const selector = focusWorker ? `[data-worker-id="${CSS.escape(focusWorker)}"]` : `[data-host-id="${CSS.escape(focusHost)}"]`;
+        const target = root.querySelector(selector);
         if (target) { target.scrollIntoView({ block: "nearest" }); scrolled = true; }
       }
     },

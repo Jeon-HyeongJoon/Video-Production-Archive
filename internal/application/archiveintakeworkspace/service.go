@@ -125,6 +125,7 @@ func (service *Service) Projection(ctx context.Context) ([]DriveView, error) {
 		return nil, err
 	}
 	drives := make(map[string]*projectionDriveState)
+	receiptRunIDs := make(map[string]bool, len(receipts))
 	transcriptionJobs, err := service.transcriptionJobs()
 	if err != nil {
 		return nil, err
@@ -133,7 +134,12 @@ func (service *Service) Projection(ctx context.Context) ([]DriveView, error) {
 	if err != nil {
 		return nil, err
 	}
+	completedByDrive, err := service.completedWork(ctx, receipts, organizationJobs)
+	if err != nil {
+		return nil, err
+	}
 	for _, receipt := range latestArchiveRunReceipts(receipts) {
+		receiptRunIDs[receipt.ID] = true
 		state := drives[receipt.WorkspaceDriveID]
 		if state == nil {
 			state = &projectionDriveState{view: DriveView{
@@ -178,6 +184,7 @@ func (service *Service) Projection(ctx context.Context) ([]DriveView, error) {
 				DecisionSequence: decision.Sequence, Disposition: decision.Disposition,
 				ProfileReference:     decision.ProfileReference,
 				HoldReasons:          append([]vocabulary.OrganizationHoldReason(nil), decision.HoldReasons...),
+				WorkOptions:          workOptions(decision),
 				ClassificationAssets: classificationAssets(decision),
 				VideoCount:           folderVideoCount(receipt.Files, coordinated.Folder),
 				EstimatedOutputBytes: estimatedOutputBytes(decision),
@@ -202,6 +209,7 @@ func (service *Service) Projection(ctx context.Context) ([]DriveView, error) {
 				if err != nil {
 					return nil, err
 				}
+				projectCatalogUpdatedAt(&state.view, jobState)
 				view.CurrentStepID = jobState.CurrentStepID
 				view.StepState = currentStepState(jobState)
 				view.Stages = append(view.Stages, projectStageOne(jobState, view.VideoCount)...)
@@ -216,8 +224,7 @@ func (service *Service) Projection(ctx context.Context) ([]DriveView, error) {
 						view.ArchiveState = packageState
 					}
 				}
-				view.CanAddTranscription = view.ArchiveState == archive.PackageStored &&
-					(decision.Disposition == vocabulary.OrganizationAsIs || decision.Disposition == vocabulary.OrganizationRenderRecordings)
+				view.CanAddTranscription = view.ArchiveState == archive.PackageStored && organization.TranscriptionEligible(decision, true)
 			} else if decision.Disposition == vocabulary.OrganizationHold {
 				view.CurrentStepID = "resolve_classification"
 				view.StepState = workflow.Waiting
@@ -227,6 +234,7 @@ func (service *Service) Projection(ctx context.Context) ([]DriveView, error) {
 				view.Stages = append(view.Stages, StageView{ID: "job_pending", State: workflow.Queued, TotalCount: view.VideoCount})
 			}
 			if stageTwo, ok := transcriptionJobs[receipt.ID+"\x00"+coordinated.Folder]; ok {
+				projectCatalogUpdatedAt(&state.view, stageTwo)
 				view.TranscriptionJobID = stageTwo.ID
 				view.CurrentStepID = stageTwo.CurrentStepID
 				view.StepState = currentStepState(stageTwo)
@@ -244,11 +252,42 @@ func (service *Service) Projection(ctx context.Context) ([]DriveView, error) {
 			}
 		}
 	}
+	if snapshots, listErr := listSnapshots(service.jobs); listErr != nil {
+		return nil, listErr
+	} else {
+		for _, snapshot := range snapshots {
+			run, decodeErr := archiverun.Decode(snapshot)
+			if decodeErr != nil || receiptRunIDs[run.ID] {
+				continue
+			}
+			state := drives[run.SourceVolumeID]
+			if state != nil && state.view.ArchiveRunID != "" {
+				continue
+			}
+			if state == nil {
+				state = &projectionDriveState{folders: make(map[string]FolderView), discoveredFolders: make(map[string]FolderView)}
+				drives[run.SourceVolumeID] = state
+			}
+			state.view.WorkspaceDriveID = run.SourceVolumeID
+			state.view.ArchiveRunID = run.ID
+			state.view.ArchiveRunRevision = run.Revision
+			state.view.WorkerID = run.WorkerID
+			state.view.SourceVolumeID = run.SourceVolumeID
+			state.view.SourceStorageID = run.SourceStorageID
+			state.view.ArchiveStorageID = run.ArchiveStorageID
+			state.view.InputRevision = run.FolderDiscoveryRevision
+			state.view.State = "IN_PROGRESS"
+			for _, folderID := range run.FolderIDs {
+				state.folders[folderID] = FolderView{Folder: folderID, InputRevision: run.FolderDiscoveryRevision}
+			}
+		}
+	}
 	if err := service.mergeInventory(ctx, drives); err != nil {
 		return nil, err
 	}
 	result := make([]DriveView, 0, len(drives))
 	for _, state := range drives {
+		state.view.CompletedWork = append(state.view.CompletedWork, completedByDrive[state.view.WorkspaceDriveID]...)
 		discoveredFolderNames := make([]string, 0, len(state.discoveredFolders))
 		for folder := range state.discoveredFolders {
 			discoveredFolderNames = append(discoveredFolderNames, folder)
@@ -282,6 +321,115 @@ func (service *Service) Projection(ctx context.Context) ([]DriveView, error) {
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].WorkspaceDriveID < result[j].WorkspaceDriveID })
 	return result, nil
+}
+
+func (service *Service) completedWork(
+	ctx context.Context,
+	receipts []organization.ArchiveOrganizationReceipt,
+	organizationJobs map[string]job.State,
+) (map[string][]CompletedWorkView, error) {
+	result := make(map[string][]CompletedWorkView)
+	seenPackages := make(map[string]bool)
+	for _, receipt := range receipts {
+		for _, coordinated := range receipt.Folders {
+			decision, err := service.store.LatestDecisionForArchiveRun(ctx, receipt.ID, coordinated.Folder)
+			if err != nil {
+				return nil, err
+			}
+			jobState, found := organizationJobs[receipt.ID+"\x00"+coordinated.Folder]
+			if coordinated.JobID != "" && (!found || jobState.ID != coordinated.JobID) {
+				snapshot, loadErr := service.jobs.Load(coordinated.JobID)
+				if loadErr != nil {
+					return nil, loadErr
+				}
+				jobState, loadErr = job.Decode(snapshot)
+				if loadErr != nil {
+					return nil, loadErr
+				}
+				found = true
+			}
+			if !found || !completedJob(jobState) {
+				continue
+			}
+			for _, step := range jobState.Steps {
+				if step.Workflow.ID != "organize" || step.Workflow.State != workflow.Completed || step.ExecutionSpec == nil || step.OutputRecord == nil {
+					continue
+				}
+				targets := make(map[string]execution.OutputTarget, len(step.ExecutionSpec.Outputs))
+				for _, target := range step.ExecutionSpec.Outputs {
+					targets[target.ID] = target
+				}
+				for _, output := range step.OutputRecord.Outputs {
+					if output.Kind != execution.OutputOrganizedMedia || output.ID == "" || seenPackages[output.ID] {
+						continue
+					}
+					originalNames, sourceCount := completedWorkSources(decision, targets[output.ID].OriginalAssetID)
+					presentation, presentationErr := archive.PresentPackage(output.ID, decision.Folder, originalNames)
+					if presentationErr != nil {
+						continue
+					}
+					packageState := archive.PackageStored
+					if service.archiveStates != nil {
+						storedState, stateErr := service.archiveStates.PackageState(ctx, output.StorageID, output.ID)
+						if stateErr != nil {
+							return nil, stateErr
+						}
+						if storedState.Valid() {
+							packageState = storedState
+						}
+					}
+					seenPackages[output.ID] = true
+					result[receipt.WorkspaceDriveID] = append(result[receipt.WorkspaceDriveID], CompletedWorkView{
+						ArchiveRunID: receipt.ID, Folder: decision.Folder, JobID: jobState.ID,
+						Disposition: decision.Disposition, ProfileReference: decision.ProfileReference,
+						SourceVideoCount: sourceCount, ArchiveStorageID: output.StorageID,
+						ArchivePackageID: output.ID, ArchiveDate: presentation.ArchiveDate,
+						ArchiveDisplayName: presentation.DisplayName, ArchiveVideoFileName: presentation.VideoFileName,
+						ArchiveState: packageState, CompletedAt: step.OutputRecord.RecordedAt,
+					})
+				}
+			}
+		}
+	}
+	for driveID := range result {
+		sort.Slice(result[driveID], func(i, j int) bool {
+			left, right := result[driveID][i], result[driveID][j]
+			if !left.CompletedAt.Equal(right.CompletedAt) {
+				return left.CompletedAt.After(right.CompletedAt)
+			}
+			return left.ArchivePackageID < right.ArchivePackageID
+		})
+	}
+	return result, nil
+}
+
+func completedWorkSources(decision organization.OrganizationDecision, originalAssetID string) ([]string, int) {
+	if originalAssetID != "" {
+		for _, input := range decision.Inputs {
+			if input.OriginalAssetID == originalAssetID {
+				return []string{path.Base(input.RelativePath)}, 1
+			}
+		}
+	}
+	names := make([]string, 0, len(decision.Inputs))
+	for _, input := range decision.Inputs {
+		names = append(names, path.Base(input.RelativePath))
+	}
+	return names, len(names)
+}
+
+func workOptions(decision organization.OrganizationDecision) []WorkOptionView {
+	if decision.Disposition != vocabulary.OrganizationHold {
+		return nil
+	}
+	options := organization.AvailableWorkOptions(decision)
+	views := make([]WorkOptionView, 0, len(options))
+	for _, option := range options {
+		views = append(views, WorkOptionView{
+			Disposition: option.Disposition, TargetVideoBitRateKbps: option.TargetVideoBitRateKbps,
+		})
+	}
+	return views
 }
 
 func latestArchiveRunReceipts(receipts []organization.ArchiveOrganizationReceipt) []organization.ArchiveOrganizationReceipt {
@@ -376,6 +524,11 @@ func (service *Service) mergeInventory(ctx context.Context, drives map[string]*p
 				VideoCount: folder.VideoCount, EstimatedOutputBytes: folder.InputBytes,
 			}
 			state.discoveredFolders[folder.Folder] = view
+			if scoped, exists := state.folders[folder.Folder]; exists && state.view.ArchiveRunID != "" {
+				scoped.VideoCount = folder.VideoCount
+				scoped.EstimatedOutputBytes = folder.InputBytes
+				state.folders[folder.Folder] = scoped
+			}
 			state.view.DiscoveredFileCount += folder.VideoCount
 			if state.view.ArchiveRunID == "" {
 				state.folders[folder.Folder] = view
@@ -439,6 +592,14 @@ func (service *Service) mergeInventory(ctx context.Context, drives map[string]*p
 		})
 	}
 	return nil
+}
+
+func listSnapshots(loader SnapshotLoader) ([]command.Snapshot, error) {
+	lister, ok := loader.(SnapshotLister)
+	if !ok {
+		return nil, nil
+	}
+	return lister.ListSnapshots()
 }
 
 func folderVideoCount(files []organization.CoordinatedFile, folder string) int {
@@ -624,6 +785,15 @@ func completedJob(state job.State) bool {
 	return true
 }
 
+func projectCatalogUpdatedAt(view *DriveView, state job.State) {
+	for _, step := range state.Steps {
+		if step.Workflow.ID == "archive_catalog" && step.Workflow.State == workflow.Completed &&
+			step.LastEventAt.After(view.CatalogUpdatedAt) {
+			view.CatalogUpdatedAt = step.LastEventAt
+		}
+	}
+}
+
 func projectStageOne(state job.State, total int) []StageView {
 	stages := make([]StageView, 0, len(state.Steps))
 	for _, step := range state.Steps {
@@ -771,8 +941,7 @@ func summarizeFolders(folders []FolderView) (stageOneRemaining, stageTwoRemainin
 		if folder.TranscriptionJobID == "" && !stageOneTerminal {
 			stageOneRemaining++
 		}
-		if folder.ArchiveState == archive.PackageStored &&
-			(folder.Disposition == vocabulary.OrganizationAsIs || folder.Disposition == vocabulary.OrganizationRenderRecordings) {
+		if folder.CanAddTranscription {
 			eligible++
 		}
 		if folder.TranscriptionJobID != "" && folder.StepState != workflow.Completed &&
@@ -791,8 +960,7 @@ func archiveRunState(view DriveView) string {
 		return "STAGE_TWO_RUNNING"
 	}
 	for _, folder := range view.Folders {
-		if folder.ArchiveState == archive.PackageStored && folder.TranscriptionJobID == "" &&
-			(folder.Disposition == vocabulary.OrganizationAsIs || folder.Disposition == vocabulary.OrganizationRenderRecordings) {
+		if folder.CanAddTranscription && folder.TranscriptionJobID == "" {
 			return "TRANSCRIPTION_READY"
 		}
 	}

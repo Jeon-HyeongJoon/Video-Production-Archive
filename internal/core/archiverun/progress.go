@@ -12,10 +12,11 @@ import (
 var ErrInvalidArchiveRunProgress = errors.New("archive run progress is invalid")
 
 type FolderProgress struct {
-	FolderID    string
-	Disposition vocabulary.OrganizationDisposition
-	StageOne    workflow.StepState
-	Stored      bool
+	FolderID              string
+	Disposition           vocabulary.OrganizationDisposition
+	StageOne              workflow.StepState
+	Stored                bool
+	TranscriptionEligible bool
 }
 
 type TranscriptionGate struct {
@@ -48,7 +49,7 @@ func EvaluateTranscriptionGate(folders []FolderProgress) (TranscriptionGate, err
 		default:
 			result.RemainingWork++
 		}
-		if folder.Stored && folder.StageOne == workflow.Completed &&
+		if folder.Stored && folder.TranscriptionEligible && folder.StageOne == workflow.Completed &&
 			(folder.Disposition == vocabulary.OrganizationAsIs || folder.Disposition == vocabulary.OrganizationRenderRecordings) {
 			result.EligibleFolderIDs = append(result.EligibleFolderIDs, folder.FolderID)
 		}

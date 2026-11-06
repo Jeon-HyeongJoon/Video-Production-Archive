@@ -52,8 +52,8 @@ func TestStartCreatesOneIdempotentTranscriptionJobPerStoredRecordingInReadyArchi
 	jobCommands := command.NewAuthorizedCreatingExecutor(store, func(command.Envelope) error { return nil }, jobHandler.Handle)
 	projection := fixtureStageOneProjection{
 		folders: []archiverun.FolderProgress{
-			{FolderID: "as-is", Disposition: vocabulary.OrganizationAsIs, StageOne: workflow.Completed, Stored: true},
-			{FolderID: "render", Disposition: vocabulary.OrganizationRenderRecordings, StageOne: workflow.Completed, Stored: true},
+			{FolderID: "as-is", Disposition: vocabulary.OrganizationAsIs, StageOne: workflow.Completed, Stored: true, TranscriptionEligible: true},
+			{FolderID: "render", Disposition: vocabulary.OrganizationRenderRecordings, StageOne: workflow.Completed, Stored: true, TranscriptionEligible: true},
 			{FolderID: "sequence", Disposition: vocabulary.OrganizationCompileSourceSequence, StageOne: workflow.Completed, Stored: true},
 			{FolderID: "hold", Disposition: vocabulary.OrganizationHold, StageOne: workflow.Waiting},
 			{FolderID: "failed", Disposition: vocabulary.OrganizationRenderRecordings, StageOne: workflow.Failed},
@@ -69,7 +69,7 @@ func TestStartCreatesOneIdempotentTranscriptionJobPerStoredRecordingInReadyArchi
 	}
 	blocked, err := New(store, fixtureStageOneProjection{folders: []archiverun.FolderProgress{
 		{FolderID: "as-is", Disposition: vocabulary.OrganizationAsIs, StageOne: workflow.Running},
-		{FolderID: "render", Disposition: vocabulary.OrganizationRenderRecordings, StageOne: workflow.Completed, Stored: true},
+		{FolderID: "render", Disposition: vocabulary.OrganizationRenderRecordings, StageOne: workflow.Completed, Stored: true, TranscriptionEligible: true},
 		{FolderID: "sequence", Disposition: vocabulary.OrganizationCompileSourceSequence, StageOne: workflow.Completed, Stored: true},
 		{FolderID: "hold", Disposition: vocabulary.OrganizationHold, StageOne: workflow.Waiting},
 		{FolderID: "failed", Disposition: vocabulary.OrganizationRenderRecordings, StageOne: workflow.Failed},
@@ -159,6 +159,7 @@ func storedRecording(folder, originalID, decisionID string, disposition vocabula
 		ArchivePackageID: packageID, ArchivePackageRevision: 1,
 		VideoRelativePath: path.Join(directory, presentation.VideoFileName), VideoChecksum: checksum,
 		SelectedProfileReference: "organization-1080p-6000k@v1",
+		TranscriptionEligible:    true,
 		SourceInputs: []execution.InputReference{{
 			OriginalAssetID: originalID, OriginalName: originalID + ".mp4", StorageID: "SOURCE-1",
 			RelativePath: folder + "/" + originalID + ".mp4", Checksum: checksum,

@@ -192,15 +192,17 @@ func (inspector *Inspector) inspectOutputStreams(ctx context.Context, resolvedPa
 
 type probeDocument struct {
 	Format struct {
-		FormatName string `json:"format_name"`
-		Duration   string `json:"duration"`
-		Size       string `json:"size"`
-		BitRate    string `json:"bit_rate"`
+		FormatName string            `json:"format_name"`
+		Duration   string            `json:"duration"`
+		Size       string            `json:"size"`
+		BitRate    string            `json:"bit_rate"`
+		Tags       map[string]string `json:"tags"`
 	} `json:"format"`
 	Streams []struct {
 		Index         int    `json:"index"`
 		CodecType     string `json:"codec_type"`
 		CodecName     string `json:"codec_name"`
+		Profile       string `json:"profile"`
 		Width         int    `json:"width"`
 		Height        int    `json:"height"`
 		AverageRate   string `json:"avg_frame_rate"`
@@ -235,6 +237,11 @@ func decode(payload []byte) (mediaanalysis.MediaInspection, error) {
 		Containers:     strings.Split(document.Format.FormatName, ","),
 		DurationMillis: duration, SizeBytes: size, BitRate: bitRate,
 	}
+	if raw := strings.TrimSpace(document.Format.Tags["creation_time"]); raw != "" {
+		if createdAt, parseErr := time.Parse(time.RFC3339Nano, raw); parseErr == nil {
+			inspection.ContainerCreatedAt = createdAt.UTC()
+		}
+	}
 	for _, stream := range document.Streams {
 		switch stream.CodecType {
 		case "video":
@@ -247,7 +254,7 @@ func decode(payload []byte) (mediaanalysis.MediaInspection, error) {
 				return mediaanalysis.MediaInspection{}, err
 			}
 			inspection.VideoStreams = append(inspection.VideoStreams, mediaanalysis.VideoStream{
-				Index: stream.Index, Codec: stream.CodecName, Width: stream.Width, Height: stream.Height,
+				Index: stream.Index, Codec: stream.CodecName, Profile: stream.Profile, Width: stream.Width, Height: stream.Height,
 				FrameRate: frameRate, PixelFormat: stream.PixelFormat, BitRate: bitRate,
 			})
 		case "audio":
@@ -255,8 +262,12 @@ func decode(payload []byte) (mediaanalysis.MediaInspection, error) {
 			if err != nil || sampleRate > int64(int(^uint(0)>>1)) {
 				return mediaanalysis.MediaInspection{}, ErrInvalidOutput
 			}
+			audioBitRate, err := parseOptionalInteger(stream.BitRate)
+			if err != nil {
+				return mediaanalysis.MediaInspection{}, err
+			}
 			inspection.AudioStreams = append(inspection.AudioStreams, mediaanalysis.AudioStream{
-				Index: stream.Index, Codec: stream.CodecName, SampleRateHz: int(sampleRate),
+				Index: stream.Index, Codec: stream.CodecName, Profile: stream.Profile, BitRate: audioBitRate, SampleRateHz: int(sampleRate),
 				Channels: stream.Channels, ChannelLayout: stream.ChannelLayout,
 			})
 		}

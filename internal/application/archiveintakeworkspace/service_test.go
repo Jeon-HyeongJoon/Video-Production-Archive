@@ -41,9 +41,25 @@ func TestArchiveRunProjectionPreservesFixedStageWaitReasonsAndArchiveStates(t *t
 		ID: "DECISION-INTERVIEW", Sequence: 1, WorkspaceDriveID: driveID, Folder: "interviews", InputRevision: 9,
 		Disposition: vocabulary.OrganizationAsIs, ProfileReference: "archive-1080p-6mbps@v1",
 	}
+	holdInput := func(id, relativePath string, frameRate mediaanalysis.Rational) organization.Input {
+		return organization.Input{
+			OriginalAssetID: id, RelativePath: relativePath,
+			Inspection: mediaanalysis.MediaInspection{
+				OriginalAssetID: id, DurationMillis: 12_000,
+				VideoStreams: []mediaanalysis.VideoStream{{
+					Index: 0, Codec: "h264", Width: 3840, Height: 2160, FrameRate: frameRate, BitRate: 50_000_000,
+				}},
+				AudioStreams: []mediaanalysis.AudioStream{{Index: 1, Codec: "pcm_s16be", SampleRateHz: 48_000, Channels: 2}},
+			},
+		}
+	}
 	holdDecision := organization.OrganizationDecision{
 		ID: "DECISION-HOLD", Sequence: 1, WorkspaceDriveID: driveID, Folder: "unclassified", InputRevision: 9,
 		Disposition: vocabulary.OrganizationHold, HoldReasons: []vocabulary.OrganizationHoldReason{vocabulary.OrganizationHoldAmbiguousMultipleVideos},
+		Inputs: []organization.Input{
+			holdInput("ASSET-HOLD-1", "unclassified/C0001.MP4", mediaanalysis.Rational{Numerator: 30, Denominator: 1}),
+			holdInput("ASSET-HOLD-3", "unclassified/C0003.MP4", mediaanalysis.Rational{Numerator: 120, Denominator: 1}),
+		},
 	}
 	deviceDecision := organization.OrganizationDecision{
 		ID: "DECISION-DEVICE", Sequence: 1, WorkspaceDriveID: driveID, Folder: "device-wait", InputRevision: 9,
@@ -173,6 +189,10 @@ func TestArchiveRunProjectionPreservesFixedStageWaitReasonsAndArchiveStates(t *t
 	hold := folderView(t, views[0], "unclassified")
 	if len(hold.Stages) != 1 || hold.Stages[0] != (archiveintakeworkspace.StageView{
 		ID: "classification", State: workflow.Waiting, WaitReason: workflow.WaitInput,
+	}) || !reflect.DeepEqual(hold.WorkOptions, []archiveintakeworkspace.WorkOptionView{
+		{Disposition: vocabulary.OrganizationRenderRecordings, TargetVideoBitRateKbps: 6_000},
+		{Disposition: vocabulary.OrganizationRenderRecordings, TargetVideoBitRateKbps: 20_000},
+		{Disposition: vocabulary.OrganizationCompileSourceSequence},
 	}) {
 		t.Fatalf("hold classification stage was not waiting: %+v", hold.Stages)
 	}
@@ -259,6 +279,151 @@ func TestArchiveRunProjectionCarriesPersistedTranscriptQualityAssessment(t *test
 		folder.TranscriptQualities[0].State != transcription.QualityReviewRecommended ||
 		!reflect.DeepEqual(folder.TranscriptQualities[0].Reasons, quality.Reasons) {
 		t.Fatalf("persisted transcript quality was not projected explicitly: %+v", folder.TranscriptQualities)
+	}
+}
+
+// Requirement: DSH-027
+func TestArchiveRunProjectionUsesLatestCompletedCatalogPublicationTime(t *testing.T) {
+	receiptAt := time.Date(2026, 11, 6, 1, 0, 0, 0, time.UTC)
+	stageOneAt := receiptAt.Add(4 * time.Second)
+	stageTwoAt := receiptAt.Add(84 * time.Second)
+	decision := organization.OrganizationDecision{
+		ID: "DECISION-1", Sequence: 1, WorkspaceDriveID: "VOLUME-1", Folder: "recording", InputRevision: 4,
+		Disposition: vocabulary.OrganizationAsIs,
+	}
+	store := workstationStore{
+		receipts: []organization.ArchiveOrganizationReceipt{{
+			ID: "ARCHIVE-RUN-1", SessionID: "INTAKE-1", InputRevision: 4, WorkspaceDriveID: "VOLUME-1", WorkerID: "WORKER-1",
+			Files:       []organization.CoordinatedFile{{RelativePath: "recording/video.mp4", OriginalAssetID: "ASSET-1"}},
+			Folders:     []organization.CoordinatedFolder{{Folder: "recording", Decision: decision, JobID: "JOB-1"}},
+			CompletedAt: receiptAt,
+		}},
+		decisions: map[string]organization.OrganizationDecision{"recording": decision},
+	}
+
+	for _, test := range []struct {
+		name          string
+		stageTwoState workflow.StepState
+		want          time.Time
+	}{
+		{name: "completed stage two publication", stageTwoState: workflow.Completed, want: stageTwoAt},
+		{name: "unfinished stage two publication", stageTwoState: workflow.Running, want: stageOneAt},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			jobs := workstationJobs{
+				"ARCHIVE-RUN-1": archiveRunSnapshot(t, archiverun.State{
+					ID: "ARCHIVE-RUN-1", Revision: 1, WorkerID: "WORKER-1", SourceStorageID: "SOURCE-1", ArchiveStorageID: "ARCHIVE-1",
+					FolderDiscoveryRevision: 4, FolderIDs: []string{"recording"},
+					SelectedBy:      command.Actor{Type: vocabulary.ActorHuman, ID: "OPERATOR-1"},
+					StageOwnerships: []archiverun.StageOwnership{{Kind: archiverun.OrganizationStage}, {Kind: archiverun.TranscriptionStage}},
+					CreatedAt:       receiptAt,
+				}),
+				"JOB-1": jobSnapshot(t, job.State{
+					ID: "JOB-1", Revision: 2, TemplateName: "archive-intake-as-is", TargetTitle: "recording",
+					ControlMode: workflow.AssistedMode, CurrentStepID: "archive_catalog", Steps: []job.Step{{
+						Workflow:    workflow.Step{ID: "archive_catalog", State: workflow.Completed},
+						LastEventAt: stageOneAt, ExecutionSpec: archiveRunSpec("ARCHIVE-RUN-1", "recording"),
+					}},
+				}),
+				"STT-JOB-1": jobSnapshot(t, job.State{
+					ID: "STT-JOB-1", Revision: 2, TemplateName: "archive-transcription", TargetTitle: "recording",
+					ControlMode: workflow.AssistedMode, CurrentStepID: "archive_catalog", Steps: []job.Step{{
+						Workflow:    workflow.Step{ID: "archive_catalog", State: test.stageTwoState},
+						LastEventAt: stageTwoAt, ExecutionSpec: archiveRunSpec("ARCHIVE-RUN-1", "recording"),
+					}},
+				}),
+			}
+			service, err := archiveintakeworkspace.New(store, jobs)
+			if err != nil {
+				t.Fatal(err)
+			}
+			views, err := service.Projection(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(views) != 1 || !views[0].CatalogUpdatedAt.Equal(test.want) {
+				t.Fatalf("catalog publication time was not projected from the latest completed step: %+v", views)
+			}
+		})
+	}
+}
+
+func TestCompletedWorkProjectionRetainsOlderPackageWithoutCountingHoldAsOutput(t *testing.T) {
+	const driveID = "VOLUME-1"
+	completedAt := time.Date(2026, 11, 4, 16, 43, 24, 0, time.UTC)
+	oldDecision := organization.OrganizationDecision{
+		ID: "DECISION-OLD", Sequence: 1, WorkspaceDriveID: driveID,
+		Folder: "shoot/CLIP", InputRevision: 4, Disposition: vocabulary.OrganizationCompileSourceSequence,
+		ProfileReference: "archive-1080p-20mbps@v1",
+		Inputs: []organization.Input{
+			{OriginalAssetID: "ASSET-1", RelativePath: "shoot/CLIP/C0001.MP4"},
+			{OriginalAssetID: "ASSET-2", RelativePath: "shoot/CLIP/C0002.MP4"},
+		},
+	}
+	holdDecision := organization.OrganizationDecision{
+		ID: "DECISION-HOLD", Sequence: 1, WorkspaceDriveID: driveID,
+		Folder: "new/hold", InputRevision: 5, Disposition: vocabulary.OrganizationHold,
+		HoldReasons: []vocabulary.OrganizationHoldReason{vocabulary.OrganizationHoldAmbiguousMultipleVideos},
+	}
+	store := workstationStore{
+		receipts: []organization.ArchiveOrganizationReceipt{
+			{ID: "ARCHIVE-RUN-OLD", SessionID: "INTAKE-1", InputRevision: 4, WorkspaceDriveID: driveID, WorkerID: "WORKER-1",
+				Folders: []organization.CoordinatedFolder{{Folder: oldDecision.Folder, Decision: oldDecision, JobID: "JOB-OLD"}}, CompletedAt: completedAt.Add(-time.Hour)},
+			{ID: "ARCHIVE-RUN-NEW", SessionID: "INTAKE-2", InputRevision: 5, WorkspaceDriveID: driveID, WorkerID: "WORKER-1",
+				Folders: []organization.CoordinatedFolder{{Folder: holdDecision.Folder, Decision: holdDecision}}, CompletedAt: completedAt.Add(time.Hour)},
+		},
+		decisions: map[string]organization.OrganizationDecision{
+			"ARCHIVE-RUN-OLD\x00" + oldDecision.Folder:  oldDecision,
+			"ARCHIVE-RUN-NEW\x00" + holdDecision.Folder: holdDecision,
+		},
+	}
+	organizeSpec := &execution.StepExecutionSpec{
+		Parameters: execution.StepExecutionParameters{ArchiveRunID: "ARCHIVE-RUN-OLD", MediaFolder: oldDecision.Folder},
+		Outputs:    []execution.OutputTarget{{ID: "VP-20261104-CLIP", Kind: execution.OutputOrganizedMedia, StorageID: "ARCHIVE-1"}},
+	}
+	jobs := workstationJobs{
+		"ARCHIVE-RUN-NEW": archiveRunSnapshot(t, archiverun.State{
+			ID: "ARCHIVE-RUN-NEW", Revision: 1, WorkerID: "WORKER-1", SourceStorageID: "SOURCE-1", ArchiveStorageID: "ARCHIVE-1",
+			FolderDiscoveryRevision: 5, FolderIDs: []string{holdDecision.Folder},
+			SelectedBy:      command.Actor{Type: vocabulary.ActorHuman, ID: "OPERATOR-1"},
+			StageOwnerships: []archiverun.StageOwnership{{Kind: archiverun.OrganizationStage}}, CreatedAt: completedAt.Add(time.Hour),
+		}),
+		"JOB-OLD": jobSnapshot(t, job.State{
+			ID: "JOB-OLD", Revision: 6, TemplateName: "archive-intake-source-sequence", TargetTitle: oldDecision.Folder,
+			ControlMode: workflow.AssistedMode, CurrentStepID: "archive_catalog", Steps: []job.Step{
+				{Workflow: workflow.Step{ID: "source_timeline", State: workflow.Completed}, ExecutionSpec: archiveRunSpec("ARCHIVE-RUN-OLD", oldDecision.Folder)},
+				{Workflow: workflow.Step{ID: "sequence_render", State: workflow.Completed}},
+				{Workflow: workflow.Step{ID: "qc", State: workflow.Completed}},
+				{Workflow: workflow.Step{ID: "organize", State: workflow.Completed}, ExecutionSpec: organizeSpec,
+					OutputRecord: &execution.StepOutputRecord{RecordedAt: completedAt, Outputs: []execution.StepOutput{{
+						ID: "VP-20261104-CLIP", Kind: execution.OutputOrganizedMedia, StorageID: "ARCHIVE-1",
+					}}},
+				},
+				{Workflow: workflow.Step{ID: "archive_catalog", State: workflow.Completed}},
+			},
+		}),
+	}
+	service, err := archiveintakeworkspace.New(store, jobs, archiveintakeworkspace.WithArchiveStateReader(packageStates{
+		"VP-20261104-CLIP": archive.PackageCommitted,
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	views, err := service.Projection(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(views) != 1 || views[0].ArchiveRunID != "ARCHIVE-RUN-NEW" || len(views[0].Folders) != 1 || views[0].Folders[0].Folder != holdDecision.Folder {
+		t.Fatalf("latest run folders were not kept separate from completion history: %+v", views)
+	}
+	if len(views[0].CompletedWork) != 1 {
+		t.Fatalf("completed package history was not retained or HOLD became output: %+v", views[0].CompletedWork)
+	}
+	completed := views[0].CompletedWork[0]
+	if completed.ArchiveRunID != "ARCHIVE-RUN-OLD" || completed.ArchivePackageID != "VP-20261104-CLIP" ||
+		completed.ArchiveVideoFileName != "CLIP.mp4" || completed.SourceVideoCount != 2 || completed.ArchiveStorageID != "ARCHIVE-1" ||
+		completed.ArchiveState != archive.PackageCommitted || !completed.CompletedAt.Equal(completedAt) {
+		t.Fatalf("completed package facts were not projected: %+v", completed)
 	}
 }
 

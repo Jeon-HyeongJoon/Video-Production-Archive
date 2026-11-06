@@ -77,7 +77,7 @@ function jobRow(job) {
   const lane = jobLane(job);
   const pct = Math.round((job.progress || 0) * 100);
   const state = lane === "fault" ? "실패" : lane === "decide" ? (job.wait_reason ? `${label("wait", job.wait_reason)} 대기` : "사람 대기") : lane === "queue" ? "대기열" : `${pct}%`;
-  return el("a", { class: "data-row doing-item", role: "row", href: `#/workers?job=${encodeURIComponent(job.job_id)}`, dataset: { jobId: job.job_id },
+  return el("a", { class: "data-row doing-item", role: "row", href: `#/jobs/${encodeURIComponent(job.job_id)}`, dataset: { jobId: job.job_id },
     title: [job.template_name, job.job_id].filter(Boolean).join(" · ") },
   el("span", { class: "cell-main" }, statusIcon(lane === "queue" ? "idle" : lane), el("b", {}, job.target_title || job.job_id)),
   el("span", {}, job.worker_id || "Worker 배정 없음"),

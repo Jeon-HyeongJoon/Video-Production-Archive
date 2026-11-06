@@ -56,8 +56,7 @@ func TestManualTakeoverPreservesWorkerExecutionLeaseAndState(t *testing.T) {
 	}
 }
 
-// Requirement: WFL-004
-func TestExpiredRunningLeaseReturnsStepToQueue(t *testing.T) {
+func TestWorkflowStepRecoversExpiredRunningLeaseWithoutConsumingAttempt(t *testing.T) {
 	now := time.Now()
 	s := Step{State: Running, ExecutionLease: &ExecutionLease{OwnerWorkerID: "worker-1", ExpiresAt: now.Add(-time.Second)}, Attempt: 1}
 	if !s.RecoverExpiredLease(now) || s.State != Queued || s.ExecutionLease != nil || s.Attempt != 1 {

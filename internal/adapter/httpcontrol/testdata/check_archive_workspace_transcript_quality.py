@@ -22,6 +22,6 @@ with sync_playwright() as playwright:
     expect(quality).to_contain_text("긴 구간 · 낮은 문자 밀도")
     expect(quality).to_contain_text("19.1초 · 1구간 · 9자")
     expect(page.locator("#alert-count")).to_have_text("6")
-    page.locator('#menu [data-menu="status"]').click()
-    expect(page.locator('#problem-cards .problem-card[data-kind="review"][data-folder-id="ready"]')).to_contain_text("전사 검토 권장")
+    page.locator("#alert-button").click()
+    expect(page.locator('#alert-panel .alert-item[data-kind="review"]')).to_contain_text("전사 검토 권장")
     browser.close()

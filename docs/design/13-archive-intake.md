@@ -13,7 +13,7 @@
 - ARCHIVE_PRIMARY에 한 벌을 검증해 게시하면 “보관됨”이다. `ARC-004`의 복제본 검증과 사람 승인을 충족하면 “확정됨”이다.
 - 기록물은 중앙 DB 없이 복원 가능한 `ARC-007` ArchivePackage 형식을 따른다.
 - 원본 드라이브 분리와 네트워크 아카이브 저장소 끊김은 `WaitReason.DEVICE`다. 기다리는 동안 실행 시도 횟수를 소비하지 않는다.
-- 폴더별 단계 표시는 2026-10-31에 막대 매트릭스 대신 드라이브당 처리 흐름 그래프와 진행 피드백으로 바꿨다. 단계별 세부는 노드와 폴더 행 세부 설명에서 확인한다.
+- 폴더별 단계 표시는 드라이브당 단계 상태 행렬과 진행 피드백으로 표시한다. 분기·선택 gate·독립 기록을 하나의 순차선으로 잇지 않으며 단계별 세부는 노드와 폴더 행 세부 설명에서 확인한다.
 
 아카이브 실행 개체는 기존 run 영수증과 분리된 영속 `ArchiveRun`다. 2026-10-31에 Q1~Q12의 권장안을 모두 v1 계약으로 확정했다. `ORG-012`
 
@@ -59,6 +59,8 @@ Archivist의 정리 검토 단위는 현재 HOLD인 MediaFolder 하나다. 목�
 - 그대로 사용은 분류 뒤 QC·보관으로 간다.
 - 개별 렌더는 6Mbps 또는 20Mbps 렌더 뒤 QC·보관으로 간다.
 - 소스 시퀀스는 정렬된 Clip과 CutMarker를 고정하고 20Mbps 통합 렌더 뒤 QC·보관으로 간다.
+- 원본에 오디오가 없는 렌더 결과는 오디오 스트림을 만들지 않으며, QC는 AAC 대신 오디오 부재를 검증한다.
+- 자동 소스 시퀀스는 동일한 frame rate까지 요구한다. 보류에서 사람이 `소스 시퀀스` 작업을 명시적으로 고를 때는 모든 입력을 다시 인코딩하므로 화면 크기와 audio 형태가 같으면 frame rate 차이를 허용한다. 화면과 MCP에는 서버가 현재 기술 근거로 검증한 작업만 제시한다.
 - HOLD는 `WaitReason.INPUT`만 기록하고 외부 Step을 만들지 않는다.
 
 Worker는 외부 subprocess에 executable과 argument 배열만 넘기고 StorageRoot 안 임시 출력에 쓴다. QC와 checksum 검증 뒤에만 선택한 ARCHIVE_PRIMARY에 게시한다. 한 벌이 검증되면 `ArchivePackageState.STORED`, 화면의 “보관됨”이다. 아직 Transcript·Subtitle을 새 패키지 리비전으로 더할 수 있다. `ORG-008`, `ARC-011`
@@ -69,7 +71,7 @@ Worker는 외부 subprocess에 executable과 argument 배열만 넘기고 Storag
 
 STT 시작은 별도 Command다. 해당 ArchiveRun의 1단계에 실행 중이거나 재시도 예정인 작업이 없을 때만 받는다. HOLD는 명시적 분류 입력을 기다리므로 남은 실행 가능 작업 수와 2단계 대상에서 제외한다. 다른 ArchiveRun와 시스템 전체 queue는 이 게이트에 포함하지 않고 자원 경합은 Scheduler가 처리한다. `PIP-008`
 
-대상은 1단계에서 보관됨이 된 `ORGANIZE_AS_IS`·`RENDER_RECORDINGS` 녹화영상뿐이다. 소스 시퀀스, HOLD, 실패 입력은 제외한다. `ORG-007`
+대상은 1단계에서 보관됨이 되고 원본 기술정보에 오디오가 있는 `ORGANIZE_AS_IS`·`RENDER_RECORDINGS` 녹화영상뿐이다. 무음 영상, 소스 시퀀스, HOLD, 실패 입력은 제외한다. `ORG-007`
 
 대상 기록물마다 1단계 Folder Job과 분리된 STT Job을 만들며 폴더별 2단계 Step은 다음 순서다. `PIP-009`
 
@@ -99,15 +101,18 @@ Transcript 게시가 성공하면 Worker는 versioned 결정 규칙으로 구간
 │           ├── events.jsonl
 │           ├── manifest-sha256.txt
 │           └── README.md
-└── catalog/
-    └── <원본 드라이브 ID>.csv
+└── archive-catalog.csv
 ```
 
 패키지는 `metadata.json`, `files.csv`, `events.jsonl`, manifest와 README만으로 DB 없이 복원할 수 있어야 한다. Storage 절대 root, mount path, credential과 executable 경로를 넣지 않는다. `ARC-007`
 
-새 패키지는 처리 날짜로 나뉜 상대경로에 둔다. 결과 영상 파일명은 단일 입력이면 원래 영상명, 여러 컷 통합이면 MediaFolder의 마지막 이름에서 만들며 Windows에서 안전하도록 정규화한다. 패키지 ID는 이름과 별개인 불변 identity로 유지하고, metadata와 ArchiveCatalog에는 원래 이름과 전체 상대경로도 함께 남긴다. 화면은 처리 날짜·결과 영상명을 주 정보로, 패키지 ID를 추적용 보조 정보로 보여준다. `ARC-013`, `DSH-023`
+새 패키지는 처리 날짜로 나뉜 상대경로에 둔다. 결과 영상 파일명은 단일 입력이면 원래 영상명, 여러 컷 통합이면 MediaFolder의 마지막 이름에서 만들며 Windows에서 안전하도록 정규화한다. 패키지 ID는 이름과 별개인 불변 identity로 유지하고, metadata와 ArchiveCatalog에는 원래 이름과 전체 상대경로도 함께 남긴다. 화면은 처리 날짜·결과 영상명을 주 정보로, 패키지 ID를 추적용 보조 정보로 보여준다. 완료된 Folder Job의 `ORGANIZED_MEDIA` 출력은 원본 드라이브의 완료 내역에 ArchiveRun을 넘어 유지한다. ArchiveRun 상태만으로 완료 내역을 만들지 않으며 실제 ArchivePackage 출력과 출력 기록 시각을 기준으로 한다. `ARC-013`, `DSH-023~024`
 
-ArchiveCatalog는 원본 영상 하나당 한 행이다. 고정 열은 원본 이름·상대경로·checksum·길이·codec·해상도·bitrate·판정과 판정 ID·ArchivePackage ID·결과 상대경로·Profile·Transcript·TranscriptText·Subtitle 상대경로·상태·보류 사유다. 상태 후보는 분류됨·보류·처리 중·보관됨·STT 완료·확정됨·실패다. 판정 추가와 결과 보관 때 전체 현재 투영을 같은 디렉터리의 임시 파일로 쓰고 검증한 뒤 원자 교체한다. `ORG-009`
+ArchiveCatalog는 아카이브 저장소 최상단의 `archive-catalog.csv` 하나이며 원본 영상 하나당 한 행이다. 다른 ArchiveRun이나 원본 드라이브라도 같은 `ARCHIVE_PRIMARY`를 대상으로 하면 이 파일에 이어서 기록한다. 행 identity는 원본 드라이브 ID와 OriginalAsset ID의 조합이다. 앞 열은 사람이 읽는 `원본 생성 시각 | 원본 영상명`과 `아카이브 처리일 | 결과 영상명` 쌍이고, 두 날짜를 합치거나 서로 대체하지 않는다. 뒤에는 원본 상대경로·상태·판정, 길이·크기·컨테이너·전체 bitrate, video/audio stream 규격, 결과 Profile과 영상·Transcript·TranscriptText·Subtitle 상대경로를 두며 추적용 드라이브·자산·판정·패키지 ID와 checksum은 마지막에 둔다. 값이 관찰되지 않은 메타데이터는 추정하지 않고 빈 칸으로 남긴다.
+
+상태 후보는 분류됨·보류·처리 중·보관됨·STT 완료·확정됨·실패다. 판정 추가와 결과 보관 때 기존 행과 새 행을 병합한 전체 현재 투영을 `archive-catalog.csv.partial`에 쓰고 검증한 뒤 원자 교체한다. 기존 드라이브별 CSV는 최상단 파일의 첫 게시에서 병합하되 복구 근거로 남긴다. `ORG-009`, `MED-007`
+
+아카이브 작업 공간의 ArchiveCatalog 마지막 기록 시각은 해당 ArchiveRun에서 성공 완료된 1·2단계 `archive_catalog` Step 중 가장 최근의 영속 완료 시각이다. 실행 중이거나 실패한 게시 시도는 성공 기록 시각을 앞당기지 않는다. `DSH-027`
 
 “보관됨”은 ARCHIVE_PRIMARY 한 벌의 검증 게시다. “확정됨”은 현재 패키지 리비전이 `ARC-004`의 QC·sidecar·manifest·서로 다른 물리 장치의 두 ArchiveCopy·사람 Approval 조건을 모두 만족한 상태다. 확정 뒤 같은 패키지 리비전을 고치지 않는다. `DSH-013`
 
@@ -143,11 +148,12 @@ Archivist용 MCP는 드라이브·폴더 조회, 1단계 시작, 상태 조회, 
 
 ## 9. 아카이브 작업 공간
 
-아카이브 작업 공간의 화면 계약은 [09. 아카이브 작업 공간](09-archive-workspace.md) §7을 따른다. Archive Intake가 쓰는 자리는 다음과 같다. 왼쪽 사이드바 메뉴는 상태·드라이브·Worker이고 Archivist 대화 칸은 모든 화면의 오른쪽에 늘 있으며 화면에는 Agent로 표기한다. `DSH-004`, `DSH-007`, `DSH-009`, `DSH-019`
+아카이브 작업 공간의 화면 계약은 [09. 아카이브 작업 공간](09-archive-workspace.md) §7을 따른다. Archive Intake가 쓰는 자리는 다음과 같다. 왼쪽 사이드바 메뉴는 작업 관리·드라이브·Worker 순서이고 작업 관리가 첫 메뉴이자 기본 화면이며, Archivist 대화 칸은 모든 화면의 오른쪽에 늘 있고 화면에는 Agent로 표기한다. `DSH-004`, `DSH-007`, `DSH-009`, `DSH-019`, `DSH-025`
 
-- 상태: 모든 드라이브·Worker의 실패와 사람 대기를 묶지 않고 문제 하나마다 카드로 보이고, 카드를 누르면 그 문제를 펼친 드라이브 상세로 이동한다. 지금 하는 일은 처리 중인 드라이브의 흐름 그래프다.
+- 상태: 모든 드라이브·Worker의 실패와 사람 대기를 묶지 않고 문제 하나마다 카드로 보이고, 카드를 누르면 그 문제를 펼친 드라이브 상세로 이동한다. 지금 하는 일은 처리 중인 드라이브의 단계 상태 행렬이다.
 - 드라이브 목록: 원본 드라이브를 실행 전·처리 중·완료로 묶고 Worker·아카이브 저장소·단계·보관 영상 진행·실패와 확인 필요 수를 한 줄로 보인다.
-- 드라이브 상세: 단계·보관 진행·Worker·아카이브·확인 필요 다섯 사실과 흐름 그래프를 담은 개요 카드, 제목 옆 STT 버튼과 실행 준비 버튼, 실행 준비(아카이브 후보의 역할·접근 방식·용량, 폴더 범위, 예상 용량, 시작 불가 이유), 확인 필요 칸, 폴더 표를 둔다. 접근 불가 후보는 비활성이고 SMTP는 표시하지 않는다.
+- 드라이브 상세: 단계·보관 진행·Worker·아카이브·확인 필요 다섯 사실과 연결선 없는 단계 상태 행렬을 담은 개요 카드, 제목 옆 STT 버튼과 실행 준비 버튼, 실행 준비(아카이브 후보의 역할·접근 방식·용량, 폴더 범위, 예상 용량, 시작 불가 이유), ArchiveRun을 넘어 유지하는 완료 내역, 확인 필요 칸, 최신 실행의 폴더 표를 둔다. 완료 내역은 실제 보관된 결과 영상명·처리 방식·원본 수·완료 시각·아카이브 Storage·보관 상태를 최신 순서로 보이고, 행을 누르면 해당 `job_id`의 작업 상세로 이동한다. 접근 불가 후보는 비활성이고 SMTP는 표시하지 않는다.
+- 작업 관리: 최상단에 실행·자원 대기·대기열 Job을 모두 보이고, 그 아래 실패·사람 입력 대기 Job의 확인 필요 목록과 끝난 Job의 완료 목록을 각각 접고 펼칠 수 있게 둔다. 작업 관리·Worker·드라이브 완료 내역은 같은 `#/jobs/<job_id>` 상세로 이동하며, 상세에서 Job identity·Step·취소·ArchivePackage 완료 결과를 본다.
 - Worker: 처리 중인 드라이브, 드라이브에 속하지 않은 Job, 아카이브 저장소 접근과 자원을 보인다.
 
 STT 버튼은 1단계 남은 실행 작업이 있으면 그 수와 함께 비활성, 게이트 통과 시 활성, 시작 뒤 진행 중으로 표시한다. 드라이브 단계는 `실행 전 → 1단계 정리 중 → STT 시작 가능 → 2단계 전사 중 → 완료` 순서이고, 폴더 단계 순서 `분류·소스 타임라인·렌더·QC·보관 | 오디오 추출·STT·자막과 전사 텍스트·패키지 추가`는 폴더 행의 단계 점과 펼친 세부에서만 보인다. 단계 점과 폴더 행은 영속 StepState와 저장된 WaitReason만 사용한다. `INPUT`·`APPROVAL`·`DEVICE`는 확인 필요 칸과 폴더 행 글자, `MEMORY`·`SCRATCH`·`SLOT`·`DISK`·`IDLE`·`PRIORITY`는 진행 중과 세부의 이유 label로 표시한다. `DSH-006`, `DSH-008`

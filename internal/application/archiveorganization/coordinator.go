@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"path"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -79,6 +80,13 @@ func NewCoordinator(catalog Catalog, receipts ReceiptStore, jobs JobBus, analyze
 		return nil, ErrInvalidRequest
 	}
 	return &Coordinator{catalog: catalog, receipts: receipts, jobs: jobs, analyzer: analyzer}, nil
+}
+
+func NewInspectedCoordinator(catalog Catalog, receipts ReceiptStore, jobs JobBus) (*Coordinator, error) {
+	if catalog == nil || receipts == nil || jobs == nil {
+		return nil, ErrInvalidRequest
+	}
+	return &Coordinator{catalog: catalog, receipts: receipts, jobs: jobs}, nil
 }
 
 func (coordinator *Coordinator) Execute(ctx context.Context, request Request) (Result, error) {
@@ -160,6 +168,122 @@ func (coordinator *Coordinator) Execute(ctx context.Context, request Request) (R
 		return Result{}, err
 	}
 	return Result{Receipt: receipt}, nil
+}
+
+// ExecuteInspected continues one ArchiveRun from immutable Worker observations.
+// It never opens the source Storage on Control.
+func (coordinator *Coordinator) ExecuteInspected(ctx context.Context, request Request, inspected []execution.InspectedMedia) (Result, error) {
+	if request.Session == nil || strings.TrimSpace(request.ArchiveRunID) == "" || strings.TrimSpace(request.IdempotencyKey) == "" ||
+		request.InputRevision == 0 || strings.TrimSpace(request.ActorID) == "" || request.StartedAt.IsZero() ||
+		request.Session.Session.ID == "" || request.Session.Session.WorkspaceDriveID == "" || request.Session.Session.PhysicalDeviceID == "" ||
+		request.Session.Session.StorageID == "" || request.Session.Session.WorkerID == "" || strings.TrimSpace(request.ArchiveStorageID) == "" ||
+		request.FolderScope.ValidateStart(request.InputRevision) != nil || len(inspected) == 0 ||
+		(request.ExecutionPriority != resource.Background && request.ExecutionPriority != resource.Immediate) {
+		return Result{}, ErrInvalidRequest
+	}
+	digest := requestDigest(request)
+	stored, found, err := coordinator.receipts.FindReceipt(ctx, request.IdempotencyKey)
+	if err != nil {
+		return Result{}, err
+	}
+	if found {
+		if stored.InputDigest != digest {
+			return Result{}, command.ErrIdempotencyConflict
+		}
+		return Result{Receipt: stored, Replayed: true}, nil
+	}
+	byFolder := make(map[string][]execution.InspectedMedia, len(request.FolderScope.FolderIDs()))
+	for _, item := range inspected {
+		if !request.FolderScope.Includes(item.Folder) || item.Observation.StorageID != request.Session.Session.StorageID ||
+			item.Observation.WorkspaceDriveID != request.Session.Session.WorkspaceDriveID || item.Observation.ObservedBy != request.Session.Session.WorkerID ||
+			item.Inspection.ObservedBy != request.Session.Session.WorkerID || item.Original.RegisteredBy != request.ActorID {
+			return Result{}, ErrInvalidRequest
+		}
+		identity := []string{request.Session.Session.ID, strconv.FormatUint(request.InputRevision, 10), item.Observation.RelativePath}
+		if item.Observation.ID != stableID("OBSERVATION", identity...) || item.Original.ID != stableID("ASSET", identity...) ||
+			item.Inspection.ID != stableID("INSPECTION", append([]string{request.ArchiveRunID}, identity...)...) {
+			return Result{}, ErrInvalidRequest
+		}
+		byFolder[item.Folder] = append(byFolder[item.Folder], item)
+	}
+	receipt := organization.ArchiveOrganizationReceipt{
+		ID: request.ArchiveRunID, IdempotencyKey: request.IdempotencyKey, InputDigest: digest,
+		SessionID: request.Session.Session.ID, InputRevision: request.InputRevision,
+		WorkspaceDriveID: request.Session.Session.WorkspaceDriveID, WorkerID: request.Session.Session.WorkerID,
+		CompletedAt: request.StartedAt.UTC(),
+	}
+	for _, folderID := range request.FolderScope.FolderIDs() {
+		items := byFolder[folderID]
+		if len(items) == 0 {
+			return Result{}, ErrInvalidRequest
+		}
+		sort.Slice(items, func(i, j int) bool { return items[i].Observation.RelativePath < items[j].Observation.RelativePath })
+		inputs := make([]organization.Input, 0, len(items))
+		for _, item := range items {
+			if err := coordinator.appendInspected(ctx, item); err != nil {
+				return Result{}, err
+			}
+			receipt.Files = append(receipt.Files, organization.CoordinatedFile{
+				RelativePath: item.Observation.RelativePath, ObservationID: item.Observation.ID,
+				OriginalAssetID: item.Original.ID, InspectionID: item.Inspection.ID,
+			})
+			inputs = append(inputs, organization.Input{
+				OriginalAssetID: item.Original.ID, RelativePath: item.Observation.RelativePath, Inspection: item.Inspection,
+			})
+		}
+		decision, err := organization.Classify(organization.AutoRequest{
+			DecisionID:       stableID("DECISION", request.ArchiveRunID, request.Session.Session.ID, strconv.FormatUint(request.InputRevision, 10), folderID),
+			WorkspaceDriveID: request.Session.Session.WorkspaceDriveID, Folder: folderID,
+			InputRevision: request.InputRevision, Inputs: inputs, Policy: organization.DefaultPolicy(), DecidedAt: request.StartedAt,
+		})
+		if err != nil {
+			return Result{}, err
+		}
+		folderResult := organization.CoordinatedFolder{Folder: folderID, Decision: decision}
+		if decision.Disposition != vocabulary.OrganizationHold {
+			jobID, err := coordinator.createFolderJob(request, decision)
+			if err != nil {
+				return Result{}, err
+			}
+			folderResult.JobID = jobID
+		}
+		receipt.Folders = append(receipt.Folders, folderResult)
+	}
+	if err := coordinator.receipts.SaveReceipt(ctx, receipt); err != nil {
+		return Result{}, err
+	}
+	return Result{Receipt: receipt}, nil
+}
+
+func (coordinator *Coordinator) appendInspected(ctx context.Context, item execution.InspectedMedia) error {
+	if stored, found, err := coordinator.catalog.FindObservation(ctx, item.Observation.ID); err != nil {
+		return err
+	} else if found {
+		if !sameObservedInput(stored, item.Observation) {
+			return ErrInvalidRequest
+		}
+	} else if err := coordinator.catalog.AppendObservation(ctx, item.Observation); err != nil {
+		return err
+	}
+	if stored, found, err := coordinator.catalog.FindOriginal(ctx, item.Original.ID); err != nil {
+		return err
+	} else if found {
+		if !sameOriginalInput(stored, item.Original) {
+			return ErrInvalidRequest
+		}
+	} else if err := coordinator.catalog.AppendOriginal(ctx, item.Original); err != nil {
+		return err
+	}
+	if stored, found, err := coordinator.catalog.FindInspection(ctx, item.Inspection.ID); err != nil {
+		return err
+	} else if found {
+		if stored.OriginalAssetID != item.Original.ID || stored.OriginalChecksum != item.Original.Checksum {
+			return ErrInvalidRequest
+		}
+	} else if err := coordinator.catalog.AppendInspection(ctx, item.Inspection); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (coordinator *Coordinator) intakeFile(ctx context.Context, request Request, relativePath string) (organization.CoordinatedFile, organization.Input, error) {
@@ -278,11 +402,21 @@ func firstWorkerSpec(archiveRunID, jobID, templateName, sourceStorageID, working
 	inputs := make([]execution.InputReference, 0, len(decision.Inputs))
 	for _, input := range decision.Inputs {
 		video := input.Inspection.VideoStreams[0]
+		var audio mediaanalysis.AudioStream
+		if len(input.Inspection.AudioStreams) > 0 {
+			audio = input.Inspection.AudioStreams[0]
+		}
 		inputs = append(inputs, execution.InputReference{
 			OriginalAssetID: input.OriginalAssetID, OriginalName: path.Base(input.RelativePath), InspectionID: input.Inspection.ID,
 			StorageID: sourceStorageID, RelativePath: input.RelativePath, Checksum: input.Inspection.OriginalChecksum,
-			DurationMillis: input.Inspection.DurationMillis, VideoCodec: video.Codec, Width: video.Width, Height: video.Height,
+			DurationMillis: input.Inspection.DurationMillis, SourceCreatedAt: input.Inspection.ContainerCreatedAt,
+			SourceSizeBytes: input.Inspection.SizeBytes, SourceContainer: strings.Join(input.Inspection.Containers, ","),
+			SourceBitRateBPS: input.Inspection.BitRate, VideoCodec: video.Codec, VideoProfile: video.Profile,
+			Width: video.Width, Height: video.Height, FrameRateNumerator: video.FrameRate.Numerator,
+			FrameRateDenominator: video.FrameRate.Denominator, VideoPixelFormat: video.PixelFormat,
 			VideoBitRateBPS: video.BitRate, HasAudio: len(input.Inspection.AudioStreams) > 0,
+			AudioCodec: audio.Codec, AudioProfile: audio.Profile, AudioBitRateBPS: audio.BitRate,
+			AudioSampleRateHz: audio.SampleRateHz, AudioChannels: audio.Channels, AudioChannelLayout: audio.ChannelLayout,
 			ProfileReference: inputProfileReference(decision, video.BitRate),
 		})
 	}
@@ -292,7 +426,7 @@ func firstWorkerSpec(archiveRunID, jobID, templateName, sourceStorageID, working
 		ArchiveStorageID: workingStorageID,
 		InputRevision:    decision.InputRevision, ArchiveDate: decision.DecidedAt.UTC().Format("20060102"), Disposition: decision.Disposition,
 		SelectedProfileReference: decision.ProfileReference,
-		TranscriptionEligible:    decision.Disposition == vocabulary.OrganizationAsIs || decision.Disposition == vocabulary.OrganizationRenderRecordings,
+		TranscriptionEligible:    organization.TranscriptionEligible(decision, true),
 		SourceInputs:             append([]execution.InputReference(nil), inputs...),
 	}
 	var stepID string

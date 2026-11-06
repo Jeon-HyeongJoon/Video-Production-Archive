@@ -334,6 +334,8 @@ func templateByName(name string) (pipeline.Template, bool) {
 		return pipeline.FinalEdit(), true
 	case pipeline.LargeFileIntake().Name:
 		return pipeline.LargeFileIntake(), true
+	case pipeline.ArchiveIntakeInspection().Name:
+		return pipeline.ArchiveIntakeInspection(), true
 	case pipeline.ArchiveTranscription().Name:
 		return pipeline.ArchiveTranscription(), true
 	default:

@@ -25,7 +25,7 @@ visual-deps:
 	python3 -m playwright install chromium
 
 archive-workspace-golden-update:
-	UPDATE_ARCHIVE_WORKSPACE_GOLDEN=1 go test -count=1 ./internal/adapter/httpcontrol -run '^(TestArchiveOrganizationWorkspaceMatchesOperatingSystemGolden|TestArchiveWorkspaceStatusWithArchivistPaneMatchesOperatingSystemGolden)$$'
+	UPDATE_ARCHIVE_WORKSPACE_GOLDEN=1 go test -count=1 ./internal/adapter/httpcontrol -run '^(TestArchiveOrganizationWorkspaceMatchesOperatingSystemGolden|TestArchiveWorkspaceJobManagementWithArchivistPaneMatchesOperatingSystemGolden|TestWorkspaceRoutesJobListsAndCompletedResultsToPersistentJobDetail)$$'
 
 archive-workspace-golden-evidence:
 	./deploy/run-archive-workspace-golden-evidence.sh

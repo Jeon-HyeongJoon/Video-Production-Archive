@@ -1,10 +1,10 @@
 // Overview of one drive, shared by 상태 and the drive's own screen: five facts
 // in a row — phase, archived video progress, Worker, archive, problems — over
-// the flow graph of its ArchiveRun. Counts behind a fact wait on hover.
+// the stage status matrix of its ArchiveRun. Counts behind a fact wait on hover.
 
 import { el, svgIcon, icons, statusIcon, problemCounts, label, stateSignal, formatCount, formatBytes, shortTime, clockTime, meter } from "./core.js";
 import { model, drivePhase, driveName, driveProgress, driveProblemCounts, folderDiscoveryText, PHASE_LABEL, PHASE_ICON } from "./store.js";
-import { flowGraph } from "./flow.js";
+import { stageMatrix } from "./flow.js";
 
 function fact(name, value, attributes = {}) {
   return el("div", { class: "fact", ...attributes }, el("span", { class: "fact-label" }, name), value);
@@ -57,5 +57,5 @@ export function driveOverview(drive) {
     el("div", { class: "overview-head" },
       el("b", {}, driveName(drive)), el("small", {}, drive.worker_id),
       el("a", { class: "btn btn-sm", href }, "드라이브 열기", svgIcon(icons.next))),
-    driveFacts(drive), flowGraph(drive));
+    driveFacts(drive), stageMatrix(drive));
 }

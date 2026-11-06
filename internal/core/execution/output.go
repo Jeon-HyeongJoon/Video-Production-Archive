@@ -6,6 +6,9 @@ import (
 	"strings"
 	"time"
 
+	"videoarchive/internal/core/asset"
+	"videoarchive/internal/core/intake"
+	"videoarchive/internal/core/mediaanalysis"
 	"videoarchive/internal/core/transcription"
 )
 
@@ -21,12 +24,22 @@ type StepOutput struct {
 }
 
 type StepOutputRecord struct {
-	SpecDigest             string       `json:"spec_digest"`
-	FencingToken           uint64       `json:"fencing_token"`
-	WorkerID               string       `json:"worker_id"`
-	RecordedAt             time.Time    `json:"recorded_at"`
-	Outputs                []StepOutput `json:"outputs"`
-	VerificationReferences []string     `json:"verification_references"`
+	SpecDigest             string           `json:"spec_digest"`
+	FencingToken           uint64           `json:"fencing_token"`
+	WorkerID               string           `json:"worker_id"`
+	RecordedAt             time.Time        `json:"recorded_at"`
+	Outputs                []StepOutput     `json:"outputs"`
+	VerificationReferences []string         `json:"verification_references"`
+	InspectedMedia         []InspectedMedia `json:"inspected_media,omitempty"`
+}
+
+// InspectedMedia is the normalized, path-safe result of one Worker-side
+// Archive Intake probe. No mount root or executable path crosses this record.
+type InspectedMedia struct {
+	Folder      string                        `json:"folder"`
+	Observation intake.InputFileObservation   `json:"observation"`
+	Original    asset.OriginalAsset           `json:"original"`
+	Inspection  mediaanalysis.MediaInspection `json:"inspection"`
 }
 
 func NewStepOutputRecord(
@@ -37,6 +50,18 @@ func NewStepOutputRecord(
 	outputs []StepOutput,
 	verificationReferences []string,
 ) (StepOutputRecord, error) {
+	return NewStepOutputRecordWithInspections(spec, fencingToken, workerID, recordedAt, outputs, verificationReferences, nil)
+}
+
+func NewStepOutputRecordWithInspections(
+	spec StepExecutionSpec,
+	fencingToken uint64,
+	workerID string,
+	recordedAt time.Time,
+	outputs []StepOutput,
+	verificationReferences []string,
+	inspectedMedia []InspectedMedia,
+) (StepOutputRecord, error) {
 	if spec.Validate() != nil || fencingToken == 0 || strings.TrimSpace(workerID) == "" || recordedAt.IsZero() ||
 		len(outputs) != len(spec.Outputs) || len(verificationReferences) == 0 {
 		return StepOutputRecord{}, ErrInvalidStepOutputRecord
@@ -44,6 +69,7 @@ func NewStepOutputRecord(
 	record := StepOutputRecord{
 		SpecDigest: spec.Digest, FencingToken: fencingToken, WorkerID: strings.TrimSpace(workerID), RecordedAt: recordedAt.UTC(),
 		Outputs: append([]StepOutput(nil), outputs...), VerificationReferences: append([]string(nil), verificationReferences...),
+		InspectedMedia: append([]InspectedMedia(nil), inspectedMedia...),
 	}
 	for index := range record.Outputs {
 		output := &record.Outputs[index]
@@ -76,15 +102,48 @@ func NewStepOutputRecord(
 		seenReferences[reference] = true
 		record.VerificationReferences[index] = reference
 	}
+	if spec.Operation == OperationInspectMedia && spec.TemplateName == "archive-intake-inspection" {
+		if len(record.InspectedMedia) == 0 {
+			return StepOutputRecord{}, ErrInvalidStepOutputRecord
+		}
+		seenPaths := make(map[string]bool, len(record.InspectedMedia))
+		for index := range record.InspectedMedia {
+			item := &record.InspectedMedia[index]
+			item.Folder = normalizeRelative(item.Folder)
+			observation, observationErr := intake.NewInputFileObservation(item.Observation)
+			inspection, inspectionErr := mediaanalysis.NewMediaInspection(item.Inspection)
+			if !safeRelative(item.Folder) || observationErr != nil || item.Original.Validate() != nil || inspectionErr != nil ||
+				pathFolder(observation.RelativePath) != item.Folder || seenPaths[observation.RelativePath] ||
+				item.Original.RegisteredFromObservationID != observation.ID || item.Original.Checksum != observation.Checksum ||
+				inspection.OriginalAssetID != item.Original.ID || inspection.OriginalChecksum != item.Original.Checksum ||
+				observation.StorageID != spec.Parameters.SourceStorageID || observation.WorkspaceDriveID != spec.Parameters.WorkspaceDriveID ||
+				observation.ObservedBy != record.WorkerID || inspection.ObservedBy != record.WorkerID {
+				return StepOutputRecord{}, ErrInvalidStepOutputRecord
+			}
+			seenPaths[observation.RelativePath] = true
+			item.Observation = observation
+			item.Inspection = inspection
+		}
+	} else if len(record.InspectedMedia) != 0 {
+		return StepOutputRecord{}, ErrInvalidStepOutputRecord
+	}
 	return record, nil
 }
 
 func (record StepOutputRecord) ValidateFor(spec StepExecutionSpec) error {
-	normalized, err := NewStepOutputRecord(
-		spec, record.FencingToken, record.WorkerID, record.RecordedAt, record.Outputs, record.VerificationReferences,
+	normalized, err := NewStepOutputRecordWithInspections(
+		spec, record.FencingToken, record.WorkerID, record.RecordedAt, record.Outputs, record.VerificationReferences, record.InspectedMedia,
 	)
 	if err != nil || record.SpecDigest != spec.Digest || !reflect.DeepEqual(record, normalized) {
 		return ErrInvalidStepOutputRecord
 	}
 	return nil
+}
+
+func pathFolder(relativePath string) string {
+	index := strings.LastIndex(relativePath, "/")
+	if index < 0 {
+		return "root"
+	}
+	return relativePath[:index]
 }

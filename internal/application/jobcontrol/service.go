@@ -15,6 +15,10 @@ type SnapshotLoader interface {
 	Load(targetID string) (command.Snapshot, error)
 }
 
+type SnapshotLister interface {
+	ListSnapshots() ([]command.Snapshot, error)
+}
+
 type ProjectionWriter interface {
 	Replace(context.Context, archiveworkspace.JobView) error
 }
@@ -43,6 +47,36 @@ func New(executor *command.Executor, states SnapshotLoader, projection Projectio
 		return nil, ErrProjectionUnavailable
 	}
 	return &Service{executor: executor, states: states, projection: projection}, nil
+}
+
+// RebuildProjections restores the disposable Job query model from the
+// authoritative aggregate ledger. The ledger also contains other aggregate
+// types, so snapshots that are not valid Jobs are intentionally ignored.
+func RebuildProjections(ctx context.Context, states SnapshotLister, projection ProjectionWriter) error {
+	if states == nil || projection == nil {
+		return ErrProjectionUnavailable
+	}
+	snapshots, err := states.ListSnapshots()
+	if err != nil {
+		return err
+	}
+	for _, snapshot := range snapshots {
+		state, decodeErr := job.Decode(snapshot)
+		if errors.Is(decodeErr, job.ErrInvalidJob) {
+			continue
+		}
+		if decodeErr != nil {
+			return decodeErr
+		}
+		view, projectErr := Project(state)
+		if projectErr != nil {
+			return projectErr
+		}
+		if replaceErr := projection.Replace(ctx, view); replaceErr != nil {
+			return replaceErr
+		}
+	}
+	return nil
 }
 
 func (service *Service) Execute(ctx context.Context, envelope command.Envelope) (command.Result, error) {

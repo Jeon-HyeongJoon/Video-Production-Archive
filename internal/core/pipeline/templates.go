@@ -145,6 +145,14 @@ func LargeFileIntake() Template {
 	)
 }
 
+// ArchiveIntakeInspection is the Worker-side boundary between a fixed folder
+// scope and the per-folder organization Jobs created from its observations.
+func ArchiveIntakeInspection() Template {
+	return newTemplate("archive-intake-inspection",
+		lightStep("inspect", vocabulary.ProcessingInspect),
+	)
+}
+
 func ArchiveOrganization(disposition vocabulary.OrganizationDisposition) (Template, error) {
 	switch disposition {
 	case vocabulary.OrganizationAsIs:

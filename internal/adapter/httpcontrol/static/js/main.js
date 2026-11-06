@@ -8,14 +8,13 @@ import { currentRoute } from "./router.js";
 import { mountTopbar } from "./topbar.js";
 import { mountSidebar } from "./sidebar.js";
 import { mountAgent } from "./agent.js";
-import * as status from "./views/status.js";
-import * as drives from "./views/drives.js";
 import * as drive from "./views/drive.js";
-import * as workers from "./views/workers.js";
+import * as jobs from "./views/jobs.js";
+import * as connections from "./views/workers.js";
 import * as search from "./views/search.js";
 import * as settings from "./views/settings.js";
 
-const screens = { status, drives, drive, workers, search, settings };
+const screens = { drive, jobs, job: jobs, connections, search, settings };
 const root = byId("view");
 const topbar = mountTopbar();
 const sidebar = mountSidebar();
@@ -25,7 +24,7 @@ let activeKey = "";
 
 function render() {
   const route = currentRoute();
-  const key = `${route.key}?${route.name === "drive" || route.name === "workers" ? route.query.toString() : ""}`;
+  const key = `${route.key}?${route.name === "drive" || route.name === "connections" ? route.query.toString() : ""}`;
   if (key !== activeKey) {
     activeKey = key;
     root.replaceChildren();

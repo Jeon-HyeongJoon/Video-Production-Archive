@@ -70,4 +70,15 @@ with sync_playwright() as playwright:
     if not before or not after or abs(before["y"] - after["y"]) > 1:
         raise AssertionError(f"select all did not stay fixed at the list top: before={before} after={after}")
 
+    # Selecting one item redraws the preparation summary. The long folder list
+    # must stay where the person was working instead of jumping back to row 1.
+    scroll_before_pick = folder_list.evaluate("element => element.scrollTop")
+    page.locator("#prep-folders .folder-pick:not(.folder-all) input").last.check()
+    expect(page.locator("#selection-summary")).to_contain_text("1 폴더")
+    scroll_after_pick = folder_list.evaluate("element => element.scrollTop")
+    if scroll_before_pick <= 0 or abs(scroll_before_pick - scroll_after_pick) > 1:
+        raise AssertionError(
+            f"folder selection lost its scroll position: before={scroll_before_pick} after={scroll_after_pick}"
+        )
+
     browser.close()

@@ -111,6 +111,42 @@ func TestExplicitOrganizationClassificationAppendsActorEvidenceAndRejectsStaleRe
 		t.Fatalf("override did not append a new decision: %+v", decisions)
 	}
 
+	// Automatic classification remains conservative when numbering or frame
+	// rates differ. An explicit source-sequence selection is nevertheless safe
+	// when the decoded dimensions and audio shape match because it is re-encoded.
+	mixedFrameRateInputs := []Input{
+		organizationInput("ASSET-MIXED-1", "source/C0001.MP4", 10_000, 50_000_000, 3840, 2160),
+		organizationInput("ASSET-MIXED-3", "source/C0003.MP4", 12_000, 50_000_000, 3840, 2160),
+	}
+	mixedFrameRateInputs[1].Inspection.VideoStreams[0].FrameRate = mediaanalysis.Rational{Numerator: 120, Denominator: 1}
+	mixed, err := Classify(AutoRequest{
+		DecisionID: "DECISION-MIXED-HOLD", WorkspaceDriveID: "DRIVE-1", Folder: "source", InputRevision: 8,
+		Inputs: mixedFrameRateInputs, Policy: DefaultPolicy(), DecidedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	options := AvailableWorkOptions(mixed)
+	if len(options) != 3 || options[0] != (OrganizationWorkOption{Disposition: vocabulary.OrganizationRenderRecordings, TargetVideoBitRateKbps: 6_000}) ||
+		options[1] != (OrganizationWorkOption{Disposition: vocabulary.OrganizationRenderRecordings, TargetVideoBitRateKbps: 20_000}) ||
+		options[2] != (OrganizationWorkOption{Disposition: vocabulary.OrganizationCompileSourceSequence}) {
+		t.Fatalf("work options exposed an unavailable as-is path or omitted executable work: %+v", options)
+	}
+	mixedHistory, err := NewDecisionHistory(mixed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mixedSource, err := mixedHistory.RecordOverride(OverrideRequest{
+		DecisionID: "DECISION-MIXED-SOURCE", ExpectedInputRevision: 8,
+		Disposition:   vocabulary.OrganizationCompileSourceSequence,
+		DecidedByType: vocabulary.ActorHuman, DecidedBy: "operator-1", Reason: "join selected camera clips",
+		Basis: []string{"ASSET-MIXED-1", "ASSET-MIXED-3"}, DecidedAt: time.Now().UTC(),
+	})
+	if err != nil || mixedSource.Disposition != vocabulary.OrganizationCompileSourceSequence ||
+		mixedSource.ProfileReference != "archive-1080p-20mbps@v1" {
+		t.Fatalf("explicit mixed-frame-rate source sequence was rejected: decision=%+v err=%v", mixedSource, err)
+	}
+
 	withoutEvidence, err := Classify(AutoRequest{
 		DecisionID: "DECISION-NO-EVIDENCE", WorkspaceDriveID: "DRIVE-1", Folder: "empty", InputRevision: 7,
 		Policy: DefaultPolicy(), DecidedAt: time.Now().UTC(),
@@ -219,8 +255,9 @@ func TestSourceTimelinePreservesOrderedWholeClipsAndCumulativeBoundaryMarkers(t 
 
 // Requirement: ORG-007
 func TestTranscriptionPlanIncludesOnlyQCPassedRecordings(t *testing.T) {
-	recording := OrganizationDecision{Disposition: vocabulary.OrganizationRenderRecordings}
-	asIs := OrganizationDecision{Disposition: vocabulary.OrganizationAsIs}
+	input := organizationInput("ASSET-STT", "recording.mp4", 60_000, 6_000_000, 1920, 1080)
+	recording := OrganizationDecision{Disposition: vocabulary.OrganizationRenderRecordings, Inputs: []Input{input}}
+	asIs := OrganizationDecision{Disposition: vocabulary.OrganizationAsIs, Inputs: []Input{input}}
 	source := OrganizationDecision{Disposition: vocabulary.OrganizationCompileSourceSequence}
 	hold := OrganizationDecision{Disposition: vocabulary.OrganizationHold}
 	for _, value := range []OrganizationDecision{recording, asIs} {
@@ -230,6 +267,11 @@ func TestTranscriptionPlanIncludesOnlyQCPassedRecordings(t *testing.T) {
 		if got := PlanFollowUp(value, false); len(got) != 0 {
 			t.Fatalf("QC-failed recording received STT plan: %v", got)
 		}
+	}
+	silentInput := input
+	silentInput.Inspection.AudioStreams = nil
+	if got := PlanFollowUp(OrganizationDecision{Disposition: vocabulary.OrganizationRenderRecordings, Inputs: []Input{silentInput}}, true); len(got) != 0 {
+		t.Fatalf("silent recording received STT plan: %v", got)
 	}
 	for _, value := range []OrganizationDecision{source, hold} {
 		if got := PlanFollowUp(value, true); len(got) != 0 {

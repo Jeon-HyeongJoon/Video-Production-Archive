@@ -20,6 +20,7 @@ type Rational struct {
 type VideoStream struct {
 	Index       int      `json:"index"`
 	Codec       string   `json:"codec"`
+	Profile     string   `json:"profile,omitempty"`
 	Width       int      `json:"width"`
 	Height      int      `json:"height"`
 	FrameRate   Rational `json:"frame_rate"`
@@ -30,6 +31,8 @@ type VideoStream struct {
 type AudioStream struct {
 	Index         int    `json:"index"`
 	Codec         string `json:"codec"`
+	Profile       string `json:"profile,omitempty"`
+	BitRate       int64  `json:"bit_rate"`
 	SampleRateHz  int    `json:"sample_rate_hz"`
 	Channels      int    `json:"channels"`
 	ChannelLayout string `json:"channel_layout,omitempty"`
@@ -38,18 +41,19 @@ type AudioStream struct {
 // MediaInspection is an append-only technical record bound to the immutable bytes
 // of an OriginalAsset by both ID and checksum.
 type MediaInspection struct {
-	ID               string        `json:"id"`
-	OriginalAssetID  string        `json:"original_asset_id"`
-	OriginalChecksum string        `json:"original_checksum"`
-	Containers       []string      `json:"containers"`
-	DurationMillis   int64         `json:"duration_millis"`
-	SizeBytes        int64         `json:"size_bytes"`
-	BitRate          int64         `json:"bit_rate"`
-	VideoStreams     []VideoStream `json:"video_streams"`
-	AudioStreams     []AudioStream `json:"audio_streams"`
-	ProcessorVersion string        `json:"processor_version"`
-	ObservedBy       string        `json:"observed_by"`
-	InspectedAt      time.Time     `json:"inspected_at"`
+	ID                 string        `json:"id"`
+	OriginalAssetID    string        `json:"original_asset_id"`
+	OriginalChecksum   string        `json:"original_checksum"`
+	Containers         []string      `json:"containers"`
+	DurationMillis     int64         `json:"duration_millis"`
+	SizeBytes          int64         `json:"size_bytes"`
+	BitRate            int64         `json:"bit_rate"`
+	ContainerCreatedAt time.Time     `json:"container_created_at,omitempty"`
+	VideoStreams       []VideoStream `json:"video_streams"`
+	AudioStreams       []AudioStream `json:"audio_streams"`
+	ProcessorVersion   string        `json:"processor_version"`
+	ObservedBy         string        `json:"observed_by"`
+	InspectedAt        time.Time     `json:"inspected_at"`
 }
 
 func NewMediaInspection(source MediaInspection) (MediaInspection, error) {
@@ -59,6 +63,9 @@ func NewMediaInspection(source MediaInspection) (MediaInspection, error) {
 	inspection.OriginalChecksum = strings.ToLower(strings.TrimSpace(source.OriginalChecksum))
 	inspection.ProcessorVersion = strings.TrimSpace(source.ProcessorVersion)
 	inspection.ObservedBy = strings.TrimSpace(source.ObservedBy)
+	if !inspection.ContainerCreatedAt.IsZero() {
+		inspection.ContainerCreatedAt = inspection.ContainerCreatedAt.UTC()
+	}
 	inspection.Containers = normalizeContainers(source.Containers)
 	inspection.VideoStreams = append([]VideoStream(nil), source.VideoStreams...)
 	inspection.AudioStreams = append([]AudioStream(nil), source.AudioStreams...)
@@ -67,6 +74,7 @@ func NewMediaInspection(source MediaInspection) (MediaInspection, error) {
 	for index := range inspection.VideoStreams {
 		stream := &inspection.VideoStreams[index]
 		stream.Codec = strings.ToLower(strings.TrimSpace(stream.Codec))
+		stream.Profile = strings.TrimSpace(stream.Profile)
 		stream.PixelFormat = strings.ToLower(strings.TrimSpace(stream.PixelFormat))
 		stream.FrameRate = normalizeRational(stream.FrameRate)
 		if stream.Index < 0 || indexes[stream.Index] || stream.Codec == "" || stream.Width <= 0 || stream.Height <= 0 || stream.BitRate < 0 ||
@@ -78,8 +86,9 @@ func NewMediaInspection(source MediaInspection) (MediaInspection, error) {
 	for index := range inspection.AudioStreams {
 		stream := &inspection.AudioStreams[index]
 		stream.Codec = strings.ToLower(strings.TrimSpace(stream.Codec))
+		stream.Profile = strings.TrimSpace(stream.Profile)
 		stream.ChannelLayout = strings.ToLower(strings.TrimSpace(stream.ChannelLayout))
-		if stream.Index < 0 || indexes[stream.Index] || stream.Codec == "" || stream.SampleRateHz <= 0 || stream.Channels <= 0 {
+		if stream.Index < 0 || indexes[stream.Index] || stream.Codec == "" || stream.BitRate < 0 || stream.SampleRateHz <= 0 || stream.Channels <= 0 {
 			return MediaInspection{}, ErrInvalidInspection
 		}
 		indexes[stream.Index] = true

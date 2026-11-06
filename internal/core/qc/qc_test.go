@@ -55,6 +55,20 @@ func TestIntegratedQCOnlyPassesCompleteMatchingRenditionEvidence(t *testing.T) {
 		t.Fatalf("matching rendition did not pass QC: report=%+v err=%v", report, err)
 	}
 
+	silentSource := source
+	silentSource.AudioStreams = nil
+	silentOutput := output
+	silentOutput.AudioCodec = ""
+	silentReport, err := Evaluate("QC-SILENT", rendition, profile, silentSource, silentOutput, Policy{DurationToleranceMillis: 100}, "WORKER-1", now.Add(90*time.Second))
+	if err != nil || silentReport.Outcome != Passed {
+		t.Fatalf("matching silent rendition did not pass QC: report=%+v err=%v", silentReport, err)
+	}
+	for _, check := range silentReport.Checks {
+		if check.Kind == CheckAudioCodec && (!check.Passed || check.Expected != "absent" || check.Actual != "absent") {
+			t.Fatalf("silent audio evidence is incomplete: %+v", check)
+		}
+	}
+
 	output.DurationMillis = 60_500
 	failed, err := Evaluate("QC-2", rendition, profile, source, output, Policy{DurationToleranceMillis: 100}, "WORKER-1", now.Add(2*time.Minute))
 	if err != nil || failed.Outcome != Failed {
@@ -109,12 +123,12 @@ func TestSourceTimelineQCUsesClipSumInsteadOfAnySingleOriginalDuration(t *testin
 		Checksum: checksum, SizeBytes: int64(len(payload)), Containers: []string{"mp4"}, DurationMillis: 30_040,
 		VideoCodec: "h264", AudioCodec: "aac", Width: 1920, Height: 1080, Decodable: true,
 	}
-	passed, err := EvaluateTimeline("QC-TIMELINE-1", rendition, profile, timeline, output, Policy{DurationToleranceMillis: 100}, "WORKER-1", now)
+	passed, err := EvaluateTimeline("QC-TIMELINE-1", rendition, profile, timeline, true, output, Policy{DurationToleranceMillis: 100}, "WORKER-1", now)
 	if err != nil || passed.Outcome != Passed || passed.SourceTimelineID != timeline.ID {
 		t.Fatalf("timeline sum did not pass QC: report=%+v err=%v", passed, err)
 	}
 	output.DurationMillis = 10_000
-	failed, err := EvaluateTimeline("QC-TIMELINE-2", rendition, profile, timeline, output, Policy{DurationToleranceMillis: 100}, "WORKER-1", now)
+	failed, err := EvaluateTimeline("QC-TIMELINE-2", rendition, profile, timeline, true, output, Policy{DurationToleranceMillis: 100}, "WORKER-1", now)
 	if err != nil || failed.Outcome != Failed {
 		t.Fatalf("single-clip duration passed timeline QC: report=%+v err=%v", failed, err)
 	}

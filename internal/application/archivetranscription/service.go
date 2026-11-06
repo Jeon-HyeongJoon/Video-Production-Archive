@@ -53,6 +53,7 @@ type StoredRecording struct {
 	VideoChecksum            string
 	SelectedProfileReference string
 	SourceInputs             []execution.InputReference
+	TranscriptionEligible    bool
 }
 
 type StageOneProjection interface {
@@ -158,7 +159,7 @@ func (service *Service) createJob(request StartRequest, archiveRun archiverun.St
 	input := execution.InputReference{
 		OriginalAssetID: recording.OriginalAssetID, ArtifactID: videoArtifactID,
 		StorageID: archiveRun.ArchiveStorageID, RelativePath: recording.VideoRelativePath,
-		Checksum: recording.VideoChecksum, Kind: execution.OutputRendition, HasAudio: true,
+		Checksum: recording.VideoChecksum, Kind: execution.OutputRendition, HasAudio: recording.TranscriptionEligible,
 	}
 	audioID := stableID("AUDIO", recording.OrganizationDecisionID, videoArtifactID)
 	spec, err := execution.NewStepExecutionSpec(execution.StepExecutionSpec{
@@ -177,7 +178,7 @@ func (service *Service) createJob(request StartRequest, archiveRun archiverun.St
 			MediaFolder:      recording.FolderID, InputRevision: archiveRun.FolderDiscoveryRevision,
 			ArchivePackageID: recording.ArchivePackageID, ArchivePackageRevision: recording.ArchivePackageRevision,
 			Disposition: recording.Disposition, SelectedProfileReference: recording.SelectedProfileReference,
-			TranscriptionEligible: true, SourceInputs: append([]execution.InputReference(nil), recording.SourceInputs...),
+			TranscriptionEligible: recording.TranscriptionEligible, SourceInputs: append([]execution.InputReference(nil), recording.SourceInputs...),
 		},
 	})
 	if err != nil {
@@ -224,7 +225,7 @@ func validateStoredRecording(archiveRun archiverun.State, recording StoredRecord
 	recording.SelectedProfileReference = strings.TrimSpace(recording.SelectedProfileReference)
 	if recording.FolderID == "" || recording.WorkspaceDriveID == "" || recording.OriginalAssetID == "" || recording.OrganizationDecisionID == "" ||
 		recording.ArchivePackageID == "" || recording.ArchivePackageRevision == 0 || recording.VideoRelativePath == "" ||
-		recording.VideoChecksum == "" || recording.SelectedProfileReference == "" || len(recording.SourceInputs) == 0 ||
+		recording.VideoChecksum == "" || recording.SelectedProfileReference == "" || len(recording.SourceInputs) == 0 || !recording.TranscriptionEligible ||
 		(recording.Disposition != vocabulary.OrganizationAsIs && recording.Disposition != vocabulary.OrganizationRenderRecordings) {
 		return ErrInvalidStoredResult
 	}

@@ -3,6 +3,8 @@ package workerexecutor
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,13 +18,16 @@ import (
 	"videoarchive/internal/adapter/archivecatalog"
 	"videoarchive/internal/adapter/ffmpeg"
 	"videoarchive/internal/adapter/ffprobe"
+	"videoarchive/internal/adapter/mediafolder"
 	"videoarchive/internal/adapter/subtitlefile"
 	"videoarchive/internal/adapter/transcripttext"
 	"videoarchive/internal/adapter/whispercpp"
 	"videoarchive/internal/adapter/workerconfig"
 	"videoarchive/internal/core/archive"
+	"videoarchive/internal/core/asset"
 	"videoarchive/internal/core/audio"
 	"videoarchive/internal/core/execution"
+	"videoarchive/internal/core/intake"
 	"videoarchive/internal/core/mediaanalysis"
 	"videoarchive/internal/core/organization"
 	"videoarchive/internal/core/qc"
@@ -37,6 +42,23 @@ var ErrProductionExecution = errors.New("production Worker operation failed")
 type operationHandler struct {
 	operation execution.Operation
 	execute   func(context.Context, execution.StepExecutionSpec, *workerconfig.StorageRoots) ([]execution.StepOutput, []string, error)
+}
+
+type inspectionOperationHandler struct {
+	operations *mediaOperations
+}
+
+func (handler *inspectionOperationHandler) Operation() execution.Operation {
+	return execution.OperationInspectMedia
+}
+
+func (handler *inspectionOperationHandler) Execute(ctx context.Context, spec execution.StepExecutionSpec, roots *workerconfig.StorageRoots) ([]execution.StepOutput, []string, error) {
+	outputs, references, _, err := handler.ExecuteDetailed(ctx, spec, roots)
+	return outputs, references, err
+}
+
+func (handler *inspectionOperationHandler) ExecuteDetailed(ctx context.Context, spec execution.StepExecutionSpec, roots *workerconfig.StorageRoots) ([]execution.StepOutput, []string, []execution.InspectedMedia, error) {
+	return handler.operations.inspectMedia(ctx, spec, roots)
 }
 
 func (handler *operationHandler) Operation() execution.Operation { return handler.operation }
@@ -60,6 +82,7 @@ func NewProduction(configuration workerconfig.Configuration, roots *workerconfig
 	}
 	media := &mediaOperations{configuration: configuration, inspector: inspector, now: func() time.Time { return time.Now().UTC() }}
 	handlers := []Handler{
+		&inspectionOperationHandler{operations: media},
 		media.handler(execution.OperationRenderRecording, media.renderRecording),
 		media.handler(execution.OperationRenderSourceSequence, media.renderSourceSequence),
 		media.handler(execution.OperationQCRendition, media.qcRendition),
@@ -74,6 +97,117 @@ func NewProduction(configuration workerconfig.Configuration, roots *workerconfig
 		handlers = append(handlers, media.handler(execution.OperationTranscribeAudio, media.transcribeAudio))
 	}
 	return New(roots, handlers...)
+}
+
+func (operations *mediaOperations) inspectMedia(ctx context.Context, spec execution.StepExecutionSpec, roots *workerconfig.StorageRoots) ([]execution.StepOutput, []string, []execution.InspectedMedia, error) {
+	if spec.Operation != execution.OperationInspectMedia || len(spec.Outputs) != 1 || len(spec.Inputs) != 0 {
+		return nil, nil, nil, ErrProductionExecution
+	}
+	sourceRoot, found := roots.Root(spec.Parameters.SourceStorageID)
+	if !found {
+		return nil, nil, nil, ErrProductionExecution
+	}
+	scanner, err := mediafolder.NewScanner(sourceRoot)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	folders, err := scanner.Discover()
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	requested := make(map[string]bool, len(spec.Parameters.FolderIDs))
+	for _, folderID := range spec.Parameters.FolderIDs {
+		requested[folderID] = true
+	}
+	foundFolders := make(map[string]bool, len(requested))
+	inspected := make([]execution.InspectedMedia, 0)
+	for _, folder := range folders {
+		if !requested[folder.RelativePath] {
+			continue
+		}
+		foundFolders[folder.RelativePath] = true
+		for _, relativePath := range folder.VideoPaths {
+			size, checksum, fileErr := sourceRoot.FileSHA256(relativePath)
+			if fileErr != nil || size <= 0 {
+				return nil, nil, nil, errors.Join(ErrProductionExecution, fileErr)
+			}
+			identity := []string{spec.Parameters.ArchiveIntakeSessionID, strconv.FormatUint(spec.Parameters.InputRevision, 10), relativePath}
+			observationID := stableInspectionID("OBSERVATION", identity...)
+			assetID := stableInspectionID("ASSET", identity...)
+			inspectionID := stableInspectionID("INSPECTION", append([]string{spec.Parameters.ArchiveRunID}, identity...)...)
+			observation, fileErr := intake.NewInputFileObservation(intake.InputFileObservation{
+				ID: observationID, StorageID: spec.Parameters.SourceStorageID, WorkspaceDriveID: spec.Parameters.WorkspaceDriveID,
+				RelativePath: relativePath, OriginalName: path.Base(relativePath), SizeBytes: size, Checksum: checksum,
+				ObservedBy: operations.configuration.ID, ObservedAt: spec.Parameters.RequestedAt.UTC(),
+			})
+			if fileErr != nil {
+				return nil, nil, nil, fileErr
+			}
+			original, fileErr := asset.RegisterOriginalAsset(assetID, observation, spec.Parameters.RequestedBy, spec.Parameters.RequestedAt.UTC())
+			if fileErr != nil {
+				return nil, nil, nil, fileErr
+			}
+			resolved, fileErr := roots.ExternalProcessPath(spec.Parameters.SourceStorageID, relativePath)
+			if fileErr != nil {
+				return nil, nil, nil, fileErr
+			}
+			inspection, fileErr := operations.inspector.Inspect(ctx, ffprobe.Request{
+				InspectionID: inspectionID, OriginalAssetID: original.ID, OriginalChecksum: original.Checksum, ResolvedInputPath: resolved,
+			})
+			if fileErr != nil {
+				return nil, nil, nil, fileErr
+			}
+			inspection.InspectedAt = spec.Parameters.RequestedAt.UTC()
+			inspection, fileErr = mediaanalysis.NewMediaInspection(inspection)
+			if fileErr != nil {
+				return nil, nil, nil, fileErr
+			}
+			inspected = append(inspected, execution.InspectedMedia{
+				Folder: folder.RelativePath, Observation: observation, Original: original, Inspection: inspection,
+			})
+		}
+	}
+	if len(foundFolders) != len(requested) || len(inspected) == 0 {
+		return nil, nil, nil, ErrProductionExecution
+	}
+	sort.Slice(inspected, func(i, j int) bool {
+		return inspected[i].Observation.RelativePath < inspected[j].Observation.RelativePath
+	})
+	payload, err := json.Marshal(inspected)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	target := spec.Outputs[0]
+	outputRoot := roots.MustRoot(target.StorageID)
+	if err := outputRoot.MkdirAll(path.Dir(target.RelativePath), 0o755); err != nil {
+		return nil, nil, nil, err
+	}
+	temporary := target.RelativePath + ".partial"
+	if err := outputRoot.WriteFile(temporary, payload, 0o600); err != nil {
+		return nil, nil, nil, err
+	}
+	if existing, existsErr := outputRoot.Exists(target.RelativePath); existsErr != nil {
+		return nil, nil, nil, existsErr
+	} else if existing {
+		if removeErr := outputRoot.Remove(target.RelativePath); removeErr != nil {
+			return nil, nil, nil, removeErr
+		}
+	}
+	if err := outputRoot.Rename(temporary, target.RelativePath); err != nil {
+		return nil, nil, nil, err
+	}
+	_, checksum, err := outputRoot.FileSHA256(target.RelativePath)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return []execution.StepOutput{{
+		ID: target.ID, Kind: target.Kind, StorageID: target.StorageID, RelativePath: target.RelativePath, Checksum: checksum,
+	}}, []string{"worker://media-inspection/" + checksum}, inspected, nil
+}
+
+func stableInspectionID(prefix string, values ...string) string {
+	digest := sha256.Sum256([]byte(strings.Join(values, "\x00")))
+	return prefix + "-" + hex.EncodeToString(digest[:12])
 }
 
 type mediaOperations struct {
@@ -289,7 +423,11 @@ func (operations *mediaOperations) qcRendition(ctx context.Context, spec executi
 		}
 		var assessment qc.QCAssessment
 		if spec.Parameters.SourceTimeline != nil {
-			assessment, err = qc.EvaluateTimeline(target.ID, rendition, profile, *spec.Parameters.SourceTimeline, observed, qc.Policy{DurationToleranceMillis: 1_500}, operations.configuration.ID, operations.now())
+			expectedAudio, audioErr := timelineExpectedAudio(*spec.Parameters.SourceTimeline, spec.Parameters.SourceInputs)
+			if audioErr != nil {
+				return nil, nil, audioErr
+			}
+			assessment, err = qc.EvaluateTimeline(target.ID, rendition, profile, *spec.Parameters.SourceTimeline, expectedAudio, observed, qc.Policy{DurationToleranceMillis: 1_500}, operations.configuration.ID, operations.now())
 		} else {
 			source, sourceErr := operations.sourceInspection(input.OriginalAssetID, spec.Parameters.SourceInputs, roots)
 			if sourceErr != nil {
@@ -312,6 +450,23 @@ func (operations *mediaOperations) qcRendition(ctx context.Context, spec executi
 		outputs = append(outputs, stepOutput(target, checksum))
 	}
 	return outputs, verificationReferences(spec.Operation, outputs), nil
+}
+
+func timelineExpectedAudio(timeline organization.SourceTimeline, sources []execution.InputReference) (bool, error) {
+	byOriginal := make(map[string]execution.InputReference, len(sources))
+	for _, source := range sources {
+		byOriginal[source.OriginalAssetID] = source
+	}
+	for _, clip := range timeline.Clips {
+		source, ok := byOriginal[clip.OriginalAssetID]
+		if !ok {
+			return false, ErrProductionExecution
+		}
+		if !source.HasAudio {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 func (operations *mediaOperations) sourceInspection(originalAssetID string, sources []execution.InputReference, roots *workerconfig.StorageRoots) (mediaanalysis.MediaInspection, error) {
@@ -692,10 +847,19 @@ func (operations *mediaOperations) writeArchiveCatalog(_ context.Context, spec e
 			profileReference = spec.Parameters.SelectedProfileReference
 		}
 		rows = append(rows, organization.ArchiveCatalogRow{
+			SourceCreatedAt: source.SourceCreatedAt, SourceName: source.OriginalName,
+			ArchiveDate: stored.metadata.ArchiveDate, OutputVideoName: stored.metadata.VideoFileName,
 			WorkspaceDriveID: spec.Parameters.WorkspaceDriveID, MediaFolder: spec.Parameters.MediaFolder,
-			OriginalAssetID: source.OriginalAssetID, SourceName: source.OriginalName, SourceRelativePath: source.RelativePath,
-			SourceChecksum: source.Checksum, SourceDurationMillis: source.DurationMillis, SourceVideoCodec: source.VideoCodec,
-			SourceWidth: source.Width, SourceHeight: source.Height, SourceVideoBitRateBPS: source.VideoBitRateBPS,
+			OriginalAssetID: source.OriginalAssetID, SourceRelativePath: source.RelativePath,
+			SourceChecksum: source.Checksum, SourceDurationMillis: source.DurationMillis,
+			SourceSizeBytes: source.SourceSizeBytes, SourceContainer: source.SourceContainer,
+			SourceBitRateBPS: source.SourceBitRateBPS, SourceVideoCodec: source.VideoCodec,
+			SourceVideoProfile: source.VideoProfile, SourceWidth: source.Width, SourceHeight: source.Height,
+			SourceFrameRateNumerator: source.FrameRateNumerator, SourceFrameRateDenominator: source.FrameRateDenominator,
+			SourceVideoPixelFormat: source.VideoPixelFormat, SourceVideoBitRateBPS: source.VideoBitRateBPS,
+			SourceAudioCodec: source.AudioCodec, SourceAudioProfile: source.AudioProfile,
+			SourceAudioBitRateBPS: source.AudioBitRateBPS, SourceAudioSampleRateHz: source.AudioSampleRateHz,
+			SourceAudioChannels: source.AudioChannels, SourceAudioChannelLayout: source.AudioChannelLayout,
 			Disposition: spec.Parameters.Disposition, DecisionID: spec.Parameters.OrganizationDecisionID,
 			ArchivePackageID: stored.metadata.PackageID, OutputMediaID: stored.metadata.PackageID,
 			OutputVideoPath: stored.metadata.VideoPath, OutputProfile: profileReference,

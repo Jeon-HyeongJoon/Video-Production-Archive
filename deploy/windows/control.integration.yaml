@@ -4,7 +4,7 @@ database:
 server:
   listen_address: 127.0.0.1:18080
   allowed_cidrs: [127.0.0.0/8]
-  allowed_origins: [http://127.0.0.1:18080]
+  allowed_origins: [http://127.0.0.1:18080, http://100.121.90.20:19080]
   trusted_proxies: []
 security:
   auth_mode: disabled
@@ -20,8 +20,8 @@ workers:
     - id: worker-windows
       enabled: true
       credential_ref: dpapi://C:/Archive/secrets/worker-windows.dpapi
-      processing_kinds: [INSPECT, RENDER, THUMBNAIL, AUDIO_EXTRACT, STT, QC, CHECKSUM, DEVICE]
-      allowed_storage_ids: [scratch-windows]
+      processing_kinds: [INSPECT, RENDER, THUMBNAIL, AUDIO_EXTRACT, STT, QC, CHECKSUM, DEVICE, ORGANIZE]
+      allowed_storage_ids: [scratch-windows, archive-local-windows]
 archivist_hosts:
   heartbeat_ttl: 30s
   turn_lease_ttl: 5m
@@ -39,3 +39,9 @@ storage:
     partition_id: desktop-fhi317j-system-partition
     volume_id: desktop-fhi317j-scratch-volume
     root: C:/Archive/workspace
+  - id: archive-local-windows
+    role: ARCHIVE_PRIMARY
+    physical_device_id: desktop-fhi317j-system-drive
+    partition_id: desktop-fhi317j-system-partition
+    volume_id: desktop-fhi317j-system-volume
+    root: C:/ArchiveStorage

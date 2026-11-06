@@ -98,6 +98,7 @@ func (projection *JobStageOneProjection) StageOne(ctx context.Context, archiveRu
 		if err != nil {
 			return nil, nil, err
 		}
+		progress[len(progress)-1].TranscriptionEligible = recording.TranscriptionEligible
 		recordings = append(recordings, recording)
 	}
 	if len(seen) != len(owned) {
@@ -179,7 +180,8 @@ func storedRecordingFromJob(archiveRun archiverun.State, folder organization.Coo
 		Disposition: folder.Decision.Disposition, ArchivePackageID: packageOutput.ID, ArchivePackageRevision: 1,
 		VideoRelativePath: path.Join(path.Dir(packageTarget.RelativePath), videoFileName),
 		VideoChecksum:     videoChecksum, SelectedProfileReference: parameters.SelectedProfileReference,
-		SourceInputs: append([]execution.InputReference(nil), parameters.SourceInputs...),
+		SourceInputs:          append([]execution.InputReference(nil), parameters.SourceInputs...),
+		TranscriptionEligible: parameters.TranscriptionEligible,
 	}, nil
 }
 

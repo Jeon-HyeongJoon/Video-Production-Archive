@@ -20,6 +20,31 @@ type OverrideRequest struct {
 	DecidedAt              time.Time
 }
 
+// OrganizationWorkOption is one executable first-stage path the current structured media
+// evidence can safely support. It is projected to people and Archivists so an
+// unavailable disposition is not offered and rejected only after submission.
+type OrganizationWorkOption struct {
+	Disposition            vocabulary.OrganizationDisposition
+	TargetVideoBitRateKbps int
+}
+
+func AvailableWorkOptions(decision OrganizationDecision) []OrganizationWorkOption {
+	options := make([]OrganizationWorkOption, 0, 4)
+	if allReadyForOrganization(decision.Inputs) {
+		options = append(options, OrganizationWorkOption{Disposition: vocabulary.OrganizationAsIs})
+	}
+	if renderableInputs(decision.Inputs) {
+		options = append(options,
+			OrganizationWorkOption{Disposition: vocabulary.OrganizationRenderRecordings, TargetVideoBitRateKbps: 6_000},
+			OrganizationWorkOption{Disposition: vocabulary.OrganizationRenderRecordings, TargetVideoBitRateKbps: 20_000},
+		)
+	}
+	if explicitlySequenceable(decision.Inputs) {
+		options = append(options, OrganizationWorkOption{Disposition: vocabulary.OrganizationCompileSourceSequence})
+	}
+	return options
+}
+
 type DecisionHistory struct {
 	decisions []OrganizationDecision
 }
@@ -61,7 +86,7 @@ func (history *DecisionHistory) RecordOverride(request OverrideRequest) (Organiz
 
 	switch request.Disposition {
 	case vocabulary.OrganizationRenderRecordings:
-		if !renderableInputs(decision.Inputs) {
+		if !availableWorkOption(latest, request.Disposition, request.TargetVideoBitRateKbps) {
 			return OrganizationDecision{}, ErrInvalidDecision
 		}
 		profile, err := rendering.OrganizationProfile(request.TargetVideoBitRateKbps)
@@ -71,19 +96,14 @@ func (history *DecisionHistory) RecordOverride(request OverrideRequest) (Organiz
 		decision.ProfileReference = profile.Reference()
 		decision.Actions = []Action{ActionRender, ActionOrganize}
 	case vocabulary.OrganizationCompileSourceSequence:
-		if len(decision.Inputs) < 2 || !allShort(decision.Inputs, DefaultPolicy().ShortClipMaxDurationMillis) || !technicallyCompatible(decision.Inputs) {
+		if !availableWorkOption(latest, request.Disposition, request.TargetVideoBitRateKbps) {
 			return OrganizationDecision{}, ErrInvalidDecision
 		}
 		decision.ProfileReference = mustOrganizationProfile(20_000).Reference()
 		decision.Actions = []Action{ActionSequence, ActionOrganize}
 	case vocabulary.OrganizationAsIs:
-		if len(decision.Inputs) == 0 {
+		if !availableWorkOption(latest, request.Disposition, request.TargetVideoBitRateKbps) {
 			return OrganizationDecision{}, ErrInvalidDecision
-		}
-		for _, input := range decision.Inputs {
-			if readyProfile(input.Inspection, DefaultPolicy()) == "" {
-				return OrganizationDecision{}, ErrInvalidDecision
-			}
 		}
 		decision.Actions = []Action{ActionOrganize}
 	case vocabulary.OrganizationHold:
@@ -91,6 +111,47 @@ func (history *DecisionHistory) RecordOverride(request OverrideRequest) (Organiz
 	}
 	history.decisions = append(history.decisions, cloneDecision(decision))
 	return cloneDecision(decision), nil
+}
+
+func availableWorkOption(decision OrganizationDecision, disposition vocabulary.OrganizationDisposition, targetVideoBitRateKbps int) bool {
+	for _, option := range AvailableWorkOptions(decision) {
+		if option.Disposition == disposition && option.TargetVideoBitRateKbps == targetVideoBitRateKbps {
+			return true
+		}
+	}
+	return false
+}
+
+func allReadyForOrganization(inputs []Input) bool {
+	if len(inputs) == 0 {
+		return false
+	}
+	for _, input := range inputs {
+		if readyProfile(input.Inspection, DefaultPolicy()) == "" {
+			return false
+		}
+	}
+	return true
+}
+
+// Explicit selection may join decoded clips with different codecs or frame
+// rates because the sequence renderer re-encodes one normalized rendition.
+// The concat filter still requires matching frame dimensions and audio shape.
+func explicitlySequenceable(inputs []Input) bool {
+	if len(inputs) < 2 || !allShort(inputs, DefaultPolicy().ShortClipMaxDurationMillis) {
+		return false
+	}
+	firstVideo := primaryVideo(inputs[0].Inspection)
+	firstAudio := primaryAudio(inputs[0].Inspection)
+	for _, input := range inputs[1:] {
+		video := primaryVideo(input.Inspection)
+		audio := primaryAudio(input.Inspection)
+		if video == nil || firstVideo == nil || video.Width != firstVideo.Width || video.Height != firstVideo.Height ||
+			!sameAudio(audio, firstAudio) {
+			return false
+		}
+	}
+	return true
 }
 
 func renderableInputs(inputs []Input) bool {

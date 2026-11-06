@@ -11,10 +11,11 @@ import (
 // Requirement: PIP-008
 func TestTranscriptionGateUsesOnlyOwningArchiveRunStageOneAndExcludesHold(t *testing.T) {
 	folders := []FolderProgress{
-		{FolderID: "recording-b", Disposition: vocabulary.OrganizationRenderRecordings, StageOne: workflow.Completed, Stored: true},
+		{FolderID: "recording-b", Disposition: vocabulary.OrganizationRenderRecordings, StageOne: workflow.Completed, Stored: true, TranscriptionEligible: true},
 		{FolderID: "hold", Disposition: vocabulary.OrganizationHold, StageOne: workflow.Waiting},
 		{FolderID: "failed", Disposition: vocabulary.OrganizationAsIs, StageOne: workflow.Failed},
 		{FolderID: "source", Disposition: vocabulary.OrganizationCompileSourceSequence, StageOne: workflow.Completed, Stored: true},
+		{FolderID: "silent", Disposition: vocabulary.OrganizationRenderRecordings, StageOne: workflow.Completed, Stored: true},
 	}
 	gate, err := EvaluateTranscriptionGate(folders)
 	if err != nil {
@@ -35,7 +36,7 @@ func TestTranscriptionGateUsesOnlyOwningArchiveRunStageOneAndExcludesHold(t *tes
 // Requirement: ORG-013
 func TestArchiveRunCompletesWithHoldReportedSeparatelyWhenNoExecutableWorkRemains(t *testing.T) {
 	folders := []FolderProgress{
-		{FolderID: "recording", Disposition: vocabulary.OrganizationAsIs, StageOne: workflow.Completed, Stored: true},
+		{FolderID: "recording", Disposition: vocabulary.OrganizationAsIs, StageOne: workflow.Completed, Stored: true, TranscriptionEligible: true},
 		{FolderID: "hold", Disposition: vocabulary.OrganizationHold, StageOne: workflow.Waiting},
 	}
 	available, err := EvaluateCompletion(folders, false, nil)

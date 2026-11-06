@@ -27,28 +27,44 @@ type OrganizedMediaBundle struct {
 }
 
 type ArchiveCatalogRow struct {
-	WorkspaceDriveID      string
-	MediaFolder           string
-	OriginalAssetID       string
-	SourceName            string
-	SourceRelativePath    string
-	SourceChecksum        string
-	SourceDurationMillis  int64
-	SourceVideoCodec      string
-	SourceWidth           int
-	SourceHeight          int
-	SourceVideoBitRateBPS int64
-	Disposition           vocabulary.OrganizationDisposition
-	DecisionID            string
-	ArchivePackageID      string
-	OutputMediaID         string
-	OutputVideoPath       string
-	OutputProfile         string
-	TranscriptPath        string
-	TranscriptTextPath    string
-	SubtitlePath          string
-	Status                string
-	HoldReason            string
+	SourceCreatedAt            time.Time
+	SourceName                 string
+	ArchiveDate                string
+	OutputVideoName            string
+	WorkspaceDriveID           string
+	MediaFolder                string
+	OriginalAssetID            string
+	SourceRelativePath         string
+	SourceChecksum             string
+	SourceDurationMillis       int64
+	SourceSizeBytes            int64
+	SourceContainer            string
+	SourceBitRateBPS           int64
+	SourceVideoCodec           string
+	SourceVideoProfile         string
+	SourceWidth                int
+	SourceHeight               int
+	SourceFrameRateNumerator   int64
+	SourceFrameRateDenominator int64
+	SourceVideoPixelFormat     string
+	SourceVideoBitRateBPS      int64
+	SourceAudioCodec           string
+	SourceAudioProfile         string
+	SourceAudioBitRateBPS      int64
+	SourceAudioSampleRateHz    int
+	SourceAudioChannels        int
+	SourceAudioChannelLayout   string
+	Disposition                vocabulary.OrganizationDisposition
+	DecisionID                 string
+	ArchivePackageID           string
+	OutputMediaID              string
+	OutputVideoPath            string
+	OutputProfile              string
+	TranscriptPath             string
+	TranscriptTextPath         string
+	SubtitlePath               string
+	Status                     string
+	HoldReason                 string
 }
 
 type ArchiveCatalog struct {

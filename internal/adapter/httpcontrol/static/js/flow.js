@@ -1,8 +1,6 @@
-// Flow graph of one drive: the ArchiveRun's steps in work order as square
-// icon nodes joined by a line that fills as the drive passes each step. A node
-// only says how far the drive's folders got through it — not yet, partly, now,
-// all — and carries a badge for failures and human waits. Details sit in the
-// node's tooltip on hover or focus.
+// Stage matrix of one drive. The first-stage, optional second-stage and catalog
+// records do not form one total order, so nodes are grouped without connector
+// lines. Each node reports only the folders to which that stage applies.
 
 import { el, svgIcon, label, humanWait, activeStates, formatCount, shortTime } from "./core.js";
 
@@ -29,7 +27,7 @@ const INFO = {
   render: ["1080p 렌더 · 개별 렌더 6Mbps(선택 시 20Mbps) · 소스 시퀀스 20Mbps 통합", "개별 렌더 · 소스 시퀀스"],
   qc: ["결과 영상을 원본 기술정보·렌더 Profile과 대조하는 검사", "보류를 뺀 모든 폴더"],
   archive: ["아카이브 저장소에 복사 · checksum 검증 뒤 보관됨", "보류를 뺀 모든 폴더"],
-  gate: ["1단계 실행 작업이 0이면 열림 · 담당자 승인 뒤 2단계 시작", "보관된 그대로 보관 · 개별 렌더"],
+  gate: ["1단계 실행 작업이 0이면 열림 · 담당자가 2단계 시작 선택", "보관된 그대로 보관 · 개별 렌더"],
   audio: ["STT 입력용 16kHz mono 오디오 추출", "STT 대상"],
   transcript: ["음성을 시간 구간 전사문으로 인식", "STT 대상"],
   subtitle: ["전사문 시간 구간으로 SRT 자막 생성 · 전사 텍스트와 동시 진행", "STT 대상"],
@@ -38,7 +36,7 @@ const INFO = {
   catalog: ["아카이브 카탈로그 · 원본 영상마다 1행 · 1단계와 2단계 뒤 갱신", "모든 원본 영상"],
 };
 
-const WORDS = { todo: "아직", part: "일부 지남", now: "지금 진행", done: "모두 지남", closed: "닫힘", ask: "승인 필요" };
+const WORDS = { todo: "아직", part: "일부 지남", now: "지금 진행", done: "모두 지남", closed: "닫힘", ask: "시작 선택", skip: "대상 없음" };
 const GLYPHS = { fault: "M3.2 3.2l3.6 3.6M6.8 3.2 3.2 6.8", decide: "M5 2.6v3M5 7.3v.1" };
 
 // tally counts the drive's folders at one step by stored StepState and
@@ -73,7 +71,8 @@ function tallyLines(counts) {
 function gateState(drive) {
   const state = drive.archive_run_state;
   if (state === "TRANSCRIPTION_READY") return ["ask", `대상 ${formatCount(drive.eligible_transcription_count)} 폴더`];
-  if (state === "STAGE_TWO_RUNNING" || state === "COMPLETED") return ["done", "승인됨"];
+  if (state === "STAGE_TWO_RUNNING" || (state === "COMPLETED" && drive.eligible_transcription_count > 0)) return ["done", "시작됨"];
+  if (state === "COMPLETED") return ["skip", "대상 없음"];
   if (drive.archive_run_id) return ["closed", `1단계 ${formatCount(drive.stage_one_remaining)} 폴더 남음`];
   return ["todo", ""];
 }
@@ -101,8 +100,7 @@ function tallyNode(drive, id) {
   return [node(drive, id, state, tallyLines(counts), badges), state];
 }
 
-export function flowGraph(drive) {
-  let reached = false;
+export function stageMatrix(drive) {
   const steps = STEPS.map((id) => {
     const area = el("span", { class: "flow-area" });
     const name = el("span", { class: "flow-name" });
@@ -136,15 +134,13 @@ export function flowGraph(drive) {
       name.textContent = label("stage", id);
     }
     step.dataset.state = state;
-    step.dataset.in = reached ? "on" : "";
-    reached = state === "done";
-    step.dataset.out = reached ? "on" : "";
     step.append(area, name);
     return step;
   });
-  return el("div", { class: "flow-graph", dataset: { driveId: drive.workspace_drive_id } },
+  return el("div", { class: "stage-matrix", dataset: { driveId: drive.workspace_drive_id } },
     el("div", { class: "flow-stages", "aria-hidden": "true" },
       el("span", { class: "flow-stage", dataset: { stage: "one" } }, "1단계 정리"),
-      el("span", { class: "flow-stage", dataset: { stage: "two" } }, "2단계 전사")),
-    el("ol", { class: "flow-nodes", "aria-label": `${drive.workspace_drive_id} 처리 흐름` }, ...steps));
+      el("span", { class: "flow-stage", dataset: { stage: "two" } }, "2단계 전사"),
+      el("span", { class: "flow-stage", dataset: { stage: "record" } }, "기록")),
+    el("ol", { class: "flow-nodes", "aria-label": `${drive.workspace_drive_id} 단계 상태` }, ...steps));
 }

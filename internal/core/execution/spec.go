@@ -8,6 +8,7 @@ import (
 	"path"
 	"regexp"
 	"strings"
+	"time"
 
 	"videoarchive/internal/core/organization"
 	"videoarchive/internal/core/vocabulary"
@@ -79,21 +80,35 @@ func (kind OutputKind) valid() bool {
 }
 
 type InputReference struct {
-	OriginalAssetID  string     `json:"original_asset_id,omitempty"`
-	OriginalName     string     `json:"original_name,omitempty"`
-	ArtifactID       string     `json:"artifact_id,omitempty"`
-	InspectionID     string     `json:"inspection_id,omitempty"`
-	StorageID        string     `json:"storage_id"`
-	RelativePath     string     `json:"relative_path"`
-	Checksum         string     `json:"checksum"`
-	DurationMillis   int64      `json:"duration_millis,omitempty"`
-	VideoCodec       string     `json:"video_codec,omitempty"`
-	Width            int        `json:"width,omitempty"`
-	Height           int        `json:"height,omitempty"`
-	VideoBitRateBPS  int64      `json:"video_bitrate_bps,omitempty"`
-	HasAudio         bool       `json:"has_audio,omitempty"`
-	ProfileReference string     `json:"profile_reference,omitempty"`
-	Kind             OutputKind `json:"kind,omitempty"`
+	OriginalAssetID      string     `json:"original_asset_id,omitempty"`
+	OriginalName         string     `json:"original_name,omitempty"`
+	ArtifactID           string     `json:"artifact_id,omitempty"`
+	InspectionID         string     `json:"inspection_id,omitempty"`
+	StorageID            string     `json:"storage_id"`
+	RelativePath         string     `json:"relative_path"`
+	Checksum             string     `json:"checksum"`
+	DurationMillis       int64      `json:"duration_millis,omitempty"`
+	SourceCreatedAt      time.Time  `json:"source_created_at,omitempty"`
+	SourceSizeBytes      int64      `json:"source_size_bytes,omitempty"`
+	SourceContainer      string     `json:"source_container,omitempty"`
+	SourceBitRateBPS     int64      `json:"source_bitrate_bps,omitempty"`
+	VideoCodec           string     `json:"video_codec,omitempty"`
+	VideoProfile         string     `json:"video_profile,omitempty"`
+	Width                int        `json:"width,omitempty"`
+	Height               int        `json:"height,omitempty"`
+	FrameRateNumerator   int64      `json:"frame_rate_numerator,omitempty"`
+	FrameRateDenominator int64      `json:"frame_rate_denominator,omitempty"`
+	VideoPixelFormat     string     `json:"video_pixel_format,omitempty"`
+	VideoBitRateBPS      int64      `json:"video_bitrate_bps,omitempty"`
+	HasAudio             bool       `json:"has_audio,omitempty"`
+	AudioCodec           string     `json:"audio_codec,omitempty"`
+	AudioProfile         string     `json:"audio_profile,omitempty"`
+	AudioBitRateBPS      int64      `json:"audio_bitrate_bps,omitempty"`
+	AudioSampleRateHz    int        `json:"audio_sample_rate_hz,omitempty"`
+	AudioChannels        int        `json:"audio_channels,omitempty"`
+	AudioChannelLayout   string     `json:"audio_channel_layout,omitempty"`
+	ProfileReference     string     `json:"profile_reference,omitempty"`
+	Kind                 OutputKind `json:"kind,omitempty"`
 }
 
 type OutputTarget struct {
@@ -106,6 +121,12 @@ type OutputTarget struct {
 
 type StepExecutionParameters struct {
 	ArchiveRunID             string                             `json:"archive_run_id,omitempty"`
+	ArchiveIntakeSessionID   string                             `json:"archive_intake_session_id,omitempty"`
+	StartIdempotencyKey      string                             `json:"start_idempotency_key,omitempty"`
+	SourceStorageID          string                             `json:"source_storage_id,omitempty"`
+	FolderIDs                []string                           `json:"folder_ids,omitempty"`
+	RequestedBy              string                             `json:"requested_by,omitempty"`
+	RequestedAt              time.Time                          `json:"requested_at,omitempty"`
 	OrganizationDecisionID   string                             `json:"organization_decision_id"`
 	WorkspaceDriveID         string                             `json:"workspace_drive_id"`
 	ArchiveStorageID         string                             `json:"archive_storage_id,omitempty"`
@@ -145,6 +166,14 @@ func NewStepExecutionSpec(source StepExecutionSpec) (StepExecutionSpec, error) {
 	spec.TemplateName = strings.TrimSpace(source.TemplateName)
 	spec.ProfileReference = strings.TrimSpace(source.ProfileReference)
 	spec.Parameters.ArchiveRunID = strings.TrimSpace(source.Parameters.ArchiveRunID)
+	spec.Parameters.ArchiveIntakeSessionID = strings.TrimSpace(source.Parameters.ArchiveIntakeSessionID)
+	spec.Parameters.StartIdempotencyKey = strings.TrimSpace(source.Parameters.StartIdempotencyKey)
+	spec.Parameters.SourceStorageID = strings.TrimSpace(source.Parameters.SourceStorageID)
+	spec.Parameters.RequestedBy = strings.TrimSpace(source.Parameters.RequestedBy)
+	spec.Parameters.FolderIDs = append([]string(nil), source.Parameters.FolderIDs...)
+	for index := range spec.Parameters.FolderIDs {
+		spec.Parameters.FolderIDs[index] = normalizeRelative(spec.Parameters.FolderIDs[index])
+	}
 	spec.Parameters.OrganizationDecisionID = strings.TrimSpace(source.Parameters.OrganizationDecisionID)
 	spec.Parameters.WorkspaceDriveID = strings.TrimSpace(source.Parameters.WorkspaceDriveID)
 	spec.Parameters.ArchiveStorageID = strings.TrimSpace(source.Parameters.ArchiveStorageID)
@@ -169,7 +198,16 @@ func NewStepExecutionSpec(source StepExecutionSpec) (StepExecutionSpec, error) {
 			input.StorageID = strings.TrimSpace(input.StorageID)
 			input.RelativePath = normalizeRelative(input.RelativePath)
 			input.Checksum = strings.ToLower(strings.TrimSpace(input.Checksum))
+			if !input.SourceCreatedAt.IsZero() {
+				input.SourceCreatedAt = input.SourceCreatedAt.UTC()
+			}
+			input.SourceContainer = strings.ToLower(strings.TrimSpace(input.SourceContainer))
 			input.VideoCodec = strings.ToLower(strings.TrimSpace(input.VideoCodec))
+			input.VideoProfile = strings.TrimSpace(input.VideoProfile)
+			input.VideoPixelFormat = strings.ToLower(strings.TrimSpace(input.VideoPixelFormat))
+			input.AudioCodec = strings.ToLower(strings.TrimSpace(input.AudioCodec))
+			input.AudioProfile = strings.TrimSpace(input.AudioProfile)
+			input.AudioChannelLayout = strings.ToLower(strings.TrimSpace(input.AudioChannelLayout))
 			input.ProfileReference = strings.TrimSpace(input.ProfileReference)
 		}
 	}
@@ -211,9 +249,13 @@ func (spec StepExecutionSpec) Validate() error {
 }
 
 func (spec StepExecutionSpec) validWithoutDigest() bool {
+	remoteInspection := spec.Operation == OperationInspectMedia && spec.TemplateName == "archive-intake-inspection"
 	if spec.JobID == "" || spec.StepID == "" || spec.TemplateName == "" || !spec.Operation.Valid() ||
-		len(spec.Inputs) == 0 || len(spec.Outputs) == 0 || spec.Parameters.OrganizationDecisionID == "" ||
+		len(spec.Outputs) == 0 ||
 		spec.Parameters.WorkspaceDriveID == "" || spec.Parameters.InputRevision == 0 {
+		return false
+	}
+	if !remoteInspection && (len(spec.Inputs) == 0 || spec.Parameters.OrganizationDecisionID == "") {
 		return false
 	}
 	if spec.Parameters.SourceTimeline != nil && spec.Parameters.SourceTimeline.Validate() != nil {
@@ -230,6 +272,11 @@ func (spec StepExecutionSpec) validWithoutDigest() bool {
 	}
 	for _, input := range spec.Parameters.SourceInputs {
 		if input.OriginalAssetID == "" || input.StorageID == "" || !safeRelative(input.RelativePath) || !sha256Pattern.MatchString(input.Checksum) {
+			return false
+		}
+		if input.SourceSizeBytes < 0 || input.SourceBitRateBPS < 0 || input.VideoBitRateBPS < 0 || input.AudioBitRateBPS < 0 ||
+			input.AudioSampleRateHz < 0 || input.AudioChannels < 0 ||
+			((input.FrameRateNumerator == 0) != (input.FrameRateDenominator == 0)) || input.FrameRateNumerator < 0 || input.FrameRateDenominator < 0 {
 			return false
 		}
 	}
@@ -268,7 +315,27 @@ func (spec StepExecutionSpec) validWithoutDigest() bool {
 			}
 		}
 		return true
-	case OperationInspectMedia, OperationCreateThumbnail, OperationVerifyChecksum, OperationDeviceIO:
+	case OperationInspectMedia:
+		if !remoteInspection {
+			return spec.Parameters.SourceTimeline == nil
+		}
+		if len(spec.Inputs) != 0 || len(spec.Outputs) != 1 || spec.Outputs[0].Kind != OutputMediaInspection ||
+			spec.Parameters.ArchiveRunID == "" || spec.Parameters.ArchiveIntakeSessionID == "" ||
+			spec.Parameters.StartIdempotencyKey == "" ||
+			spec.Parameters.SourceStorageID == "" || spec.Parameters.ArchiveStorageID == "" ||
+			spec.Parameters.RequestedBy == "" || spec.Parameters.RequestedAt.IsZero() || len(spec.Parameters.FolderIDs) == 0 ||
+			spec.Parameters.SourceTimeline != nil {
+			return false
+		}
+		seenFolders := make(map[string]bool, len(spec.Parameters.FolderIDs))
+		for _, folderID := range spec.Parameters.FolderIDs {
+			if !safeRelative(folderID) || seenFolders[folderID] {
+				return false
+			}
+			seenFolders[folderID] = true
+		}
+		return true
+	case OperationCreateThumbnail, OperationVerifyChecksum, OperationDeviceIO:
 		return spec.Parameters.SourceTimeline == nil
 	default:
 		return true

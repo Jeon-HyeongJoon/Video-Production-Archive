@@ -80,18 +80,28 @@ type Dispatcher interface {
 	DispatchAvailable(context.Context) error
 }
 
+type CompletionObserver interface {
+	ObserveCompletion(context.Context, job.State) error
+}
+
 type Service struct {
 	store      Store
 	projection ProjectionWriter
 	dispatcher Dispatcher
+	observers  []CompletionObserver
 	now        func() time.Time
 }
 
-func New(store Store, projection ProjectionWriter, dispatcher Dispatcher, now func() time.Time) (*Service, error) {
+func New(store Store, projection ProjectionWriter, dispatcher Dispatcher, now func() time.Time, observers ...CompletionObserver) (*Service, error) {
 	if store == nil || projection == nil || dispatcher == nil || now == nil {
 		return nil, ErrInvalidAssignment
 	}
-	return &Service{store: store, projection: projection, dispatcher: dispatcher, now: now}, nil
+	for _, observer := range observers {
+		if observer == nil {
+			return nil, ErrInvalidAssignment
+		}
+	}
+	return &Service{store: store, projection: projection, dispatcher: dispatcher, now: now, observers: append([]CompletionObserver(nil), observers...)}, nil
 }
 
 func (service *Service) Claim(ctx context.Context, workerID string) (Assignment, error) {
@@ -129,6 +139,11 @@ func (service *Service) Report(ctx context.Context, result Result) error {
 	}
 	if err := service.project(ctx, state); err != nil {
 		return err
+	}
+	for _, observer := range service.observers {
+		if err := observer.ObserveCompletion(ctx, state); err != nil {
+			return err
+		}
 	}
 	return service.dispatcher.DispatchAvailable(ctx)
 }

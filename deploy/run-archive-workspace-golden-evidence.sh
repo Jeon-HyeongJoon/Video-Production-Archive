@@ -18,7 +18,7 @@ fi
 export ARCHIVE_WORKSPACE_GOLDEN_EVIDENCE_DIR="${image_dir}"
 
 go test -json -count=1 \
-  -run '^(TestArchiveOrganizationWorkspaceMatchesOperatingSystemGolden|TestArchiveWorkspaceStatusWithArchivistPaneMatchesOperatingSystemGolden|TestArchiveWorkspaceKeepsLayoutAcrossViewportWidths|TestDrivePreparationSelectsArchiveAndFolderScopeAndLocksRunningScope|TestArchivistPaneShowsRecallToolsSelectionAndDisablesBusySend|TestArchivistAddSettingsShowsOnlyNameHostDetectedCLIAndControlMode|TestWorkspaceSeparatesStoredAndCommittedArchiveRecords|TestWorkspaceShowsReservationAdjustedWorkerCapacity)$' \
+  -run '^(TestArchiveOrganizationWorkspaceMatchesOperatingSystemGolden|TestArchiveWorkspaceJobManagementWithArchivistPaneMatchesOperatingSystemGolden|TestWorkspaceRoutesJobListsAndCompletedResultsToPersistentJobDetail|TestArchiveWorkspaceKeepsLayoutAcrossViewportWidths|TestDrivePreparationSelectsArchiveAndFolderScopeAndLocksRunningScope|TestArchivistPaneShowsRecallToolsSelectionAndDisablesBusySend|TestArchivistAddSettingsShowsOnlyNameHostDetectedCLIAndControlMode|TestWorkspaceSeparatesStoredAndCommittedArchiveRecords|TestWorkspaceShowsReservationAdjustedWorkerCapacity)$' \
   ./internal/adapter/httpcontrol | tee "${raw_log}"
 
 go run ./cmd/testevidence \
@@ -30,8 +30,8 @@ go run ./cmd/testevidence \
   -repository archive
 
 approved_goldens=(internal/adapter/httpcontrol/testdata/archive_workspace_*_*.golden.png)
-if [ "${#approved_goldens[@]}" -ne 15 ]; then
-  printf 'expected 15 operating-system golden files, found %s\n' "${#approved_goldens[@]}" >&2
+if [ "${#approved_goldens[@]}" -ne 18 ]; then
+  printf 'expected 18 operating-system golden files, found %s\n' "${#approved_goldens[@]}" >&2
   exit 1
 fi
 for approved in "${approved_goldens[@]}"; do

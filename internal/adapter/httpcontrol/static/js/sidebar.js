@@ -1,13 +1,17 @@
-// 사이드바: the 상태·드라이브·Worker menus with their counts, every Worker with
-// the drives and drive-free Jobs it processes as one tree, settings and the
-// light or dark theme. The theme is a convenience of this browser only.
+// 사이드바: two primary menus and a scrollable Job workspace index. A
+// workspace card is a navigation projection of one persisted Job, not a new
+// aggregate; it keeps the Job ID, source drive and assigned Worker together.
 
-import { byId, el, svgIcon, icons, statusIcon, workerIcon, problemCounts, label, stateSignal, formatCount } from "./core.js";
-import { model, sortedProblems, drivePhase, driveName, driveProgress, driveProblemCounts, driveFreeJobs, jobLane, PHASE_ICON } from "./store.js";
+import { byId, el, svgIcon, icons, statusIcon, label, formatCount } from "./core.js";
+import { model, driveName, jobLane } from "./store.js";
 import { menus } from "./router.js";
 
 const THEME_KEY = "archive.theme";
-const MENU_ICON = { status: icons.status, drives: icons.drives, workers: icons.workers };
+const MENU_ICON = { jobs: icons.jobs, connections: icons.workers };
+const LANE_LABEL = {
+  fault: "실패", decide: "확인 필요", work: "실행 중", resource: "자원 대기", queue: "대기열", done: "완료",
+};
+const LANE_RANK = { fault: 5, decide: 4, work: 3, resource: 2, queue: 1, done: 0 };
 
 function storedTheme() {
   try {
@@ -24,30 +28,50 @@ function applyTheme(theme) {
   }
 }
 
-function driveItem(drive, route) {
-  const phase = drivePhase(drive);
-  const counts = driveProblemCounts(drive);
-  const current = route.name === "drive" && route.driveID === drive.workspace_drive_id;
-  const meta = phase === "intake" ? "실행 전" : phase === "done" ? "완료" : `${driveProgress(drive).pct}%`;
-  return el("a", { class: "tree-item", href: `#/drives/${encodeURIComponent(drive.workspace_drive_id)}`, "aria-current": current ? "page" : undefined, dataset: { driveId: drive.workspace_drive_id } },
-    statusIcon(PHASE_ICON[phase]), el("span", { class: "tree-name" }, driveName(drive)),
-    problemCounts(counts.fault, counts.decide), el("span", { class: "tree-meta num" }, meta));
+function workspaceContext(job) {
+  for (const drive of model.drives) {
+    const folder = (drive.folders || []).find((item) => item.job_id === job.job_id || item.transcription_job_id === job.job_id);
+    if (folder) return { drive: driveName(drive), worker: job.worker_id || drive.worker_id || "배정 없음" };
+  }
+  return { drive: "드라이브 없음", worker: job.worker_id || "배정 없음" };
 }
 
-function jobItem(job, route) {
-  const lane = jobLane(job);
-  const current = route.name === "workers" && route.query.get("job") === job.job_id;
-  return el("a", { class: "tree-item", href: `#/workers?job=${encodeURIComponent(job.job_id)}`, "aria-current": current ? "page" : undefined, title: `드라이브 밖 작업 · ${job.job_id}`, dataset: { jobId: job.job_id } },
-    statusIcon(lane === "queue" ? "idle" : lane), el("span", { class: "tree-name" }, job.target_title || job.job_id),
-    el("span", { class: "tree-meta num" }, `${Math.round((job.progress || 0) * 100)}%`));
+function workspaceCard(job, route) {
+  const lane = jobLane(job) || "done";
+  const context = workspaceContext(job);
+  const current = route.name === "job" && route.jobID === job.job_id;
+  const state = lane === "decide" && job.wait_reason ? `${label("wait", job.wait_reason)} 대기` : LANE_LABEL[lane];
+  return el("a", {
+    class: "workspace-card", href: `#/jobs/${encodeURIComponent(job.job_id)}`,
+    "aria-current": current ? "page" : undefined, dataset: { jobId: job.job_id, lane },
+    title: [job.target_title, job.job_id, context.drive, context.worker].filter(Boolean).join(" · "),
+  },
+  el("span", { class: "workspace-card-head" },
+    statusIcon(lane === "queue" ? "idle" : lane),
+    el("b", { class: "workspace-job-id num" }, job.job_id),
+    el("span", { class: "workspace-state", dataset: { signal: ["fault", "decide"].includes(lane) ? lane : undefined } }, state)),
+  el("span", { class: "workspace-card-meta" },
+    el("span", { class: "workspace-drive" }, context.drive),
+    el("span", { "aria-hidden": "true" }, "·"),
+    el("span", { class: "workspace-worker num" }, context.worker)));
+}
+
+function orderedWorkspaces() {
+  return [...model.jobs].sort((left, right) => {
+    const leftLane = jobLane(left) || "done";
+    const rightLane = jobLane(right) || "done";
+    const lane = LANE_RANK[rightLane] - LANE_RANK[leftLane];
+    if (lane) return lane;
+    const recent = new Date(right.last_event_at || 0) - new Date(left.last_event_at || 0);
+    return recent || left.job_id.localeCompare(right.job_id);
+  });
 }
 
 export function mountSidebar() {
   const nav = byId("menu");
   const counts = {
-    status: el("span", { class: "menu-badges", id: "status-counts" }),
-    drives: el("span", { class: "menu-count num", id: "drive-count" }),
-    workers: el("span", { class: "menu-count num", id: "worker-count" }),
+    jobs: el("span", { class: "menu-count num", id: "job-count" }),
+    connections: el("span", { class: "menu-count num", id: "connection-count" }),
   };
   nav.replaceChildren(...menus.map((menu) => el("a", { href: menu.path, class: "menu-link", dataset: { menu: menu.id } },
     svgIcon(MENU_ICON[menu.id]), el("span", { class: "menu-label" }, menu.label), counts[menu.id])));
@@ -75,33 +99,14 @@ export function mountSidebar() {
       if (route.menu === "settings") settings.setAttribute("aria-current", "page");
       else settings.removeAttribute("aria-current");
 
-      const problems = sortedProblems();
-      const faults = problems.filter((item) => item.signal === "fault").length;
-      counts.status.replaceChildren(...[problemCounts(faults, problems.length - faults)].filter(Boolean));
-      counts.drives.textContent = formatCount(model.drives.length);
-      counts.workers.textContent = formatCount(model.workers.length);
-
-      const freeJobs = driveFreeJobs();
-      const known = new Set(model.workers.map((worker) => worker.worker_id));
-      const groups = model.workers.map((worker) => {
-        const focused = route.name === "workers" && route.query.get("worker") === worker.worker_id;
-        const offline = stateSignal(worker.state) === "fault";
-        const drives = model.drives.filter((drive) => drive.worker_id === worker.worker_id)
-          .sort((left, right) => left.workspace_drive_id.localeCompare(right.workspace_drive_id));
-        return el("div", { class: "tree-group", dataset: { workerId: worker.worker_id } },
-          el("a", { class: "tree-worker", href: `#/workers?worker=${encodeURIComponent(worker.worker_id)}`, "aria-current": focused ? "page" : undefined },
-            workerIcon(worker.state), el("span", { class: "tree-name" }, worker.worker_id),
-            el("span", { class: "tree-state", dataset: { signal: offline ? "fault" : undefined } }, label("worker", worker.state))),
-          ...drives.map((drive) => driveItem(drive, route)),
-          ...freeJobs.filter((job) => job.worker_id === worker.worker_id).map((job) => jobItem(job, route)));
-      });
-      const others = freeJobs.filter((job) => !known.has(job.worker_id));
-      if (others.length) {
-        groups.push(el("div", { class: "tree-group", dataset: { workerId: "" } },
-          el("span", { class: "tree-worker tree-other" }, el("span", { class: "tree-name" }, "그 밖의 작업")),
-          ...others.map((job) => jobItem(job, route))));
-      }
-      tree.replaceChildren(el("span", { class: "tree-title" }, "Worker · 드라이브"), ...groups);
+      counts.jobs.textContent = formatCount(model.jobs.length);
+      counts.connections.textContent = formatCount(model.workers.length + model.drives.length + model.sessions.length);
+      const workspaces = orderedWorkspaces();
+      tree.replaceChildren(
+        el("span", { class: "tree-title" }, "워크스페이스"),
+        el("div", { class: "workspace-list" }, ...(workspaces.length
+          ? workspaces.map((job) => workspaceCard(job, route))
+          : [el("p", { class: "workspace-empty" }, "작업 없음")])));
     },
   };
 }

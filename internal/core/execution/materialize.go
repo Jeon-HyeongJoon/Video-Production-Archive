@@ -161,8 +161,8 @@ func MaterializeDependentStepExecutionSpec(request MaterializeRequest) (StepExec
 		operation = OperationWriteArchiveCatalog
 		inputs = inputsFromOutputs(allOutputs, outputOriginals, OutputOrganizedMedia, OutputArchiveRevision)
 		if len(inputs) > 0 {
-			id := stableExecutionID("CATALOG", parameters.WorkspaceDriveID, parameters.OrganizationDecisionID)
-			outputs = []OutputTarget{{ID: id, Kind: OutputArchiveCatalog, StorageID: parameters.ArchiveStorageID, RelativePath: path.Join("catalog", parameters.WorkspaceDriveID+".csv")}}
+			id := stableExecutionID("CATALOG", parameters.ArchiveStorageID, parameters.OrganizationDecisionID)
+			outputs = []OutputTarget{{ID: id, Kind: OutputArchiveCatalog, StorageID: parameters.ArchiveStorageID, RelativePath: "archive-catalog.csv"}}
 		}
 	default:
 		return StepExecutionSpec{}, ErrCannotMaterializeStepExecutionSpec

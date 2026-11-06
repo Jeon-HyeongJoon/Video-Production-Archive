@@ -10,6 +10,7 @@ import (
 
 	"videoarchive/internal/core/command"
 	"videoarchive/internal/core/dispatch"
+	"videoarchive/internal/core/job"
 	"videoarchive/internal/core/vocabulary"
 	"videoarchive/internal/core/workflow"
 )
@@ -148,6 +149,73 @@ func TestSQLiteDispatchAtomicallyCommitsOneReservationStateLeaseAndFencingToken(
 		t.Fatalf("confirmed reservation was not deducted from the same snapshot: %v", err)
 	}
 	assertDispatchAbsent(t, store, loser, "STEP-"+loserSuffix, "RES-"+loserSuffix+"-RETRY", 1)
+}
+
+// Requirement: WFL-004
+func TestExpiredRunningLeaseReturnsStepToQueue(t *testing.T) {
+	ctx := context.Background()
+	store, err := Open(t.TempDir() + "/recovery.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	now := time.Date(2026, 11, 5, 1, 0, 0, 0, time.UTC)
+	jobID := "JOB-RUNNING-RECOVERY"
+	stepID := "inspect"
+	compositeStepID := jobID + "/" + stepID
+	queued := job.State{
+		ID: jobID, Revision: 1, TemplateName: "archive-intake-inspection", TargetTitle: "selected folder",
+		ControlMode: workflow.AssistedMode, CurrentStepID: stepID,
+		Steps: []job.Step{{Workflow: workflow.Step{ID: stepID, State: workflow.Queued, Attempt: 1, MaxAttempts: 3}}},
+	}
+	queuedBytes, err := json.Marshal(queued)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Seed(ctx, command.Snapshot{TargetID: jobID, Revision: 1, State: queuedBytes}); err != nil {
+		t.Fatal(err)
+	}
+
+	lease := workflow.ExecutionLease{
+		OwnerWorkerID: "worker-windows", AcquiredAt: now.Add(-2 * time.Minute), HeartbeatAt: now.Add(-2 * time.Minute),
+		ExpiresAt: now.Add(-time.Minute), FencingToken: 1,
+	}
+	running := queued
+	running.Revision = 2
+	running.Steps[0].Workflow.State = workflow.Running
+	running.Steps[0].Workflow.ExecutionLease = &lease
+	running.Steps[0].Workflow.LastFencingToken = 1
+	running.Steps[0].WorkerID = "worker-windows"
+	runningBytes, err := json.Marshal(running)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commit := dispatchCommit(jobID, compositeStepID, "RES-RUNNING-RECOVERY", 91, 1, now.Add(-2*time.Minute))
+	commit.NextState = &command.Snapshot{TargetID: jobID, Revision: 2, State: runningBytes}
+	commit.Lease = lease
+	if err := store.CommitDispatch("running-recovery:dispatch", commit); err != nil {
+		t.Fatal(err)
+	}
+
+	recovered, err := store.RecoverExpiredReservations(ctx, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(recovered) != 1 || recovered[0].Revision != 3 || recovered[0].Steps[0].Workflow.State != workflow.Queued ||
+		recovered[0].Steps[0].Workflow.ExecutionLease != nil || recovered[0].Steps[0].Workflow.Attempt != 1 || recovered[0].Steps[0].WorkerID != "" {
+		t.Fatalf("expired RUNNING lease was not recovered atomically: %+v", recovered)
+	}
+	var activeReservations, activeLeases int
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM resource_reservations WHERE reservation_id = ? AND released_at IS NULL`, commit.Reservation.ID).Scan(&activeReservations); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM execution_leases WHERE step_id = ?`, compositeStepID).Scan(&activeLeases); err != nil {
+		t.Fatal(err)
+	}
+	if activeReservations != 0 || activeLeases != 0 {
+		t.Fatalf("expired execution rows remain active: reservations=%d leases=%d", activeReservations, activeLeases)
+	}
 }
 
 func dispatchCommit(jobID, stepID, reservationID string, snapshotID, dispatchSequence uint64, now time.Time) command.DispatchCommit {

@@ -258,13 +258,16 @@
         "en": "Job"
       },
       "code_name": "Job",
-      "definition": "템플릿 하나를 특정 대상(원본 등)에 적용해 만든 실행 인스턴스. 작업함과 작업 상세 화면이 다루는 단위다.",
+      "definition": "템플릿 하나를 특정 대상(원본 등)에 적용해 만든 고유 식별자의 영속 실행 인스턴스. 작업 목록과 작업 상세 화면이 다루는 단위다.",
       "rules": [
         "제품 층에서 '작업'은 Job만 뜻한다.",
         "Worker가 설치된 PC는 'Worker PC', 처리 중 임시 파일 경로는 'scratch'라고 부른다. '작업 PC'라고 쓰지 않는다.",
         "'Workflow'나 'Pipeline'으로 Job을 부르지 않는다.",
         "작업 소유자 개념을 두지 않는다. 누가 했는지는 Actor로 기록한다.",
-        "JobState를 별도로 저장하지 않는다. Job의 현재 상태는 소속 StepState에서 계산한 투영이다."
+        "JobState를 별도로 저장하지 않는다. Job의 현재 상태는 소속 StepState에서 계산한 투영이다.",
+        "작업 관리·Worker·드라이브 완료 내역의 Job 참조는 자체 상세를 만들지 않고 같은 job_id의 주소 가능한 작업 상세로 이동한다.",
+        "작업 관리 기본 화면은 실행 중 Job을 최상단에 늘 보이고, 자원 대기·대기열 Job은 별도 작업 큐에, 실패·사람 입력 대기 Job은 확인 필요 목록에, 끝난 Job과 ArchiveCompletionEntry는 완료 목록에 둔다.",
+        "작업 관리의 확인 필요와 완료 목록은 각각 접고 펼칠 수 있으며 완료 Job의 결과 정보를 상태 행으로 축약하지 않는다."
       ],
       "forbidden": {
         "words": [
@@ -281,7 +284,8 @@
       ],
       "sources": [
         "사용자 결정: 제품 층 작업 = Job",
-        "사용자 결정: 작업 소유자는 지금 두지 않음"
+        "사용자 결정: 작업 소유자는 지금 두지 않음",
+        "사용자 결정 2026-11-05: 영속 Job은 고유 식별자의 작업 상세로 이동"
       ],
       "decided": "2026-10-19"
     },
@@ -678,7 +682,7 @@
       "code_name": "DispatchPolicy",
       "definition": "실행 준비가 된 Step 가운데 다음 Worker lease를 시도할 후보와 Worker를 결정적으로 선택하는 정책.",
       "rules": [
-        "Dispatch Queue는 별도 업무 원장이 아니라 저장된 Job·Step에서 다시 만드는 projection이다.",
+        "Dispatch Queue는 별도 업무 원장이 아니라 저장된 Job·Step에서 다시 만드는 projection이며 아카이브 작업 공간의 작업 큐도 이 projection만 표시한다.",
         "IMMEDIATE와 aging 기준을 넘긴 BACKGROUND는 같은 높은 유효 우선순위로 평가한다.",
         "같은 Job의 후보를 연속 선점시키지 않고 저장된 dispatch sequence로 Job 사이의 공정성을 보장한다.",
         "IMMEDIATE는 기존 ExecutionLease를 선점하지 않고 다음 lease 선택에만 영향을 준다.",
@@ -1081,6 +1085,9 @@
       "rules": [
         "Archive Workspace는 조회 전용 화면이 아니라 대화와 직접 명령을 함께 제공하는 Archive의 주 사용자 표면이다.",
         "상태 시각화만 가리키는 별도 제품 표면 이름을 만들지 않는다.",
+        "왼쪽 메뉴는 작업 관리·연결 관리 순서이며 작업 관리가 기본 화면이다.",
+        "왼쪽 워크스페이스는 새 영속 개체가 아니라 Job마다 job_id·드라이브·Worker를 묶어 같은 작업 상세로 이동하는 스크롤 가능한 탐색 카드다.",
+        "전체 작업 표면은 어두운 회색 계층으로 깊이를 나타내고 Agent 머리줄은 시스템 테마를 따르며 Agent 대화 본문은 밝은 테마에서도 터미널처럼 가장 어두운 검정 표면과 밝은 글자를 유지한다.",
         "사람의 직접 명령과 Archivist의 도구 호출은 같은 Command Bus와 Capability Registry를 사용한다.",
         "사람의 웹 직접 명령은 requested_via를 archive_workspace로 기록한다.",
         "채팅 문구는 Archivist에게 주는 지시가 될 수 있지만 Approval 기록을 대신하지 않는다.",
@@ -1113,6 +1120,50 @@
         "docs/design/09-archive-workspace.md"
       ],
       "decided": "2026-11-01"
+    },
+    {
+      "id": "connection-management",
+      "layer": "product",
+      "kind": "surface",
+      "name": {
+        "ko": "연결 관리",
+        "en": "Connection Management"
+      },
+      "code_name": "ConnectionManagement",
+      "definition": "아카이브 작업 공간에서 Worker PC·논리 드라이브·Agent와 Agent Host의 연결·자원·접근 상태를 한 메뉴에 모아 보는 운영 표면.",
+      "rules": [
+        "연결 관리는 Worker PC·드라이브·Agent를 새 개체로 합치지 않고 각 identity와 상세 경계를 유지한다.",
+        "드라이브를 선택하면 같은 workspace_drive_id의 드라이브 상세로 이동한다.",
+        "Provider·Worker·Archivist Host·Storage 등록과 credential 변경은 로컬 설정 권한에 남고 연결 관리 화면은 runtime API로 이를 바꾸지 않는다."
+      ],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "part-of",
+          "target": "archive-workspace"
+        },
+        {
+          "type": "refers-to",
+          "target": "worker"
+        },
+        {
+          "type": "refers-to",
+          "target": "workspace-drive"
+        },
+        {
+          "type": "refers-to",
+          "target": "archivist-host"
+        }
+      ],
+      "sources": [
+        "사용자 결정 2026-11-05: Worker PC·드라이브·Agent를 하나의 연결 관리 메뉴에서 관리",
+        "docs/design/09-archive-workspace.md §7",
+        "requirements DSH-026"
+      ],
+      "decided": "2026-11-05"
     },
     {
       "id": "approval",
@@ -2512,7 +2563,7 @@
       "rules": [
         "드라이브 워크스테이션은 Worker PC나 Archivist Host를 뜻하지 않으며 선택한 원본 드라이브를 기준으로 한다.",
         "아카이브 실행은 단계 줄과 보관된 영상 수 기준 진행 한 줄로 조용히 표시한다. 폴더 행은 한 단어 상태·단계 점·보관됨/확정됨만 두고 단계 이름·진행 수·대기 이유는 폴더 세부를 펼칠 때만 보인다. 날짜 이름 폴더는 연간 달력으로도 볼 수 있다.",
-        "정상 진행 중인 폴더 상태는 드라이브 상세 밖에 드러내지 않는다. 실패와 사람 대기는 상태 화면 카드와 알림 목록에 폴더 하나씩 보이고 드라이브 상세의 확인 필요 칸에서 해결한다.",
+        "정상 진행 중인 폴더 상태는 드라이브 상세 밖에 드러내지 않는다. 실패와 사람 대기는 알림 목록에 폴더 하나씩 보이고 드라이브 상세의 확인 필요 칸에서 해결한다.",
         "폴더와 파일 수가 많아도 정상 진행과 자원 대기는 조용히 두며 절대경로와 credential을 표시하지 않는다."
       ],
       "forbidden": {
@@ -2920,11 +2971,13 @@
         "en": "Media Inspection"
       },
       "code_name": "MediaInspection",
-      "definition": "원본 자산의 확정 checksum에 묶여 컨테이너, 길이, 크기와 video/audio stream 규격을 정규화해 남기는 추가 전용 기술정보 기록.",
+      "definition": "원본 자산의 확정 checksum에 묶여 컨테이너 생성 시각, 길이, 크기와 video/audio stream 규격을 정규화해 남기는 추가 전용 기술정보 기록.",
       "rules": [
         "원본 자산 ID와 checksum을 함께 참조한다.",
         "다른 분석 도구 버전으로 다시 분석하면 기존 기록을 고치지 않고 새 기록을 추가한다.",
-        "파일 경로나 ffprobe 원문을 검색 기준으로 삼지 않는다."
+        "파일 경로나 ffprobe 원문을 검색 기준으로 삼지 않는다.",
+        "컨테이너 생성 시각이 없거나 잘못됐으면 stream tag나 파일시스템 날짜로 대체하지 않는다.",
+        "video/audio codec profile, frame rate, pixel format, bitrate, sample rate, channel 규격은 관찰값만 보존한다."
       ],
       "forbidden": {
         "words": [],
@@ -2939,7 +2992,7 @@
       "sources": [
         "docs/design/03-domain-workflow.md §1",
         "docs/design/04-data-archive.md §4",
-        "requirements MED-001, MED-004"
+        "requirements MED-001, MED-004, MED-007"
       ],
       "decided": "2026-10-26"
     },
@@ -3293,6 +3346,7 @@
       "definition": "원본 자산에서 versioned Audio Extraction Profile로 추출해 게시한 STT 입력용 파생 오디오 파일.",
       "rules": [
         "v1 speech audio는 WAV/PCM 16-bit little-endian, 16kHz, mono 규격이다.",
+        "2단계 STT는 원본 기술정보에 오디오가 있는 보관됨 녹화영상에만 이 아티팩트를 만들며 무음 영상은 제외한다.",
         "원본 자산·Profile·처리기·Worker와 checksum provenance를 가진다.",
         "Transcript가 참조하는 직접 입력 아티팩트다."
       ],
@@ -3330,7 +3384,8 @@
       "rules": [
         "프록시, 아카이브 렌더본, VJ 통합본은 모두 렌더 결과이며 프로파일로 구분한다. 별도 아티팩트 종류로 나누지 않는다.",
         "'프록시'는 proxy 프로파일로 만든 렌더 결과, '아카이브 렌더본'은 archive 프로파일로 만든 렌더 결과를 부르는 말이다.",
-        "검증된 임시 출력만 게시하며 Profile·처리기·Worker와 checksum을 provenance에 남긴다."
+        "검증된 임시 출력만 게시하며 Profile·처리기·Worker와 checksum을 provenance에 남긴다.",
+        "원본에 오디오가 있으면 AAC를 보존하고 원본에 오디오가 없으면 오디오 스트림을 만들지 않으며 QC도 그 부재를 검증한다."
       ],
       "forbidden": {
         "words": [],
@@ -3575,6 +3630,51 @@
         "사용자 결정 2026-11-04: 날짜와 원본 폴더·영상 이름으로 결과를 사람이 분류"
       ],
       "decided": "2026-10-31"
+    },
+    {
+      "id": "archive-completion-entry",
+      "layer": "product",
+      "kind": "record",
+      "name": {
+        "ko": "완료 내역 항목",
+        "en": "Archive Completion Entry"
+      },
+      "code_name": "CompletedWorkView",
+      "definition": "완료된 1단계 Folder Job이 검증해 게시한 ArchivePackage 출력 하나를 원본 드라이브의 완료 내역에 투영한 불변 결과 항목.",
+      "rules": [
+        "ArchiveRun이 바뀌어도 유지하며 출력 기록 시각 역순으로 표시한다.",
+        "ArchiveRun 상태가 완료라는 사실만으로 만들지 않고 완료된 organize Step의 ORGANIZED_MEDIA 출력이 있을 때만 만든다.",
+        "결과 영상명·처리 방식·원본 수·완료 시각·아카이브 Storage·ArchivePackageState를 주 정보로 사용하고 ArchiveRun·Job·Package ID는 추적용 보조 정보로 둔다.",
+        "드라이브와 작업 관리의 완료 내역 항목은 저장된 Job ID의 같은 작업 상세로 이동한다.",
+        "Storage 절대 root는 포함하지 않는다."
+      ],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "archive-package"
+        },
+        {
+          "type": "refers-to",
+          "target": "archive-run"
+        },
+        {
+          "type": "refers-to",
+          "target": "job"
+        },
+        {
+          "type": "refers-to",
+          "target": "workspace-drive"
+        }
+      ],
+      "sources": [
+        "사용자 결정 2026-11-05: 완료된 작업 내용을 실행 뒤 확인",
+        "docs/design/09-archive-workspace.md §7"
+      ],
+      "decided": "2026-11-05"
     },
     {
       "id": "archive-package-state",
@@ -4451,6 +4551,42 @@
       "decided": "2026-10-30"
     },
     {
+      "id": "organization-work-choice",
+      "layer": "product",
+      "kind": "record",
+      "name": {
+        "ko": "작업 선택",
+        "en": "Organization Work Choice"
+      },
+      "code_name": "OrganizationWorkOption",
+      "definition": "현재 MediaFolder의 구조화된 기술 근거로 안전하게 실행할 수 있어 사람 또는 Archivist에게 제시하는 정리 작업과 선택 Profile의 조합.",
+      "rules": [
+        "화면과 MCP에는 서버가 현재 OrganizationDecision 입력으로 검증한 선택지만 제시한다.",
+        "그대로 보관은 ORGANIZE_AS_IS 조건을 모두 만족할 때만 제시한다.",
+        "명시적 소스 시퀀스는 각 입력을 다시 인코딩하므로 frame rate 차이를 허용하되 concat 전에 필요한 화면 크기와 audio 형태는 같아야 한다.",
+        "작업 선택은 기존 OrganizationDecision을 수정하지 않고 새 결정을 추가한다."
+      ],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "organization-decision"
+        },
+        {
+          "type": "refers-to",
+          "target": "organization-disposition"
+        }
+      ],
+      "sources": [
+        "docs/design/09-archive-workspace.md",
+        "docs/design/13-archive-intake.md §4"
+      ],
+      "decided": "2026-11-05"
+    },
+    {
       "id": "organization-hold-reason",
       "layer": "product",
       "kind": "enum",
@@ -4706,12 +4842,16 @@
         "en": "Archive Catalog"
       },
       "code_name": "ArchiveCatalog",
-      "definition": "원본 드라이브의 OriginalAsset 기술정보·추가 전용 판정·ArchivePackage ID·결과 상대경로·상태를 원본 영상 한 개당 한 행으로 아카이브 저장소에 내보낸 CSV 기록.",
+      "definition": "같은 아카이브 저장소를 대상으로 한 모든 작업과 원본 드라이브의 OriginalAsset 기술정보·추가 전용 판정·ArchivePackage ID·결과 상대경로·상태를 원본 영상 한 개당 한 행으로 최상단 단일 CSV에 내보낸 기록.",
       "rules": [
         "보류 입력과 소스 시퀀스 Clip도 누락하지 않는다.",
         "Storage 절대 root와 mount path를 포함하지 않는다.",
         "ArchivePackage files.csv와 다른 범위를 가진다.",
-        "판정이 추가되거나 1·2단계 결과가 보관될 때 현재 행 투영을 다시 게시한다."
+        "같은 ARCHIVE_PRIMARY의 다른 ArchiveRun과 원본 드라이브도 archive-catalog.csv 하나에 누적한다.",
+        "원본 생성 시각과 원본 영상명, 아카이브 처리일과 결과 영상명을 각각 인접한 앞 열에 두고 날짜를 합치거나 대체하지 않는다.",
+        "추적용 ID와 checksum은 사람 중심 열 뒤에 둔다.",
+        "판정이 추가되거나 1·2단계 결과가 보관될 때 기존 행과 병합한 현재 전체 투영을 임시 파일로 검증한 뒤 원자 교체한다.",
+        "작업 공간의 마지막 기록 시각은 성공 완료된 가장 최근 archive_catalog Step의 영속 완료 시각이다."
       ],
       "forbidden": {
         "words": [],
@@ -4738,8 +4878,8 @@
         }
       ],
       "sources": [
-        "사용자 플로우: 메타데이터 포함 영상 정보를 드라이브 기준 CSV로 생성",
-        "사용자 결정 2026-10-31: catalog/<원본 드라이브 ID>.csv",
+        "사용자 플로우: 메타데이터 포함 영상 정보를 사람이 읽는 CSV로 생성",
+        "사용자 결정 2026-11-06: 같은 아카이브 대상 경로 최상단의 단일 archive-catalog.csv",
         "docs/design/13-archive-intake.md"
       ],
       "decided": "2026-10-31"

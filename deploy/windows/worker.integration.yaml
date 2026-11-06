@@ -8,6 +8,8 @@ worker:
   storage_roots:
     - storage_id: scratch-windows
       root: C:/Archive/workspace
+    - storage_id: archive-local-windows
+      root: C:/ArchiveStorage
     - storage_id: models-windows
       root: C:/Archive/models
   tools:
