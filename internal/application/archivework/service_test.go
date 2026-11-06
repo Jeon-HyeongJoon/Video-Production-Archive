@@ -118,13 +118,11 @@ func TestArchiveWorkReadsPersistedSourceVideoFactsForOneJob(t *testing.T) {
 		{
 			OriginalAssetID: "ASSET-1", StorageID: "source-e", RelativePath: "event-a/A001.mp4",
 			Checksum: strings.Repeat("a", 64), SourceCreatedAt: now.Add(-2 * time.Hour), DurationMillis: 60_000,
-			SourceSizeBytes: 45_000_000, SourceContainer: "mp4", SourceBitRateBPS: 6_000_000,
 			VideoCodec: "h264", Width: 1920, Height: 1080, VideoBitRateBPS: 5_700_000,
-			AudioCodec: "aac", AudioBitRateBPS: 192_000, AudioSampleRateHz: 48_000, AudioChannels: 2,
 		},
 	}
-	state.Steps[0].ExecutionSpec = &execution.StepExecutionSpec{Parameters: execution.StepExecutionParameters{SourceInputs: inputs}}
-	state.Steps = append(state.Steps, job.Step{ExecutionSpec: &execution.StepExecutionSpec{Parameters: execution.StepExecutionParameters{SourceInputs: inputs}}})
+	state.Steps[0].ExecutionSpec = &execution.StepExecutionSpec{Parameters: execution.StepExecutionParameters{ArchiveRunID: "ARCHIVE-RUN-MEDIA", SourceInputs: inputs}}
+	state.Steps = append(state.Steps, job.Step{ExecutionSpec: &execution.StepExecutionSpec{Parameters: execution.StepExecutionParameters{ArchiveRunID: "ARCHIVE-RUN-MEDIA", SourceInputs: inputs}}})
 	inspection := linkedJob("JOB-INSPECTION-MEDIA", "archive-intake-inspection", "volume-e", "ARCHIVE-RUN-MEDIA", "", workflow.Completed, now)
 	drives := fixedDrives{views: []archiveintakeworkspace.DriveView{{
 		ArchiveRunID: "ARCHIVE-RUN-MEDIA", Folders: []archiveintakeworkspace.FolderView{{

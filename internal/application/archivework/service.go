@@ -183,12 +183,15 @@ func (service *Service) Media(ctx context.Context, jobID string) ([]VideoInfo, e
 			continue
 		}
 		media := mediaFromJob(state)
-		if len(media) > 0 || state.TemplateName != "archive-intake-inspection" {
+		runID := jobArchiveRunID(state)
+		if runID == "" {
 			return media, nil
 		}
-		runID := jobArchiveRunID(state)
 		drives, projectionErr := service.drives.Projection(ctx)
 		if projectionErr != nil {
+			if len(media) > 0 {
+				return media, nil
+			}
 			return nil, projectionErr
 		}
 		for _, drive := range drives {
@@ -199,7 +202,11 @@ func (service *Service) Media(ctx context.Context, jobID string) ([]VideoInfo, e
 			for _, folder := range drive.Folders {
 				assets = append(assets, folder.ClassificationAssets...)
 			}
-			return mediaFromClassificationAssets(assets), nil
+			observed := mediaFromClassificationAssets(assets)
+			if len(media) == 0 && state.TemplateName == "archive-intake-inspection" {
+				return observed, nil
+			}
+			return enrichVideoInfo(media, observed), nil
 		}
 		return media, nil
 	}
@@ -285,6 +292,40 @@ func mediaFromClassificationAssets(assets []archiveintakeworkspace.Classificatio
 			info.AudioSampleRateHz, info.AudioChannels, info.AudioChannelLayout = audio.SampleRateHz, audio.Channels, audio.ChannelLayout
 		}
 		result = append(result, info)
+	}
+	sortVideoInfo(result)
+	return result
+}
+
+func enrichVideoInfo(media, observed []VideoInfo) []VideoInfo {
+	byIdentity := make(map[string]VideoInfo, len(observed)*2)
+	for _, item := range observed {
+		if item.OriginalAssetID != "" {
+			byIdentity["asset:"+item.OriginalAssetID] = item
+		}
+		if item.RelativePath != "" {
+			byIdentity["path:"+item.RelativePath] = item
+		}
+	}
+	result := append([]VideoInfo(nil), media...)
+	for index, item := range result {
+		match, found := byIdentity["asset:"+item.OriginalAssetID]
+		if !found {
+			match, found = byIdentity["path:"+item.RelativePath]
+		}
+		if !found {
+			continue
+		}
+		if !item.SourceCreatedAt.IsZero() {
+			match.SourceCreatedAt = item.SourceCreatedAt
+		}
+		if item.OriginalName != "" {
+			match.OriginalName = item.OriginalName
+		}
+		if item.ProfileReference != "" {
+			match.ProfileReference = item.ProfileReference
+		}
+		result[index] = match
 	}
 	sortVideoInfo(result)
 	return result
