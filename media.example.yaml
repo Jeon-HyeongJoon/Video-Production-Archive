@@ -1,0 +1,26 @@
+schema_version: 1
+media:
+  id: media-local
+  storage_roots:
+    - storage_id: source-main
+      root: /absolute/path/to/source
+    - storage_id: archive-main
+      root: /absolute/path/to/archive
+  tools:
+    ffmpeg:
+      executable: /absolute/path/to/ffmpeg
+      version: ffmpeg-local
+    ffprobe:
+      executable: /absolute/path/to/ffprobe
+      version: ffprobe-local
+    # whispercpp:
+    #   executable: /absolute/path/to/whisper-cli
+    #   version: whisper.cpp-local
+    #   model_storage_id: archive-main
+    #   model_relative_path: models/ggml-large-v3-turbo.bin
+    #   profile:
+    #     id: event-ko
+    #     version: 1
+    #     model_id: ggml-large-v3-turbo
+    #     language: ko
+    #     thread_count: 8

@@ -31,7 +31,7 @@ func TestWindowsArchiveRunCompletesSourceSequenceAcrossWorkerRestart(t *testing.
 	if os.Getenv("ARCHIVE_WINDOWS_DRIVE_ACCEPTANCE") != "1" {
 		t.Skip("set ARCHIVE_WINDOWS_DRIVE_ACCEPTANCE=1 on the isolated Windows acceptance host")
 	}
-	workerExecutable := requireWindowsAcceptanceExecutable(t, "ARCHIVE_WORKER_PATH")
+	mediaExecutable := requireWindowsAcceptanceExecutable(t, "ARCHIVE_MEDIA_PATH")
 	ffmpegExecutable := requireWindowsAcceptanceExecutable(t, "ARCHIVE_FFMPEG_PATH")
 	ffprobeExecutable := requireWindowsAcceptanceExecutable(t, "ARCHIVE_FFPROBE_PATH")
 	directory := t.TempDir()
@@ -156,7 +156,7 @@ worker:
 		t.Fatal(err)
 	}
 
-	firstWorker := startWindowsAcceptanceProcess(t, workerExecutable, "-config", workerPath)
+	firstWorker := startWindowsAcceptanceProcess(t, mediaExecutable, "runner", "-config", workerPath)
 	defer firstWorker.Stop(t)
 	waitForWindowsAcceptance(t, 15*time.Second, "production Worker ONLINE", func() bool {
 		response := runtimeRequest(runtime.Handler(), http.MethodGet, "/api/v1/workers", "", nil, "", "")
@@ -176,7 +176,7 @@ worker:
 		return detail.stepState("sequence_render") == workflow.Completed && detail.stepState("qc") != workflow.Running
 	})
 	firstWorker.Stop(t)
-	secondWorker := startWindowsAcceptanceProcess(t, workerExecutable, "-config", workerPath)
+	secondWorker := startWindowsAcceptanceProcess(t, mediaExecutable, "runner", "-config", workerPath)
 	defer secondWorker.Stop(t)
 	waitForWindowsAcceptance(t, 120*time.Second, "Archive Organization Job completion after Worker restart", func() bool {
 		detail := readDriveJob(t, runtime.Handler(), jobID)

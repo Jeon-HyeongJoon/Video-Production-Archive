@@ -18,7 +18,7 @@ L1 시스템 컨텍스트
   담당자 / 관리자 / 외부 Archivist / AI Provider / 외장 매체
         ↓
 L2 실행 컨테이너
-  Archive Control / Archive Worker / Archivist Host / SQLite / File Storage / OS Secret Store
+  Archive Control / Archive Media CLI·Runner / Archivist Host / SQLite / File Storage / OS Secret Store
         ↓
 L3 애플리케이션 컴포넌트
   Command Bus / Workflow / Scheduler / Archivist Gateway / Domain Services
@@ -45,11 +45,10 @@ Windows PC
 │   ├── Archivist Gateway
 │   ├── Workflow/Scheduler
 │   └── SQLite 단일 writer
-├── archive-worker.exe
-│   ├── Step lease client
-│   ├── FFmpeg/ffprobe/STT executor
-│   ├── QC executor
-│   └── Device Adapter
+├── archive-media.exe
+│   ├── 독립 MediaOperation CLI
+│   ├── FFmpeg/ffprobe/STT·QC·카탈로그
+│   └── 선택형 runner: Step lease·자원 관측·결과 보고 Adapter
 ├── archivist-host.exe
 │   ├── ArchivistTurn lease/event client
 │   ├── loopback MCP proxy
@@ -61,6 +60,8 @@ Windows PC
 ```
 
 Worker가 다른 PC로 이동해도 Domain 계약과 Control API는 바뀌지 않는다.
+
+단일 파일 처리에서는 `archive-media`만 실행하며 Control·대시보드·DB·Worker 등록을 요구하지 않는다. 여러 PC 큐 관리가 필요할 때만 같은 실행 파일의 `runner` 하위 명령을 상주시킨다. CLI와 runner는 같은 MediaOperation Port를 사용한다. `APP-009~010`
 
 ## 4. 설계별 소유권
 

@@ -100,7 +100,7 @@ Windows Archivist acceptance는 DPAPI secret의 새 프로세스 복호화와 �
 
 ## 7. Windows 서비스 배포
 
-- `archive-control`, `archive-worker`, 필요한 PC의 `archivist-host`를 별도 Windows Service로 등록
+- `archive-control`, 선택형 `archive-media runner`, 필요한 PC의 `archivist-host`를 별도 Windows Service로 등록
 - 자동 시작은 delayed start 사용
 - 서비스 계정에 필요한 storage root와 Secret Store 권한만 부여
 - 화면 잠금과 무관하게 서비스 지속
@@ -154,7 +154,7 @@ mcp_listen_address: 127.0.0.1  # auth disabled인 경우
 
 Tailscale 같은 overlay network를 사용할 때도 전체 CGNAT 대역을 허용하기보다 해당 장치/사용자 ACL과 필요한 주소만 허용한다.
 
-원격 Worker PC에는 `archive-worker`만 설치한다. Worker가 Control로 outbound 연결하므로 inbound 포트를 열지 않으며, Worker ID와 credential reference는 양쪽 로컬 설정에 사전 등록한다. 아카이브 작업 공간의 사용자 인증 비활성 설정은 Worker service 인증을 끄지 않는다.
+단독 작업 PC에는 `archive-media`만 설치하며 CLI 실행은 Control 연결이나 service credential을 요구하지 않는다. 관리형 원격 PC에는 같은 실행 파일의 `runner` 하위 명령을 서비스로 등록한다. runner가 Control로 outbound 연결하므로 inbound 포트를 열지 않으며, Worker ID와 credential reference는 양쪽 로컬 설정에 사전 등록한다. 아카이브 작업 공간의 사용자 인증 비활성 설정은 runner service 인증을 끄지 않는다. `APP-009~010`
 
 로컬 CLI가 필요한 PC에는 Archivist Host를 추가한다. Archivist Host도 Control로 outbound 연결하며 CLI용 MCP proxy는 loopback에서만 연다. 허용 backend·CLI 실행 파일·workspace root와 credential reference를 양쪽 시작 설정에 사전 등록하고, raw credential·임의 path·shell command를 원격 입력으로 받지 않는다. 전체 Orca 앱 설치는 필수가 아니며 Embedded Core backend를 기본으로 한다. Orca CLI backend를 선택한 배포만 별도 Orca 설치를 요구한다. `LRH-001`, `LRH-007`, `MCP-001`
 

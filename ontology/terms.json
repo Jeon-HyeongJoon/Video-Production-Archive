@@ -2150,9 +2150,10 @@
         "en": "Worker"
       },
       "code_name": "Worker",
-      "definition": "Archive Control에 사전 등록되어 실행 리스를 받고 Step을 실행하는 서비스. Worker PC마다 설치되며 Archive Control로 outbound 연결한다. Principal로는 ActorType.WORKER다.",
+      "definition": "Archive Control에 사전 등록되어 실행 리스를 받고 Step을 실행하는 서비스 역할. Worker PC에서 archive-media의 선택형 runner 모드로 실행되며 Archive Control로 outbound 연결한다. Principal로는 ActorType.WORKER다.",
       "rules": [
-        "'Worker Archivist'라고 부르지 않는다."
+        "'Worker Archivist'라고 부르지 않는다.",
+        "Worker 역할만을 위한 별도 archive-worker 실행 파일을 두지 않는다."
       ],
       "forbidden": {
         "words": [
@@ -5044,6 +5045,42 @@
         "requirements WRK-011"
       ],
       "decided": "2026-10-30"
+    },
+    {
+      "id": "media-operation",
+      "layer": "product",
+      "kind": "component",
+      "name": {
+        "ko": "미디어 처리 기능",
+        "en": "Media Operation"
+      },
+      "code_name": "MediaOperation",
+      "definition": "검사·렌더·소스 연결·QC·오디오·전사·자막·아카이브 패키지·카탈로그처럼 등록 StorageRoot의 파일을 입력으로 받아 검증된 파일 결과를 만드는 독립 실행 기능.",
+      "rules": [
+        "단독 CLI와 선택형 관리 Runner는 같은 MediaOperation Port를 호출한다.",
+        "단독 실행에는 Archive Control, 대시보드, Worker 등록, service credential 또는 SQLite가 필요하지 않다.",
+        "서로 다른 출력은 병렬 실행할 수 있고 같은 Storage 출력은 교차 프로세스 잠금으로 직렬화한다.",
+        "원본은 읽기 전용이며 출력은 임시 파일에서 검증한 뒤 게시한다."
+      ],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "processing-kind"
+        },
+        {
+          "type": "refers-to",
+          "target": "storage"
+        }
+      ],
+      "sources": [
+        "사용자 결정 2026-11-06: 영상 처리 기능만 독립 CLI로 모듈화",
+        "requirements APP-009~010"
+      ],
+      "decided": "2026-11-06"
     }
   ],
   "open": [

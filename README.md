@@ -21,11 +21,11 @@
 - 요구사항과 테스트의 자동 1:1 추적 검사
 - 등록 Storage 입고·기술정보 분석·검증된 렌더·통합 QC·메타데이터 검색, timestamp 전사·SRT 자막과 리비전 요약 계약
 - strict YAML boot 설정, 재시작 가능한 SQLite Runtime, CIDR 보호 아카이브 작업 공간과 조회 API를 제공하는 `archive-control`
-- CSRF 보호 Job 생성·취소 Command API와 credential 인증 heartbeat를 보내는 `archive-worker`
+- Control 없이 파일 처리만 실행하는 `archive-media` CLI와, 필요할 때 같은 실행 파일에서 credential 인증 heartbeat·Step claim을 수행하는 선택형 `runner`
 - Worker·원본·아카이브·폴더 범위를 고정하는 ArchiveRun, 1단계 분류·렌더·QC·보관과 별도 2단계 STT·자막·텍스트·패키지 리비전·ArchiveCatalog
 - 세션 제어 모드, 구조화된 드라이브 선택 참조, MCP 업무 도구, ActionCard와 단계 완료 SYSTEM 재호출을 잇는 Archivist 협업 흐름
 
-현재는 SQLite Command Unit of Work, Storage→논리 Volume 작업 공간 해석과 별도 PhysicalDevice I/O 충돌 키, 아카이브 sidecar export/import, 게시 장애 조정, Notification SSE 재연결, 독립 Capability 실행·증적·Archive Workspace 상태 투영과 CI 테스트 증적의 integration 계약까지 구현되어 있다. 등록 Storage 입고 카탈로그와 ffprobe·FFmpeg·whisper.cpp subprocess Adapter도 격리 fixture로 검증하며 FFmpeg speech audio 추출에서 timestamp Transcript 게시·최신 segment 검색, 검증된 SRT 자막, Archivist·사람 작성 리비전 요약 게시와 SQLite 내용 검수 복원까지 연결된다. `archive-control`은 boot 설정으로 같은 SQLite DB와 Storage topology를 열고 내부망 아카이브 작업 공간, 자산·전사·요약·검수·Job·Worker·Archivist Runtime 조회 API와 CSRF 보호 Job·Session·Turn 명령을 제공한다. `archive-worker`는 별도 boot 설정과 Credential Resolver에서 service credential을 읽어 heartbeat, Step claim·결과, 실행 중 취소 stop·정리 결과를 전송한다. `archivist-host`는 허용된 로컬 CLI와 workspace만 실행하고 Control에 outbound heartbeat·Turn claim·event를 보내며 loopback MCP proxy를 제공한다. Control MCP Adapter는 versioned 업무 Capability만 같은 Command Bus에 연결한다. Archivist Host native resume, Windows Device Adapter, VJ 편집 기능과 Provider API Adapter는 아직 남아 있다. 로컬 CLI 경로는 전체 Orca 앱 대신 최소 Embedded Core를 기본으로 하고 Orca CLI는 선택형 backend로 둔다. 실제 Windows Credential Manager·장치·CLI와 운영 ffprobe·FFmpeg·whisper.cpp 실행은 장비 acceptance로 검증한다.
+현재는 SQLite Command Unit of Work, Storage→논리 Volume 작업 공간 해석과 별도 PhysicalDevice I/O 충돌 키, 아카이브 sidecar export/import, 게시 장애 조정, Notification SSE 재연결, 독립 Capability 실행·증적·Archive Workspace 상태 투영과 CI 테스트 증적의 integration 계약까지 구현되어 있다. 등록 Storage 입고 카탈로그와 ffprobe·FFmpeg·whisper.cpp subprocess Adapter도 격리 fixture로 검증하며 FFmpeg speech audio 추출에서 timestamp Transcript 게시·최신 segment 검색, 검증된 SRT 자막, Archivist·사람 작성 리비전 요약 게시와 SQLite 내용 검수 복원까지 연결된다. `archive-control`은 boot 설정으로 같은 SQLite DB와 Storage topology를 열고 내부망 아카이브 작업 공간, 자산·전사·요약·검수·Job·Worker·Archivist Runtime 조회 API와 CSRF 보호 Job·Session·Turn 명령을 제공한다. `archive-media`는 같은 MediaOperation Adapter를 단독 CLI와 선택형 관리 Runner에서 함께 사용한다. 단독 실행은 Control·대시보드·SQLite·서비스 credential을 열지 않으며, `runner` 모드만 heartbeat, Step claim·결과와 실행 중 취소 stop·정리 결과를 전송한다. `archivist-host`는 허용된 로컬 CLI와 workspace만 실행하고 Control에 outbound heartbeat·Turn claim·event를 보내며 loopback MCP proxy를 제공한다. Control MCP Adapter는 versioned 업무 Capability만 같은 Command Bus에 연결한다. Archivist Host native resume, Windows Device Adapter, VJ 편집 기능과 Provider API Adapter는 아직 남아 있다. 로컬 CLI 경로는 전체 Orca 앱 대신 최소 Embedded Core를 기본으로 하고 Orca CLI는 선택형 backend로 둔다. 실제 Windows Credential Manager·장치·CLI와 운영 ffprobe·FFmpeg·whisper.cpp 실행은 장비 acceptance로 검증한다.
 
 영속 Dispatch Queue의 aging·Job 공정성, 전체 자원 snapshot heartbeat와 ResourceReservation·ExecutionLease·fencing token의 SQLite 원자 확정이 구현되어 있다. Control은 heartbeat 직후 ready Step을 평가해 Worker 자원을 예약한다. Worker는 lease를 claim해 실행하고 결과를 정산하며, 실행 중 취소는 lease를 먼저 fence한 뒤 process 종료와 임시 출력 정리를 확인해야 예약을 해제한다.
 
@@ -83,13 +83,26 @@ go run ./cmd/archive-control -config config.yaml
 
 설정된 주소에서 아카이브 작업 공간과 `/api/v1`을 제공한다. 개발 PC에서 확인할 때도 wildcard listen 대신 loopback 주소와 `127.0.0.0/8`을 명시한다.
 
-## Worker 실행
+## 파일 처리 CLI와 선택형 Runner
+
+[`media.example.yaml`](media.example.yaml)을 `media.yaml`로 복사해 Storage root와 로컬 도구 경로를 맞춘다. `archive-media operations`는 지원하는 모듈을 보여준다. `inspect`, `render`, `sequence`, `qc`, `package`, `audio`, `transcribe`, `subtitle`, `transcript-text`, `package-revise`, `catalog` 명령은 typed operation JSON 하나를 직접 실행하며 Control이나 아카이브 작업 공간을 시작하지 않는다.
+
+```bash
+go run ./cmd/archive-media operations
+go run ./cmd/archive-media check -config media.yaml
+go run ./cmd/archive-media render -config media.yaml -spec render.json
+go run ./cmd/archive-media catalog -config media.yaml -spec catalog.json
+```
+
+각 명령은 stdout에 성공 여부, 결과 상대경로와 checksum을 JSON으로 반환한다. 입력 원본은 읽기 전용이며 출력은 임시 파일 검증 뒤 게시된다. 서로 다른 출력은 CLI와 Runner에서 동시에 실행할 수 있고, 같은 Storage 출력은 교차 프로세스 잠금으로 한 번에 하나만 실행한다.
+
+여러 PC 큐·자원·취소·대시보드가 필요할 때만 같은 바이너리를 관리 Runner로 실행한다.
 
 Control과 Worker PC의 OS Secret Store에 같은 service credential을 저장한다. 사용자 profile이 적재된 서비스 계정은 `wincred://` generic credential을 사용할 수 있다. profile 없는 Windows Service나 OpenSSH 배포는 `archive-secret -dpapi-reference dpapi://C:/절대/경로.dpapi`에 credential을 표준 입력으로 전달하고, blob 경로 ACL을 해당 서비스 계정과 `SYSTEM`으로 제한한다. credential 원문은 YAML이나 명령행에 넣지 않는다. 그 다음 예시를 `worker.yaml`로 복사해 Control URL과 접근 가능한 Storage ID를 맞춘다. 다른 PC의 Control에 연결할 때는 HTTPS URL이 필수다.
 
 ```bash
-go run ./cmd/archive-worker -config worker.yaml -check-config
-go run ./cmd/archive-worker -config worker.yaml
+go run ./cmd/archive-media runner -config worker.yaml -check-config
+go run ./cmd/archive-media runner -config worker.yaml
 ```
 
 Worker가 연결되면 아카이브 작업 공간의 “Worker 연결” 상태 영역과 `/api/v1/workers`에서 ONLINE 상태를 확인할 수 있다.

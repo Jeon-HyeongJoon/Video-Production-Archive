@@ -62,8 +62,8 @@ if (-not $healthy) {
     throw 'Control health check timed out'
 }
 
-$worker = Start-Process -FilePath (Join-Path $bin 'archive-worker.exe') `
-	-ArgumentList @('-config', (Join-Path $config 'worker.yaml')) `
+$worker = Start-Process -FilePath (Join-Path $bin 'archive-media.exe') `
+	-ArgumentList @('runner', '-config', (Join-Path $config 'worker.yaml')) `
     -RedirectStandardOutput (Join-Path $logs 'worker.stdout.log') `
     -RedirectStandardError (Join-Path $logs 'worker.stderr.log') `
     -PassThru

@@ -91,7 +91,7 @@ if ([string]::IsNullOrWhiteSpace($SourceDirectory) -or -not (Test-Path -LiteralP
     throw "Stage requires an existing -SourceDirectory."
 }
 
-$binaryNames = @("archive-control.exe", "archive-worker.exe", "archivist-host.exe")
+$binaryNames = @("archive-control.exe", "archive-media.exe", "archivist-host.exe")
 $releaseDirectory = Join-Path $layout.releases $Revision
 $stagingDirectory = "$releaseDirectory.partial"
 if ((Test-Path -LiteralPath $releaseDirectory) -or (Test-Path -LiteralPath $stagingDirectory)) {

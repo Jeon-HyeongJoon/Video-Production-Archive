@@ -9,6 +9,7 @@ import (
 	osexec "os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -184,6 +185,243 @@ func TestProductionExecutorRoutesOneTypedOperationThroughRegisteredStorageRoots(
 	}
 
 	t.Run("actual ffmpeg source sequence", testActualSourceSequence)
+}
+
+// Requirement: APP-010
+func TestDirectCLIAndManagedRunnerSerializeSameOutputPath(t *testing.T) {
+	directory := t.TempDir()
+	sourcePath := filepath.Join(directory, "source")
+	archivePath := filepath.Join(directory, "archive")
+	for _, rootPath := range []string{sourcePath, archivePath} {
+		if err := os.Mkdir(rootPath, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(sourcePath, "clip.mov"), []byte("source"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	roots, err := workerconfig.OpenStorageRoots(workerconfig.Configuration{
+		StorageRoots: []workerconfig.StorageRootConfiguration{
+			{StorageID: "source", Root: sourcePath},
+			{StorageID: "archive", Root: archivePath},
+		},
+		AccessibleStorageIDs: []string{"source", "archive"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer roots.Close()
+	_, checksum, err := roots.MustRoot("source").FileSHA256("clip.mov")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	entered := make(chan string, 3)
+	releaseFirst := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseFirst) }) }
+	defer release()
+	registry, err := New(roots, &lockingProbeHandler{
+		blockedOutput: "results/a.json",
+		entered:       entered,
+		release:       releaseFirst,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	specification := func(jobID, outputPath string) execution.StepExecutionSpec {
+		t.Helper()
+		spec, specErr := execution.NewStepExecutionSpec(execution.StepExecutionSpec{
+			JobID: jobID, StepID: "organize", TemplateName: "media-operation-lock-test",
+			Operation: execution.OperationOrganizeMedia,
+			Inputs: []execution.InputReference{{
+				OriginalAssetID: "ASSET-1", OriginalName: "clip.mov", InspectionID: "INSPECTION-1",
+				StorageID: "source", RelativePath: "clip.mov", Checksum: checksum, DurationMillis: 1,
+			}},
+			Outputs: []execution.OutputTarget{{
+				ID: "OUTPUT-" + jobID, Kind: execution.OutputOrganizedMedia, StorageID: "archive",
+				RelativePath: outputPath, OriginalAssetID: "ASSET-1",
+			}},
+			ProfileReference: "archive-1080p-6mbps@v1",
+			Parameters: execution.StepExecutionParameters{
+				OrganizationDecisionID: "DECISION-1", WorkspaceDriveID: "VOLUME-1",
+				ArchiveStorageID: "archive", InputRevision: 1,
+			},
+		})
+		if specErr != nil {
+			t.Fatal(specErr)
+		}
+		return spec
+	}
+
+	firstSpec := specification("DIRECT-A", "results/a.json")
+	firstResult := make(chan workerclient.ExecutionResult, 1)
+	go func() { firstResult <- registry.ExecuteDirect(context.Background(), firstSpec, 11) }()
+	if path := <-entered; path != "results/a.json" {
+		t.Fatalf("direct execution entered the wrong output: %s", path)
+	}
+	helperSpec, err := json.Marshal(firstSpec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	helperReady := filepath.Join(directory, "cross-process.ready")
+	helperResult := filepath.Join(directory, "cross-process.result")
+	helper := osexec.Command(os.Args[0], "-test.run=^TestMediaOperationCrossProcessHelper$")
+	helper.Env = append(os.Environ(),
+		"ARCHIVE_MEDIA_LOCK_HELPER=1",
+		"ARCHIVE_MEDIA_LOCK_SOURCE="+sourcePath,
+		"ARCHIVE_MEDIA_LOCK_ARCHIVE="+archivePath,
+		"ARCHIVE_MEDIA_LOCK_SPEC="+string(helperSpec),
+		"ARCHIVE_MEDIA_LOCK_READY="+helperReady,
+		"ARCHIVE_MEDIA_LOCK_RESULT="+helperResult,
+	)
+	helperOutput := &strings.Builder{}
+	helper.Stdout = helperOutput
+	helper.Stderr = helperOutput
+	if err := helper.Start(); err != nil {
+		t.Fatal(err)
+	}
+	helperDone := make(chan error, 1)
+	go func() { helperDone <- helper.Wait() }()
+	for attempt := 0; attempt < 200; attempt++ {
+		if _, err := os.Stat(helperReady); err == nil {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if _, err := os.Stat(helperReady); err != nil {
+		t.Fatalf("cross-process Runner did not start: %v: %s", err, helperOutput.String())
+	}
+	select {
+	case err := <-helperDone:
+		t.Fatalf("cross-process Runner bypassed the output lock: %v: %s", err, helperOutput.String())
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	sameContext, cancelSame := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancelSame()
+	sameResult := make(chan workerclient.ExecutionResult, 1)
+	go func() {
+		sameResult <- registry.Execute(sameContext, workerclient.Assignment{
+			JobID: firstSpec.JobID, StepID: firstSpec.StepID, FencingToken: 12, ExecutionSpec: firstSpec,
+		})
+	}()
+
+	differentSpec := specification("RUNNER-B", "results/b.json")
+	different := registry.Execute(context.Background(), workerclient.Assignment{
+		JobID: differentSpec.JobID, StepID: differentSpec.StepID, FencingToken: 13, ExecutionSpec: differentSpec,
+	})
+	if !different.Success {
+		t.Fatalf("different output did not execute in parallel: %+v", different)
+	}
+	if path := <-entered; path != "results/b.json" {
+		t.Fatalf("managed execution entered the wrong output: %s", path)
+	}
+
+	serialized := <-sameResult
+	if serialized.Cancellation == nil || serialized.Success {
+		t.Fatalf("same output entered instead of waiting for the shared lock: %+v", serialized)
+	}
+	select {
+	case unexpected := <-entered:
+		t.Fatalf("same output handler executed while the direct operation held the lock: %s", unexpected)
+	default:
+	}
+	release()
+	if completed := <-firstResult; !completed.Success {
+		t.Fatalf("direct execution did not complete after releasing its output: %+v", completed)
+	}
+	select {
+	case err := <-helperDone:
+		if err != nil {
+			t.Fatalf("cross-process Runner failed after lock release: %v: %s", err, helperOutput.String())
+		}
+	case <-time.After(5 * time.Second):
+		_ = helper.Process.Kill()
+		t.Fatal("cross-process Runner did not continue after lock release")
+	}
+	if payload, err := os.ReadFile(helperResult); err != nil || string(payload) != "success" {
+		t.Fatalf("cross-process Runner did not publish its serialized result: %q err=%v", payload, err)
+	}
+}
+
+func TestMediaOperationCrossProcessHelper(t *testing.T) {
+	if os.Getenv("ARCHIVE_MEDIA_LOCK_HELPER") != "1" {
+		t.Skip("cross-process lock helper")
+	}
+	if err := os.WriteFile(os.Getenv("ARCHIVE_MEDIA_LOCK_READY"), []byte("ready"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var spec execution.StepExecutionSpec
+	if err := json.Unmarshal([]byte(os.Getenv("ARCHIVE_MEDIA_LOCK_SPEC")), &spec); err != nil {
+		t.Fatal(err)
+	}
+	roots, err := workerconfig.OpenStorageRoots(workerconfig.Configuration{
+		StorageRoots: []workerconfig.StorageRootConfiguration{
+			{StorageID: "source", Root: os.Getenv("ARCHIVE_MEDIA_LOCK_SOURCE")},
+			{StorageID: "archive", Root: os.Getenv("ARCHIVE_MEDIA_LOCK_ARCHIVE")},
+		},
+		AccessibleStorageIDs: []string{"source", "archive"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer roots.Close()
+	registry, err := New(roots, &crossProcessProbeHandler{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := registry.Execute(context.Background(), workerclient.Assignment{
+		JobID: spec.JobID, StepID: spec.StepID, FencingToken: 14, ExecutionSpec: spec,
+	})
+	if !result.Success {
+		t.Fatalf("managed Runner result failed: %+v", result)
+	}
+	if err := os.WriteFile(os.Getenv("ARCHIVE_MEDIA_LOCK_RESULT"), []byte("success"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+type lockingProbeHandler struct {
+	blockedOutput string
+	entered       chan<- string
+	release       <-chan struct{}
+}
+
+type crossProcessProbeHandler struct{}
+
+func (*crossProcessProbeHandler) Operation() execution.Operation {
+	return execution.OperationOrganizeMedia
+}
+
+func (*crossProcessProbeHandler) Execute(ctx context.Context, spec execution.StepExecutionSpec, roots *workerconfig.StorageRoots) ([]execution.StepOutput, []string, error) {
+	target := spec.Outputs[0]
+	checksum, err := publishPayload(ctx, roots.MustRoot(target.StorageID), target.RelativePath, []byte("cross-process-runner"))
+	if err != nil {
+		return nil, nil, err
+	}
+	outputs := []execution.StepOutput{stepOutput(target, checksum)}
+	return outputs, verificationReferences(spec.Operation, outputs), nil
+}
+
+func (*lockingProbeHandler) Operation() execution.Operation { return execution.OperationOrganizeMedia }
+
+func (handler *lockingProbeHandler) Execute(ctx context.Context, spec execution.StepExecutionSpec, roots *workerconfig.StorageRoots) ([]execution.StepOutput, []string, error) {
+	target := spec.Outputs[0]
+	handler.entered <- target.RelativePath
+	if target.RelativePath == handler.blockedOutput {
+		select {
+		case <-ctx.Done():
+			return nil, nil, ctx.Err()
+		case <-handler.release:
+		}
+	}
+	checksum, err := publishPayload(ctx, roots.MustRoot(target.StorageID), target.RelativePath, []byte(spec.JobID))
+	if err != nil {
+		return nil, nil, err
+	}
+	outputs := []execution.StepOutput{stepOutput(target, checksum)}
+	return outputs, verificationReferences(spec.Operation, outputs), nil
 }
 
 type blockingPartialHandler struct{}

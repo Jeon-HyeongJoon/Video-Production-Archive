@@ -29,7 +29,7 @@ func TestWindowsRuntimeUsesSingleRootAndRetainsLegacyEvidence(t *testing.T) {
 	} {
 		requireWindowsRuntimeDirectory(t, filepath.Join(root, filepath.FromSlash(relative)))
 	}
-	for _, name := range []string{"archive-control.exe", "archive-worker.exe", "archivist-host.exe"} {
+	for _, name := range []string{"archive-control.exe", "archive-media.exe", "archivist-host.exe"} {
 		requireWindowsRuntimeFile(t, filepath.Join(root, "runtime", "current", name))
 	}
 
@@ -180,7 +180,7 @@ type windowsRuntimeSnapshot struct {
 
 func readWindowsRuntimeSnapshot(t *testing.T) windowsRuntimeSnapshot {
 	t.Helper()
-	script := `$ProgressPreference='SilentlyContinue'; $names=@('Archive Control','Archive Worker','Archive Archivist Host'); $tasks=@(Get-ScheduledTask -TaskName $names | ForEach-Object {[pscustomobject]@{name=$_.TaskName;execute=$_.Actions[0].Execute}}); $processes=@(Get-CimInstance Win32_Process | Where-Object {$_.Name -in @('archive-control.exe','archive-worker.exe','archivist-host.exe')} | ForEach-Object {[pscustomobject]@{name=$_.Name;executable=$_.ExecutablePath}}); [pscustomobject]@{tasks=$tasks;processes=$processes} | ConvertTo-Json -Depth 5 -Compress`
+	script := `$ProgressPreference='SilentlyContinue'; $names=@('Archive Control','Archive Worker','Archive Archivist Host'); $tasks=@(Get-ScheduledTask -TaskName $names | ForEach-Object {[pscustomobject]@{name=$_.TaskName;execute=$_.Actions[0].Execute}}); $processes=@(Get-CimInstance Win32_Process | Where-Object {$_.Name -in @('archive-control.exe','archive-media.exe','archivist-host.exe')} | ForEach-Object {[pscustomobject]@{name=$_.Name;executable=$_.ExecutablePath}}); [pscustomobject]@{tasks=$tasks;processes=$processes} | ConvertTo-Json -Depth 5 -Compress`
 	command := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script)
 	output, err := command.CombinedOutput()
 	if err != nil {

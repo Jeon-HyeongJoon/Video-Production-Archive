@@ -23,7 +23,7 @@ func TestWindowsCredentialManagerAuthenticatesOnlyMatchingControlAndWorkerProces
 	if os.Getenv("ARCHIVE_WINDOWS_WINCRED_ACCEPTANCE") != "1" {
 		t.Skip("set ARCHIVE_WINDOWS_WINCRED_ACCEPTANCE=1 on the isolated Windows acceptance host")
 	}
-	workerExecutable := requireWindowsAcceptanceExecutable(t, "ARCHIVE_WORKER_PATH")
+	mediaExecutable := requireWindowsAcceptanceExecutable(t, "ARCHIVE_MEDIA_PATH")
 	ffmpegExecutable := requireWindowsAcceptanceExecutable(t, "ARCHIVE_FFMPEG_PATH")
 	ffprobeExecutable := requireWindowsAcceptanceExecutable(t, "ARCHIVE_FFPROBE_PATH")
 	suffix := strconv.FormatInt(time.Now().UTC().UnixNano(), 10) + "-" + strconv.Itoa(os.Getpid())
@@ -77,7 +77,7 @@ worker:
 		return path
 	}
 
-	wrongWorker := startWindowsAcceptanceProcess(t, workerExecutable, "-config", writeWorkerConfiguration("wincred://"+wrongTarget))
+	wrongWorker := startWindowsAcceptanceProcess(t, mediaExecutable, "runner", "-config", writeWorkerConfiguration("wincred://"+wrongTarget))
 	time.Sleep(2500 * time.Millisecond)
 	status := runtimeRequest(runtime.Handler(), http.MethodGet, "/api/v1/workers", "", nil, "", "")
 	if status.Code != http.StatusOK || !strings.Contains(status.Body.String(), `"state":"OFFLINE"`) {
@@ -86,7 +86,7 @@ worker:
 	}
 	wrongWorker.Stop(t)
 
-	correctWorker := startWindowsAcceptanceProcess(t, workerExecutable, "-config", writeWorkerConfiguration("wincred://"+correctTarget))
+	correctWorker := startWindowsAcceptanceProcess(t, mediaExecutable, "runner", "-config", writeWorkerConfiguration("wincred://"+correctTarget))
 	defer correctWorker.Stop(t)
 	waitForWindowsAcceptance(t, 15*time.Second, "Worker authenticated through Windows Credential Manager", func() bool {
 		response := runtimeRequest(runtime.Handler(), http.MethodGet, "/api/v1/workers", "", nil, "", "")

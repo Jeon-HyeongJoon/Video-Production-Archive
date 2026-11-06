@@ -1,8 +1,8 @@
-# 07. 다중 Worker 운영 설계
+# 07. 선택형 Media Runner와 다중 실행 운영 설계
 
 ## 1. 목표
 
-Control PC 한 대가 상태와 DB를 소유하고, 여러 Windows Worker PC가 렌더·STT·입고 Step을 수행한다. 초기 All-in-One 구성도 `worker-main` 하나가 같은 PC에 있는 특수한 경우로 취급한다.
+단일 작업은 `archive-media` CLI가 Control 없이 MediaOperation Port를 직접 호출한다. 여러 PC의 큐·자원·취소를 관리할 때만 Control PC 한 대가 상태와 DB를 소유하고 여러 Windows PC에서 `archive-media runner` Adapter가 렌더·STT·입고 Step을 수행한다. 초기 All-in-One 관리 구성도 `worker-main` runner 하나가 같은 PC에 있는 특수한 경우다.
 
 Worker는 로컬 CLI를 감독하지 않는다. Codex·Claude CLI 세션은 별도 Archivist Host가 담당하며, 같은 PC에 두 서비스를 설치해도 identity, credential과 lease를 공유하지 않는다. [11. 로컬 CLI Archivist Host 설계](11-archivist-host.md)가 그 경계를 소유한다.
 
@@ -154,7 +154,7 @@ profile reference와 operation별 typed parameter
 
 선행 Step이 있는 실행 명세는 선행 출력이 확정되기 전에는 만들지 않는다. 성공 결과 정산 transaction이 최신 출력 기록과 Job의 고정 입력 문맥에서 다음 ready Step의 명세를 결정적으로 한 번 만들며, Worker가 보고한 절대경로나 임의 parameter를 후속 입력으로 승격하지 않는다. `APP-004`
 
-운영 `archive-worker`는 fixture flag 없이 typed operation을 등록 Adapter에 대응시키는 executor registry를 항상 조립한다. registry는 하나의 명세를 정확히 하나의 Adapter에만 연결하며, 입력·임시 출력·게시 경로를 모두 boot 때 연 `StorageRoot`로 해석한다. 임시 출력 이름에는 현재 fencing token을 포함하고 취소 정리는 그 token의 파일만 지워, lease를 잃은 실행이 뒤의 실행을 훼손하지 못하게 한다. ArchivePackage의 리비전·`current.json` 갱신은 StorageRoot의 package 단위 배타 잠금으로 직렬화한다. operation이 없거나 둘 이상에 대응하면 subprocess를 시작하지 않는다. `WRK-012`
+운영 MediaOperation registry는 fixture mode 없이 typed operation을 등록 Adapter에 대응시킨다. 단독 `archive-media` CLI와 선택형 관리 runner가 같은 registry를 조립하며 하나의 명세를 정확히 하나의 Adapter에만 연결하고, 입력·임시 출력·게시 경로를 모두 시작 때 연 `StorageRoot`로 해석한다. 임시 출력 이름에는 실행 token을 포함하고 취소 정리는 그 token의 파일만 지운다. 같은 Storage 출력에는 교차 프로세스 배타 잠금을 먼저 획득해 CLI와 runner의 동시 게시를 막는다. ArchivePackage의 리비전·`current.json` 갱신도 StorageRoot의 package 단위 잠금으로 직렬화한다. operation이 없거나 둘 이상에 대응하면 subprocess를 시작하지 않는다. `WRK-012`, `APP-009~010`
 
 실행 중인 Worker는 Control이 claim에서 내려준 주기로 현재 owner·fencing token의 lease heartbeat를 보낸다. 갱신은 token을 바꾸지 않고 같은 TTL만 연장하며, Worker는 서버와 로컬 시계 차이를 피하려고 절대 만료 시각이 아니라 상대 갱신 주기로 다음 시각을 계산한다. 결과 HTTP를 재전송하는 동안에도 갱신을 계속 시도한다. `WRK-013`
 
@@ -170,7 +170,7 @@ CONNECTING | ONLINE | BUSY | DRAINING | OFFLINE | DISABLED
 
 `DRAINING`은 새 lease를 받지 않고 현재 작업만 끝내는 운영 상태다. Control 재시작 후 Worker는 다시 연결하고, 기존 Step은 lease 만료·idempotency 규칙으로 복구한다.
 
-초기 실행 파일은 `archive-worker`이며 strict boot YAML과 Credential Resolver에서 설정·credential을 각각 읽는다. Worker는 시작 직후와 설정 주기마다 outbound heartbeat를 보내고 Control은 등록 identity·credential이 모두 일치할 때만 ONLINE/BUSY/DRAINING 상태를 갱신한다. 구현된 heartbeat는 단조 snapshot ID와 CPU·GPU·idle·memory·VRAM·scratch·slot·물리 장치·접근 Storage를 한 관측값으로 전송한다. Windows Probe는 시스템 memory·scratch·CPU를 직접 관측하고 NVIDIA 도구가 있을 때 GPU·VRAM을 추가한다. credential과 reference는 아카이브 작업 공간 응답에 포함하지 않는다. DPAPI process 경계는 `LRH-010`에서 검증하며, 실제 Windows Credential Manager Adapter의 서로 다른 서비스 계정 간 연결은 `WRK-007` acceptance로 별도 검증한다. `CFG-007`, `WRK-005~008`
+관리형 실행은 `archive-media runner`이며 strict boot YAML과 Credential Resolver에서 설정·credential을 각각 읽는다. Runner는 시작 직후와 설정 주기마다 Worker identity로 outbound heartbeat를 보내고 Control은 등록 identity·credential이 모두 일치할 때만 ONLINE/BUSY/DRAINING 상태를 갱신한다. 구현된 heartbeat는 단조 snapshot ID와 CPU·GPU·idle·memory·VRAM·scratch·slot·물리 장치·접근 Storage를 한 관측값으로 전송한다. Windows Probe는 시스템 memory·scratch·CPU를 직접 관측하고 NVIDIA 도구가 있을 때 GPU·VRAM을 추가한다. credential과 reference는 아카이브 작업 공간 응답에 포함하지 않는다. DPAPI process 경계는 `LRH-010`에서 검증하며, 실제 Windows Credential Manager Adapter의 서로 다른 서비스 계정 간 연결은 `WRK-007` acceptance로 별도 검증한다. `CFG-007`, `WRK-005~008`
 
 ## 5. Worker 선택
 

@@ -37,7 +37,7 @@ import (
 	"videoarchive/internal/core/vocabulary"
 )
 
-var ErrProductionExecution = errors.New("production Worker operation failed")
+var ErrProductionExecution = errors.New("production MediaOperation failed")
 
 type operationHandler struct {
 	operation execution.Operation
@@ -67,8 +67,9 @@ func (handler *operationHandler) Execute(ctx context.Context, spec execution.Ste
 	return handler.execute(ctx, spec, roots)
 }
 
-// NewProduction assembles the non-fixture Worker operations from boot-local
-// tools and already-opened StorageRoot capabilities.
+// NewProduction assembles non-fixture MediaOperation Adapters from local tools
+// and already-opened StorageRoot capabilities. Direct CLI and managed Runner
+// entry points share the returned registry.
 func NewProduction(configuration workerconfig.Configuration, roots *workerconfig.StorageRoots) (*Registry, error) {
 	if roots == nil || strings.TrimSpace(configuration.ID) == "" || configuration.Tools.FFmpeg.Executable == "" ||
 		configuration.Tools.FFprobe.Executable == "" {

@@ -2,7 +2,7 @@
 
 ## 1. 독립 실행 단위
 
-각 도메인 기능은 MCP tool이나 HTTP handler가 아니라 Application Capability로 먼저 구현한다.
+영속 업무 상태를 바꾸는 기능은 MCP tool이나 HTTP handler가 아니라 Application Capability로 먼저 구현한다. 파일 변환 자체인 MediaOperation은 Command Bus와 DB가 필요한 업무 Command가 아니므로 별도 MediaOperation Port가 소유한다.
 
 ```text
 CLI / Test / Scheduler / HTTP / MCP
@@ -14,6 +14,16 @@ CLI / Test / Scheduler / HTTP / MCP
        Command Bus + Domain Core
 ```
 
+파일 처리 경계는 다음과 같다.
+
+```text
+archive-media CLI ─┐
+관리 Runner ───────┼→ MediaOperation Port → FFmpeg·FFprobe·Whisper·StorageRoot
+integration test ──┘
+```
+
+`archive-media`는 Control·대시보드·Worker 등록·service credential·SQLite 없이 typed operation 하나를 직접 실행한다. 관리 Runner는 같은 Port에 queue claim, ExecutionLease, 자원 관측과 결과 보고만 덧붙이는 선택형 Adapter다. 두 Adapter는 동시에 사용할 수 있으며 서로 다른 출력은 병렬 실행한다. 같은 Storage 출력은 Port가 StorageRoot의 교차 프로세스 잠금을 먼저 획득한 실행 하나만 Adapter에 진입시킨다. `APP-009~010`
+
 Capability는 versioned input, 필요한 Domain ID, 예상 리비전과 실행 이유를 받고 다음 둘 중 하나를 반환한다.
 
 - 짧은 기능: Command receipt와 결과 ID
@@ -23,7 +33,7 @@ Capability는 versioned input, 필요한 Domain ID, 예상 리비전과 실행 �
 
 대용량 파일 Job은 생성 시점의 업무 입력을 잃지 않는다. Coordinator는 Domain ID·Storage ID·정규화 상대경로·Profile reference를 Step별 typed `StepExecutionSpec`으로 내리고, 선행 출력이 필요한 Step의 명세는 이전 `StepOutputRecord`가 확정된 transaction에서 구체화한다. Capability receipt의 Job·Step handle과 실제 Worker 실행 입력은 이 두 기록으로 연결하며 protocol DTO나 Worker 로컬 절대경로를 Job 상태에 넣지 않는다. `APP-003~004`, `WRK-010~012`
 
-Archive Control를 띄우지 않은 integration test와 진단 CLI에서도 같은 Capability를 직접 호출할 수 있어야 한다. 요구사항: `APP-001`
+Archive Control를 띄우지 않은 integration test와 진단 CLI에서도 영속 업무 Capability를 직접 호출할 수 있어야 한다. 파일 처리 CLI는 Command Bus를 우회하는 것이 아니라 Command Bus 바깥의 MediaOperation Port를 직접 호출한다. 요구사항: `APP-001`, `APP-009`
 
 ## 2. 작업 공간 드라이브
 

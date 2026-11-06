@@ -32,7 +32,7 @@ func TestWindowsRecordingCompletesRenderingTranscriptionAndOrganization(t *testi
 	if os.Getenv("ARCHIVE_WINDOWS_RECORDING_ACCEPTANCE") != "1" {
 		t.Skip("set ARCHIVE_WINDOWS_RECORDING_ACCEPTANCE=1 on the isolated Windows acceptance host")
 	}
-	workerExecutable := requireWindowsAcceptanceExecutable(t, "ARCHIVE_WORKER_PATH")
+	mediaExecutable := requireWindowsAcceptanceExecutable(t, "ARCHIVE_MEDIA_PATH")
 	ffmpegExecutable := requireWindowsAcceptanceExecutable(t, "ARCHIVE_FFMPEG_PATH")
 	ffprobeExecutable := requireWindowsAcceptanceExecutable(t, "ARCHIVE_FFPROBE_PATH")
 	whisperExecutable := requireWindowsAcceptanceExecutable(t, "ARCHIVE_WHISPER_PATH")
@@ -166,7 +166,7 @@ worker:
 		t.Fatal(err)
 	}
 
-	workerProcess := startWindowsAcceptanceProcess(t, workerExecutable, "-config", workerPath)
+	workerProcess := startWindowsAcceptanceProcess(t, mediaExecutable, "runner", "-config", workerPath)
 	defer workerProcess.Stop(t)
 	waitForWindowsAcceptance(t, 20*time.Second, "recording production Worker ONLINE", func() bool {
 		response := runtimeRequest(runtime.Handler(), http.MethodGet, "/api/v1/workers", "", nil, "", "")

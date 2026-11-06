@@ -7,7 +7,7 @@ flowchart LR
     Browser[Archive Workspace Browser] -->|Firewall + CIDR guard + HTTP/SSE| Control[Archive Control]
     MCPClient[External MCP Client] -->|authenticated MCP| Control
     Control -->|HTTPS| Provider[AI Provider]
-    Worker[Archive Worker 1..N] -->|service-authenticated lease/heartbeat/result API| Control
+    Worker[Archive Media Runner 0..N] -->|service-authenticated lease/heartbeat/result API| Control
     Host[Archivist Host 1..N] -->|service-authenticated turn lease/event stream| Control
     CLI[Codex or Claude CLI] -->|loopback MCP proxy| Host
     Host -->|process/PTY + structured turn protocol| CLI
@@ -43,9 +43,11 @@ v1 Archive Control는 strict boot YAML에서 DB·listen·CIDR·Origin·Worker·S
 
 ArchivistSession·ArchivistTurn은 Control이 먼저 SQLite에 확정하고 Archivist Host가 outbound 연결로 claim한다. Host는 로컬 CLI process/PTY와 resume token만 감독하며 업무 상태나 승인 정책을 소유하지 않는다. 전체 Orca 앱은 배포 구성요소가 아니고, 최소 Embedded Core가 기본 runtime backend이며 Orca CLI 연동은 같은 Port의 선택형 Adapter다. 자세한 계약은 [11. 로컬 CLI Archivist Host 설계](11-archivist-host.md)를 따른다. `LRH-001~009`, `CTL-005~006`
 
-## 3. Archive Worker
+## 3. MediaOperation과 선택형 Runner
 
-Worker는 다음 순서로 단계 하나를 처리한다.
+단일 파일 작업은 `archive-media` CLI가 아래 처리 경계를 Control 없이 직접 실행한다. 여러 PC의 큐·리스·자원 관측이 필요할 때만 같은 실행 파일의 `runner` 하위 명령이 Worker 역할을 맡는다. 두 실행 방식은 동일한 MediaOperation Adapter와 StorageRoot 게시 경계를 공유한다. `APP-009~010`
+
+관리 Runner는 다음 순서로 단계 하나를 처리한다.
 
 ```text
 lease claim
@@ -62,7 +64,7 @@ Worker는 DB 파일을 직접 열지 않는다. Control API가 내려준 ID와 �
 
 같은 PC의 local Worker도 원격 Worker와 같은 registry·ExecutionLease 계약을 사용한다. PC를 추가할 때 Worker만 설치하고 boot config에 `worker_id`, credential reference, 처리 종류를 등록한다. 원격 Worker가 Control에 outbound 연결하므로 Worker PC에는 inbound 포트를 열지 않는다.
 
-v1 `archive-worker`는 별도 strict YAML의 identity·Control URL·Windows Credential Manager reference·heartbeat·claim 주기·접근 Storage를 읽고 Control로 outbound bounded heartbeat·별도 folder inventory와 Step claim·lease renewal·결과·취소 정리를 보낸다. Control의 `/worker/v1`은 아카이브 작업 공간 로그인 설정과 무관하게 매 요청의 Worker별 Bearer credential을 Resolver 값과 비교하고, 성공한 상태만 credential 없이 Archive Workspace Worker 상태 영역에 투영한다. loopback HTTP는 All-in-One 개발 구성에만 허용하고 원격 Control URL은 HTTPS만 허용한다. Resolver·HTTP 계약은 fixture 통합으로 검증하고 실제 Windows Credential Manager 호출은 격리 Windows acceptance 전까지 계획 상태다. `CFG-007`, `WRK-005~015`, `CAN-001~005`
+v1 `archive-media runner`는 별도 strict YAML의 identity·Control URL·Windows Credential Manager reference·heartbeat·claim 주기·접근 Storage를 읽고 Control로 outbound bounded heartbeat·별도 folder inventory와 Step claim·lease renewal·결과·취소 정리를 보낸다. Control의 `/worker/v1`은 아카이브 작업 공간 로그인 설정과 무관하게 매 요청의 Worker별 Bearer credential을 Resolver 값과 비교하고, 성공한 상태만 credential 없이 Archive Workspace Worker 상태 영역에 투영한다. loopback HTTP는 All-in-One 개발 구성에만 허용하고 원격 Control URL은 HTTPS만 허용한다. Resolver·HTTP 계약은 fixture 통합으로 검증하고 실제 Windows Credential Manager 호출은 격리 Windows acceptance 전까지 계획 상태다. `CFG-007`, `WRK-005~015`, `CAN-001~005`
 
 ## 4. 프로세스 장애 경계
 

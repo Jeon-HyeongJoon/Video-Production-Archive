@@ -2,8 +2,12 @@ package workerexecutor
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"path"
+	"sort"
 	"time"
 
 	"videoarchive/internal/adapter/workerconfig"
@@ -15,8 +19,8 @@ import (
 )
 
 var (
-	ErrInvalidRegistry    = errors.New("production Worker executor registry is invalid")
-	ErrDuplicateOperation = errors.New("production Worker operation has more than one Adapter")
+	ErrInvalidRegistry    = errors.New("production MediaOperation registry is invalid")
+	ErrDuplicateOperation = errors.New("production MediaOperation has more than one Adapter")
 )
 
 type Handler interface {
@@ -29,6 +33,12 @@ type detailedHandler interface {
 	ExecuteDetailed(context.Context, execution.StepExecutionSpec, *workerconfig.StorageRoots) ([]execution.StepOutput, []string, []execution.InspectedMedia, error)
 }
 
+// MediaOperationPort is the protocol-independent execution boundary shared by
+// direct CLI and managed Runner Adapters.
+type MediaOperationPort interface {
+	ExecuteOperation(context.Context, execution.StepExecutionSpec, uint64) workerclient.ExecutionResult
+}
+
 type Registry struct {
 	roots    *workerconfig.StorageRoots
 	handlers map[execution.Operation]Handler
@@ -37,6 +47,7 @@ type Registry struct {
 type executionAttemptContextKey struct{}
 
 var _ workerclient.StepExecutor = (*Registry)(nil)
+var _ MediaOperationPort = (*Registry)(nil)
 
 func New(roots *workerconfig.StorageRoots, handlers ...Handler) (*Registry, error) {
 	if roots == nil || len(handlers) == 0 {
@@ -57,7 +68,14 @@ func New(roots *workerconfig.StorageRoots, handlers ...Handler) (*Registry, erro
 
 func (registry *Registry) Execute(ctx context.Context, assignment workerclient.Assignment) workerclient.ExecutionResult {
 	spec := assignment.ExecutionSpec
-	if spec.Validate() != nil || spec.JobID != assignment.JobID || spec.StepID != assignment.StepID || assignment.FencingToken == 0 {
+	if spec.JobID != assignment.JobID || spec.StepID != assignment.StepID {
+		return inputFailure("INVALID_STEP_EXECUTION_SPEC")
+	}
+	return registry.ExecuteOperation(ctx, spec, assignment.FencingToken)
+}
+
+func (registry *Registry) ExecuteOperation(ctx context.Context, spec execution.StepExecutionSpec, executionToken uint64) workerclient.ExecutionResult {
+	if spec.Validate() != nil || executionToken == 0 {
 		return inputFailure("INVALID_STEP_EXECUTION_SPEC")
 	}
 	handler, exists := registry.handlers[spec.Operation]
@@ -89,7 +107,25 @@ func (registry *Registry) Execute(ctx context.Context, assignment workerclient.A
 	var verificationReferences []string
 	var inspectedMedia []execution.InspectedMedia
 	var err error
-	attemptContext := context.WithValue(ctx, executionAttemptContextKey{}, assignment.FencingToken)
+	attemptContext := context.WithValue(ctx, executionAttemptContextKey{}, executionToken)
+	releaseOutputLocks, lockErr := registry.acquireOutputLocks(attemptContext, spec)
+	if lockErr != nil {
+		if ctx.Err() != nil {
+			return workerclient.ExecutionResult{
+				ErrorClass: "STEP_EXECUTION_CANCELLED", LogReference: "media://output-lock-cancelled",
+				Cancellation: &workerclient.CancellationExecutionResult{
+					ProcessStopped: true, CleanupConfirmed: true, LogReference: "media://output-lock-cancelled",
+				},
+			}
+		}
+		if failure, classified := storageFailure(lockErr, operationStorageID(spec)); classified {
+			return failure
+		}
+		return workerclient.ExecutionResult{
+			FailureClass: workflow.FailureTransient, ErrorClass: "OUTPUT_LOCK_UNAVAILABLE", LogReference: "media://output-lock-failed",
+		}
+	}
+	defer releaseOutputLocks()
 	if detailed, ok := handler.(detailedHandler); ok {
 		outputs, verificationReferences, inspectedMedia, err = detailed.ExecuteDetailed(attemptContext, spec, registry.roots)
 	} else {
@@ -97,7 +133,7 @@ func (registry *Registry) Execute(ctx context.Context, assignment workerclient.A
 	}
 	if err != nil {
 		if ctx.Err() != nil {
-			cleanupConfirmed, externalEffects := registry.cleanupCancelledOutputs(spec, assignment.FencingToken)
+			cleanupConfirmed, externalEffects := registry.cleanupCancelledOutputs(spec, executionToken)
 			return workerclient.ExecutionResult{
 				ErrorClass: "STEP_EXECUTION_CANCELLED", LogReference: "worker://operation-cancelled",
 				Cancellation: &workerclient.CancellationExecutionResult{
@@ -118,7 +154,7 @@ func (registry *Registry) Execute(ctx context.Context, assignment workerclient.A
 		validationWorkerID = inspectedMedia[0].Observation.ObservedBy
 	}
 	if _, err := execution.NewStepOutputRecordWithInspections(
-		spec, assignment.FencingToken, validationWorkerID, time.Now().UTC(), outputs, verificationReferences, inspectedMedia,
+		spec, executionToken, validationWorkerID, time.Now().UTC(), outputs, verificationReferences, inspectedMedia,
 	); err != nil {
 		return inputFailure("INVALID_ADAPTER_OUTPUT")
 	}
@@ -126,6 +162,59 @@ func (registry *Registry) Execute(ctx context.Context, assignment workerclient.A
 		Success: true, Outputs: outputs, VerificationReferences: verificationReferences, InspectedMedia: inspectedMedia,
 		LogReference: "worker://operation-completed",
 	}
+}
+
+// ExecuteDirect is the protocol-independent MediaOperation entry point used by
+// the standalone CLI. Managed runners call Execute with their lease token; both
+// paths reach the same output locking and Adapter registry.
+func (registry *Registry) ExecuteDirect(ctx context.Context, spec execution.StepExecutionSpec, executionToken uint64) workerclient.ExecutionResult {
+	return registry.ExecuteOperation(ctx, spec, executionToken)
+}
+
+func (registry *Registry) acquireOutputLocks(ctx context.Context, spec execution.StepExecutionSpec) (func(), error) {
+	type target struct {
+		key       string
+		storageID string
+		lockPath  string
+	}
+	unique := make(map[string]target, len(spec.Outputs))
+	for _, output := range spec.Outputs {
+		key := output.StorageID + "\x00" + output.RelativePath
+		digest := sha256.Sum256([]byte(key))
+		unique[key] = target{
+			key: key, storageID: output.StorageID,
+			lockPath: path.Join(".archive-locks", "media-operations", hex.EncodeToString(digest[:])+".lock"),
+		}
+	}
+	targets := make([]target, 0, len(unique))
+	for _, candidate := range unique {
+		targets = append(targets, candidate)
+	}
+	sort.Slice(targets, func(i, j int) bool { return targets[i].key < targets[j].key })
+	locks := make([]*archive.StorageLock, 0, len(targets))
+	release := func() {
+		for index := len(locks) - 1; index >= 0; index-- {
+			_ = locks[index].Close()
+		}
+	}
+	for _, candidate := range targets {
+		root, registered := registry.roots.Root(candidate.storageID)
+		if !registered {
+			release()
+			return func() {}, ErrInvalidRegistry
+		}
+		if err := root.MkdirAll(path.Dir(candidate.lockPath), 0o755); err != nil {
+			release()
+			return func() {}, err
+		}
+		lock, err := root.AcquireExclusiveLock(ctx, candidate.lockPath)
+		if err != nil {
+			release()
+			return func() {}, err
+		}
+		locks = append(locks, lock)
+	}
+	return release, nil
 }
 
 func operationStorageID(spec execution.StepExecutionSpec) string {

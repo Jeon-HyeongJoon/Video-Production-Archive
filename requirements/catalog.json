@@ -2452,9 +2452,9 @@
     {
       "id": "WRK-012",
       "design": "production-worker-step-executor-registry",
-      "statement": "운영 Worker는 fixture mode 없이 typed StepExecutionSpec operation을 정확히 하나의 등록 Adapter에 연결하고 모든 파일을 boot 때 연 StorageRoot로만 접근하며 임시 출력을 fencing token별로 격리해야 한다.",
+      "statement": "archive-media의 관리 Runner는 fixture mode 없이 typed StepExecutionSpec operation을 정확히 하나의 등록 MediaOperation Adapter에 연결하고 모든 파일을 boot 때 연 StorageRoot로만 접근하며 임시 출력을 fencing token별로 격리해야 한다.",
       "given": "등록 StorageRoot와 FFmpeg·FFprobe·정리·전사·자막·CSV Adapter, 서로 다른 fencing token 및 지원·미지원·중복 operation 명세가 있다.",
-      "when": "운영 Worker가 배정 명세를 실행한다.",
+      "when": "archive-media runner가 Worker로서 배정 명세를 실행한다.",
       "then": "지원 명세는 정확히 한 Adapter에서 현재 fencing token 전용 임시 출력을 검증·게시 후 구조화 결과를 만들고 취소 정리는 다른 token의 임시 출력을 보존하며, 미지원·중복 operation 또는 미등록 Storage는 subprocess와 파일 변경 없이 거부된다.",
       "test_file": "internal/application/workerexecutor/registry_test.go",
       "test_name": "TestProductionExecutorRoutesOneTypedOperationThroughRegisteredStorageRoots",
@@ -2500,9 +2500,9 @@
     {
       "id": "APP-005",
       "design": "windows-archive-intake-vertical-acceptance",
-      "statement": "실제 Windows Control과 별도 Worker process는 소스 시퀀스 Folder Job을 claim해 FFmpeg·FFprobe QC·정리 묶음·ArchiveCatalog까지 한 번만 완료해야 한다.",
+      "statement": "실제 Windows Control과 archive-media 관리 Runner process는 소스 시퀀스 Folder Job을 claim해 FFmpeg·FFprobe QC·정리 묶음·ArchiveCatalog까지 한 번만 완료해야 한다.",
       "given": "격리 Windows PC의 등록 SOURCE_MEDIA·WORKING StorageRoot, 호환된 짧은 영상 3개와 실제 FFmpeg·FFprobe 실행 파일이 있다.",
-      "when": "Archive Organization Capability로 소스 시퀀스 결정을 만들고 Worker process를 중간 재시작하며 Job 완료까지 실행한다.",
+      "when": "Archive Organization Capability로 소스 시퀀스 결정을 만들고 archive-media runner process를 중간 재시작하며 Job 완료까지 실행한다.",
       "then": "20Mbps 시퀀스와 CutMarker가 QC를 통과하고 원본 checksum을 유지한 정리 묶음·모든 원본 행의 CSV·각 Worker Step의 immutable StepOutputRecord가 생성되며 재시작 전후 외부 처리는 중복되지 않는다.",
       "test_file": "internal/application/controlruntime/windows_archive_run_acceptance_test.go",
       "test_name": "TestWindowsArchiveRunCompletesSourceSequenceAcrossWorkerRestart",
@@ -2560,9 +2560,9 @@
     {
       "id": "APP-007",
       "design": "windows-recording-transcription-vertical-acceptance",
-      "statement": "실제 Windows Worker는 선택된 SOURCE_MEDIA와 ARCHIVE_PRIMARY Storage에서 1단계 렌더·QC·보관을 완료한 뒤 별도 2단계 명령으로 whisper.cpp STT·자막·패키지 리비전·ArchiveCatalog를 완료해야 한다.",
+      "statement": "실제 Windows archive-media 관리 Runner는 선택된 SOURCE_MEDIA와 ARCHIVE_PRIMARY Storage에서 1단계 렌더·QC·보관을 완료한 뒤 별도 2단계 명령으로 whisper.cpp STT·자막·패키지 리비전·ArchiveCatalog를 완료해야 한다.",
       "given": "격리 Windows PC의 서로 다른 등록 SOURCE_MEDIA·ARCHIVE_PRIMARY StorageRoot, 한국어 합성 음성이 든 미렌더 녹화영상과 실제 FFmpeg·FFprobe·whisper.cpp가 있다.",
-      "when": "1단계 아카이브 실행을 완료한 뒤 STT 시작 명령을 제출하고 별도 Worker process가 두 단계의 모든 Step을 claim한다.",
+      "when": "1단계 아카이브 실행을 완료한 뒤 STT 시작 명령을 제출하고 별도 archive-media runner process가 두 단계의 모든 Step을 claim한다.",
       "then": "1단계 뒤 보관됨 패키지와 CSV가 존재하고 2단계 뒤 Transcript·Subtitle을 포함한 새 패키지 리비전과 갱신 CSV·immutable StepOutputRecord가 생성되며 원본 checksum은 유지된다.",
       "test_file": "internal/application/controlruntime/windows_archive_transcription_acceptance_test.go",
       "test_name": "TestWindowsRecordingCompletesRenderingTranscriptionAndOrganization",
@@ -3084,6 +3084,30 @@
       "test_name": "TestArchiveRunProjectionUsesLatestCompletedCatalogPublicationTime",
       "status": "implemented",
       "level": "unit"
+    },
+    {
+      "id": "APP-009",
+      "design": "standalone-media-operation-cli",
+      "statement": "영상 파일 처리 기능은 Archive Control·대시보드·Worker 등록·서비스 credential·SQLite 없이 하나의 archive-media CLI가 공통 MediaOperation Port를 직접 호출해 실행할 수 있어야 한다.",
+      "given": "등록된 로컬 StorageRoot와 FFmpeg·FFprobe 도구, 유효한 typed StepExecutionSpec 및 Archive Control이 실행되지 않은 환경이 있다.",
+      "when": "사람 또는 Agent가 archive-media의 operation 하위 명령을 실행한다.",
+      "then": "CLI는 네트워크나 Control DB를 열지 않고 해당 파일 처리만 실행해 stdout에 구조화 결과와 검증된 상대 출력경로·checksum을 반환하며 원본을 바꾸지 않는다.",
+      "test_file": "cmd/archive-media/main_test.go",
+      "test_name": "TestStandaloneMediaCLIExecutesTypedOperationWithoutControlOrWorkerRuntime",
+      "status": "implemented",
+      "level": "integration"
+    },
+    {
+      "id": "APP-010",
+      "design": "shared-media-operation-adapters",
+      "statement": "단독 CLI Adapter와 선택형 관리 Runner Adapter는 같은 MediaOperation Port를 동시에 사용할 수 있고 같은 Storage 출력에 대한 실행만 교차 프로세스 잠금으로 직렬화해야 한다.",
+      "given": "같은 MediaOperation Port와 StorageRoot를 공유하는 직접 CLI 요청과 관리 Runner 요청 및 같거나 서로 다른 출력 상대경로가 있다.",
+      "when": "두 Adapter가 동시에 파일 처리를 요청한다.",
+      "then": "서로 다른 출력은 독립 실행되고 같은 출력은 먼저 잠근 실행만 Adapter에 진입하며 대기 취소는 게시 파일을 바꾸지 않고, 잠금 해제 뒤 다음 실행이 진행된다.",
+      "test_file": "internal/application/workerexecutor/registry_test.go",
+      "test_name": "TestDirectCLIAndManagedRunnerSerializeSameOutputPath",
+      "status": "implemented",
+      "level": "integration"
     },
     {
       "id": "CFG-014",

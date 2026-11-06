@@ -23,7 +23,7 @@ $evidenceDirectory = Join-Path $repository (Join-Path 'evidence' $runID)
 $binaryDirectory = Join-Path $evidenceDirectory 'bin'
 $fixtureDirectory = Join-Path $evidenceDirectory 'fixture'
 $rawLog = Join-Path $evidenceDirectory 'go-test.jsonl'
-$worker = Join-Path $binaryDirectory 'archive-worker.exe'
+$media = Join-Path $binaryDirectory 'archive-media.exe'
 $koreanAudio = Join-Path $fixtureDirectory 'synthetic-ko.wav'
 New-Item -ItemType Directory -Force -Path $binaryDirectory | Out-Null
 New-Item -ItemType Directory -Force -Path $fixtureDirectory | Out-Null
@@ -49,13 +49,13 @@ finally {
 
 Push-Location $repository
 try {
-    & go build -o $worker ./cmd/archive-worker
+    & go build -o $media ./cmd/archive-media
     if ($LASTEXITCODE -ne 0) {
-        throw "Worker build failed with exit code $LASTEXITCODE"
+        throw "Archive Media build failed with exit code $LASTEXITCODE"
     }
 
     $env:ARCHIVE_WINDOWS_RECORDING_ACCEPTANCE = '1'
-    $env:ARCHIVE_WORKER_PATH = $worker
+    $env:ARCHIVE_MEDIA_PATH = $media
     $env:ARCHIVE_FFMPEG_PATH = $ffmpeg
     $env:ARCHIVE_FFPROBE_PATH = $ffprobe
     $env:ARCHIVE_WHISPER_PATH = $WhisperExecutable
