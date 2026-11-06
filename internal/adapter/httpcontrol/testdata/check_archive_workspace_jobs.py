@@ -7,19 +7,20 @@ with sync_playwright() as playwright:
     browser = playwright.chromium.launch()
     page = browser.new_page(viewport={"width": 1440, "height": 900}, color_scheme="light", locale="ko-KR")
     page.goto(sys.argv[1] + "/#/jobs", wait_until="networkidle")
-    # Every persisted Job is one scrollable workspace navigation card. The
-    # card exposes identity and context without inventing another aggregate.
+    # The sidebar indexes user-facing work: one grouped ArchiveRun plus
+    # standalone Jobs. Internal folder Jobs stay inside the run detail.
     workspaces = page.locator("#tree .workspace-card")
     expect(workspaces).to_have_count(4)
-    running = page.locator('#tree .workspace-card[data-job-id="JOB-RUNNING"]')
+    archive_run = page.locator('#tree .workspace-card[data-work-id="ARCHIVE-RUN-1"]')
+    expect(archive_run).to_contain_text("ARCHIVE-RUN-1")
+    expect(archive_run).to_contain_text("VOLUME-1")
+    expect(archive_run).to_contain_text("WORKER-1")
+    expect(archive_run).to_have_attribute("href", "#/runs/ARCHIVE-RUN-1")
+    running = page.locator('#tree .workspace-card[data-work-id="JOB-RUNNING"]')
     expect(running).to_contain_text("JOB-RUNNING")
     expect(running).to_contain_text("드라이브 없음")
-    expect(running).to_contain_text("worker-main")
+    expect(running).to_contain_text("WORKER-1")
     expect(running.locator(".workspace-state")).to_have_text("실행 중")
-    source = page.locator('#tree .workspace-card[data-job-id="JOB-SOURCE"]')
-    expect(source).to_contain_text("JOB-SOURCE")
-    expect(source).to_contain_text("VOLUME-1")
-    expect(source).to_contain_text("WORKER-1")
     expect(running).to_have_attribute("href", "#/jobs/JOB-RUNNING")
     running.click()
     expect(page).to_have_url(sys.argv[1] + "/#/jobs/JOB-RUNNING")
@@ -30,8 +31,8 @@ with sync_playwright() as playwright:
 
     # The same persistent Job appears in 작업 관리 확인 필요 and opens its detail.
     page.goto(sys.argv[1] + "/#/jobs", wait_until="networkidle")
-    row = page.locator('#attention-jobs .job-row[data-job-id="JOB-REVIEW"]')
-    expect(row).to_contain_text("승인 대기")
+    row = page.locator('#attention-jobs .work-row[data-work-id="JOB-REVIEW"]')
+    expect(row).to_contain_text("확인 필요")
     row.click()
     expect(page).to_have_url(sys.argv[1] + "/#/jobs/JOB-REVIEW")
     expect(page.locator('#job-steps .stage-row[data-step="approve-summary"] .stage-state')).to_have_text("WAITING · APPROVAL · 82%")

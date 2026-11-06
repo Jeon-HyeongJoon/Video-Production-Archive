@@ -29,9 +29,9 @@ SCENES: dict[str, dict[str, Any]] = {
         "words": {"INPUT": "분류 확인 필요"}, "panels": ["broken", "hold", "ready"], "stored": 5, "committed": 1,
         "detail": ("ready", ["분류", "QC", "보관", "오디오 추출", "STT", "자막", "전사 텍스트", "패키지 추가"]),
     },
-    # DSH-004/025: primary Job management and one addressable detail for JOB-SOURCE.
+    # DSH-004/025: grouped work management and one addressable ArchiveRun detail.
     "jobs": {"route": "#/jobs", "menu": "jobs", "problems": ("6", "fault"), "rows": 3},
-    "job-detail": {"route": "#/jobs/JOB-SOURCE", "menu": "jobs", "problems": ("6", "fault")},
+    "job-detail": {"route": "#/runs/ARCHIVE-RUN-1", "menu": "jobs", "problems": ("6", "fault")},
 }
 
 
@@ -141,29 +141,26 @@ def check_drive(page, scene) -> None:
 
 
 def check_jobs(page, scene) -> None:
-    expect(page.locator('#active-jobs .job-row[data-job-id="JOB-RUNNING"]')).to_have_count(1)
-    expect(page.locator('#queued-jobs .job-row[data-job-id="JOB-QUEUED"]')).to_have_count(1)
+    expect(page.locator('#active-jobs .work-row[data-work-id="JOB-RUNNING"]')).to_have_count(1)
+    expect(page.locator('#queued-jobs .work-row[data-work-id="JOB-QUEUED"]')).to_have_count(1)
     expect(page.locator("#attention-jobs")).to_have_attribute("open", "")
     expect(page.locator("#attention-jobs > summary")).to_have_text("확인 필요1")
-    expect(page.locator('#attention-jobs .job-row[data-job-id="JOB-REVIEW"]')).to_have_count(1)
+    expect(page.locator('#attention-jobs .work-row[data-work-id="JOB-REVIEW"]')).to_have_count(1)
     expect(page.locator("#completed-jobs")).to_have_attribute("open", "")
     expect(page.locator("#completed-jobs > summary")).to_have_text("완료1")
-    completed = page.locator('#completed-jobs .completed-row[data-job-id="JOB-SOURCE"]')
-    expect(completed).to_have_attribute("href", "#/jobs/JOB-SOURCE")
-    expect(completed).to_contain_text("source.mp4")
-    expect(completed).to_contain_text("86 → 1")
-    expect(completed).to_contain_text("archive-main")
+    completed = page.locator('#completed-jobs .work-row[data-work-id="ARCHIVE-RUN-1"]')
+    expect(completed).to_have_attribute("href", "#/runs/ARCHIVE-RUN-1")
+    expect(completed).to_contain_text("8 폴더 · 795 영상")
 
 
 def check_job_detail(page, _scene) -> None:
-    expect(page.locator("#job-title")).to_have_text("source.mp4")
-    expect(page.locator("#job-summary")).to_contain_text("JOB-SOURCE")
-    expect(page.locator('#job-steps .stage-row[data-step="organize"] .stage-state')).to_contain_text("COMPLETED · 100%")
-    result = page.locator('#job-result[data-package-id="VP-20261030-SOURCE"]')
+    expect(page.locator("#run-summary")).to_contain_text("ARCHIVE-RUN-1")
+    expect(page.locator("#run-scope .data-row")).to_have_count(8)
+    expect(page.locator('#run-children .job-row[data-job-id="JOB-SOURCE"]')).to_have_count(1)
+    result = page.locator('#run-results [data-package-id="VP-20261030-SOURCE"]')
     expect(result).to_contain_text("source.mp4")
     expect(result).to_contain_text("86 → 1")
     expect(result).to_contain_text("archive-main")
-    expect(result).to_contain_text("ARCHIVE-RUN-1")
 
 
 def main() -> None:
@@ -188,7 +185,7 @@ def main() -> None:
         expect(page.locator("#menu .menu-link[aria-current=page]")).to_have_attribute("data-menu", menu)
         expect(page.locator("#job-count")).to_have_text("4")
         expect(page.locator("#connection-count")).to_have_text("5")
-        expect(page.locator('#tree .workspace-card[data-job-id="JOB-RUNNING"]')).to_contain_text("JOB-RUNNING")
+        expect(page.locator('#tree .workspace-card[data-work-id="JOB-RUNNING"]')).to_contain_text("JOB-RUNNING")
         count, signal = scene["problems"]
         expect(page.locator("#alert-count")).to_have_text(count)
         expect(page.locator("#alert-count")).to_have_attribute("data-signal", signal)

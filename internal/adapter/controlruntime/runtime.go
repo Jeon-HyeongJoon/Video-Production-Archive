@@ -32,6 +32,7 @@ import (
 	"videoarchive/internal/application/archiveintakeworkspace"
 	"videoarchive/internal/application/archiveorganization"
 	"videoarchive/internal/application/archivetranscription"
+	"videoarchive/internal/application/archivework"
 	"videoarchive/internal/application/archiveworkspace"
 	"videoarchive/internal/application/archivistcontrol"
 	"videoarchive/internal/application/dispatchcoordinator"
@@ -191,6 +192,10 @@ func OpenWithDependencies(ctx context.Context, configuration bootconfig.Configur
 		return fail(err)
 	}
 	runtime.archiveIntakeWorkspace = archiveIntakeWorkspace
+	workQueries, err := archivework.New(commandStore, queries, archiveIntakeWorkspace)
+	if err != nil {
+		return fail(err)
+	}
 	batchHandler, batchErr := archiverun.NewHandler(dependencies.Now)
 	if batchErr != nil {
 		return fail(batchErr)
@@ -313,7 +318,7 @@ func OpenWithDependencies(ctx context.Context, configuration bootconfig.Configur
 	runtime.mcpHandler = mcpHandler
 	handler, err := httpcontrol.New(httpcontrol.Configuration{
 		Access: configuration.Access, TrustedProxies: configuration.TrustedProxies,
-		Catalog: catalogStore, ArchiveWorkspace: queries, Notifications: notificationsse.New(&notification.Feed{}),
+		Catalog: catalogStore, ArchiveWorkspace: queries, ArchiveWork: workQueries, Notifications: notificationsse.New(&notification.Feed{}),
 		Commands: jobCommands, WorkerAPI: workerAPI, Workers: workerCapacity,
 		ArchivistAPI: archivistAPI, Archivists: archivists,
 		Drives: archiveIntakeWorkspace, ArchiveIntake: archiveIntakeSelection,

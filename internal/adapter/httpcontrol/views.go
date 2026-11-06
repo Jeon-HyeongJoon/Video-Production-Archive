@@ -3,10 +3,12 @@ package httpcontrol
 import (
 	"time"
 
+	"videoarchive/internal/application/archivework"
 	"videoarchive/internal/application/archiveworkspace"
 	"videoarchive/internal/core/archivistruntime"
 	"videoarchive/internal/core/summary"
 	"videoarchive/internal/core/worker"
+	"videoarchive/internal/core/workflow"
 )
 
 type summaryView struct {
@@ -304,6 +306,86 @@ type jobDetailView struct {
 	ArchivistActions []archivistActionView `json:"archivist_actions"`
 	Workers          []workerView          `json:"workers"`
 	Timeline         []timelineView        `json:"timeline"`
+}
+
+type workSummaryView struct {
+	WorkID           string    `json:"work_id"`
+	Kind             string    `json:"kind"`
+	State            string    `json:"state"`
+	CreatedAt        time.Time `json:"created_at"`
+	LastEventAt      time.Time `json:"last_event_at"`
+	WorkerID         string    `json:"worker_id,omitempty"`
+	SourceVolumeID   string    `json:"source_volume_id,omitempty"`
+	SourceStorageID  string    `json:"source_storage_id,omitempty"`
+	ArchiveStorageID string    `json:"archive_storage_id,omitempty"`
+	FolderCount      int       `json:"folder_count"`
+	VideoCount       int       `json:"video_count"`
+	HoldCount        int       `json:"hold_count"`
+	ResultCount      int       `json:"result_count"`
+	ChildJobCount    int       `json:"child_job_count"`
+	Progress         float64   `json:"progress"`
+	Title            string    `json:"title,omitempty"`
+}
+
+type workChildJobView struct {
+	Role   string         `json:"role"`
+	Folder string         `json:"folder,omitempty"`
+	Job    jobSummaryView `json:"job"`
+}
+
+type workDetailView struct {
+	Summary       workSummaryView          `json:"summary"`
+	FolderIDs     []string                 `json:"folder_ids"`
+	Children      []workChildJobView       `json:"children"`
+	CompletedWork []driveCompletedWorkView `json:"completed_work"`
+}
+
+func projectWorkSummary(value archivework.Summary) workSummaryView {
+	return workSummaryView{
+		WorkID: value.WorkID, Kind: string(value.Kind), State: string(value.State), CreatedAt: value.CreatedAt,
+		LastEventAt: value.LastEventAt, WorkerID: value.WorkerID, SourceVolumeID: value.SourceVolumeID,
+		SourceStorageID: value.SourceStorageID, ArchiveStorageID: value.ArchiveStorageID,
+		FolderCount: value.FolderCount, VideoCount: value.VideoCount, HoldCount: value.HoldCount,
+		ResultCount: value.ResultCount, ChildJobCount: value.ChildJobCount, Progress: value.Progress, Title: value.Title,
+	}
+}
+
+func projectStandaloneWork(value archiveworkspace.JobSummary) workSummaryView {
+	state := archivework.StateQueued
+	if value.StepState == workflow.Failed || value.ErrorClass != "" {
+		state = archivework.StateFailed
+	} else if value.NeedsHumanIntervention {
+		state = archivework.StateAttention
+	} else {
+		switch value.StepState {
+		case workflow.Reserved, workflow.Running, workflow.Verifying:
+			state = archivework.StateActive
+		case workflow.Completed, workflow.Cancelled:
+			state = archivework.StateCompleted
+		}
+	}
+	return projectWorkSummary(archivework.Summary{
+		WorkID: value.JobID, Kind: archivework.StandaloneJob, State: state, CreatedAt: value.LastEventAt,
+		LastEventAt: value.LastEventAt, WorkerID: value.WorkerID, ChildJobCount: 1, Progress: value.Progress, Title: value.TargetTitle,
+	})
+}
+
+func projectWorkDetail(value archivework.View) workDetailView {
+	result := workDetailView{Summary: projectWorkSummary(value.Summary), FolderIDs: append([]string(nil), value.FolderIDs...)}
+	for _, child := range value.Children {
+		result.Children = append(result.Children, workChildJobView{Role: string(child.Role), Folder: child.Folder, Job: projectJobSummary(child.Job)})
+	}
+	for _, completed := range value.CompletedWork {
+		result.CompletedWork = append(result.CompletedWork, driveCompletedWorkView{
+			ArchiveRunID: completed.ArchiveRunID, Folder: completed.Folder, JobID: completed.JobID,
+			Disposition: string(completed.Disposition), ProfileReference: completed.ProfileReference,
+			SourceVideoCount: completed.SourceVideoCount, ArchiveStorageID: completed.ArchiveStorageID,
+			ArchivePackageID: completed.ArchivePackageID, ArchiveDate: completed.ArchiveDate,
+			ArchiveDisplayName: completed.ArchiveDisplayName, ArchiveVideoFileName: completed.ArchiveVideoFileName,
+			ArchiveState: string(completed.ArchiveState), CompletedAt: completed.CompletedAt,
+		})
+	}
+	return result
 }
 
 func projectJobSummary(value archiveworkspace.JobSummary) jobSummaryView {

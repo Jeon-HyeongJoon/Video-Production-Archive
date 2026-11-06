@@ -250,6 +250,40 @@
       "decided": "2026-10-19"
     },
     {
+      "id": "managed-work",
+      "layer": "product",
+      "kind": "category",
+      "name": {
+        "ko": "관리 작업",
+        "en": "Managed Work"
+      },
+      "definition": "작업 관리와 왼쪽 워크스페이스에서 상태·이력·상세 이동을 한 행과 카드로 다루는 상위 단위. 아카이브 접수는 ArchiveRun, ArchiveRun에 속하지 않는 Template 실행은 Job을 그대로 사용하며 별도 aggregate를 만들지 않는다.",
+      "rules": [
+        "ArchiveRun을 참조하는 검사·Folder·STT Job은 그 ArchiveRun의 하위 작업이며 상위 목록에 독립 작업으로 중복 표시하지 않는다.",
+        "ArchiveRun을 참조하지 않는 Job만 독립 관리 작업으로 표시한다.",
+        "관리 작업 ID는 기존 archive_run_id 또는 job_id이며 별도 identity를 만들지 않는다."
+      ],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "archive-run"
+        },
+        {
+          "type": "refers-to",
+          "target": "job"
+        }
+      ],
+      "sources": [
+        "사용자 결정 2026-11-06: 여러 폴더 선택은 하나의 영속 ArchiveRun 작업으로 이동하고 내부 Job은 상세에서 본다",
+        "requirements DSH-016, DSH-019, DSH-025, DSH-028"
+      ],
+      "decided": "2026-11-06"
+    },
+    {
       "id": "job",
       "layer": "product",
       "kind": "entity",
@@ -258,16 +292,15 @@
         "en": "Job"
       },
       "code_name": "Job",
-      "definition": "템플릿 하나를 특정 대상(원본 등)에 적용해 만든 고유 식별자의 영속 실행 인스턴스. 작업 목록과 작업 상세 화면이 다루는 단위다.",
+      "definition": "템플릿 하나를 특정 대상(원본 등)에 적용해 만든 고유 식별자의 영속 실행 인스턴스. ArchiveRun에 속할 수 있고 항상 job_id 작업 상세로 주소를 가진다.",
       "rules": [
-        "제품 층에서 '작업'은 Job만 뜻한다.",
+        "Job은 실행·예약·취소의 단위다. 작업 관리의 상위 단위는 관리 작업이며 ArchiveRun 소속 Job은 그 상세의 하위 작업이다.",
         "Worker가 설치된 PC는 'Worker PC', 처리 중 임시 파일 경로는 'scratch'라고 부른다. '작업 PC'라고 쓰지 않는다.",
         "'Workflow'나 'Pipeline'으로 Job을 부르지 않는다.",
         "작업 소유자 개념을 두지 않는다. 누가 했는지는 Actor로 기록한다.",
         "JobState를 별도로 저장하지 않는다. Job의 현재 상태는 소속 StepState에서 계산한 투영이다.",
-        "작업 관리·Worker·드라이브 완료 내역의 Job 참조는 자체 상세를 만들지 않고 같은 job_id의 주소 가능한 작업 상세로 이동한다.",
-        "작업 관리 기본 화면은 실행 중 Job을 최상단에 늘 보이고, 자원 대기·대기열 Job은 별도 작업 큐에, 실패·사람 입력 대기 Job은 확인 필요 목록에, 끝난 Job과 ArchiveCompletionEntry는 완료 목록에 둔다.",
-        "작업 관리의 확인 필요와 완료 목록은 각각 접고 펼칠 수 있으며 완료 Job의 결과 정보를 상태 행으로 축약하지 않는다."
+        "ArchiveRun 상세·Worker·드라이브에서 Job을 참조하면 같은 job_id의 주소 가능한 작업 상세로 이동한다.",
+        "ArchiveRun에 속하지 않는 Job은 독립 관리 작업으로 진행 중·작업 큐·확인 필요·완료 목록에 들어간다."
       ],
       "forbidden": {
         "words": [
@@ -283,9 +316,10 @@
         }
       ],
       "sources": [
-        "사용자 결정: 제품 층 작업 = Job",
+        "사용자 결정: Job은 고유 식별자의 영속 실행 단위",
         "사용자 결정: 작업 소유자는 지금 두지 않음",
-        "사용자 결정 2026-11-05: 영속 Job은 고유 식별자의 작업 상세로 이동"
+        "사용자 결정 2026-11-05: 영속 Job은 고유 식별자의 작업 상세로 이동",
+        "사용자 결정 2026-11-06: ArchiveRun 소속 Job은 상위 ArchiveRun 작업 아래에서 본다"
       ],
       "decided": "2026-10-19"
     },
@@ -1150,18 +1184,19 @@
         "en": "Archive Workspace"
       },
       "code_name": "ArchiveWorkspace",
-      "definition": "사용자와 Archivist가 같은 Job·Step·자산·명령·이벤트를 보면서 대화, 직접 API 명령, 도구 호출과 승인을 이어가는 제품의 주 사용자 표면.",
+      "definition": "사용자와 Archivist가 같은 관리 작업·Job·Step·자산·명령·이벤트를 보면서 대화, 직접 API 명령, 도구 호출과 승인을 이어가는 제품의 주 사용자 표면.",
       "includes": [
         "사람이 버튼·폼 또는 API로 ArchivistSession 없이 Job과 도메인 명령을 직접 시작하는 경로",
         "사람이 채팅으로 ArchivistTurn을 만들고 Archivist가 허용된 MCP Capability를 호출하는 경로",
-        "Job·Step·ArchivistTurn·Tool Call·ActionCard·Worker 상태의 Archive Workspace 투영",
+        "ArchiveRun과 독립 Job의 관리 작업·Step·ArchivistTurn·Tool Call·ActionCard·Worker 상태 투영",
         "사람과 Archivist가 만든 Command·Event·결과를 같은 업무 문맥으로 돌려주는 상태 feed"
       ],
       "rules": [
         "Archive Workspace는 조회 전용 화면이 아니라 대화와 직접 명령을 함께 제공하는 Archive의 주 사용자 표면이다.",
         "상태 시각화만 가리키는 별도 제품 표면 이름을 만들지 않는다.",
         "왼쪽 메뉴는 작업 관리·연결 관리 순서이며 작업 관리가 기본 화면이다.",
-        "왼쪽 워크스페이스는 새 영속 개체가 아니라 Job마다 job_id·드라이브·Worker를 묶어 같은 작업 상세로 이동하는 스크롤 가능한 탐색 카드다.",
+        "왼쪽 워크스페이스는 새 영속 개체가 아니라 ArchiveRun 또는 독립 Job마다 work ID·드라이브·Worker를 묶어 해당 영속 상세로 이동하는 스크롤 가능한 탐색 카드다.",
+        "설정과 테마 전환은 전역 제어로서 왼쪽 워크스페이스 목록이 아니라 상단 알림 옆에 둔다.",
         "전체 작업 표면은 어두운 회색 계층으로 깊이를 나타내고 Agent 머리줄은 시스템 테마를 따르며 Agent 대화 본문은 밝은 테마에서도 터미널처럼 가장 어두운 검정 표면과 밝은 글자를 유지한다.",
         "사람의 직접 명령과 Archivist의 도구 호출은 같은 Command Bus와 Capability Registry를 사용한다.",
         "사람의 웹 직접 명령은 requested_via를 archive_workspace로 기록한다.",
@@ -1499,7 +1534,7 @@
       },
       "definition": "개발 루프에서 하나의 완료 조건으로 끝나는 변경 단위.",
       "rules": [
-        "제품 층의 작업(Job)과 구분하기 위해 개발 층에서는 '작업'이라고 쓰지 않는다.",
+        "제품 층의 관리 작업·Job과 구분하기 위해 개발 층에서는 '작업'이라고 쓰지 않는다.",
         "'Task'는 MCP Task와 겹치므로 쓰지 않는다."
       ],
       "forbidden": {
@@ -4519,6 +4554,7 @@
         "Worker·원본 Storage·아카이브 Storage·폴더 범위는 생성할 때 고정하고 Archivist나 자동 정책이 선택하지 않는다.",
         "완료된 같은 원본 범위를 새 ArchiveRun으로 다시 선택할 수 있으며 원본 Observation·OriginalAsset identity는 재사용하고 검사·판정·Folder Job identity는 새 ArchiveRun에 분리한다.",
         "아카이브 작업 공간은 같은 논리 Volume에서 영속 생성 시각이 가장 최근인 ArchiveRun을 검사 receipt가 생기기 전부터 현재 실행으로 투영한다.",
+        "작업 관리와 왼쪽 워크스페이스는 폴더 수와 무관하게 ArchiveRun 하나를 관리 작업 하나로 표시하고 검사·Folder·STT Job은 실행 상세의 하위 작업으로 둔다.",
         "ArchiveRun의 전사 게이트는 자신의 1단계 실행 가능 작업만 보며 2단계는 별도 STT Job으로 실행한다.",
         "실행 가능한 작업이 없으면 완료로 보고하되 HOLD 수와 명시적 분류 필요 상태를 별도로 보존한다."
       ],

@@ -17,6 +17,7 @@ import (
 	"videoarchive/internal/application/archiveintakeworkspace"
 	"videoarchive/internal/application/archiveorganization"
 	"videoarchive/internal/application/archivetranscription"
+	"videoarchive/internal/application/archivework"
 	"videoarchive/internal/application/archiveworkspace"
 	"videoarchive/internal/application/archivistcontrol"
 	"videoarchive/internal/core/archivistruntime"
@@ -42,6 +43,11 @@ type CatalogReader interface {
 type ArchiveWorkspaceReader interface {
 	Inbox(context.Context) ([]archiveworkspace.JobSummary, error)
 	Detail(context.Context, string) (archiveworkspace.JobView, error)
+}
+
+type ArchiveWorkReader interface {
+	Inbox(context.Context) ([]archivework.Summary, error)
+	Detail(context.Context, string) (archivework.View, error)
 }
 
 type JobCommander interface {
@@ -79,6 +85,7 @@ type Configuration struct {
 	TrustedProxies        []netip.Prefix
 	Catalog               CatalogReader
 	ArchiveWorkspace      ArchiveWorkspaceReader
+	ArchiveWork           ArchiveWorkReader
 	Notifications         http.Handler
 	Commands              JobCommander
 	WorkerAPI             http.Handler
@@ -98,6 +105,7 @@ type Handler struct {
 	trustedProxies        []netip.Prefix
 	catalog               CatalogReader
 	archiveWorkspace      ArchiveWorkspaceReader
+	archiveWork           ArchiveWorkReader
 	notifications         http.Handler
 	commands              JobCommander
 	workerAPI             http.Handler
@@ -126,7 +134,7 @@ func New(configuration Configuration) (*Handler, error) {
 	}
 	handler := &Handler{
 		access: configuration.Access, trustedProxies: append([]netip.Prefix(nil), configuration.TrustedProxies...),
-		catalog: configuration.Catalog, archiveWorkspace: configuration.ArchiveWorkspace,
+		catalog: configuration.Catalog, archiveWorkspace: configuration.ArchiveWorkspace, archiveWork: configuration.ArchiveWork,
 		notifications: configuration.Notifications, commands: configuration.Commands,
 		workerAPI: configuration.WorkerAPI, workers: configuration.Workers,
 		archivistAPI: configuration.ArchivistAPI, archivists: configuration.Archivists,
@@ -149,6 +157,8 @@ func New(configuration Configuration) (*Handler, error) {
 	mux.HandleFunc("GET /api/v1/summaries/{summaryID}/reviews", handler.reviews)
 	mux.HandleFunc("GET /api/v1/jobs", handler.jobs)
 	mux.HandleFunc("GET /api/v1/jobs/{jobID}", handler.job)
+	mux.HandleFunc("GET /api/v1/work", handler.workInbox)
+	mux.HandleFunc("GET /api/v1/work/{workID}", handler.workDetail)
 	if handler.workers != nil {
 		mux.HandleFunc("GET /api/v1/workers", handler.workerStatuses)
 	}
@@ -337,6 +347,61 @@ func (handler *Handler) job(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 	writeJSON(writer, http.StatusOK, map[string]any{"data": projectJobDetail(job)})
+}
+
+func (handler *Handler) workInbox(writer http.ResponseWriter, request *http.Request) {
+	if handler.archiveWork == nil {
+		jobs, err := handler.archiveWorkspace.Inbox(request.Context())
+		if err != nil {
+			writeError(writer, http.StatusInternalServerError, "QUERY_FAILED")
+			return
+		}
+		result := make([]workSummaryView, 0, len(jobs))
+		for _, item := range jobs {
+			result = append(result, projectStandaloneWork(item))
+		}
+		writeJSON(writer, http.StatusOK, map[string]any{"data": result})
+		return
+	}
+	values, err := handler.archiveWork.Inbox(request.Context())
+	if err != nil {
+		writeError(writer, http.StatusInternalServerError, "QUERY_FAILED")
+		return
+	}
+	result := make([]workSummaryView, 0, len(values))
+	for _, value := range values {
+		result = append(result, projectWorkSummary(value))
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"data": result})
+}
+
+func (handler *Handler) workDetail(writer http.ResponseWriter, request *http.Request) {
+	if handler.archiveWork == nil {
+		job, err := handler.archiveWorkspace.Detail(request.Context(), request.PathValue("workID"))
+		if errors.Is(err, archiveworkspace.ErrJobNotFound) {
+			writeError(writer, http.StatusNotFound, "WORK_NOT_FOUND")
+			return
+		}
+		if err != nil {
+			writeError(writer, http.StatusInternalServerError, "QUERY_FAILED")
+			return
+		}
+		writeJSON(writer, http.StatusOK, map[string]any{"data": workDetailView{
+			Summary:  projectStandaloneWork(job.Summary),
+			Children: []workChildJobView{{Role: "FOLDER", Folder: job.Summary.TargetTitle, Job: projectJobSummary(job.Summary)}},
+		}})
+		return
+	}
+	value, err := handler.archiveWork.Detail(request.Context(), request.PathValue("workID"))
+	if errors.Is(err, archivework.ErrWorkNotFound) {
+		writeError(writer, http.StatusNotFound, "WORK_NOT_FOUND")
+		return
+	}
+	if err != nil {
+		writeError(writer, http.StatusInternalServerError, "QUERY_FAILED")
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"data": projectWorkDetail(value)})
 }
 
 func (handler *Handler) workerStatuses(writer http.ResponseWriter, request *http.Request) {

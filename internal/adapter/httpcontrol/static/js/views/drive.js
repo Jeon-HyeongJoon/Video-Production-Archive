@@ -273,7 +273,7 @@ function completedWorkSection(drive) {
       `실행 ${item.archive_run_id}`,
     ].filter(Boolean).join("\n");
     const sourceCount = item.source_video_count > 1 ? `${formatCount(item.source_video_count)} → 1` : formatCount(item.source_video_count);
-    return el("a", { class: "completed-row", href: `#/jobs/${encodeURIComponent(item.job_id)}`, dataset: { packageId: item.archive_package_id, jobId: item.job_id }, title: trace },
+    return el("a", { class: "completed-row", href: `#/runs/${encodeURIComponent(item.archive_run_id)}`, dataset: { packageId: item.archive_package_id, jobId: item.job_id, archiveRunId: item.archive_run_id }, title: trace },
       el("span", { class: "completed-result" },
         el("b", {}, item.archive_video_file_name || item.archive_package_id),
         el("small", {}, item.folder)),

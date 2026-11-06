@@ -4,10 +4,10 @@
 // after the screen was opened rises as a toast at the bottom right.
 
 import { byId, el, svgIcon, icons, statusIcon, setStatusIcon, clockTime } from "./core.js";
-import { model, ui, notify, isStale, problemItems, sortedProblems, problemPath, problemSubject, newProblems, findDrive, driveName } from "./store.js";
+import { model, ui, notify, isStale, problemItems, sortedProblems, problemPath, problemSubject, newProblems, findDrive, driveName, workName } from "./store.js";
 import { go } from "./router.js";
 
-const PLACE = { drive: "연결 관리", jobs: "작업 관리", job: "작업 관리", connections: "연결 관리", search: "검색", settings: "설정" };
+const PLACE = { drive: "연결 관리", jobs: "작업 관리", job: "작업 관리", run: "작업 관리", connections: "연결 관리", search: "검색", settings: "설정" };
 
 function resolve(item) {
   newProblems.delete(item.key);
@@ -31,13 +31,14 @@ function alertItem(item) {
 
 // crumbs names the menu and, below it, the drive, Worker or Job in view.
 function crumbs(route) {
-  const items = [[PLACE[route.name] || "작업 관리", route.name === "drive" || route.name === "job" || (route.name === "connections" && route.query.get("worker")) ? `#/${route.menu}` : ""]];
+  const items = [[PLACE[route.name] || "작업 관리", route.name === "drive" || route.name === "job" || route.name === "run" || (route.name === "connections" && route.query.get("worker")) ? `#/${route.menu}` : ""]];
   if (route.name === "drive") items.push([driveName(findDrive(route.driveID) || { workspace_drive_id: route.driveID }), ""]);
   if (route.name === "connections" && route.query.get("worker")) items.push([route.query.get("worker"), ""]);
   if (route.name === "job") {
     const job = model.jobs.find((entry) => entry.job_id === route.jobID);
     items.push([job?.target_title || route.jobID, ""]);
   }
+  if (route.name === "run") items.push([workName(model.work.find((entry) => entry.work_id === route.workID)) || route.workID, ""]);
   return items.flatMap(([text, href], index) => [
     svgIcon(icons.slash, "0 0 24 24", "crumb-sep"),
     href ? el("a", { class: "crumb", href }, text) : el("span", { class: "crumb", "aria-current": index === items.length - 1 ? "page" : undefined }, text),

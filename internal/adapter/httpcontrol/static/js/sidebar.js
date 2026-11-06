@@ -1,9 +1,8 @@
-// 사이드바: two primary menus and a scrollable Job workspace index. A
-// workspace card is a navigation projection of one persisted Job, not a new
-// aggregate; it keeps the Job ID, source drive and assigned Worker together.
+// 사이드바: two primary menus and a scrollable work index. ArchiveRun cards
+// group their internal Jobs; unrelated Template Jobs remain standalone.
 
-import { byId, el, svgIcon, icons, statusIcon, label, formatCount } from "./core.js";
-import { model, driveName, jobLane } from "./store.js";
+import { byId, el, svgIcon, icons, statusIcon, formatCount } from "./core.js";
+import { model, driveName, findDrive, workLane, workName } from "./store.js";
 import { menus } from "./router.js";
 
 const THEME_KEY = "archive.theme";
@@ -28,42 +27,44 @@ function applyTheme(theme) {
   }
 }
 
-function workspaceContext(job) {
-  for (const drive of model.drives) {
-    const folder = (drive.folders || []).find((item) => item.job_id === job.job_id || item.transcription_job_id === job.job_id);
-    if (folder) return { drive: driveName(drive), worker: job.worker_id || drive.worker_id || "배정 없음" };
-  }
-  return { drive: "드라이브 없음", worker: job.worker_id || "배정 없음" };
+function workspaceContext(work) {
+  const drive = findDrive(work.source_volume_id);
+  return {
+    drive: drive ? driveName(drive) : work.source_volume_id || (work.kind === "JOB" ? "드라이브 없음" : "원본 없음"),
+    worker: work.worker_id || drive?.worker_id || "배정 없음",
+  };
 }
 
-function workspaceCard(job, route) {
-  const lane = jobLane(job) || "done";
-  const context = workspaceContext(job);
-  const current = route.name === "job" && route.jobID === job.job_id;
-  const state = lane === "decide" && job.wait_reason ? `${label("wait", job.wait_reason)} 대기` : LANE_LABEL[lane];
+function workspaceCard(work, route) {
+  const lane = workLane(work);
+  const context = workspaceContext(work);
+  const current = (route.name === "run" && route.workID === work.work_id) || (route.name === "job" && route.jobID === work.work_id);
+  const state = LANE_LABEL[lane];
+  const href = work.kind === "ARCHIVE_RUN" ? `#/runs/${encodeURIComponent(work.work_id)}` : `#/jobs/${encodeURIComponent(work.work_id)}`;
   return el("a", {
-    class: "workspace-card", href: `#/jobs/${encodeURIComponent(job.job_id)}`,
-    "aria-current": current ? "page" : undefined, dataset: { jobId: job.job_id, lane },
-    title: [job.target_title, job.job_id, context.drive, context.worker].filter(Boolean).join(" · "),
+    class: "workspace-card", href,
+    "aria-current": current ? "page" : undefined, dataset: { workId: work.work_id, kind: work.kind, lane },
+    title: [workName(work), work.work_id, context.drive, context.worker].filter(Boolean).join(" · "),
   },
   el("span", { class: "workspace-card-head" },
     statusIcon(lane === "queue" ? "idle" : lane),
-    el("b", { class: "workspace-job-id num" }, job.job_id),
+    el("b", { class: "workspace-work-name" }, workName(work)),
     el("span", { class: "workspace-state", dataset: { signal: ["fault", "decide"].includes(lane) ? lane : undefined } }, state)),
   el("span", { class: "workspace-card-meta" },
     el("span", { class: "workspace-drive" }, context.drive),
     el("span", { "aria-hidden": "true" }, "·"),
-    el("span", { class: "workspace-worker num" }, context.worker)));
+    el("span", { class: "workspace-worker num" }, context.worker)),
+  el("span", { class: "workspace-card-id num" }, work.work_id));
 }
 
 function orderedWorkspaces() {
-  return [...model.jobs].sort((left, right) => {
-    const leftLane = jobLane(left) || "done";
-    const rightLane = jobLane(right) || "done";
+  return [...model.work].sort((left, right) => {
+    const leftLane = workLane(left);
+    const rightLane = workLane(right);
     const lane = LANE_RANK[rightLane] - LANE_RANK[leftLane];
     if (lane) return lane;
     const recent = new Date(right.last_event_at || 0) - new Date(left.last_event_at || 0);
-    return recent || left.job_id.localeCompare(right.job_id);
+    return recent || left.work_id.localeCompare(right.work_id);
   });
 }
 
@@ -99,13 +100,13 @@ export function mountSidebar() {
       if (route.menu === "settings") settings.setAttribute("aria-current", "page");
       else settings.removeAttribute("aria-current");
 
-      counts.jobs.textContent = formatCount(model.jobs.length);
+      counts.jobs.textContent = formatCount(model.work.length);
       counts.connections.textContent = formatCount(model.workers.length + model.drives.length + model.sessions.length);
       const workspaces = orderedWorkspaces();
       tree.replaceChildren(
         el("span", { class: "tree-title" }, "워크스페이스"),
         el("div", { class: "workspace-list" }, ...(workspaces.length
-          ? workspaces.map((job) => workspaceCard(job, route))
+          ? workspaces.map((work) => workspaceCard(work, route))
           : [el("p", { class: "workspace-empty" }, "작업 없음")])));
     },
   };

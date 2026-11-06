@@ -14,7 +14,7 @@ import * as connections from "./views/workers.js";
 import * as search from "./views/search.js";
 import * as settings from "./views/settings.js";
 
-const screens = { drive, jobs, job: jobs, connections, search, settings };
+const screens = { drive, jobs, job: jobs, run: jobs, connections, search, settings };
 const root = byId("view");
 const topbar = mountTopbar();
 const sidebar = mountSidebar();

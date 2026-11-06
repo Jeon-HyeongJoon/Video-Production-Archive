@@ -3,6 +3,7 @@
 //   #/drives/<drive>[?folder=<f>]     드라이브 상세, 그 폴더의 문제를 펼침
 //   #/jobs                            작업 목록
 //   #/jobs/<job>                      영속 작업 상세
+//   #/runs/<archive-run>              아카이브 실행 작업 상세
 //   #/search[?q=<text>]               검색 결과
 //   #/settings                        설정
 
@@ -21,6 +22,7 @@ export function currentRoute() {
   if (menu === "drives") return { menu: "connections", name: "connections", key: "connections", query };
   if (menu === "jobs" && parts[1]) return { menu, name: "job", key: `job:${parts[1]}`, jobID: parts[1], query };
   if (menu === "jobs") return { menu, name: "jobs", key: "jobs", query };
+  if (menu === "runs" && parts[1]) return { menu: "jobs", name: "run", key: `run:${parts[1]}`, workID: parts[1], query };
   if (menu === "connections") return { menu, name: "connections", key: "connections", query };
   // Keep old Worker bookmarks usable while the menu is consolidated.
   if (menu === "workers") return { menu: "connections", name: "connections", key: "connections", query };

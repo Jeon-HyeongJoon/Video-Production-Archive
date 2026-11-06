@@ -6,7 +6,7 @@ import { api, mutation, newID, label, stageSignal, stateSignal, humanWait, activ
 // Three missed 5 second refreshes in a row mean the screen is stale.
 const STALE_AFTER = 3;
 
-export const model = { workers: [], drives: [], hosts: [], sessions: [], jobs: [], refreshedAt: 0, failures: 0, error: "" };
+export const model = { workers: [], drives: [], hosts: [], sessions: [], jobs: [], work: [], refreshedAt: 0, failures: 0, error: "" };
 
 // Screen-local choices that must survive the 5 second refresh.
 export const ui = {
@@ -34,12 +34,12 @@ export function isStale() {
 export async function refresh() {
   const sequence = ++refreshSequence;
   try {
-    const [workers, drives, hosts, sessions, jobs] = await Promise.all([
+    const [workers, drives, hosts, sessions, jobs, work] = await Promise.all([
       api("/api/v1/workers"), api("/api/v1/archive-intake"), api("/api/v1/archivist-hosts"),
-      api("/api/v1/archivist-sessions"), api("/api/v1/jobs"),
+      api("/api/v1/archivist-sessions"), api("/api/v1/jobs"), api("/api/v1/work"),
     ]);
     if (sequence !== refreshSequence) return;
-    Object.assign(model, { workers, drives, hosts, sessions, jobs: jobs || [], refreshedAt: Date.now(), failures: 0, error: "" });
+    Object.assign(model, { workers, drives, hosts, sessions, jobs: jobs || [], work: work || [], refreshedAt: Date.now(), failures: 0, error: "" });
     trackProblems();
   } catch (error) {
     if (sequence !== refreshSequence) return;
@@ -274,6 +274,8 @@ export function driveJobIDs() {
 
 // Jobs that belong to no drive, such as Template Jobs, stay their own unit.
 export function driveFreeJobs() {
+  const standalone = new Set(model.work.filter((item) => item.kind === "JOB").map((item) => item.work_id));
+  if (standalone.size) return model.jobs.filter((job) => jobLane(job) && standalone.has(job.job_id));
   const owned = driveJobIDs();
   return model.jobs.filter((job) => jobLane(job) && !owned.has(job.job_id));
 }
@@ -370,6 +372,19 @@ export function jobLane(job) {
   if (["RUNNING", "RESERVED", "VERIFYING"].includes(job.step_state)) return "work";
   if (finishedSteps.has(job.step_state)) return "";
   return "queue";
+}
+
+export function workLane(work) {
+  return { FAILED: "fault", ATTENTION: "decide", ACTIVE: "work", QUEUED: "queue", COMPLETED: "done" }[work?.state] || "queue";
+}
+
+export function workName(work) {
+  if (!work) return "—";
+  if (work.kind === "JOB") return work.title || work.work_id;
+  const drive = findDrive(work.source_volume_id);
+  const source = drive ? driveName(drive) : work.source_volume_id || work.source_storage_id || "원본";
+  const date = String(work.created_at || "").slice(0, 10);
+  return [date, source, `${formatCount(work.folder_count)}개 폴더`].filter(Boolean).join(" · ");
 }
 
 // ─── Archivist ──────────────────────────────────────────────────────────────

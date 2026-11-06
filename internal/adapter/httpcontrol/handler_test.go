@@ -25,6 +25,7 @@ import (
 	"videoarchive/internal/adapter/sqlitecatalog"
 	"videoarchive/internal/application/archiveintakeworkspace"
 	"videoarchive/internal/application/archiveorganization"
+	"videoarchive/internal/application/archivework"
 	"videoarchive/internal/application/archiveworkspace"
 	"videoarchive/internal/application/archivistcontrol"
 	"videoarchive/internal/core/archive"
@@ -477,7 +478,8 @@ func testControlHTTPScene(t *testing.T, scene archiveWorkspaceScene, check func(
 		Access: security.AccessConfig{
 			Mode: security.AuthDisabled, AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")},
 		},
-		Catalog: catalogStore, ArchiveWorkspace: queries, Notifications: notificationsse.New(&notification.Feed{}), Version: "v1-test",
+		Catalog: catalogStore, ArchiveWorkspace: queries, ArchiveWork: newArchiveWorkSceneFixture(scene, observation.ObservedAt),
+		Notifications: notificationsse.New(&notification.Feed{}), Version: "v1-test",
 		WorkerAPI: http.NotFoundHandler(),
 		Workers: fixedWorkerReader{{
 			WorkerID: "WORKER-1", State: sceneWorkerState(scene), LastHeartbeat: observation.ObservedAt,
@@ -782,6 +784,92 @@ const (
 var archiveWorkspaceScenes = []archiveWorkspaceScene{scenePreRun, sceneStageOne, sceneTranscription, sceneComplete}
 
 var sceneFolderIDs = []string{"broken", "event-b", "hold", "intro", "ready", "render", "source", "source-b"}
+
+type archiveWorkSceneFixture struct {
+	summaries []archivework.Summary
+	details   map[string]archivework.View
+}
+
+func newArchiveWorkSceneFixture(scene archiveWorkspaceScene, at time.Time) archiveWorkSceneFixture {
+	standalone := func(id, title string, state archivework.State, minute int) archivework.Summary {
+		return archivework.Summary{
+			WorkID: id, Kind: archivework.StandaloneJob, State: state, CreatedAt: at.Add(time.Duration(minute) * time.Minute),
+			LastEventAt: at.Add(time.Duration(minute) * time.Minute), WorkerID: "WORKER-1", ChildJobCount: 1, Title: title,
+		}
+	}
+	values := []archivework.Summary{
+		standalone("JOB-RUNNING", "행사 하이라이트", archivework.StateActive, 1),
+		standalone("JOB-QUEUED", "외장 드라이브 복사", archivework.StateQueued, 2),
+		standalone("JOB-REVIEW", "인터뷰 요약 검수", archivework.StateAttention, 3),
+	}
+	fixture := archiveWorkSceneFixture{details: make(map[string]archivework.View)}
+	if scene == scenePreRun {
+		values = append(values, standalone("JOB-SOURCE", "source.mp4", archivework.StateCompleted, 4))
+	} else {
+		runState := archivework.StateActive
+		if scene == sceneTranscription {
+			runState = archivework.StateAttention
+		} else if scene == sceneComplete || scene == sceneJobs || scene == sceneJobDetail {
+			runState = archivework.StateCompleted
+		}
+		run := archivework.Summary{
+			WorkID: "ARCHIVE-RUN-1", Kind: archivework.ArchiveRunWork, State: runState,
+			CreatedAt: at, LastEventAt: at.Add(3 * time.Hour), WorkerID: "WORKER-1",
+			SourceVolumeID: "VOLUME-1", SourceStorageID: "source-main", ArchiveStorageID: "archive-main",
+			FolderCount: len(sceneFolderIDs), VideoCount: 795, HoldCount: 1, ChildJobCount: 1,
+		}
+		switch runState {
+		case archivework.StateCompleted:
+			run.Progress = 1
+		case archivework.StateAttention:
+			run.Progress = 0.9
+		default:
+			run.Progress = 0.54
+		}
+		sourceJob := archiveworkspace.JobSummary{
+			JobID: "JOB-SOURCE", Revision: 9, TemplateName: "archive-intake-source-sequence", TargetTitle: "source.mp4",
+			ControlMode: workflow.ManualMode, CurrentStepID: "organize", StepState: workflow.Completed, Progress: 1,
+			ExecutorKind: vocabulary.ExecutorWorker, WorkerID: "WORKER-1", LastEventAt: at.Add(2 * time.Hour),
+		}
+		view := archivework.View{
+			Summary: run, FolderIDs: append([]string(nil), sceneFolderIDs...),
+			Children: []archivework.ChildJob{{Role: archivework.ChildFolder, Folder: "source", Job: sourceJob}},
+		}
+		if runState == archivework.StateCompleted {
+			view.CompletedWork = []archiveintakeworkspace.CompletedWorkView{{
+				ArchiveRunID: run.WorkID, Folder: "source", JobID: sourceJob.JobID,
+				Disposition: vocabulary.OrganizationCompileSourceSequence, ProfileReference: "h264-1080p-20mbps",
+				SourceVideoCount: 86, ArchiveStorageID: run.ArchiveStorageID, ArchivePackageID: "VP-20261030-SOURCE",
+				ArchiveDate: "2026-10-30", ArchiveDisplayName: "2026-10-30 · source · source.mp4",
+				ArchiveVideoFileName: "source.mp4", ArchiveState: archive.PackageCommitted, CompletedAt: at.Add(2 * time.Hour),
+			}}
+			run.ResultCount = len(view.CompletedWork)
+			view.Summary = run
+		}
+		values = append(values, run)
+		fixture.details[run.WorkID] = view
+	}
+	for _, summary := range values {
+		if summary.Kind != archivework.StandaloneJob {
+			continue
+		}
+		fixture.details[summary.WorkID] = archivework.View{Summary: summary}
+	}
+	fixture.summaries = values
+	return fixture
+}
+
+func (fixture archiveWorkSceneFixture) Inbox(context.Context) ([]archivework.Summary, error) {
+	return append([]archivework.Summary(nil), fixture.summaries...), nil
+}
+
+func (fixture archiveWorkSceneFixture) Detail(_ context.Context, workID string) (archivework.View, error) {
+	view, exists := fixture.details[workID]
+	if !exists {
+		return archivework.View{}, archivework.ErrWorkNotFound
+	}
+	return view, nil
+}
 
 type archiveIntakeWorkspaceFixture struct {
 	scene    archiveWorkspaceScene
