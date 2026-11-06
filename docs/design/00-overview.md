@@ -59,6 +59,8 @@ Windows PC
 └── External media: source/archive copies
 ```
 
+macOS의 Control·Archivist 통합 배치에서는 같은 PC에 `archive-control`, `archivist-host`, `archive-archivist`를 둔다. `archive-archivist`는 Keychain OAuth Profile을 사용해 ChatGPT Responses 한 Turn과 제한된 Archive MCP 업무 도구만 실행한다.
+
 Worker가 다른 PC로 이동해도 Domain 계약과 Control API는 바뀌지 않는다.
 
 단일 파일 처리에서는 `archive-media`만 실행하며 Control·대시보드·DB·Worker 등록을 요구하지 않는다. 여러 PC 큐 관리가 필요할 때만 같은 실행 파일의 `runner` 하위 명령을 상주시킨다. CLI와 runner는 같은 MediaOperation Port를 사용한다. `APP-009~010`

@@ -131,6 +131,13 @@ func ValidSecretReference(reference string) bool {
 		target := strings.TrimPrefix(reference, "wincred://")
 		return target != "" && !strings.ContainsAny(target, "\x00\r\n")
 	}
+	if strings.HasPrefix(reference, "keychain://") {
+		path := strings.TrimPrefix(reference, "keychain://")
+		service, account, found := strings.Cut(path, "/")
+		return found && service != "" && account != "" &&
+			!strings.ContainsAny(service, "\x00\r\n/?#") &&
+			!strings.ContainsAny(account, "\x00\r\n/?#")
+	}
 	if !strings.HasPrefix(reference, "dpapi://") {
 		return false
 	}

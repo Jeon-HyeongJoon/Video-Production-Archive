@@ -49,6 +49,10 @@ type Resolver struct{}
 
 func New() *Resolver { return &Resolver{} }
 
+func ProvisionKeychain(string, string) error { return ErrUnsupportedPlatform }
+
+func DeleteKeychain(string) error { return ErrUnsupportedPlatform }
+
 func (*Resolver) Resolve(reference string) (string, error) {
 	switch {
 	case strings.HasPrefix(reference, "wincred://"):

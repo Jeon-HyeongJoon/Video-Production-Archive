@@ -4,6 +4,7 @@ build:
 	mkdir -p bin
 	go build -o bin/archive-control ./cmd/archive-control
 	go build -o bin/archive-media ./cmd/archive-media
+	go build -o bin/archive-archivist ./cmd/archive-archivist
 	go build -o bin/archivist-host ./cmd/archivist-host
 	go build -o bin/archivist-fixture ./cmd/archivist-fixture
 	go build -o bin/archive-secret ./cmd/archive-secret

@@ -1,0 +1,21 @@
+schema_version: 1
+archivist_host:
+  id: archivist-control-mac
+  control_url: http://127.0.0.1:18080
+  mcp_control_url: http://127.0.0.1:18081
+  credential_ref: keychain://archive-control/archivist-control-mac
+  heartbeat_interval: 5s
+  claim_interval: 1s
+  mcp_listen_address: 127.0.0.1:18082
+clis:
+  - id: archive-gpt
+    executable: /Applications/Archive/bin/archive-archivist
+    fixed_arguments:
+      - run
+      - --profile-ref
+      - keychain://archive-archivist/chatgpt-default
+      - --model
+      - REPLACE_WITH_ACCOUNT_MODEL_SLUG
+workspace_roots:
+  - id: archive-control-workspace
+    path: /Users/archive/ArchiveWorkspace

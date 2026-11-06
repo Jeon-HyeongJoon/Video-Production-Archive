@@ -15,9 +15,12 @@ const maximumInputSize = 64 << 10
 
 func main() {
 	reference := flag.String("dpapi-reference", "", "absolute dpapi:// blob reference")
+	keychainReference := flag.String("keychain-reference", "", "keychain:// service/account reference")
 	flag.Parse()
-	if strings.TrimSpace(*reference) == "" || flag.NArg() != 0 {
-		fmt.Fprintln(os.Stderr, "a DPAPI reference and stdin credential are required")
+	dpapi := strings.TrimSpace(*reference)
+	keychain := strings.TrimSpace(*keychainReference)
+	if (dpapi == "") == (keychain == "") || flag.NArg() != 0 {
+		fmt.Fprintln(os.Stderr, "exactly one OS secret reference and stdin credential are required")
 		os.Exit(2)
 	}
 	payload, err := io.ReadAll(io.LimitReader(os.Stdin, maximumInputSize+1))
@@ -31,11 +34,19 @@ func main() {
 		fmt.Fprintln(os.Stderr, "credential input is empty")
 		os.Exit(2)
 	}
-	if err := ossecret.ProvisionDPAPI(*reference, string(payload)); err != nil {
+	var provisionErr error
+	label := "DPAPI"
+	if dpapi != "" {
+		provisionErr = ossecret.ProvisionDPAPI(dpapi, string(payload))
+	} else {
+		label = "Keychain"
+		provisionErr = ossecret.ProvisionKeychain(keychain, string(payload))
+	}
+	if provisionErr != nil {
 		clear(payload)
-		fmt.Fprintln(os.Stderr, "DPAPI credential provisioning failed")
+		fmt.Fprintf(os.Stderr, "%s credential provisioning failed\n", label)
 		os.Exit(1)
 	}
 	clear(payload)
-	fmt.Println("DPAPI credential stored")
+	fmt.Printf("%s credential stored\n", label)
 }

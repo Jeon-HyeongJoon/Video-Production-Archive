@@ -1620,6 +1620,82 @@
       "decided": "2026-10-27"
     },
     {
+      "id": "archivist-loop",
+      "layer": "product",
+      "kind": "component",
+      "name": {
+        "ko": "Archivist 루프",
+        "en": "Archivist Loop"
+      },
+      "code_name": "ArchivistLoop",
+      "definition": "ArchivistTurn 하나의 정제된 입력을 Provider model에 보내고 구조화된 Archive Tool Call과 결과를 제한 횟수 안에서 교환해 최종 응답을 만드는 Host 로컬 구성요소.",
+      "rules": [
+        "ArchivistSession·Turn·Tool Call의 영속 상태를 새로 소유하지 않고 Control의 identity와 receipt를 사용한다.",
+        "Control MCP가 광고한 도구와 로컬 schema registry가 모두 허용한 업무 도구만 model에 제공한다.",
+        "긴 ArchiveRun을 한 Turn에서 polling하지 않고 시작 응답 뒤 SYSTEM 재호출 Turn으로 이어 간다.",
+        "model round와 Tool Call 수는 설정 상한을 초과할 수 없다."
+      ],
+      "forbidden": {
+        "words": [],
+        "code": [
+          "AgentLoop"
+        ]
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "archivist-turn"
+        },
+        {
+          "type": "refers-to",
+          "target": "archivist-tool-call"
+        }
+      ],
+      "sources": [
+        "docs/design/06-archivist-security.md §2, §6, §9",
+        "docs/design/11-archivist-host.md §3, §6",
+        "requirements AGT-018~020"
+      ],
+      "decided": "2026-11-07"
+    },
+    {
+      "id": "provider-authentication-profile",
+      "layer": "product",
+      "kind": "entity",
+      "name": {
+        "ko": "Provider 인증 Profile",
+        "en": "Provider Authentication Profile"
+      },
+      "code_name": "ProviderAuthenticationProfile",
+      "definition": "한 Archivist Host에서 직접 Provider inference를 승인한 identity·issued client·stable Host ID·scope·rotating token set을 OS Secret Store에 함께 보존하는 로컬 credential record.",
+      "rules": [
+        "Control의 다계정 ProviderAccount가 아니며 routing priority·budget·fallback 상태를 소유하지 않는다.",
+        "Host service credential과 별도 OS Secret Store reference를 사용한다.",
+        "access·refresh·ID token을 설정·로그·아카이브 작업 공간에 노출하지 않는다.",
+        "rotating refresh 성공 시 새 token set 전체를 함께 교체한다."
+      ],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "archivist-host"
+        },
+        {
+          "type": "refers-to",
+          "target": "archivist-loop"
+        }
+      ],
+      "sources": [
+        "docs/design/06-archivist-security.md §2~3",
+        "docs/design/11-archivist-host.md §9",
+        "requirements AGT-016~017, CFG-015"
+      ],
+      "decided": "2026-11-07"
+    },
+    {
       "id": "archivist-host",
       "layer": "product",
       "kind": "component",
@@ -1650,6 +1726,10 @@
         {
           "type": "refers-to",
           "target": "runtime-backend"
+        },
+        {
+          "type": "refers-to",
+          "target": "archivist-loop"
         }
       ],
       "sources": [
@@ -2057,7 +2137,8 @@
       "definition": "Provider routing에 사용하는 별도 credential reference, 상태, budget, 모델 기능과 데이터 정책을 가진 개체.",
       "rules": [
         "credential 원문 대신 OS Secret Store reference만 저장한다.",
-        "인증 실패는 AUTH_FAILED와 재연결 필요 상태로 기록하며 별도 알림 수신 역할을 요구하지 않는다."
+        "인증 실패는 AUTH_FAILED와 재연결 필요 상태로 기록하며 별도 알림 수신 역할을 요구하지 않는다.",
+        "Host 로컬의 단일 Provider 인증 Profile과 구분하며 다계정 routing·budget·fallback을 소유한다."
       ],
       "forbidden": {
         "words": [],

@@ -1,4 +1,4 @@
-//go:build !windows
+//go:build !windows && !darwin
 
 package ossecret
 
@@ -11,3 +11,7 @@ func (*Resolver) Resolve(string) (string, error) {
 }
 
 func ProvisionDPAPI(string, string) error { return ErrUnsupportedPlatform }
+
+func ProvisionKeychain(string, string) error { return ErrUnsupportedPlatform }
+
+func DeleteKeychain(string) error { return ErrUnsupportedPlatform }

@@ -6,11 +6,13 @@
 flowchart LR
     Browser[Archive Workspace Browser] -->|Firewall + CIDR guard + HTTP/SSE| Control[Archive Control]
     MCPClient[External MCP Client] -->|authenticated MCP| Control
-    Control -->|HTTPS| Provider[AI Provider]
     Worker[Archive Media Runner 0..N] -->|service-authenticated lease/heartbeat/result API| Control
     Host[Archivist Host 1..N] -->|service-authenticated turn lease/event stream| Control
     CLI[Codex or Claude CLI] -->|loopback MCP proxy| Host
     Host -->|process/PTY + structured turn protocol| CLI
+    GPTLoop[archive-archivist] -->|loopback MCP proxy| Host
+    Host -->|process + structured turn protocol| GPTLoop
+    GPTLoop -->|OAuth Responses| Provider[ChatGPT account model]
     Control --> SQLite[(SQLite)]
     Control --> Secrets[OS Secret Store]
     Worker --> Tools[FFmpeg/ffprobe/STT]
@@ -29,7 +31,7 @@ Archive Control만 운영 DB에 직접 쓴다.
 | Workflow Engine | DAG, StepState, 재시도, Approval, ExecutionLease·fencing |
 | Resource Scheduler | Worker metric과 정책으로 실행 허용 판단 |
 | Dispatch Coordinator | 영속 ready queue 순서, aging·Job 공정성, Worker 선택과 ResourceReservation·lease 원자 확정 |
-| Archivist Gateway | Provider routing, context, Tool Call, 폴백 |
+| Archivist Gateway | Session·Turn context와 Tool Call 상관관계; 다계정 Provider routing·폴백은 planned |
 | Archive Workspace Service | 사람 직접 Command, ArchivistSession·ArchivistTurn, 공통 작업 문맥과 ActionCard 조립 |
 | Archivist Session Service | ArchivistSession·ArchivistTurn·lease·fencing·ActionCard 원장 |
 | Repository Adapter | SQLite transaction과 projection |
@@ -39,9 +41,9 @@ Archive Control만 운영 DB에 직접 쓴다.
 
 HTTP와 MCP는 Domain 함수를 직접 호출하지 않고 같은 Command Bus를 사용한다. Handler는 저장 상태를 직접 바꾸지 않고 새 상태와 Event를 반환하며 Store가 상태·CommandRecord·Event·receipt를 한 번에 확정한다. Core 경계는 `CMD-001~010`, 실제 SQLite transaction은 `PER-001` integration test로 검증한다.
 
-v1 Archive Control는 strict boot YAML에서 DB·listen·CIDR·Origin·Worker·Storage topology를 읽어 시작하며 `archive-control` 실행 파일이 `internal/adapter/controlruntime` 조립 Adapter를 열어 SQLite Command Store·카탈로그, 아카이브 작업 공간 projection과 Notification SSE를 하나의 HTTP Handler에 조립한다. Application 패키지는 이 구체 Adapter 조립을 import하지 않는다. Worker와 Archivist Host credential reference는 사용자 profile이 있는 서비스의 `wincred://`와 profile 없는 서비스의 절대 `dpapi://`를 모두 허용하되 raw secret·상대 DPAPI 경로는 거부한다. 정적 아카이브 작업 공간과 health, 자산·전사·요약·검수·Job 조회·명령 API는 실제 peer CIDR 검사를 공통으로 통과하고 protocol DTO에서 Storage 경로를 제외한다. 같은 boot topology의 재시작은 멱등하지만 기존 Storage ID의 물리 identity나 root 변경은 시작 오류다. 사용자는 Archivist 없이도 Job을 직접 만들 수 있고, 사람 직접 Command와 Archivist Tool Call은 같은 Command Bus를 통과한다. 상태·명령·Event·receipt가 SQLite transaction으로 확정된 다음 공통 읽기 투영을 갱신한다. `CFG-006`, `CTL-001~004`, `COL-001`
+v1 Archive Control는 strict boot YAML에서 DB·listen·CIDR·Origin·Worker·Storage topology를 읽어 시작하며 `archive-control` 실행 파일이 `internal/adapter/controlruntime` 조립 Adapter를 열어 SQLite Command Store·카탈로그, 아카이브 작업 공간 projection과 Notification SSE를 하나의 HTTP Handler에 조립한다. Application 패키지는 이 구체 Adapter 조립을 import하지 않는다. Worker와 Archivist Host credential reference는 Windows의 `wincred://`·절대 `dpapi://`와 macOS의 `keychain://`를 허용하되 raw secret·상대 DPAPI 경로는 거부한다. 정적 아카이브 작업 공간과 health, 자산·전사·요약·검수·Job 조회·명령 API는 실제 peer CIDR 검사를 공통으로 통과하고 protocol DTO에서 Storage 경로를 제외한다. 같은 boot topology의 재시작은 멱등하지만 기존 Storage ID의 물리 identity나 root 변경은 시작 오류다. 사용자는 Archivist 없이도 Job을 직접 만들 수 있고, 사람 직접 Command와 Archivist Tool Call은 같은 Command Bus를 통과한다. 상태·명령·Event·receipt가 SQLite transaction으로 확정된 다음 공통 읽기 투영을 갱신한다. `CFG-006`, `CTL-001~004`, `COL-001`
 
-ArchivistSession·ArchivistTurn은 Control이 먼저 SQLite에 확정하고 Archivist Host가 outbound 연결로 claim한다. Host는 로컬 CLI process/PTY와 resume token만 감독하며 업무 상태나 승인 정책을 소유하지 않는다. 전체 Orca 앱은 배포 구성요소가 아니고, 최소 Embedded Core가 기본 runtime backend이며 Orca CLI 연동은 같은 Port의 선택형 Adapter다. 자세한 계약은 [11. 로컬 CLI Archivist Host 설계](11-archivist-host.md)를 따른다. `LRH-001~009`, `CTL-005~006`
+ArchivistSession·ArchivistTurn은 Control이 먼저 SQLite에 확정하고 Archivist Host가 outbound 연결로 claim한다. Host는 로컬 CLI process/PTY와 resume token만 감독하며 업무 상태나 승인 정책을 소유하지 않는다. 전체 Orca 앱은 배포 구성요소가 아니고, 최소 Embedded Core가 기본 runtime backend이며 Orca CLI 연동은 같은 Port의 선택형 Adapter다. Embedded Core는 Codex·Claude 외에도 `archive-archivist` 한 process를 실행해 ChatGPT account model과 loopback MCP 사이의 제한된 단일 Turn 루프를 제공한다. 자세한 계약은 [11. 로컬 CLI Archivist Host 설계](11-archivist-host.md)를 따른다. `LRH-001~008`, `AGT-016~020`, `CTL-005~006`
 
 ## 3. MediaOperation과 선택형 Runner
 

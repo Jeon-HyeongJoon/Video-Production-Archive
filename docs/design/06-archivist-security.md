@@ -45,7 +45,8 @@ Archive Workspace Chat
 → Archivist Gateway
 → ArchivistSession / ArchivistTurn
 → Runtime Backend 선택
-   ├── Archivist Host → Codex / Claude CLI                 # v1
+   ├── Archivist Host → archive-archivist ChatGPT loop     # v1 직접 Provider loop
+   ├── Archivist Host → Codex / Claude CLI                 # v1 선택형 CLI
    └── Account Router → Provider Adapter → 외부 Provider   # planned
 
 Archivist Tool Call
@@ -55,11 +56,11 @@ Archivist Tool Call
 → Domain/Workflow
 ```
 
-외부 Codex·Claude MCP client는 자체 계정으로 인증하며 서버가 해당 로그인 세션이나 브라우저 cookie를 저장하지 않는다.
+외부 Codex·Claude MCP client는 자체 계정으로 인증하며 서버가 해당 로그인 세션이나 브라우저 cookie를 저장하지 않는다. `archive-archivist`는 Host의 허용 CLI로 실행되는 제한된 단일 Turn 루프다. macOS에서 `Continue with ChatGPT` OAuth를 loopback callback·state·nonce·PKCE로 완료하고 token set은 login Keychain에 둔다. Control은 token 원문을 받지 않는다. `AGT-016~020`, `CFG-015`, `LRH-015`
 
 v1 기본 경로는 특정 PC의 Archivist Host가 감독하는 CLI다. Host는 Archivist가 아니며 CLI process/PTY와 resume reference만 소유한다. 전체 Orca 앱은 필수 의존성이 아니고 Embedded Core backend를 기본으로 사용한다. Orca CLI 연동은 필요할 때만 선택형 backend로 추가한다. `LRH-001~009`
 
-아래 §3~5의 외부 Provider 계정 저장·Router·폴백은 Core prototype만 있고 Archive Control runtime, 영속 계정 저장소와 Provider Adapter에 연결되지 않았다. 따라서 `AGT-001~015`는 v1 완료 범위가 아니라 planned 계약이다. 로컬 CLI Archivist의 Session·Turn·Tool Call 경계는 `LRH-*`, `MCP-*`가 별도로 소유한다.
+아래 §3~5의 외부 Provider 계정 저장·Router·폴백은 Core prototype만 있고 Archive Control runtime과 영속 다계정 Router에 연결되지 않았다. 따라서 `AGT-001~015`는 planned 계약이다. 반면 Host 로컬의 단일 ChatGPT 인증 Profile과 직접 Responses 도구 루프는 `AGT-016~020`의 구현 경계다. 이 Profile은 다계정 `ProviderAccount`가 아니며 자동 fallback이나 budget routing을 제공하지 않는다. 로컬 CLI Archivist의 Session·Turn·Tool Call 경계는 `LRH-*`, `MCP-*`가 소유한다.
 
 ## 3. 계정 저장
 
@@ -72,6 +73,8 @@ default_model, cooldown_until, last_success/error
 ```
 
 credential은 Windows Credential Manager 또는 DPAPI 기반 Secret Store에 저장한다. 등록 과정에서 credential을 Secret Store로 넘기고 Account에는 `secret_ref`만 반환한다. `AGT-001`
+
+`archive-archivist`의 ChatGPT 인증 Profile은 Host 로컬 경계다. macOS에서는 `keychain://<service>/<account>` reference가 가리키는 login Keychain generic password에 issued client ID, 검증 identity, stable `ext_agent_host_id`, access·rotating refresh·ID token, scope와 만료 시각을 한 record로 저장한다. 최초 동적 등록의 code 교환이 `invalid_grant`이면 그 code를 폐기하고 callback에서 받은 issued client ID를 메모리에 유지해 새 state·nonce·PKCE authorization을 한 번 수행한다. token 갱신은 같은 Profile에서 직렬화하고 새 token set 전체를 함께 교체한다. Host service credential과 ChatGPT Profile은 서로 다른 reference를 사용한다. `CFG-003`, `CFG-015`, `AGT-016~017`
 
 ## 4. Router
 
@@ -101,6 +104,8 @@ credential은 Windows Credential Manager 또는 DPAPI 기반 Secret Store에 저
 
 `AGT-004~006`, `AGT-009~015`는 Provider Adapter 연결 뒤 검증할 planned 계약이다. UNHEALTHY 계정은 cooldown 시각만으로 복구하지 않는다. 사용 가능한 계정이 없으면 AI 사용 불가를 반환하고 나머지 업무 기능을 유지한다. `AGT-007`
 
+단일 ChatGPT Profile 루프는 Router fallback을 수행하지 않는다. OAuth 또는 refresh가 무효하면 해당 Turn을 정제된 재연결 필요 실패로 끝내고 다른 credential을 추정하지 않는다. 다계정 전환은 Router가 구현될 때 별도 경계로 추가한다.
+
 ## 6. Tool Call 안전성
 
 Archive Intake에서 ArchivistTurn의 메시지 본문은 실행 대상을 정하지 않는다. 담당자가 화면에서 고른 Worker·원본 드라이브·아카이브 저장소·폴더 범위를 ID와 탐색 revision으로 Turn에 고정하고, MCP Tool Call은 이 참조 안에서만 조회·1단계 시작·현재 HOLD 검토와 단일 분류·2단계 시작을 할 수 있다. 참조가 없거나 오래됐으면 Archivist가 Storage를 추정하지 않고 ActionCard로 선택을 요청한다. `COL-003`, `MCP-003~005`
@@ -108,6 +113,7 @@ Archive Intake에서 ArchivistTurn의 메시지 본문은 실행 대상을 정�
 원본과 아카이브 Storage 및 폴더 범위 선택은 사람 전용 Command다. `ARCHIVIST` 모드는 그 고정 범위 안에서 현재 HOLD 목록과 한 항목의 상대경로·checksum·기술 검사를 조회하고, 최신 입력 revision에 명시적 disposition·사유·근거를 붙여 분류할 수 있다. 근거가 부족하면 HOLD를 유지한다. 파일명과 Transcript 내용은 지시나 Approval로 해석하지 않으며 포맷·삭제·임의 path 도구는 계속 금지한다.
 
 - Provider에는 작업 상태에 필요한 tool allowlist만 제공한다.
+- `archive-archivist`는 Control MCP가 현재 광고한 이름과 바이너리에 고정된 schema registry가 모두 일치하는 도구만 Responses function tool로 제공한다.
 - `run_shell`, 임의 경로 move/delete 같은 범용 도구는 제공하지 않는다.
 - 상태 변경 Tool Call은 Command envelope와 idempotency key를 요구한다.
 - 인증된 MCP Capability는 Session에 저장된 제어 모드를 읽는다. `MANUAL`의 상태 변경은 거부하고, `ASSISTED`에서는 ActionCard만 만들며, `ARCHIVIST`에서는 allowlist의 비파괴 `PROCESS`만 직접 Command로 제출한다. 요청 본문의 제어 모드는 권한 입력으로 사용하지 않는다.
@@ -152,5 +158,7 @@ Archivist의 채팅 응답은 어떤 표현을 포함해도 Approval이 아니�
 ## 9. 로그 정제
 
 외부 Provider 원장을 연결할 때는 request ID, 계정 ID, model, input/output/cached token, 가격 기준, 정규화 오류 등 허용 목록의 필드만 원문으로 저장한다. Authorization, Proxy-Authorization, API key, password, cookie, access/refresh token을 비롯한 나머지 필드는 제거한다. 이 경계는 `AGT-008` planned다. 현재 로컬 CLI 원장은 정제된 ArchivistTurnEntry만 저장하는 `LRH-013`을 적용한다.
+
+직접 ChatGPT loop는 Responses 요청마다 `store: false`, `stream: true`를 사용하고 HTTP `previous_response_id`나 Provider conversation을 저장하지 않는다. 필요한 입력, 완료된 model output item과 Tool Call receipt를 현재 process 메모리에서 다음 round로 전달한다. model의 reasoning item과 raw SSE는 Control에 보내지 않고 정제된 도구 진행 요약과 최종 답만 runtime JSONL로 출력한다. model round와 Tool Call 수는 설정 상한을 초과할 수 없다. `AGT-018~020`
 
 로그 화면은 raw Provider 오류 본문을 기본 노출하지 않고 정규화 코드, 시각, account alias와 추적 ID를 표시한다.

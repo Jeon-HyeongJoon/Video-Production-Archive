@@ -35,7 +35,7 @@ func TestManagementConfigurationAppliesOnlyFromLocalFileAtProcessStart(t *testin
 func TestBootConfigAcceptsOnlyUniqueOSSecretReferences(t *testing.T) {
 	valid := Settings{
 		AuthMode: security.AuthDisabled, ListenAddress: "192.168.40.8:8080", MCPListenAddress: "127.0.0.1:8081",
-		Providers: []ProviderDefinition{{ID: "provider-primary", SecretRef: "wincred://archive/provider-primary"}},
+		Providers: []ProviderDefinition{{ID: "provider-primary", SecretRef: "keychain://archive/provider-primary"}},
 		Workers:   []WorkerDefinition{{ID: "worker-main", CredentialRef: "dpapi://C:/Archive/secrets/worker-main.dpapi"}},
 	}
 	if err := valid.Validate(); err != nil {
