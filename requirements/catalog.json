@@ -3098,6 +3098,18 @@
       "level": "unit"
     },
     {
+      "id": "DSH-029",
+      "design": "archive-run-work-projection-rebuild",
+      "statement": "작업 관리 읽기 모델을 재구성할 때 현재 드라이브 projection에 ArchiveRun이 있지만 해당 aggregate snapshot이 없는 기존 저장 데이터도 폴더 Job을 펼치지 않고 ArchiveRun 상위 작업 하나로 복원해야 한다.",
+      "given": "현재 드라이브 projection에 archive_run_id·Worker·원본·아카이브·두 폴더가 저장되어 있고 그 실행 ID를 가진 Folder Job과 독립 Job은 있지만 ArchiveRun aggregate snapshot은 없는 저장 데이터가 있다.",
+      "when": "Control이 작업 관리 목록과 ArchiveRun 상세를 재구성한다.",
+      "then": "목록은 드라이브의 ArchiveRun 한 건과 독립 Job 한 건을 반환하고 Folder Job은 ArchiveRun 상세의 하위 작업이며 고정 폴더 범위와 영상 수가 보존된다.",
+      "test_file": "internal/application/archivework/service_test.go",
+      "test_name": "TestArchiveWorkRebuildsCurrentArchiveRunFromPersistedDriveProjection",
+      "status": "implemented",
+      "level": "unit"
+    },
+    {
       "id": "APP-009",
       "design": "standalone-media-operation-cli",
       "statement": "영상 파일 처리 기능은 Archive Control·대시보드·Worker 등록·서비스 credential·SQLite 없이 하나의 archive-media CLI가 공통 MediaOperation Port를 직접 호출해 실행할 수 있어야 한다.",

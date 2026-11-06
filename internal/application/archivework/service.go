@@ -151,6 +151,16 @@ func (service *Service) project(ctx context.Context) ([]View, error) {
 	for _, summary := range jobSummaries {
 		summaryByJob[summary.JobID] = summary
 	}
+	driveByRun := make(map[string]archiveintakeworkspace.DriveView)
+	completedByRun := make(map[string][]archiveintakeworkspace.CompletedWorkView)
+	for _, drive := range drives {
+		if drive.ArchiveRunID != "" {
+			driveByRun[drive.ArchiveRunID] = drive
+		}
+		for _, completed := range drive.CompletedWork {
+			completedByRun[completed.ArchiveRunID] = append(completedByRun[completed.ArchiveRunID], completed)
+		}
+	}
 	runs := make(map[string]archiverun.State)
 	jobsByRun := make(map[string][]ChildJob)
 	ownedJobs := make(map[string]bool)
@@ -168,8 +178,10 @@ func (service *Service) project(ctx context.Context) ([]View, error) {
 		if runID == "" {
 			continue
 		}
-		if _, exists := runs[runID]; !exists {
-			continue
+		if _, aggregateExists := runs[runID]; !aggregateExists {
+			if _, projectedExists := driveByRun[runID]; !projectedExists {
+				continue
+			}
 		}
 		summary, exists := summaryByJob[state.ID]
 		if !exists {
@@ -179,17 +191,6 @@ func (service *Service) project(ctx context.Context) ([]View, error) {
 		jobsByRun[runID] = append(jobsByRun[runID], ChildJob{
 			Role: childRole(state.TemplateName), Folder: childFolder(state), Job: summary,
 		})
-	}
-
-	driveByRun := make(map[string]archiveintakeworkspace.DriveView)
-	completedByRun := make(map[string][]archiveintakeworkspace.CompletedWorkView)
-	for _, drive := range drives {
-		if drive.ArchiveRunID != "" {
-			driveByRun[drive.ArchiveRunID] = drive
-		}
-		for _, completed := range drive.CompletedWork {
-			completedByRun[completed.ArchiveRunID] = append(completedByRun[completed.ArchiveRunID], completed)
-		}
 	}
 
 	result := make([]View, 0, len(runs)+len(jobSummaries))
@@ -202,6 +203,20 @@ func (service *Service) project(ctx context.Context) ([]View, error) {
 		result = append(result, View{
 			Summary:   summarizeRun(run, children, drive, current, completed),
 			FolderIDs: append([]string(nil), run.FolderIDs...), Children: children, CompletedWork: completed,
+		})
+	}
+	for runID, drive := range driveByRun {
+		if _, exists := runs[runID]; exists {
+			continue
+		}
+		children := append([]ChildJob(nil), jobsByRun[runID]...)
+		sortChildren(children)
+		completed := append([]archiveintakeworkspace.CompletedWorkView(nil), completedByRun[runID]...)
+		sort.Slice(completed, func(i, j int) bool { return completed[i].CompletedAt.After(completed[j].CompletedAt) })
+		folders := driveFolderIDs(drive)
+		result = append(result, View{
+			Summary: summarizeProjectedRun(runID, drive, children, completed), FolderIDs: folders,
+			Children: children, CompletedWork: completed,
 		})
 	}
 	for _, summary := range jobSummaries {
@@ -224,6 +239,16 @@ func (service *Service) project(ctx context.Context) ([]View, error) {
 		return result[i].Summary.WorkID < result[j].Summary.WorkID
 	})
 	return result, nil
+}
+
+func driveFolderIDs(drive archiveintakeworkspace.DriveView) []string {
+	result := make([]string, 0, len(drive.Folders))
+	for _, folder := range drive.Folders {
+		if strings.TrimSpace(folder.Folder) != "" {
+			result = append(result, folder.Folder)
+		}
+	}
+	return result
 }
 
 func jobArchiveRunID(state job.State) string {
@@ -305,6 +330,39 @@ func summarizeRun(run archiverun.State, children []ChildJob, drive archiveintake
 		}
 	}
 	summary.State = summarizeState(children, drive, current)
+	return summary
+}
+
+func summarizeProjectedRun(runID string, drive archiveintakeworkspace.DriveView, children []ChildJob, completed []archiveintakeworkspace.CompletedWorkView) Summary {
+	createdAt := drive.CatalogUpdatedAt
+	for _, child := range children {
+		if createdAt.IsZero() || child.Job.LastEventAt.Before(createdAt) {
+			createdAt = child.Job.LastEventAt
+		}
+	}
+	summary := Summary{
+		WorkID: runID, Kind: ArchiveRunWork, CreatedAt: createdAt, LastEventAt: createdAt,
+		WorkerID: drive.WorkerID, SourceVolumeID: drive.SourceVolumeID, SourceStorageID: drive.SourceStorageID,
+		ArchiveStorageID: drive.ArchiveStorageID, FolderCount: drive.FolderCount, HoldCount: drive.HoldCount,
+		ChildJobCount: len(children), ResultCount: len(completed),
+	}
+	if summary.FolderCount == 0 {
+		summary.FolderCount = len(drive.Folders)
+	}
+	var totalProgress float64
+	for _, child := range children {
+		totalProgress += child.Job.Progress
+		if child.Job.LastEventAt.After(summary.LastEventAt) {
+			summary.LastEventAt = child.Job.LastEventAt
+		}
+	}
+	if len(children) > 0 {
+		summary.Progress = totalProgress / float64(len(children))
+	}
+	for _, folder := range drive.Folders {
+		summary.VideoCount += folder.VideoCount
+	}
+	summary.State = summarizeState(children, drive, true)
 	return summary
 }
 

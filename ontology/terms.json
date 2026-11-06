@@ -1197,6 +1197,7 @@
         "왼쪽 메뉴는 작업 관리·연결 관리 순서이며 작업 관리가 기본 화면이다.",
         "왼쪽 워크스페이스는 새 영속 개체가 아니라 ArchiveRun 또는 독립 Job마다 work ID·드라이브·Worker를 묶어 해당 영속 상세로 이동하는 스크롤 가능한 탐색 카드다.",
         "설정과 테마 전환은 전역 제어로서 왼쪽 워크스페이스 목록이 아니라 상단 알림 옆에 둔다.",
+        "현재 드라이브 projection에 archive_run_id가 남은 기존 실행은 ArchiveRun snapshot이 없어도 같은 관리 작업 카드와 상세로 복원한다.",
         "전체 작업 표면은 어두운 회색 계층으로 깊이를 나타내고 Agent 머리줄은 시스템 테마를 따르며 Agent 대화 본문은 밝은 테마에서도 터미널처럼 가장 어두운 검정 표면과 밝은 글자를 유지한다.",
         "사람의 직접 명령과 Archivist의 도구 호출은 같은 Command Bus와 Capability Registry를 사용한다.",
         "사람의 웹 직접 명령은 requested_via를 archive_workspace로 기록한다.",

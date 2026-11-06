@@ -63,6 +63,44 @@ func TestArchiveWorkGroupsFixedFolderJobsUnderOneArchiveRunAndKeepsStandaloneJob
 	}
 }
 
+// Requirement: DSH-029
+func TestArchiveWorkRebuildsCurrentArchiveRunFromPersistedDriveProjection(t *testing.T) {
+	now := time.Date(2026, 11, 6, 14, 0, 0, 0, time.UTC)
+	folder := linkedJob("JOB-FOLDER-A", "archive-intake-render-recordings", "event-a", "ARCHIVE-RUN-IMPORTED", "event-a", workflow.Running, now)
+	standalone := linkedJob("JOB-STANDALONE", "occasion-recording", "행사 기록", "", "", workflow.Queued, now.Add(time.Minute))
+	ledger := fixedSnapshots{snapshots: []command.Snapshot{
+		snapshotOf(t, folder.ID, folder.Revision, folder), snapshotOf(t, standalone.ID, standalone.Revision, standalone),
+	}}
+	jobs := fixedJobs{summaries: []archiveworkspace.JobSummary{summaryOf(folder, workflow.Running, 0.5), summaryOf(standalone, workflow.Queued, 0)}}
+	drives := fixedDrives{views: []archiveintakeworkspace.DriveView{{
+		WorkspaceDriveID: "volume-e", ArchiveRunID: "ARCHIVE-RUN-IMPORTED", WorkerID: "worker-windows",
+		SourceVolumeID: "volume-e", SourceStorageID: "source-e", ArchiveStorageID: "archive-local",
+		ArchiveRunState: "STAGE_ONE_RUNNING", FolderCount: 2,
+		Folders: []archiveintakeworkspace.FolderView{{Folder: "event-a", VideoCount: 3}, {Folder: "event-b", VideoCount: 2}},
+	}}}
+	service, err := New(ledger, jobs, drives)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	values, err := service.Inbox(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(values) != 2 || values[0].WorkID != "ARCHIVE-RUN-IMPORTED" || values[0].Kind != ArchiveRunWork ||
+		values[0].FolderCount != 2 || values[0].VideoCount != 5 || values[0].ChildJobCount != 1 ||
+		values[1].WorkID != standalone.ID || values[1].Kind != StandaloneJob {
+		t.Fatalf("current ArchiveRun was flattened after projection rebuild: %+v", values)
+	}
+	detail, err := service.Detail(context.Background(), "ARCHIVE-RUN-IMPORTED")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(detail.FolderIDs, []string{"event-a", "event-b"}) || len(detail.Children) != 1 || detail.Children[0].Job.JobID != folder.ID {
+		t.Fatalf("rebuilt ArchiveRun lost fixed scope or child Job: %+v", detail)
+	}
+}
+
 func linkedJob(id, template, title, runID, folder string, state workflow.StepState, at time.Time) job.State {
 	var spec *execution.StepExecutionSpec
 	if runID != "" {

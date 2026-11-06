@@ -383,7 +383,8 @@ export function workName(work) {
   if (work.kind === "JOB") return work.title || work.work_id;
   const drive = findDrive(work.source_volume_id);
   const source = drive ? driveName(drive) : work.source_volume_id || work.source_storage_id || "원본";
-  const date = String(work.created_at || "").slice(0, 10);
+  const rawDate = String(work.created_at || "").slice(0, 10);
+  const date = rawDate && rawDate !== "0001-01-01" ? rawDate : "";
   return [date, source, `${formatCount(work.folder_count)}개 폴더`].filter(Boolean).join(" · ");
 }
 
