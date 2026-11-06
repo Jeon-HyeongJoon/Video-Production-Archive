@@ -300,7 +300,8 @@
         "작업 소유자 개념을 두지 않는다. 누가 했는지는 Actor로 기록한다.",
         "JobState를 별도로 저장하지 않는다. Job의 현재 상태는 소속 StepState에서 계산한 투영이다.",
         "ArchiveRun 상세·Worker·드라이브에서 Job을 참조하면 같은 job_id의 주소 가능한 작업 상세로 이동한다.",
-        "ArchiveRun에 속하지 않는 Job은 독립 관리 작업으로 진행 중·작업 큐·확인 필요·완료 목록에 들어간다."
+        "ArchiveRun에 속하지 않는 Job은 독립 관리 작업으로 진행 중·작업 큐·확인 필요·완료 목록에 들어간다.",
+        "Job별 영상 정보는 영속 StepExecutionSpec의 원본 관찰값만 사용하며 Storage root를 노출하지 않고 disclosure를 펼칠 때만 조회한다."
       ],
       "forbidden": {
         "words": [
@@ -1198,6 +1199,7 @@
         "왼쪽 워크스페이스는 새 영속 개체가 아니라 ArchiveRun 또는 독립 Job마다 work ID·드라이브·Worker를 묶어 해당 영속 상세로 이동하는 스크롤 가능한 탐색 카드다.",
         "설정과 테마 전환은 전역 제어로서 왼쪽 워크스페이스 목록이 아니라 상단 알림 옆에 둔다.",
         "현재 드라이브 projection에 archive_run_id가 남은 기존 실행은 ArchiveRun snapshot이 없어도 같은 관리 작업 카드와 상세로 복원한다.",
+        "ArchiveRun 하위 작업과 Job 상세의 영상 정보는 기본으로 조회하거나 만들지 않고 담당자가 해당 Job의 disclosure를 펼칠 때만 영속 원본 관찰값을 표시한다.",
         "전체 작업 표면은 어두운 회색 계층으로 깊이를 나타내고 Agent 머리줄은 시스템 테마를 따르며 Agent 대화 본문은 밝은 테마에서도 터미널처럼 가장 어두운 검정 표면과 밝은 글자를 유지한다.",
         "사람의 직접 명령과 Archivist의 도구 호출은 같은 Command Bus와 Capability Registry를 사용한다.",
         "사람의 웹 직접 명령은 requested_via를 archive_workspace로 기록한다.",

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -98,6 +99,45 @@ func TestArchiveWorkRebuildsCurrentArchiveRunFromPersistedDriveProjection(t *tes
 	}
 	if !reflect.DeepEqual(detail.FolderIDs, []string{"event-a", "event-b"}) || len(detail.Children) != 1 || detail.Children[0].Job.JobID != folder.ID {
 		t.Fatalf("rebuilt ArchiveRun lost fixed scope or child Job: %+v", detail)
+	}
+}
+
+// Requirement: DSH-030
+func TestArchiveWorkReadsPersistedSourceVideoFactsForOneJob(t *testing.T) {
+	now := time.Date(2026, 11, 6, 15, 0, 0, 0, time.UTC)
+	state := linkedJob("JOB-FOLDER-MEDIA", "archive-intake-render-recordings", "event-a", "ARCHIVE-RUN-MEDIA", "event-a", workflow.Completed, now)
+	inputs := []execution.InputReference{
+		{
+			OriginalAssetID: "ASSET-2", OriginalName: "B002.mov", StorageID: "source-e", RelativePath: "event-a/B002.mov",
+			Checksum: strings.Repeat("b", 64), SourceCreatedAt: now.Add(-time.Hour), DurationMillis: 120_000,
+			SourceSizeBytes: 240_000_000, SourceContainer: "mov", SourceBitRateBPS: 16_000_000,
+			VideoCodec: "h264", Width: 1920, Height: 1080, VideoBitRateBPS: 15_000_000,
+			AudioCodec: "aac", AudioBitRateBPS: 256_000, AudioSampleRateHz: 48_000, AudioChannels: 2,
+		},
+		{
+			OriginalAssetID: "ASSET-1", StorageID: "source-e", RelativePath: "event-a/A001.mp4",
+			Checksum: strings.Repeat("a", 64), SourceCreatedAt: now.Add(-2 * time.Hour), DurationMillis: 60_000,
+			SourceSizeBytes: 45_000_000, SourceContainer: "mp4", SourceBitRateBPS: 6_000_000,
+			VideoCodec: "h264", Width: 1920, Height: 1080, VideoBitRateBPS: 5_700_000,
+			AudioCodec: "aac", AudioBitRateBPS: 192_000, AudioSampleRateHz: 48_000, AudioChannels: 2,
+		},
+	}
+	state.Steps[0].ExecutionSpec = &execution.StepExecutionSpec{Parameters: execution.StepExecutionParameters{SourceInputs: inputs}}
+	state.Steps = append(state.Steps, job.Step{ExecutionSpec: &execution.StepExecutionSpec{Parameters: execution.StepExecutionParameters{SourceInputs: inputs}}})
+	service, err := New(fixedSnapshots{snapshots: []command.Snapshot{snapshotOf(t, state.ID, state.Revision, state)}}, fixedJobs{}, fixedDrives{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	media, err := service.Media(context.Background(), state.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(media) != 2 || media[0].OriginalAssetID != "ASSET-1" || media[0].OriginalName != "A001.mp4" ||
+		media[0].RelativePath != "event-a/A001.mp4" || media[0].DurationMillis != 60_000 || media[0].SizeBytes != 45_000_000 ||
+		media[0].Container != "mp4" || media[0].VideoCodec != "h264" || media[0].Width != 1920 || media[0].Height != 1080 ||
+		media[0].VideoBitRateBPS != 5_700_000 || media[0].AudioCodec != "aac" {
+		t.Fatalf("persisted source video facts were not projected without duplicates: %+v", media)
 	}
 }
 

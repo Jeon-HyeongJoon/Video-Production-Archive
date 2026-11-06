@@ -44,7 +44,7 @@ with sync_playwright() as playwright:
     expect(result).to_contain_text("소스 시퀀스")
     expect(result).to_contain_text("86 → 1")
     expect(result).to_contain_text("archive-main")
-    child = page.locator('#run-children .job-row[data-job-id="JOB-SOURCE"]')
+    child = page.locator('#run-children .job-row[data-job-id="JOB-SOURCE"] a')
     expect(child).to_have_attribute("href", "#/jobs/JOB-SOURCE")
     child.click()
     expect(page).to_have_url(base_url + "/#/jobs/JOB-SOURCE")

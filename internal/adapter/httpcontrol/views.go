@@ -340,6 +340,47 @@ type workDetailView struct {
 	CompletedWork []driveCompletedWorkView `json:"completed_work"`
 }
 
+type jobVideoInfoView struct {
+	OriginalAssetID      string    `json:"original_asset_id"`
+	OriginalName         string    `json:"original_name"`
+	RelativePath         string    `json:"relative_path"`
+	Checksum             string    `json:"checksum"`
+	SourceCreatedAt      time.Time `json:"source_created_at"`
+	DurationMillis       int64     `json:"duration_millis"`
+	SizeBytes            int64     `json:"size_bytes"`
+	Container            string    `json:"container"`
+	BitRateBPS           int64     `json:"bitrate_bps"`
+	VideoCodec           string    `json:"video_codec"`
+	VideoProfile         string    `json:"video_profile"`
+	Width                int       `json:"width"`
+	Height               int       `json:"height"`
+	FrameRateNumerator   int64     `json:"frame_rate_numerator"`
+	FrameRateDenominator int64     `json:"frame_rate_denominator"`
+	VideoPixelFormat     string    `json:"video_pixel_format"`
+	VideoBitRateBPS      int64     `json:"video_bitrate_bps"`
+	AudioCodec           string    `json:"audio_codec"`
+	AudioProfile         string    `json:"audio_profile"`
+	AudioBitRateBPS      int64     `json:"audio_bitrate_bps"`
+	AudioSampleRateHz    int       `json:"audio_sample_rate_hz"`
+	AudioChannels        int       `json:"audio_channels"`
+	AudioChannelLayout   string    `json:"audio_channel_layout"`
+	ProfileReference     string    `json:"profile_reference"`
+}
+
+func projectJobVideoInfo(value archivework.VideoInfo) jobVideoInfoView {
+	return jobVideoInfoView{
+		OriginalAssetID: value.OriginalAssetID, OriginalName: value.OriginalName, RelativePath: value.RelativePath,
+		Checksum: value.Checksum, SourceCreatedAt: value.SourceCreatedAt, DurationMillis: value.DurationMillis,
+		SizeBytes: value.SizeBytes, Container: value.Container, BitRateBPS: value.BitRateBPS,
+		VideoCodec: value.VideoCodec, VideoProfile: value.VideoProfile, Width: value.Width, Height: value.Height,
+		FrameRateNumerator: value.FrameRateNumerator, FrameRateDenominator: value.FrameRateDenominator,
+		VideoPixelFormat: value.VideoPixelFormat, VideoBitRateBPS: value.VideoBitRateBPS,
+		AudioCodec: value.AudioCodec, AudioProfile: value.AudioProfile, AudioBitRateBPS: value.AudioBitRateBPS,
+		AudioSampleRateHz: value.AudioSampleRateHz, AudioChannels: value.AudioChannels,
+		AudioChannelLayout: value.AudioChannelLayout, ProfileReference: value.ProfileReference,
+	}
+}
+
 func projectWorkSummary(value archivework.Summary) workSummaryView {
 	return workSummaryView{
 		WorkID: value.WorkID, Kind: string(value.Kind), State: string(value.State), CreatedAt: value.CreatedAt,

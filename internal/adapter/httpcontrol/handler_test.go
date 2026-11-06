@@ -357,6 +357,13 @@ func TestWorkspaceCombinesWorkerDriveAndAgentConnections(t *testing.T) {
 	})
 }
 
+// Requirement: DSH-031
+func TestWorkspaceLoadsJobVideoInformationOnlyWhenDisclosureOpens(t *testing.T) {
+	testControlHTTPScene(t, sceneComplete, func(t *testing.T, handler http.Handler) {
+		assertArchiveWorkspaceScript(t, handler, "check_archive_workspace_job_media.py")
+	})
+}
+
 func testControlHTTPWorkspace(t *testing.T, check func(*testing.T, http.Handler)) {
 	testControlHTTPScene(t, sceneStageOne, check)
 }
@@ -869,6 +876,36 @@ func (fixture archiveWorkSceneFixture) Detail(_ context.Context, workID string) 
 		return archivework.View{}, archivework.ErrWorkNotFound
 	}
 	return view, nil
+}
+
+func (fixture archiveWorkSceneFixture) Media(_ context.Context, jobID string) ([]archivework.VideoInfo, error) {
+	if jobID != "JOB-SOURCE" {
+		for _, detail := range fixture.details {
+			for _, child := range detail.Children {
+				if child.Job.JobID == jobID {
+					return []archivework.VideoInfo{}, nil
+				}
+			}
+		}
+		return nil, archivework.ErrJobNotFound
+	}
+	at := time.Date(2026, 10, 30, 8, 30, 0, 0, time.UTC)
+	return []archivework.VideoInfo{
+		{
+			OriginalAssetID: "ASSET-C0001", OriginalName: "C0001.MP4", RelativePath: "source/CLIP/C0001.MP4",
+			Checksum: strings.Repeat("a", 64), SourceCreatedAt: at, DurationMillis: 61_200, SizeBytes: 154_000_000,
+			Container: "mp4", BitRateBPS: 20_100_000, VideoCodec: "h264", VideoProfile: "High",
+			Width: 1920, Height: 1080, VideoBitRateBPS: 19_800_000, AudioCodec: "aac", AudioBitRateBPS: 256_000,
+			AudioSampleRateHz: 48_000, AudioChannels: 2, ProfileReference: "source-1080p-20mbps@v1",
+		},
+		{
+			OriginalAssetID: "ASSET-C0002", OriginalName: "C0002.MP4", RelativePath: "source/CLIP/C0002.MP4",
+			Checksum: strings.Repeat("b", 64), SourceCreatedAt: at.Add(2 * time.Minute), DurationMillis: 58_800, SizeBytes: 148_000_000,
+			Container: "mp4", BitRateBPS: 20_100_000, VideoCodec: "h264", VideoProfile: "High",
+			Width: 1920, Height: 1080, VideoBitRateBPS: 19_800_000, AudioCodec: "aac", AudioBitRateBPS: 256_000,
+			AudioSampleRateHz: 48_000, AudioChannels: 2, ProfileReference: "source-1080p-20mbps@v1",
+		},
+	}, nil
 }
 
 type archiveIntakeWorkspaceFixture struct {

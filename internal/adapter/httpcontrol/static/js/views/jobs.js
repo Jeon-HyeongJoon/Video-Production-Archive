@@ -81,16 +81,25 @@ function childRole(role) {
   return { INSPECTION: "검사", FOLDER: "폴더 처리", TRANSCRIPTION: "STT" }[role] || role;
 }
 
-function childRow(child) {
+function childRow(child, media) {
   const job = child.job;
   const lane = laneOf(job);
-  return el("a", { class: "data-row job-row", role: "row", href: `#/jobs/${encodeURIComponent(job.job_id)}`, dataset: { jobId: job.job_id, lane } },
-    el("b", { class: "cell-main" }, child.folder || childRole(child.role)),
+  const body = el("div", { class: "job-media-body" });
+  let disclosure;
+  disclosure = el("details", {
+    class: "child-work", open: media.isOpen(job.job_id), dataset: { jobId: job.job_id, lane },
+    ontoggle: () => media.toggle(disclosure, body, job.job_id),
+  },
+  el("summary", { class: "data-row job-row", role: "row", dataset: { jobId: job.job_id, lane } },
+    el("span", { class: "cell-main" },
+      el("a", { href: `#/jobs/${encodeURIComponent(job.job_id)}`, onclick: (event) => event.stopPropagation() }, child.folder || childRole(child.role)),
+      el("small", { class: "media-hint" }, "영상 정보")),
     el("span", {}, childRole(child.role)),
     el("span", {}, job.worker_id || "배정 없음"),
     el("span", { class: "cell-state" }, statusIcon(LANE[lane]?.[1] || "idle"), el("span", {}, laneText(job))),
     el("span", { class: "cell-meter" }, meter(Math.round((job.progress || 0) * 100), lane === "done"), el("span", { class: "num" }, `${Math.round((job.progress || 0) * 100)}%`)),
-    el("span", { class: "num muted" }, shortTime(job.last_event_at)));
+    el("span", { class: "num muted child-recent" }, shortTime(job.last_event_at))), body);
+  return disclosure;
 }
 
 function fold(id, title, count, open, onToggle, ...children) {
@@ -150,7 +159,64 @@ function runResultRow(item) {
     el("span", { class: "completed-place" }, token(item.archive_state === "COMMITTED" ? "확정됨" : "보관됨", item.archive_state === "COMMITTED" ? "done" : "idle"), el("small", {}, item.archive_storage_id)));
 }
 
-function renderRunDetail(root, detail) {
+function mediaDate(value) {
+  if (!value || String(value).startsWith("0001-01-01")) return "날짜 없음";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "날짜 없음";
+  return new Intl.DateTimeFormat("ko-KR", { year: "numeric", month: "2-digit", day: "2-digit" }).format(date);
+}
+
+function mediaDuration(millis) {
+  if (!millis) return "—";
+  const total = Math.max(0, Math.round(millis / 1000));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const seconds = total % 60;
+  return hours ? `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}` : `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
+function mediaBytes(value) {
+  if (!value) return "—";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let amount = Number(value);
+  let unit = 0;
+  while (amount >= 1000 && unit < units.length - 1) { amount /= 1000; unit += 1; }
+  return `${amount >= 100 || unit === 0 ? Math.round(amount) : amount.toFixed(1)} ${units[unit]}`;
+}
+
+function mediaRate(value) {
+  if (!value) return "—";
+  return value >= 1_000_000 ? `${(value / 1_000_000).toFixed(value >= 10_000_000 ? 1 : 2)} Mbps` : `${Math.round(value / 1000)} kbps`;
+}
+
+function mediaTable(items) {
+  if (!items.length) return emptyState("연결된 영상 정보 없음");
+  const rows = items.map((item) => {
+    const video = [item.container, item.video_codec, item.width && item.height ? `${item.width}×${item.height}` : "", mediaRate(item.video_bitrate_bps || item.bitrate_bps)].filter(Boolean).join(" · ") || "—";
+    const audio = [item.audio_codec, item.audio_sample_rate_hz ? `${Math.round(item.audio_sample_rate_hz / 1000)} kHz` : "", item.audio_channels ? `${item.audio_channels}ch` : ""].filter(Boolean).join(" · ") || "—";
+    return el("div", { class: "video-row", role: "row", dataset: { assetId: item.original_asset_id } },
+      el("span", { class: "video-source" }, el("b", {}, `${mediaDate(item.source_created_at)} · ${item.original_name || "이름 없음"}`), el("small", { title: item.relative_path || "" }, item.relative_path || "—")),
+      el("span", { class: "num" }, mediaDuration(item.duration_millis), el("small", {}, mediaBytes(item.size_bytes))),
+      el("span", { class: "video-tech" }, el("b", {}, video), el("small", {}, audio)),
+      el("span", { class: "video-profile", title: item.profile_reference || "" }, item.profile_reference || "—"));
+  });
+  return el("div", { class: "video-table", role: "table" },
+    el("div", { class: "video-head", role: "row" }, ...["원본", "길이 · 용량", "기술정보", "Profile"].map((text) => el("span", { role: "columnheader" }, text))),
+    ...rows);
+}
+
+function jobMediaDisclosure(jobID, media) {
+  const body = el("div", { class: "job-media-body" });
+  const toggleLabel = el("span", { class: "muted media-disclosure-label" }, media.isOpen(jobID) ? "접기" : "펼치기");
+  let disclosure;
+  disclosure = el("details", {
+    class: "panel job-media-disclosure", id: "job-media", open: media.isOpen(jobID), dataset: { jobId: jobID },
+    ontoggle: () => { toggleLabel.textContent = disclosure.open ? "접기" : "펼치기"; media.toggle(disclosure, body, jobID); },
+  }, el("summary", { class: "panel-toolbar" }, el("b", { class: "panel-title" }, "영상 정보"), toggleLabel), body);
+  return disclosure;
+}
+
+function renderRunDetail(root, detail, media) {
   const summary = detail?.summary;
   if (!summary) {
     root.replaceChildren(emptyState("아카이브 작업을 찾을 수 없음"));
@@ -174,7 +240,7 @@ function renderRunDetail(root, detail) {
       el("div", { class: "job-facts" }, ...facts.map(([name, value]) => fact(name, value)))),
     el("section", { class: "section jobs-section", id: "run-children" },
       el("h2", { class: "section-title" }, "하위 작업 ", el("span", { class: "num" }, String(children.length))),
-      table(["대상", "단계", "Worker", "상태", "진행", "최근"], children.map(childRow), "하위 작업 없음")),
+      table(["대상", "단계", "Worker", "상태", "진행", "최근"], children.map((child) => childRow(child, media)), "하위 작업 없음")),
     completed.length ? el("section", { class: "section jobs-section", id: "run-results" },
       el("h2", { class: "section-title" }, "완료 결과 ", el("span", { class: "num" }, String(completed.length))),
       el("div", { class: "completed-table" },
@@ -193,8 +259,44 @@ export function mount(root, route) {
   let loadError = "";
   let disposed = false;
   let request = null;
+  const mediaCache = new Map();
+  const mediaOpen = new Set();
+  const mediaRequests = new Map();
   ui.jobCancel = "";
   ui.status = "";
+
+  const media = {
+    isOpen(jobID) { return mediaOpen.has(jobID); },
+    async toggle(disclosure, body, jobID) {
+      if (!disclosure.open) {
+        mediaOpen.delete(jobID);
+        body.replaceChildren();
+        return;
+      }
+      mediaOpen.add(jobID);
+      if (mediaCache.has(jobID)) {
+        body.replaceChildren(mediaTable(mediaCache.get(jobID)));
+        return;
+      }
+      body.replaceChildren(emptyState("영상 정보 불러오는 중"));
+      let pending = mediaRequests.get(jobID);
+      if (!pending) {
+        const controller = new AbortController();
+        pending = { controller, value: api(`/api/v1/jobs/${encodeURIComponent(jobID)}/media`, { signal: controller.signal }) };
+        mediaRequests.set(jobID, pending);
+      }
+      try {
+        const values = await pending.value;
+        if (disposed) return;
+        mediaCache.set(jobID, values || []);
+        if (disclosure.open) body.replaceChildren(mediaTable(mediaCache.get(jobID)));
+      } catch (error) {
+        if (error.name !== "AbortError" && !disposed && disclosure.open) body.replaceChildren(emptyState("영상 정보 조회 실패"));
+      } finally {
+        mediaRequests.delete(jobID);
+      }
+    },
+  };
 
   async function cancel(job) {
     try {
@@ -259,6 +361,7 @@ export function mount(root, route) {
       el("section", { class: "panel job-summary", id: "job-summary" },
         el("div", { class: "panel-toolbar" }, el("b", { class: "panel-title" }, "작업 정보")),
         el("div", { class: "job-facts" }, ...facts.map(([name, value]) => fact(name, value)))),
+      jobMediaDisclosure(summary.job_id, media),
       confirm ? el("div", { class: "confirm-box", title: "대기 단계 즉시 취소 · 실행 중 단계는 정지·정리 확인 뒤 취소" },
         el("span", {}, "작업 취소 확인"),
         el("div", { class: "detail-actions" },
@@ -294,7 +397,7 @@ export function mount(root, route) {
             workDetail = null;
           }
         }
-        if (!disposed) renderRunDetail(root, workDetail);
+        if (!disposed) renderRunDetail(root, workDetail, media);
         return;
       }
       const job = model.jobs.find((item) => item.job_id === nextRoute.jobID);
@@ -318,6 +421,7 @@ export function mount(root, route) {
     dispose() {
       disposed = true;
       request?.abort();
+      for (const pending of mediaRequests.values()) pending.controller.abort();
     },
   };
 }

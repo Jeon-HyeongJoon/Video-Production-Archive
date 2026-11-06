@@ -3110,6 +3110,30 @@
       "level": "unit"
     },
     {
+      "id": "DSH-030",
+      "design": "job-source-video-information-projection",
+      "statement": "작업의 영상 정보 읽기 모델은 선택한 Job의 영속 StepExecutionSpec에 기록된 원본 영상 관찰값을 원본 자산마다 한 건씩 반환하고 Storage root나 mount path를 포함하지 않아야 한다.",
+      "given": "같은 두 원본 영상의 이름·상대경로·생성 시각·길이·용량·container·video/audio 규격이 여러 Step의 SourceInputs에 중복 저장된 Folder Job이 있다.",
+      "when": "작업 공간이 그 job_id의 영상 정보를 조회한다.",
+      "then": "상대경로 순서의 영상 두 건만 반환되고 이름이 없는 영상은 상대경로의 파일명을 사용하며 관찰된 기술정보는 보존되고 Storage root와 mount path는 반환하지 않는다.",
+      "test_file": "internal/application/archivework/service_test.go",
+      "test_name": "TestArchiveWorkReadsPersistedSourceVideoFactsForOneJob",
+      "status": "implemented",
+      "level": "unit"
+    },
+    {
+      "id": "DSH-031",
+      "design": "job-video-information-disclosure",
+      "statement": "ArchiveRun 하위 작업과 주소 가능한 Job 상세는 영상 정보를 기본으로 만들거나 조회하지 않고 담당자가 해당 작업의 영상 정보 disclosure를 펼칠 때만 그 Job의 영상별 사람 중심 정보와 기술정보를 표시해야 한다.",
+      "given": "원본 생성일·이름·상대경로·길이·용량·container·video/audio 규격이 저장된 두 영상의 하위 Job이 있는 ArchiveRun 상세가 열려 있다.",
+      "when": "담당자가 하위 작업의 영상 정보 disclosure를 펼치고 접은 뒤 다시 펼치며 같은 Job 상세의 영상 정보 disclosure도 펼친다.",
+      "then": "최초 펼침 전에는 영상 API 요청과 영상 행이 없고 펼친 작업의 영상 두 건만 날짜와 이름을 앞에 두어 표시하며 접으면 영상 행을 제거하고 같은 화면의 재펼침은 저장된 응답을 쓰며 Job 상세도 펼칠 때만 조회해 표시한다.",
+      "test_file": "internal/adapter/httpcontrol/handler_test.go",
+      "test_name": "TestWorkspaceLoadsJobVideoInformationOnlyWhenDisclosureOpens",
+      "status": "implemented",
+      "level": "integration"
+    },
+    {
       "id": "APP-009",
       "design": "standalone-media-operation-cli",
       "statement": "영상 파일 처리 기능은 Archive Control·대시보드·Worker 등록·서비스 credential·SQLite 없이 하나의 archive-media CLI가 공통 MediaOperation Port를 직접 호출해 실행할 수 있어야 한다.",

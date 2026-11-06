@@ -48,6 +48,7 @@ type ArchiveWorkspaceReader interface {
 type ArchiveWorkReader interface {
 	Inbox(context.Context) ([]archivework.Summary, error)
 	Detail(context.Context, string) (archivework.View, error)
+	Media(context.Context, string) ([]archivework.VideoInfo, error)
 }
 
 type JobCommander interface {
@@ -157,6 +158,7 @@ func New(configuration Configuration) (*Handler, error) {
 	mux.HandleFunc("GET /api/v1/summaries/{summaryID}/reviews", handler.reviews)
 	mux.HandleFunc("GET /api/v1/jobs", handler.jobs)
 	mux.HandleFunc("GET /api/v1/jobs/{jobID}", handler.job)
+	mux.HandleFunc("GET /api/v1/jobs/{jobID}/media", handler.jobMedia)
 	mux.HandleFunc("GET /api/v1/work", handler.workInbox)
 	mux.HandleFunc("GET /api/v1/work/{workID}", handler.workDetail)
 	if handler.workers != nil {
@@ -347,6 +349,27 @@ func (handler *Handler) job(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 	writeJSON(writer, http.StatusOK, map[string]any{"data": projectJobDetail(job)})
+}
+
+func (handler *Handler) jobMedia(writer http.ResponseWriter, request *http.Request) {
+	if handler.archiveWork == nil {
+		writeError(writer, http.StatusNotFound, "JOB_MEDIA_NOT_FOUND")
+		return
+	}
+	media, err := handler.archiveWork.Media(request.Context(), request.PathValue("jobID"))
+	if errors.Is(err, archivework.ErrJobNotFound) {
+		writeError(writer, http.StatusNotFound, "JOB_MEDIA_NOT_FOUND")
+		return
+	}
+	if err != nil {
+		writeError(writer, http.StatusInternalServerError, "QUERY_FAILED")
+		return
+	}
+	result := make([]jobVideoInfoView, 0, len(media))
+	for _, item := range media {
+		result = append(result, projectJobVideoInfo(item))
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"data": result})
 }
 
 func (handler *Handler) workInbox(writer http.ResponseWriter, request *http.Request) {

@@ -56,18 +56,18 @@
 | 알림 | `NTF-001~002` | 저장 이벤트 replay와 일시 metric 분리, SSE 재연결 |
 | Archivist | `LRH-001~014`, `MCP-001~005`; `AGT-001~015`(planned) | v1 로컬 CLI Archivist 수직 경로. 외부 Provider 계정 Router·폴백·계정 health는 아직 제품 경로에 연결하지 않음 |
 | 장치와 Worker | `DEV-006~013`, `WRK-001~015`, `CFG-008~014`, `CAN-001~005`; `DEV-001~005`(planned) | Worker별 논리 드라이브·Storage, 점진적 폴더 inventory, lease 갱신, durable 완료 조정, typed 오류, 취소 보상, 로컬 media toolchain과 단일 Windows runtime root. 장치 포맷·eject lock은 후속 경계 |
-| Archive Intake | `ORG-001~014`, `MED-005~007`, `RND-004~006`, `QCT-003`, `AUD-004`, `TRN-005~007`, `PIP-007~009`, `APP-002~007`, `ARC-009~014`, `DSH-006~014`, `DSH-016`, `DSH-018~029` | ArchiveRun, 사람의 원본·아카이브·폴더 선택, Worker 검사, HOLD 분류 뒤 동일 실행 재개, 1단계 보관, 별도 2단계 STT, 전사 품질 확인 필요, 날짜·원본 기반 결과명, ArchiveRun 상위 작업과 하위 Job 상세 이동·기존 저장 데이터 복원, Worker·드라이브·Agent 연결 관리, 보관됨·확정됨, ArchiveCatalog |
+| Archive Intake | `ORG-001~014`, `MED-005~007`, `RND-004~006`, `QCT-003`, `AUD-004`, `TRN-005~007`, `PIP-007~009`, `APP-002~007`, `ARC-009~014`, `DSH-006~014`, `DSH-016`, `DSH-018~031` | ArchiveRun, 사람의 원본·아카이브·폴더 선택, Worker 검사, HOLD 분류 뒤 동일 실행 재개, 1단계 보관, 별도 2단계 STT, 전사 품질 확인 필요, 날짜·원본 기반 결과명, ArchiveRun 상위 작업과 하위 Job 상세 이동·기존 저장 데이터 복원·Job별 영상 정보 지연 펼침, Worker·드라이브·Agent 연결 관리, 보관됨·확정됨, ArchiveCatalog |
 | 작업 공간·직접 실행 | `DEV-006`, `APP-001` | Storage를 논리 Volume 작업 공간으로 해석하고 PhysicalDevice를 I/O 충돌 키로 분리, Adapter 없이 Capability 직접 실행 |
-| 아카이브 작업 공간·증적 | `COL-001~003`, `DSH-001~017`, `DSH-019~029`, `CTL-007`, `TST-001`; `OBS-001`(planned) | 사람 직접 실행과 Archivist 도구 호출의 공통 업무 문맥, 구조화된 선택 참조, 예약 차감 Worker 자원 상태, 작업 관리·연결 관리·드라이브 상세와 문제 해결 위치 이동, ArchiveRun과 독립 Job의 진행 중·작업 큐·확인 필요·완료 구분, ArchiveRun 고정 범위·하위 Job projection과 기존 저장 데이터 복원, 점진적 폴더 탐색과 범위 잠금, 사람이 읽는 아카이브 결과명과 실행을 넘어 유지되는 완료 내역, ArchiveCatalog 기록 시각, 새 문제 알림과 낡은 화면 잠금, 조작 화면과 golden 증적. 모든 Capability의 공통 운영 Evidence Sink 연결은 후속 경계 |
+| 아카이브 작업 공간·증적 | `COL-001~003`, `DSH-001~017`, `DSH-019~031`, `CTL-007`, `TST-001`; `OBS-001`(planned) | 사람 직접 실행과 Archivist 도구 호출의 공통 업무 문맥, 구조화된 선택 참조, 예약 차감 Worker 자원 상태, 작업 관리·연결 관리·드라이브 상세와 문제 해결 위치 이동, ArchiveRun과 독립 Job의 진행 중·작업 큐·확인 필요·완료 구분, ArchiveRun 고정 범위·하위 Job projection과 기존 저장 데이터 복원, Job별 영속 영상 기술정보의 지연 펼침, 점진적 폴더 탐색과 범위 잠금, 사람이 읽는 아카이브 결과명과 실행을 넘어 유지되는 완료 내역, ArchiveCatalog 기록 시각, 새 문제 알림과 낡은 화면 잠금, 조작 화면과 golden 증적. 모든 Capability의 공통 운영 Evidence Sink 연결은 후속 경계 |
 | Archivist Host | `LRH-001~014`, `MCP-001~005`, `CTL-005~006` | Host 인증·Turn lease·재개·Tool Call·ActionCard, 단계 완료 SYSTEM 재호출·업무 문맥, 정제된 진행 항목, 선택 범위의 HOLD 검토·단일 분류 MCP 경계 |
 
 실제 DB transaction과 공유 연결 수명주기, HTTP 재연결은 각각 `PER-001~002`, `NTF-002`의 integration test로 검증한다. sidecar 복원과 게시 뒤 결과 보고 전 중단 조정은 아직 제품 수직 경로에 연결되지 않아 `ARC-007`, `EXE-003`을 planned로 유지한다. Windows junction 경계는 `ARC-008`의 전용 Windows acceptance test로 검증한다. 장치 lock·eject·format 경계는 `DEV-001~005`로 계획 상태를 유지한다.
 
 ## 5. 현재 기준선
 
-- 전체 요구사항: 263개
-- 구현됨: 226개, 주석 테스트 226개와 1:1 연결
-- 구현된 integration 테스트: `ARC-006`, `ARC-013`, `PER-001~002`, `NTF-002`, `DSH-001~002`, `DSH-004~007`, `DSH-009~014`, `DSH-016~026`, `DEV-006~008`, `DEV-010`, `DEV-013`, `APP-001~004`, `APP-006`, `APP-008`, `TST-001`, `MED-002`, `MED-004`, `MED-006~007`, `INT-001`, `INT-003~004`, `RND-002`, `RND-005~006`, `QCT-002`, `CAT-002~003`, `AUD-002`, `AUD-004`, `TRN-002`, `TRN-004`, `TRN-006`, `SUB-002`, `SUM-003`, `REV-002`, `CFG-006~011`, `CTL-001~007`, `WRK-005~006`, `WRK-008~015`, `LRH-001`, `LRH-012~013`, `MCP-001`, `MCP-003~005`, `ORG-001`, `ORG-008~009`, `ARC-011`, `COL-001`, `COL-003`, `DSP-003`, `CAN-001~005`
+- 전체 요구사항: 265개
+- 구현됨: 228개, 주석 테스트 228개와 1:1 연결
+- 구현된 integration 테스트: `ARC-006`, `ARC-013`, `PER-001~002`, `NTF-002`, `DSH-001~002`, `DSH-004~007`, `DSH-009~014`, `DSH-016~026`, `DSH-031`, `DEV-006~008`, `DEV-010`, `DEV-013`, `APP-001~004`, `APP-006`, `APP-008`, `TST-001`, `MED-002`, `MED-004`, `MED-006~007`, `INT-001`, `INT-003~004`, `RND-002`, `RND-005~006`, `QCT-002`, `CAT-002~003`, `AUD-002`, `AUD-004`, `TRN-002`, `TRN-004`, `TRN-006`, `SUB-002`, `SUM-003`, `REV-002`, `CFG-006~011`, `CTL-001~007`, `WRK-005~006`, `WRK-008~015`, `LRH-001`, `LRH-012~013`, `MCP-001`, `MCP-003~005`, `ORG-001`, `ORG-008~009`, `ARC-011`, `COL-001`, `COL-003`, `DSP-003`, `CAN-001~005`
 - 구현된 실장비 acceptance 테스트: `ARC-008`, `ARC-014`, `MED-003`, `RND-003`, `AUD-003`, `LRH-010~011`, `APP-005`, `APP-007`, `CFG-014`
 - 계획됨: 37개
 - 계획된 unit 테스트: `DEV-001~004`, `AGT-001~015`
@@ -86,7 +86,7 @@ go test ./...
 현재 정상 출력:
 
 ```text
-traceability ok: 263 requirements (226 implemented, 37 planned), 226 one-to-one tests
+traceability ok: 265 requirements (228 implemented, 37 planned), 228 one-to-one tests
 ```
 
 ## 7. 새 요구사항 추가 절차

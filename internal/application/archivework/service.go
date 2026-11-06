@@ -7,6 +7,7 @@ package archivework
 import (
 	"context"
 	"errors"
+	"path"
 	"sort"
 	"strings"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"videoarchive/internal/application/archiveworkspace"
 	"videoarchive/internal/core/archiverun"
 	"videoarchive/internal/core/command"
+	"videoarchive/internal/core/execution"
 	"videoarchive/internal/core/job"
 	"videoarchive/internal/core/vocabulary"
 	"videoarchive/internal/core/workflow"
@@ -23,6 +25,7 @@ import (
 var (
 	ErrInvalidService = errors.New("archive work service is invalid")
 	ErrWorkNotFound   = errors.New("archive work was not found")
+	ErrJobNotFound    = errors.New("archive work job was not found")
 )
 
 type Kind string
@@ -82,6 +85,35 @@ type View struct {
 	CompletedWork []archiveintakeworkspace.CompletedWorkView
 }
 
+// VideoInfo is the persisted, observed source-video information for one Job.
+// It deliberately contains no Storage root or mount path.
+type VideoInfo struct {
+	OriginalAssetID      string
+	OriginalName         string
+	RelativePath         string
+	Checksum             string
+	SourceCreatedAt      time.Time
+	DurationMillis       int64
+	SizeBytes            int64
+	Container            string
+	BitRateBPS           int64
+	VideoCodec           string
+	VideoProfile         string
+	Width                int
+	Height               int
+	FrameRateNumerator   int64
+	FrameRateDenominator int64
+	VideoPixelFormat     string
+	VideoBitRateBPS      int64
+	AudioCodec           string
+	AudioProfile         string
+	AudioBitRateBPS      int64
+	AudioSampleRateHz    int
+	AudioChannels        int
+	AudioChannelLayout   string
+	ProfileReference     string
+}
+
 type SnapshotReader interface {
 	ListSnapshots() ([]command.Snapshot, error)
 }
@@ -131,6 +163,83 @@ func (service *Service) Detail(ctx context.Context, workID string) (View, error)
 		}
 	}
 	return View{}, ErrWorkNotFound
+}
+
+// Media returns video facts only when a caller asks for one addressable Job.
+// The ordinary work list and detail projections therefore stay small even
+// when an ArchiveRun contains many source videos.
+func (service *Service) Media(_ context.Context, jobID string) ([]VideoInfo, error) {
+	jobID = strings.TrimSpace(jobID)
+	if jobID == "" {
+		return nil, ErrJobNotFound
+	}
+	snapshots, err := service.ledger.ListSnapshots()
+	if err != nil {
+		return nil, err
+	}
+	for _, snapshot := range snapshots {
+		state, decodeErr := job.Decode(snapshot)
+		if decodeErr != nil || state.ID != jobID {
+			continue
+		}
+		return mediaFromJob(state), nil
+	}
+	return nil, ErrJobNotFound
+}
+
+func mediaFromJob(state job.State) []VideoInfo {
+	sources := make([]execution.InputReference, 0)
+	for _, step := range state.Steps {
+		if step.ExecutionSpec != nil {
+			sources = append(sources, step.ExecutionSpec.Parameters.SourceInputs...)
+		}
+	}
+	if len(sources) == 0 {
+		for _, step := range state.Steps {
+			if step.ExecutionSpec == nil {
+				continue
+			}
+			for _, input := range step.ExecutionSpec.Inputs {
+				if input.VideoCodec != "" || input.Width > 0 || input.Height > 0 || input.DurationMillis > 0 || input.Kind == execution.OutputRendition {
+					sources = append(sources, input)
+				}
+			}
+		}
+	}
+	seen := make(map[string]bool, len(sources))
+	result := make([]VideoInfo, 0, len(sources))
+	for _, input := range sources {
+		identity := strings.TrimSpace(input.OriginalAssetID)
+		if identity == "" {
+			identity = strings.TrimSpace(input.RelativePath)
+		}
+		if identity == "" || seen[identity] {
+			continue
+		}
+		seen[identity] = true
+		name := strings.TrimSpace(input.OriginalName)
+		if name == "" {
+			name = path.Base(input.RelativePath)
+		}
+		result = append(result, VideoInfo{
+			OriginalAssetID: input.OriginalAssetID, OriginalName: name, RelativePath: input.RelativePath,
+			Checksum: input.Checksum, SourceCreatedAt: input.SourceCreatedAt, DurationMillis: input.DurationMillis,
+			SizeBytes: input.SourceSizeBytes, Container: input.SourceContainer, BitRateBPS: input.SourceBitRateBPS,
+			VideoCodec: input.VideoCodec, VideoProfile: input.VideoProfile, Width: input.Width, Height: input.Height,
+			FrameRateNumerator: input.FrameRateNumerator, FrameRateDenominator: input.FrameRateDenominator,
+			VideoPixelFormat: input.VideoPixelFormat, VideoBitRateBPS: input.VideoBitRateBPS,
+			AudioCodec: input.AudioCodec, AudioProfile: input.AudioProfile, AudioBitRateBPS: input.AudioBitRateBPS,
+			AudioSampleRateHz: input.AudioSampleRateHz, AudioChannels: input.AudioChannels,
+			AudioChannelLayout: input.AudioChannelLayout, ProfileReference: input.ProfileReference,
+		})
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].RelativePath != result[j].RelativePath {
+			return result[i].RelativePath < result[j].RelativePath
+		}
+		return result[i].OriginalAssetID < result[j].OriginalAssetID
+	})
+	return result
 }
 
 func (service *Service) project(ctx context.Context) ([]View, error) {
