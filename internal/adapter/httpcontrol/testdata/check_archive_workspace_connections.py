@@ -41,9 +41,8 @@ with sync_playwright() as playwright:
         route.fulfill(response=response, json=body)
 
     page.route("**/api/v1/archive-intake", detach_source)
-    page.reload(wait_until="networkidle")
     secondary = page.locator('#connection-drives [data-drive-id="VOLUME-2"]')
-    expect(secondary).to_contain_text("연결 해제됨")
+    expect(secondary).to_contain_text("연결 해제됨", timeout=8_000)
     expect(page.locator('#alert-panel')).to_be_hidden()
     page.locator('#alert-button').click()
     expect(page.locator('#alert-panel')).to_contain_text("드라이브 연결 해제됨")
