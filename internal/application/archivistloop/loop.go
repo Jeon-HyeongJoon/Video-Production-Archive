@@ -151,7 +151,7 @@ func (loop *Loop) Run(ctx context.Context, runtime RuntimeContext, prompt string
 	if err != nil {
 		return Result{}, err
 	}
-	definitions, mapping := selectTools(available)
+	definitions, mapping := SelectTools(available)
 	if len(definitions) == 0 {
 		return Result{}, ErrInvalidConfiguration
 	}
@@ -188,24 +188,24 @@ func (loop *Loop) Run(ctx context.Context, runtime RuntimeContext, prompt string
 			if !ok || strings.TrimSpace(call.CallID) == "" {
 				return Result{}, ErrInvalidModelResponse
 			}
-			canonical, err := canonicalObject(call.Arguments)
+			canonical, err := CanonicalObject(call.Arguments)
 			if err != nil {
 				return Result{}, ErrInvalidModelResponse
 			}
 			callKey := response.RequestID + "\x00" + call.CallID
 			output, exists := completedCalls[callKey]
 			if !exists {
-				if err := loop.progress(toolProgress(definition.Name)); err != nil {
+				if err := loop.progress(ToolProgress(definition.Name)); err != nil {
 					return Result{}, err
 				}
-				envelope := toolEnvelope(runtime, call, definition.Name, canonical)
+				envelope := NewToolEnvelope("archive-archivist", runtime, call.CallID, definition.Name, canonical)
 				toolResult, err := loop.toolClient.Call(ctx, envelope)
 				if err != nil {
 					return Result{}, err
 				}
-				output = normalizeToolOutput(toolResult)
+				output = NormalizeToolOutput(toolResult)
 				completedCalls[callKey] = output
-				collectResultIDs(output, resultIDs)
+				CollectResultIDs(output, resultIDs)
 			}
 			input = append(input, map[string]any{
 				"type": "function_call_output", "call_id": call.CallID, "output": string(output),
@@ -215,19 +215,23 @@ func (loop *Loop) Run(ctx context.Context, runtime RuntimeContext, prompt string
 	return Result{}, ErrExecutionLimit
 }
 
-func toolEnvelope(runtime RuntimeContext, call ToolCall, toolName string, input json.RawMessage) ToolEnvelope {
+// NewToolEnvelope derives the Tool Call, Command and idempotency IDs from the
+// turn, the model adapter's call ID, the tool and its canonical input, so a
+// replayed call reaches Control with the same identity. The namespace names
+// the model adapter that issued the call.
+func NewToolEnvelope(namespace string, runtime RuntimeContext, callID, toolName string, input json.RawMessage) ToolEnvelope {
 	digest := sha256.Sum256(input)
-	identity := sha256.Sum256([]byte(runtime.SessionID + "\x00" + runtime.TurnID + "\x00" + call.CallID + "\x00" + toolName + "\x00" + hex.EncodeToString(digest[:])))
+	identity := sha256.Sum256([]byte(runtime.SessionID + "\x00" + runtime.TurnID + "\x00" + callID + "\x00" + toolName + "\x00" + hex.EncodeToString(digest[:])))
 	short := hex.EncodeToString(identity[:16])
 	return ToolEnvelope{
 		SessionID: runtime.SessionID, TurnID: runtime.TurnID, FencingToken: runtime.FencingToken,
 		ToolCallID: "CALL-" + short, CommandID: "COMMAND-" + short,
-		IdempotencyKey: "archive-archivist:" + short, InputDigest: hex.EncodeToString(digest[:]),
+		IdempotencyKey: namespace + ":" + short, InputDigest: hex.EncodeToString(digest[:]),
 		Tool: toolName, Input: input,
 	}
 }
 
-func canonicalObject(source string) (json.RawMessage, error) {
+func CanonicalObject(source string) (json.RawMessage, error) {
 	decoder := json.NewDecoder(strings.NewReader(source))
 	decoder.UseNumber()
 	var value map[string]any
@@ -241,7 +245,7 @@ func canonicalObject(source string) (json.RawMessage, error) {
 	return json.Marshal(value)
 }
 
-func normalizeToolOutput(result ToolResult) json.RawMessage {
+func NormalizeToolOutput(result ToolResult) json.RawMessage {
 	var body any
 	if len(result.Body) == 0 || json.Unmarshal(result.Body, &body) != nil {
 		body = map[string]any{"error": "invalid tool response"}
@@ -253,7 +257,7 @@ func normalizeToolOutput(result ToolResult) json.RawMessage {
 	return encoded
 }
 
-func collectResultIDs(payload []byte, target map[string]bool) {
+func CollectResultIDs(payload []byte, target map[string]bool) {
 	var value any
 	if json.Unmarshal(payload, &value) != nil {
 		return
@@ -283,7 +287,7 @@ func validResultID(value string) bool {
 	return value != "" && len(value) <= 256 && !strings.ContainsAny(value, "\x00\r\n/\\")
 }
 
-func toolProgress(name string) string {
+func ToolProgress(name string) string {
 	summaries := map[string]string{
 		"archive.jobs.get.v1": "작업 상태 확인", "archive.assets.search.v1": "아카이브 자료 조회",
 		"archive.jobs.create.v1": "작업 요청", "archive.intake.selection.get.v1": "선택 범위 확인",
@@ -297,7 +301,7 @@ func toolProgress(name string) string {
 	return "Archive 도구 실행"
 }
 
-func selectTools(available []AvailableTool) ([]ToolDefinition, map[string]ToolDefinition) {
+func SelectTools(available []AvailableTool) ([]ToolDefinition, map[string]ToolDefinition) {
 	known := knownTools()
 	definitions := make([]ToolDefinition, 0, len(available))
 	mapping := make(map[string]ToolDefinition)

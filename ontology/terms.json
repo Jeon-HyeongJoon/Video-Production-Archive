@@ -2061,6 +2061,41 @@
       "decided": "2026-10-27"
     },
     {
+      "id": "native-cli-thread",
+      "layer": "product",
+      "kind": "value",
+      "name": {
+        "ko": "네이티브 CLI 스레드",
+        "en": "Native CLI Thread"
+      },
+      "code_name": "NativeCLIThread",
+      "definition": "ArchivistSession에 대응해 Codex 같은 로컬 CLI가 process 경계 뒤에도 대화 문맥을 재개하는 영속 thread reference.",
+      "rules": [
+        "Control의 ArchivistSession·Turn identity나 Command·Tool Call 멱등성 원장을 대신하지 않는다.",
+        "Archivist Host의 해당 CLI 계정 전용 저장소에 reference만 두고 prompt, raw terminal, reasoning과 credential을 mapping에 저장하지 않는다.",
+        "다음 ArchivistTurn은 같은 reference를 공식 native resume protocol로 연다."
+      ],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "archivist-session"
+        },
+        {
+          "type": "refers-to",
+          "target": "runtime-backend"
+        }
+      ],
+      "sources": [
+        "docs/design/11-archivist-host.md §3, §6",
+        "requirements LRH-018"
+      ],
+      "decided": "2026-11-08"
+    },
+    {
       "id": "runtime-event",
       "layer": "product",
       "kind": "record",

@@ -61,6 +61,8 @@ Archivist Tool Call
 
 같은 실행 파일의 `local` Provider는 Archivist Host와 같은 PC의 인증 없는 loopback OpenAI 호환 Chat Completions endpoint만 연다. 별도 Provider credential·Account Router·예산·자동 fallback은 두지 않으며, model은 function tool call을 지원해야 한다. Host boot 설정은 `chatgpt`와 `local`을 서로 다른 CLI ID와 고정 인수로 동시에 등록할 수 있다. 두 경로 모두 같은 Archivist Loop 상한과 MCP allowlist·fencing·멱등 receipt를 사용한다. `AGT-021`, `LRH-016~017`
 
+Windows의 로컬 Codex 경로는 로그인된 Codex CLI와 같은 Windows 사용자 계정에서 `archive-codex`를 실행하고 Codex app-server의 영속 thread를 재개한다. Archive는 다른 사용자 profile의 Codex auth 파일을 복사하거나 Control DB에 token을 저장하지 않는다. app-server에는 Archive stdio MCP만 주입하고 범용 shell·파일·browser·connector·plugin·skill discovery 도구는 비활성화한다. 공개 agent message와 Archive Tool Call 상태만 정제된 Turn 항목으로 전송하며 reasoning, raw stderr, command output과 실제 path는 폐기한다. `LRH-018`, `MCP-006`
+
 v1 기본 경로는 특정 PC의 Archivist Host가 감독하는 CLI다. Host는 Archivist가 아니며 CLI process/PTY와 resume reference만 소유한다. 전체 Orca 앱은 필수 의존성이 아니고 Embedded Core backend를 기본으로 사용한다. Orca CLI 연동은 필요할 때만 선택형 backend로 추가한다. `LRH-001~009`
 
 아래 §3~5의 외부 Provider 계정 저장·Router·폴백은 Core prototype만 있고 Archive Control runtime과 영속 다계정 Router에 연결되지 않았다. 따라서 `AGT-001~015`는 planned 계약이다. 반면 Host 로컬의 단일 ChatGPT 인증 Profile·직접 Responses 도구 루프와 credential 없는 loopback 자체 LLM Adapter는 `AGT-016~021`의 구현 경계다. 이 두 경로는 다계정 `ProviderAccount`가 아니며 자동 fallback이나 budget routing을 제공하지 않는다. 로컬 CLI Archivist의 Session·Turn·Tool Call 경계는 `LRH-*`, `MCP-*`가 소유한다.

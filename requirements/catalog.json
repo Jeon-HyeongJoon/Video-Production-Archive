@@ -3300,6 +3300,30 @@
       "test_name": "",
       "status": "planned",
       "level": "acceptance"
+    },
+    {
+      "id": "LRH-018",
+      "design": "codex-app-server-native-thread-adapter",
+      "statement": "Codex App Server Adapter는 같은 ArchivistSession을 영속 native CLI thread에 연결해 process 경계 뒤 재개하고 공개 Agent message와 Archive Tool Call만 정제된 Host 진행·최종 응답으로 변환해야 한다.",
+      "given": "두 ArchivistTurn, process마다 새로 시작되는 Codex app-server fixture, Session 전용 상태 디렉터리와 reasoning·stderr·실제 경로를 포함한 비공개 fixture event가 있다.",
+      "when": "같은 ArchivistSession의 두 Turn을 차례로 실행한다.",
+      "then": "첫 process는 thread를 만들고 둘째는 같은 thread를 resume하며 공개 commentary·Archive Tool 진행·최종 응답만 Host 계약으로 나오고 prompt·reasoning·stderr·실제 경로는 진행 출력과 native thread mapping에 남지 않는다.",
+      "test_file": "internal/adapter/codexcli/appserver_test.go",
+      "test_name": "TestCodexAppServerResumesNativeThreadAndPublishesOnlySanitizedTurnEvents",
+      "status": "implemented",
+      "level": "integration"
+    },
+    {
+      "id": "MCP-006",
+      "design": "codex-archive-stdio-mcp-bridge",
+      "statement": "Codex용 stdio MCP Bridge는 Control 광고와 로컬 schema registry가 함께 허용한 Archive 업무 도구만 노출하고 현재 Turn 상관관계와 호출 상한을 보존해 Host loopback MCP로 전달해야 한다.",
+      "given": "허용된 Archive 조회 도구와 범용 shell 도구를 함께 광고하는 Control, 현재 Session·Turn·fencing 및 반복된 stdio 도구 호출이 있다.",
+      "when": "Codex가 도구 목록을 조회하고 허용 도구와 미등록 도구를 호출한 뒤 설정 상한을 넘겨 다시 호출한다.",
+      "then": "목록에는 Archive 도구만 있고 첫 허용 호출만 결정적 Tool Call·Command·멱등·digest와 현재 상관관계로 전달되며 미등록 호출과 상한 초과 호출은 Control에 전달되지 않는다.",
+      "test_file": "internal/adapter/codexcli/mcp_test.go",
+      "test_name": "TestCodexMCPBridgeExposesOnlyArchiveToolsAndPreservesTurnIdentity",
+      "status": "implemented",
+      "level": "integration"
     }
   ]
 }
