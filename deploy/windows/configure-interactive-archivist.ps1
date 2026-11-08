@@ -95,6 +95,10 @@ if ([string]::IsNullOrWhiteSpace($CodexExecutable)) {
     $CodexExecutable = $candidate.FullName
 }
 $codex = Assert-ArchiveRootFile -RuntimeRoot $resolvedRoot -Path $CodexExecutable -Label "Codex executable"
+foreach ($companion in @("codex-code-mode-host.exe", "codex-exec-server.exe")) {
+    Assert-ArchiveRootFile -RuntimeRoot $resolvedRoot `
+        -Path (Join-Path (Split-Path -Parent $codex) $companion) -Label "Codex companion executable $companion" | Out-Null
+}
 $probe = Invoke-ArchiveCodexLoginProbe -User $user -Executable $codex -WorkingDirectory $resolvedRoot
 
 if ($Mode -eq "Probe") {

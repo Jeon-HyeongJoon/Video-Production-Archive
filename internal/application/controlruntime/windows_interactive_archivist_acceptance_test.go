@@ -19,7 +19,12 @@ func TestWindowsCodexHostRunsInAuthenticatedInteractiveTerminalSession(t *testin
 	root := requireWindowsRuntimePath(t, "ARCHIVE_WINDOWS_RUNTIME_ROOT")
 	codex := requireWindowsRuntimePath(t, "ARCHIVE_WINDOWS_CODEX_EXECUTABLE")
 	script := requireWindowsRuntimePath(t, "ARCHIVE_WINDOWS_INTERACTIVE_ARCHIVIST_SCRIPT")
-	for _, path := range []string{codex, script} {
+	for _, path := range []string{
+		codex,
+		filepath.Join(filepath.Dir(codex), "codex-code-mode-host.exe"),
+		filepath.Join(filepath.Dir(codex), "codex-exec-server.exe"),
+		script,
+	} {
 		if info, err := os.Stat(path); err != nil || !info.Mode().IsRegular() {
 			t.Fatalf("required acceptance file is unavailable: %s: %v", path, err)
 		}

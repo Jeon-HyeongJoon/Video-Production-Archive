@@ -1750,7 +1750,7 @@
         "Archivist 역할이나 Worker가 아니다.",
         "업무 상태·승인 정책·Command 결과를 소유하지 않는다.",
         "inbound 관리 포트를 열지 않고 Control로 outbound 연결한다.",
-        "Windows 구독 로그인 CLI는 현재 console 사용자의 로그인 probe를 통과한 같은 SID의 대화형 Session에서 실행하고 SYSTEM·서비스·SSH batch logon으로 대신하지 않는다.",
+        "Windows 구독 로그인 Codex는 본체·code-mode host·exec server의 같은 버전 실행 번들을 사용하고 현재 console 사용자의 로그인 probe를 통과한 같은 SID의 대화형 Session에서 실행하며 SYSTEM·서비스·SSH batch logon으로 대신하지 않는다.",
         "아카이브 작업 공간 화면 표기는 'Agent Host'로 한다."
       ],
       "forbidden": {
