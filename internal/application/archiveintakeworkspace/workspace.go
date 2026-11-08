@@ -113,6 +113,9 @@ type CompletedWorkView struct {
 
 type DriveView struct {
 	WorkspaceDriveID           string
+	ConnectionState            vocabulary.VolumeConnectionState
+	ConnectionObservedAt       time.Time
+	ConnectionWorkerID         string
 	ArchiveRunID               string
 	ArchiveRunRevision         uint64
 	CandidateRevision          uint64

@@ -98,11 +98,15 @@ Provider, Worker registry, Archivist Host, 인증, Storage와 파괴적 기능 �
 - 사람과 Archivist가 만든 Command 결과를 같은 작업 상세에 반영한다.
 - 다음 ArchivistTurn 문맥은 현재 Job·Step 리비전과 완료 Tool Call receipt를 다시 읽어 구성한다.
 - 로그 원문은 파일에 회전·압축하고 아카이브 작업 공간에는 정제된 tail과 참조만 전달한다.
-- 현재 Notification Feed에는 아카이브 실행 event 발행자가 없다. 아카이브 작업 공간은 화면이 보이는 동안 5초마다 Worker·드라이브·Host·Archivist·Job 읽기 모델을 다시 읽는다. 상시 연결 표시나 마지막 갱신 시각은 두지 않고, 갱신이 세 번 연속 실패하면 상단 막대 아래에 연결 끊김과 마지막 갱신 시각을 한 줄로 보이며 회복될 때까지 판정·실행·취소 Command를 잠근다. 펼친 보류 판정과 선택 상태는 다시 읽어도 유지한다. `DSH-021`
+- 현재 Notification Feed에는 아카이브 실행 event 발행자가 없다. 아카이브 작업 공간은 화면이 보이는 동안 5초마다 Worker·드라이브·Host·Archivist·Job 읽기 모델을 다시 읽는다. 드라이브 목록·상세·알림·실행 gate는 각기 상태를 추측하지 않고 드라이브 projection의 같은 `VolumeConnectionState`와 관측 시각을 사용한다. API 갱신 자체가 세 번 연속 실패하면 상단 막대 아래에 연결 끊김과 마지막 갱신 시각을 한 줄로 보이며 회복될 때까지 판정·실행·취소 Command를 잠근다. 펼친 보류 판정과 선택 상태는 다시 읽어도 유지한다. `DSH-021`, `DSH-026`
 - route가 바뀌면 이전 화면의 진행 중 fetch를 취소하고 dispose된 view의 늦은 응답은 DOM을 갱신하지 않는다. 같은 상태 변경 endpoint는 첫 요청이 끝날 때까지 다시 제출하지 않아 빠른 이중 클릭이 새 idempotency key의 중복 Command를 만들지 않는다.
 - Archivist Host 상태와 ArchivistTurn event는 저장 cursor 이후 replay하며 raw PTY output을 업무 상태로 취급하지 않는다.
 
 ## 7. 화면 계약
+
+연결 관리의 논리 드라이브 행은 현재 연결·Worker·단계·아카이브를 함께 보인다. `CONNECTED`는 연결됨, online Worker의 현재 관측에서 빠진 영속 드라이브는 연결 해제됨, Worker 자체가 offline이면 확인 불가로 표시한다. 연결 해제는 알림과 주소 가능한 드라이브 상세에도 같은 값으로 나타나고 새 실행 준비를 잠그지만 완료 실행·Package·Catalog 이력은 지우지 않는다. `DEV-010`, `DSH-010`, `DSH-026`
+
+상태 신호에서 `DISCONNECTED`는 실패, `CONNECTED`는 완료, 연결을 관측할 수 없는 `UNKNOWN`은 중립이다. 드라이브의 아카이브 진행 상태와 연결 상태는 서로 덮어쓰지 않고 별도 항목으로 함께 표시한다.
 
 메뉴 분리와 기능 수준별 화면 재구성은 [14. 아카이브 작업 공간 UX·UI 설계 기준](14-archive-workspace-ux.md)의 확정 결정을 따른다. 화면 틀은 상단 막대, 왼쪽 사이드바, 본문, 오른쪽 Archivist 대화 칸의 네 자리다(결정 9-2, 결정 10~17). 사이드바 메뉴는 작업 관리·연결 관리의 두 route이고 작업 관리가 첫 메뉴이자 기본 화면이다. 메뉴에는 개수를 붙이지 않는다. 메뉴 아래에는 미완료 관리 작업을 이름·상태만 보이는 카드 하나씩 표시하는 스크롤 가능한 워크스페이스 목록을 두고 작업 ID·드라이브·Worker는 카드의 마우스 오버로 보인다. 완료 관리 작업은 이 목록에서 제거하고 작업 관리의 완료 목록과 영속 상세에만 유지한다. 아카이브 접수는 선택한 폴더 수와 무관하게 ArchiveRun 카드 하나이며 검사·Folder·STT Job은 그 실행 상세의 하위 작업이다. ArchiveRun을 참조하지 않는 Template Job만 독립 카드로 같은 `job_id` 상세에 이동한다. 이 카드는 새 aggregate를 만들지 않는다. 상단 막대는 지금 위치와 검색 칸에 이어 설정·모든 대상의 실패와 사람 대기를 하나씩 보여 주는 알림 버튼을 우상단에 두고, 테마 전환은 설정 화면 안에 둔다. 작업 관리는 최상단에서 `새 작업 생성`으로 등록된 Template·이름·제어 모드를 기존 Job Command Bus에 제출하고 성공한 `job_id` 상세로 이동할 수 있으며, 이어서 실행 중 ArchiveRun과 독립 Job, 자원 대기·대기열 관리 작업의 작업 큐, 실패·사람 입력 대기 관리 작업의 확인 필요 목록, 처음에는 접힌 끝난 관리 작업의 완료 목록을 둔다. 확인 필요와 완료 목록은 각각 접고 펼칠 수 있게 둔다. 작업 행은 이름·상태·최근 시각을 보이고 진행률은 실행 중 행에만, Worker와 ID는 마우스 오버로 둔다. 작업 큐는 별도 원장이 아니라 저장된 ArchiveRun·Job·Step의 projection이다. ArchiveRun 상세는 그 실행 범위의 확인 필요 폴더를 맨 위에 두어 해결할 드라이브 상세로 이동시키고, 원본→아카이브·폴더 수·영상 수를 보이며 identity·Worker·하위 작업 수·결과 수는 마우스 오버로, 고정 폴더 범위는 처음에 접힌 목록으로 두고 하위 Job·ArchivePackage 완료 결과를 결합한다. 하위 Job은 주소 가능한 Job 상세와 취소 경계를 유지한다. 완료 Job의 `아카이브 결과` 조작과 드라이브 완료 행은 같은 ArchiveRun 상세의 정확한 Package 결과를 선택하며 Storage root가 아닌 검증된 패키지 상대경로를 보여준다. 연결 관리는 Worker PC·논리 드라이브·Agent와 Agent Host를 한 화면의 독립 영역으로 모으고 Worker 자원·Storage 접근, 드라이브의 Worker·단계·아카이브, Agent의 Host·CLI·제어 모드를 보인다. 드라이브 행은 주소 가능한 드라이브 상세로 이동한다. 검색은 메뉴가 아니라 상단 막대의 검색 칸에서 연 결과 화면이다. Archivist는 모든 route의 오른쪽에 늘 열린 대화 칸으로 두고 화면에는 Agent로 표기한다. 고정 fixture를 실제 Chromium viewport로 렌더링한 운영체제별 PNG golden과 폭별 배치 검사로 검증한다. `DSH-004`, `DSH-007`, `DSH-009`, `DSH-014`, `DSH-016`, `DSH-019`, `DSH-024~026`, `DSH-028`, `DSH-032`
 

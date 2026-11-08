@@ -315,6 +315,12 @@ func (service *Service) Projection(ctx context.Context) ([]DriveView, error) {
 	}
 	result := make([]DriveView, 0, len(drives))
 	for _, state := range drives {
+		if !state.view.ConnectionState.Valid() {
+			state.view.ConnectionState = vocabulary.VolumeUnknown
+		}
+		if state.view.ConnectionWorkerID == "" {
+			state.view.ConnectionWorkerID = state.view.WorkerID
+		}
 		state.view.CompletedWork = append(state.view.CompletedWork, completedByDrive[state.view.WorkspaceDriveID]...)
 		discoveredFolderNames := make([]string, 0, len(state.discoveredFolders))
 		for folder := range state.discoveredFolders {
@@ -526,6 +532,7 @@ func (service *Service) mergeInventory(ctx context.Context, drives map[string]*p
 		}
 	}
 	statusByWorker := make(map[string]worker.Status, len(statuses))
+	candidateByVolume := make(map[string]archiveintake.Candidate, len(candidates))
 	observations := make(map[string]worker.StorageObservation)
 	attachedVolumes := make(map[string]worker.AttachedVolumeObservation)
 	for _, status := range statuses {
@@ -538,6 +545,7 @@ func (service *Service) mergeInventory(ctx context.Context, drives map[string]*p
 		}
 	}
 	for _, candidate := range candidates {
+		candidateByVolume[candidate.VolumeID] = candidate
 		state := drives[candidate.VolumeID]
 		if state == nil {
 			state = &projectionDriveState{view: DriveView{
@@ -588,19 +596,47 @@ func (service *Service) mergeInventory(ctx context.Context, drives map[string]*p
 		}
 	}
 	for _, state := range drives {
-		status, found := statusByWorker[state.view.WorkerID]
-		if !found {
-			continue
+		connectionWorkerID := state.view.WorkerID
+		candidate, hasCandidate := candidateByVolume[state.view.WorkspaceDriveID]
+		if hasCandidate {
+			connectionWorkerID = candidate.WorkerID
+		}
+		state.view.ConnectionWorkerID = connectionWorkerID
+		state.view.ConnectionState = vocabulary.VolumeUnknown
+		status, found := statusByWorker[connectionWorkerID]
+		workerLive := found && liveWorkerState(status.State)
+		if found {
+			state.view.ConnectionObservedAt = status.Metrics.ObservedAt
+			if state.view.ConnectionObservedAt.IsZero() {
+				state.view.ConnectionObservedAt = status.LastHeartbeat
+			}
+		}
+		source, sourceObserved := attachedVolumes[connectionWorkerID+"\x00"+state.view.SourceStorageID]
+		sourceMatches := sourceObserved && source.VolumeID == state.view.WorkspaceDriveID
+		if workerLive {
+			if sourceMatches && (!hasCandidate || candidate.Connected) {
+				state.view.ConnectionState = vocabulary.VolumeConnected
+			} else {
+				state.view.ConnectionState = vocabulary.VolumeDisconnected
+			}
 		}
 		seenStorageIDs := make(map[string]bool)
-		if source, observed := attachedVolumes[state.view.WorkerID+"\x00"+state.view.SourceStorageID]; observed {
+		if sourceObserved {
 			state.view.StorageCandidates = append(state.view.StorageCandidates, StorageView{
 				StorageID: source.StorageID, Role: vocabulary.StorageSourceMedia,
-				WorkspaceDriveID: source.VolumeID, AccessKind: vocabulary.StorageAccessAttachedVolume, Accessible: true,
-				Model: source.Model, Label: source.Label, FileSystem: source.FileSystem,
+				WorkspaceDriveID: source.VolumeID, AccessKind: vocabulary.StorageAccessAttachedVolume,
+				Accessible: state.view.ConnectionState == vocabulary.VolumeConnected,
+				Model:      source.Model, Label: source.Label, FileSystem: source.FileSystem,
 				CapacityBytes: source.CapacityBytes, FreeBytes: source.FreeBytes,
 			})
 			seenStorageIDs[source.StorageID] = true
+		} else if state.view.SourceStorageID != "" {
+			state.view.StorageCandidates = append(state.view.StorageCandidates, StorageView{
+				StorageID: state.view.SourceStorageID, Role: vocabulary.StorageSourceMedia,
+				WorkspaceDriveID: state.view.WorkspaceDriveID, AccessKind: vocabulary.StorageAccessAttachedVolume,
+				Accessible: false,
+			})
+			seenStorageIDs[state.view.SourceStorageID] = true
 		}
 		// Every other attached data volume is also an explicit archive target
 		// candidate. The source logical volume itself is excluded by identity;
@@ -611,7 +647,7 @@ func (service *Service) mergeInventory(ctx context.Context, drives map[string]*p
 			}
 			state.view.StorageCandidates = append(state.view.StorageCandidates, StorageView{
 				StorageID: attached.ArchiveStorageID, Role: vocabulary.StorageArchivePrimary,
-				WorkspaceDriveID: attached.VolumeID, AccessKind: vocabulary.StorageAccessAttachedVolume, Accessible: true,
+				WorkspaceDriveID: attached.VolumeID, AccessKind: vocabulary.StorageAccessAttachedVolume, Accessible: workerLive,
 				Model: attached.Model, Label: attached.Label, FileSystem: attached.FileSystem,
 				CapacityBytes: attached.CapacityBytes, FreeBytes: attached.FreeBytes,
 			})
@@ -623,14 +659,14 @@ func (service *Service) mergeInventory(ctx context.Context, drives map[string]*p
 				(access.Role != vocabulary.StorageSourceMedia && access.Role != vocabulary.StorageArchivePrimary) {
 				continue
 			}
-			observation, observed := observations[state.view.WorkerID+"\x00"+access.StorageID]
+			observation, observed := observations[connectionWorkerID+"\x00"+access.StorageID]
 			accessKind := observation.AccessKind
 			if !accessKind.Valid() {
 				accessKind = vocabulary.StorageAccessLocal
 			}
 			state.view.StorageCandidates = append(state.view.StorageCandidates, StorageView{
 				StorageID: access.StorageID, Role: access.Role, WorkspaceDriveID: access.WorkspaceDriveID,
-				AccessKind: accessKind, Accessible: observed && observation.Connected,
+				AccessKind: accessKind, Accessible: workerLive && observed && observation.Connected,
 				CapacityBytes: observation.CapacityBytes, FreeBytes: observation.FreeBytes,
 			})
 			seenStorageIDs[access.StorageID] = true
@@ -640,6 +676,15 @@ func (service *Service) mergeInventory(ctx context.Context, drives map[string]*p
 		})
 	}
 	return nil
+}
+
+func liveWorkerState(state string) bool {
+	switch state {
+	case "ONLINE", "BUSY", "DRAINING":
+		return true
+	default:
+		return false
+	}
 }
 
 func listSnapshots(loader SnapshotLoader) ([]command.Snapshot, error) {

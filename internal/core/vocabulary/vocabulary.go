@@ -176,6 +176,22 @@ func (value StorageAccessKind) Valid() bool {
 	}
 }
 
+// VolumeConnectionState is the current observability of a logical data
+// volume from its Worker. It is deliberately separate from archive progress:
+// a completed historical run can remain addressable after its source volume
+// has been detached.
+type VolumeConnectionState string
+
+const (
+	VolumeConnected    VolumeConnectionState = "CONNECTED"
+	VolumeDisconnected VolumeConnectionState = "DISCONNECTED"
+	VolumeUnknown      VolumeConnectionState = "UNKNOWN"
+)
+
+func (value VolumeConnectionState) Valid() bool {
+	return value == VolumeConnected || value == VolumeDisconnected || value == VolumeUnknown
+}
+
 // FolderDiscoveryState reports whether a Worker's source-folder inventory is
 // still partial, complete and revisioned, or unavailable because discovery
 // failed. SCANNING observations are display-only and cannot define a run.

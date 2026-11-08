@@ -23,7 +23,31 @@ with sync_playwright() as playwright:
     expect(drives).to_have_count(2)
     primary = page.locator('#connection-drives [data-drive-id="VOLUME-1"]')
     expect(primary).to_contain_text("WORKER-1")
+    expect(primary).to_contain_text("연결됨")
     expect(primary).to_have_attribute("href", "#/drives/VOLUME-1")
+    secondary = page.locator('#connection-drives [data-drive-id="VOLUME-2"]')
+    expect(secondary).to_contain_text("확인 불가")
+
+    # Every drive surface uses the same projected live state. A fresh Worker
+    # observation without this volume changes all of them to detached on the
+    # next five-second refresh; archive progress remains historical.
+    def detach_source(route):
+        response = route.fetch()
+        body = response.json()
+        body["data"] = [
+            {**drive, "connection_state": "DISCONNECTED"} if drive["workspace_drive_id"] == "VOLUME-2" else drive
+            for drive in body["data"]
+        ]
+        route.fulfill(response=response, json=body)
+
+    page.route("**/api/v1/archive-intake", detach_source)
+    page.reload(wait_until="networkidle")
+    secondary = page.locator('#connection-drives [data-drive-id="VOLUME-2"]')
+    expect(secondary).to_contain_text("연결 해제됨")
+    expect(page.locator('#alert-panel')).to_be_hidden()
+    page.locator('#alert-button').click()
+    expect(page.locator('#alert-panel')).to_contain_text("드라이브 연결 해제됨")
+    page.locator('#alert-button').click()
 
     agents = page.locator("#connection-agents [data-session-id]")
     expect(agents).to_have_count(1)
@@ -34,7 +58,9 @@ with sync_playwright() as playwright:
     expect(hosts).to_have_count(2)
     expect(hosts.filter(has_text="archivist-mac")).to_contain_text("꺼짐")
 
-    primary.click()
-    expect(page).to_have_url(sys.argv[1] + "/#/drives/VOLUME-1")
+    secondary.click()
+    expect(page).to_have_url(sys.argv[1] + "/#/drives/VOLUME-2")
     expect(page.locator('#menu [data-menu="connections"]')).to_have_attribute("aria-current", "page")
+    expect(page.locator('#drive-overview [data-fact="connection"]')).to_contain_text("연결 해제됨")
+    expect(page.locator('#prepare-run')).to_be_disabled()
     browser.close()

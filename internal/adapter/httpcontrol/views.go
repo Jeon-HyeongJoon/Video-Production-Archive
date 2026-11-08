@@ -108,6 +108,9 @@ type archivistHostStatusView struct {
 
 type driveView struct {
 	WorkspaceDriveID           string                   `json:"workspace_drive_id"`
+	ConnectionState            string                   `json:"connection_state"`
+	ConnectionObservedAt       time.Time                `json:"connection_observed_at,omitempty"`
+	ConnectionWorkerID         string                   `json:"connection_worker_id,omitempty"`
 	ArchiveRunID               string                   `json:"archive_run_id"`
 	ArchiveRunRevision         uint64                   `json:"archive_run_revision"`
 	CandidateRevision          uint64                   `json:"candidate_revision"`

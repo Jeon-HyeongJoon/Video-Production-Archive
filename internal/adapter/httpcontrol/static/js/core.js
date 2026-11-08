@@ -120,7 +120,8 @@ export const icons = {
 
 export const signals = {
   FAILED: "fault", OFFLINE: "fault", RUNNING: "work", RESERVED: "work", VERIFYING: "work", BUSY: "work",
-  CONNECTING: "work", LEASED: "work", SUBMITTED: "work", COMPLETED: "done", CONNECTED: "done", ONLINE: "done", HAS_HOLD: "decide",
+	CONNECTING: "work", LEASED: "work", SUBMITTED: "work", COMPLETED: "done", CONNECTED: "done", ONLINE: "done",
+	DISCONNECTED: "fault", HAS_HOLD: "decide",
 };
 export const humanWait = new Set(["INPUT", "APPROVAL", "DEVICE"]);
 export const activeStates = new Set(["RUNNING", "RESERVED", "VERIFYING"]);
@@ -153,6 +154,7 @@ export const labels = {
   cardState: { PENDING: "결정 대기", COMPLETED: "실행됨", REJECTED: "거절됨" },
   storageRole: { SOURCE_MEDIA: "원본", ARCHIVE_PRIMARY: "아카이브" },
   storageAccess: { LOCAL: "로컬 저장소", MOUNTED_NETWORK: "네트워크 드라이브", ATTACHED_VOLUME: "새 드라이브", FTP: "FTP", SFTP: "SFTP" },
+	volumeConnection: { CONNECTED: "연결됨", DISCONNECTED: "연결 해제됨", UNKNOWN: "확인 불가" },
   transcriptQuality: { SEGMENT_TOO_LONG: "긴 구간", LOW_TEXT_DENSITY: "낮은 문자 밀도" },
   admission: { OFFLINE: "꺼짐", DISABLED: "사용 안 함", NOT_ACCEPTING_WORK: "정리 중" },
   mode: { ASSISTED: "제안 · 담당자 실행", ARCHIVIST: "허용된 처리 직접 실행", MANUAL: "상태 변경 없음" },

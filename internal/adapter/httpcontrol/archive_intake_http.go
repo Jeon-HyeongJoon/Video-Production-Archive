@@ -25,7 +25,9 @@ func (handler *Handler) archiveIntakeProjection(writer http.ResponseWriter, requ
 	result := make([]driveView, 0, len(views))
 	for _, value := range views {
 		projected := driveView{
-			WorkspaceDriveID: value.WorkspaceDriveID, ArchiveRunID: value.ArchiveRunID, ArchiveRunRevision: value.ArchiveRunRevision,
+			WorkspaceDriveID: value.WorkspaceDriveID, ConnectionState: string(value.ConnectionState),
+			ConnectionObservedAt: value.ConnectionObservedAt, ConnectionWorkerID: value.ConnectionWorkerID,
+			ArchiveRunID: value.ArchiveRunID, ArchiveRunRevision: value.ArchiveRunRevision,
 			CandidateRevision: value.CandidateRevision, FolderDiscoveryRevision: value.FolderDiscoveryRevision,
 			FolderDiscoveryState: string(value.FolderDiscoveryState),
 			SessionID:            value.SessionID, WorkerID: value.WorkerID, SourceVolumeID: value.SourceVolumeID,

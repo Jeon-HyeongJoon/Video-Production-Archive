@@ -40,20 +40,13 @@ with sync_playwright() as playwright:
         expect(page.locator("#start-archive-run")).to_be_enabled()
         expect(page.locator("#selection-chips .selection-chip")).to_have_text(["WORKER-1", "VOLUME-1", "source-main", "archive-main", "1 폴더"])
 
-        # A completed drive on a Worker that is off can be prepared but not started.
-        prepared(page, "VOLUME-2")
-        expect(page.locator("#prep-archives .option")).to_have_count(1)
-        expect(page.locator('#prep-archives [data-storage-id="archive-nas"]')).to_have_attribute("aria-pressed", "false")
-        expect(page.locator("#prep-folders input[type=checkbox]:not(#select-all)")).to_have_count(2)
-        page.locator("#select-all").check()
-        expect(page.locator("#selection-summary")).to_have_text("2 폴더 · 386 영상 · 42 GB")
-        expect(page.locator("#start-reason")).to_have_text("아카이브 선택 없음")
-        page.locator('#prep-folders [data-folder-id="review-b"] input[type="checkbox"]').uncheck()
-        expect(page.locator("#selection-summary")).to_have_text("1 폴더 · 64 영상 · 12 GB")
-        page.locator('#prep-archives [data-storage-id="archive-nas"]').click()
-        expect(page.locator("#start-reason")).to_have_text("Worker 꺼짐")
-        expect(page.locator("#start-archive-run")).to_be_disabled()
-        expect(page.locator("#selection-chips .selection-chip")).to_have_text(["WORKER-2", "VOLUME-2", "source-review", "archive-nas", "1 폴더"])
+        # A completed drive whose Worker is off has unknown live attachment state;
+        # historical results remain visible but a new run cannot be prepared.
+        page.goto(sys.argv[1] + "/#/drives/VOLUME-2", wait_until="networkidle")
+        expect(page.locator('#drive-overview [data-fact="connection"]')).to_contain_text("확인 불가")
+        expect(page.locator("#prepare-run")).to_be_disabled()
+        expect(page.locator("#prepare-run")).to_have_text("드라이브 연결 확인 불가")
+        expect(page.locator("#drive-prep, #start-archive-run")).to_have_count(0)
     else:
         # A running ArchiveRun keeps its archive and folder scope locked.
         page.goto(sys.argv[1] + "/#/drives/VOLUME-1", wait_until="networkidle")

@@ -84,6 +84,11 @@ export function findDrive(driveID) {
   return model.drives.find((drive) => drive.workspace_drive_id === driveID);
 }
 
+export function driveConnection(drive) {
+	const state = drive?.connection_state || "UNKNOWN";
+	return { state, text: label("volumeConnection", state), signal: stateSignal(state) };
+}
+
 // driveProgress counts videos in folders whose package is stored or committed.
 export function driveProgress(drive) {
   const folders = drive.folders || [];
@@ -123,6 +128,7 @@ export function archiveCandidates(drive) {
 // prepareDrive opens a new ArchiveRun scope for one drive. It fixes the human
 // volume choice to an ArchiveIntakeSession when the drive has none yet.
 export async function prepareDrive(drive) {
+	if (drive?.connection_state !== "CONNECTED") return;
   ui.prepDriveID = drive.workspace_drive_id;
   ui.prepRevision = drive.folder_discovery_revision || 0;
   ui.archiveID = "";
@@ -175,6 +181,8 @@ export function startBlocker(drive, selected) {
   const source = (drive.storage_candidates || []).find((item) => item.storage_id === drive.source_storage_id);
   const archive = archiveCandidates(drive).find((item) => item.storage_id === ui.archiveID);
   const estimated = selected.reduce((sum, folder) => sum + (folder.estimated_output_bytes || 0), 0);
+	if (drive.connection_state === "DISCONNECTED") return "드라이브 연결 해제됨";
+	if (drive.connection_state !== "CONNECTED") return "드라이브 연결 확인 불가";
   if (drive.folder_discovery_state === "SCANNING") return "폴더 검색 중";
   if (drive.folder_discovery_state === "FAILED") return "폴더 검색 실패";
   if (!folderDiscoveryReady(drive)) return "폴더 검색 대기";
@@ -291,6 +299,9 @@ export function problemItems() {
   const cards = pendingCards();
   for (const drive of model.drives) {
     const base = { driveID: drive.workspace_drive_id, workerID: drive.worker_id };
+		if (drive.connection_state === "DISCONNECTED") {
+			items.push({ ...base, key: `drive-disconnected:${drive.workspace_drive_id}`, kind: "drive", signal: "fault", title: "드라이브 연결 해제됨" });
+		}
     for (const folder of drive.folders || []) {
       const problem = folderProblem(folder);
       if (problem) items.push({ ...base, key: `${problem.kind}:${drive.workspace_drive_id}:${folder.folder}`, kind: problem.kind, signal: problem.signal, title: problem.title, folder: folder.folder, target: problem.target || "" });

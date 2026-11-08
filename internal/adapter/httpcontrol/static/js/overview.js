@@ -5,7 +5,7 @@
 // listed once, in the 확인 필요 section below. Counts behind a fact wait on hover.
 
 import { el, svgIcon, icons, statusIcon, label, stateSignal, formatCount, formatBytes, shortTime, clockTime, meter } from "./core.js";
-import { model, drivePhase, driveName, driveProgress, folderDiscoveryText, PHASE_LABEL, PHASE_ICON } from "./store.js";
+import { model, drivePhase, driveName, driveProgress, driveConnection, folderDiscoveryText, PHASE_LABEL, PHASE_ICON } from "./store.js";
 import { stageMatrix } from "./flow.js";
 
 function fact(name, value, attributes = {}) {
@@ -32,10 +32,14 @@ export function driveFacts(drive, progressID = "") {
   const worker = model.workers.find((item) => item.worker_id === drive.worker_id);
   const offline = stateSignal(worker?.state) === "fault";
   const progress = driveProgress(drive);
+	const connection = driveConnection(drive);
 	const discoveryIcon = drive.folder_discovery_state === "SCANNING" ? "work" : drive.folder_discovery_state === "FAILED" ? "fault" : "";
 	const discoveryValue = el("span", { class: "fact-value", dataset: { signal: drive.folder_discovery_state === "FAILED" ? "fault" : undefined } },
 		discoveryIcon ? statusIcon(discoveryIcon) : null, el("span", { class: "num" }, folderDiscoveryText(drive)));
   const facts = [
+		fact("연결", el("span", { class: "fact-value", dataset: { signal: connection.signal } },
+			statusIcon(connection.signal), el("span", {}, connection.text)),
+		{ title: drive.connection_observed_at ? `관측 ${clockTime(drive.connection_observed_at, true)}` : "현재 연결을 확인할 수 없음", dataset: { fact: "connection" } }),
     fact("상태", el("span", { class: "fact-value" }, statusIcon(PHASE_ICON[phase]), el("span", {}, PHASE_LABEL[phase])), { dataset: { fact: "state", phase } }),
     drive.archive_run_id
       ? fact("보관 진행", el("span", { class: "fact-value" }, el("span", { class: "progress-pct num" }, `${progress.pct}%`)),
@@ -47,7 +51,7 @@ export function driveFacts(drive, progressID = "") {
     drive.archive_storage_id ? null
       : fact("아카이브", el("span", { class: "fact-value", dataset: { muted: "true" } }, el("span", {}, "미정")), { dataset: { fact: "archive" } }),
   ].filter(Boolean);
-  if (drive.archive_run_id) facts[1].append(meter(progress.pct, phase === "done"));
+	if (drive.archive_run_id) facts[2].append(meter(progress.pct, phase === "done"));
   return el("div", { class: "facts-grid" }, ...facts);
 }
 

@@ -401,9 +401,12 @@ export function mount(root, route) {
       // The STT gate of a run and the preparation of a new one sit beside the title.
       const buttons = [];
       if (drive.archive_run_state === "TRANSCRIPTION_READY" && drive.archive_run_revision) buttons.push(sttButton(drive));
-      if (!isRunning(drive) && !preparing(drive)) {
-        buttons.push(el("button", { type: "button", class: `btn${drive.archive_run_id ? "" : " primary"}`, id: "prepare-run", dataset: { action: "prepare" }, onclick: () => prepareDrive(drive) },
-          drive.archive_run_id ? "새 아카이브 실행 준비" : "아카이브 실행 준비"));
+		if (!isRunning(drive) && !preparing(drive)) {
+			const connected = drive.connection_state === "CONNECTED";
+			const connectionText = drive.connection_state === "DISCONNECTED" ? "드라이브 연결 해제됨" : "드라이브 연결 확인 불가";
+			buttons.push(el("button", { type: "button", class: `btn${drive.archive_run_id ? "" : " primary"}`, id: "prepare-run", dataset: { action: "prepare" },
+				disabled: !connected, title: connected ? undefined : connectionText, onclick: () => prepareDrive(drive) },
+				connected ? (drive.archive_run_id ? "새 아카이브 실행 준비" : "아카이브 실행 준비") : connectionText));
       }
       actions.replaceChildren(...buttons);
 

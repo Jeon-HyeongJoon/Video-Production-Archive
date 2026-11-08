@@ -54,6 +54,12 @@ func TestEveryDecidedVocabularyValueIsValid(t *testing.T) {
 			t.Fatalf("StorageAccessKind %q is not valid", value)
 		}
 	}
+	volumeConnectionStates := []VolumeConnectionState{VolumeConnected, VolumeDisconnected, VolumeUnknown}
+	for _, value := range volumeConnectionStates {
+		if !value.Valid() {
+			t.Fatalf("VolumeConnectionState %q is not valid", value)
+		}
+	}
 	executorKinds := []ExecutorKind{ExecutorWorker, ExecutorArchivistGateway, ExecutorControl, ExecutorHuman}
 	for _, value := range executorKinds {
 		if !value.Valid() {
@@ -96,7 +102,7 @@ func TestEveryDecidedVocabularyValueIsValid(t *testing.T) {
 
 	if ActorType("UNKNOWN").Valid() || UserRole("UNKNOWN").Valid() || WaitReason("UNKNOWN").Valid() ||
 		ProcessingKind("UNKNOWN").Valid() || ResourceClass("UNKNOWN").Valid() || StorageRole("UNKNOWN").Valid() ||
-		StorageAccessKind("UNKNOWN").Valid() ||
+		StorageAccessKind("UNKNOWN").Valid() || VolumeConnectionState("INVALID").Valid() ||
 		ExecutorKind("UNKNOWN").Valid() ||
 		ApprovalDecision("UNKNOWN").Valid() || ContentReviewDecision("UNKNOWN").Valid() ||
 		RuntimeBackend("UNKNOWN").Valid() || ArchivistHostState("UNKNOWN").Valid() || ArchivistTurnState("UNKNOWN").Valid() {

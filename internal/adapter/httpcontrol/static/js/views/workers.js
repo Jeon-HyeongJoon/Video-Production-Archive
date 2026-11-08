@@ -6,7 +6,7 @@ import {
   el, statusIcon, workerIcon, label, stateSignal, formatBytes, formatPercent, formatCount, clockTime, meter, emptyState,
 } from "../core.js";
 import {
-  model, drivePhase, driveName, driveProgress, driveProblemCounts, PHASE_LABEL, PHASE_ICON, hostFor, activeTurn,
+	model, drivePhase, driveName, driveProgress, driveProblemCounts, driveConnection, PHASE_LABEL, PHASE_ICON, hostFor, activeTurn,
 } from "../store.js";
 
 function admissionLabel(admission) {
@@ -70,12 +70,14 @@ function workerCard(worker, focusWorker) {
 
 function driveRow(drive) {
   const phase = drivePhase(drive);
+	const connection = driveConnection(drive);
   const progress = driveProgress(drive);
   const { fault: faults, decide: decisions } = driveProblemCounts(drive);
   const issues = [faults ? `실패 ${faults}` : "", decisions ? `확인 ${decisions}` : ""].filter(Boolean).join(" · ");
   return el("a", { class: "data-row", role: "row", href: `#/drives/${encodeURIComponent(drive.workspace_drive_id)}`, dataset: { driveId: drive.workspace_drive_id } },
     el("b", { class: "cell-main" }, driveName(drive)),
-    el("span", { class: "num" }, drive.worker_id || "배정 없음"),
+		el("span", { class: "cell-state", dataset: { signal: connection.signal } }, statusIcon(connection.signal), connection.text),
+		el("span", { class: "num" }, drive.connection_worker_id || drive.worker_id || "배정 없음"),
     el("span", { class: "cell-state" }, statusIcon(PHASE_ICON[phase]), PHASE_LABEL[phase]),
     phase === "intake" ? el("span", { class: "muted" }, "—")
       : el("span", { class: "cell-meter" }, meter(progress.pct), el("span", { class: "num" }, `${progress.pct}% · ${formatCount(progress.stored)} / ${formatCount(progress.total)}`)),
@@ -133,12 +135,14 @@ export function mount(root, route) {
   return {
     update() {
       const online = model.workers.filter((worker) => stateSignal(worker.state) !== "fault").length;
-      heading.title = `Worker PC ${model.workers.length} · 연결 ${online} · 드라이브 ${model.drives.length} · Agent ${model.sessions.length}`;
+		const connectedDrives = model.drives.filter((drive) => drive.connection_state === "CONNECTED").length;
+		const disconnectedDrives = model.drives.filter((drive) => drive.connection_state === "DISCONNECTED").length;
+		heading.title = `Worker PC ${model.workers.length} · 연결 ${online} · 드라이브 ${model.drives.length} (연결 ${connectedDrives} · 해제 ${disconnectedDrives}) · Agent ${model.sessions.length}`;
       root.querySelector("#connection-worker-count").textContent = String(model.workers.length);
       root.querySelector("#connection-drive-count").textContent = String(model.drives.length);
       root.querySelector("#connection-agent-count").textContent = String(model.sessions.length);
       workers.replaceChildren(...(model.workers.length ? model.workers.map((worker) => workerCard(worker, focusWorker)) : [emptyState("Worker PC 없음")]));
-      drives.replaceChildren(table("connection-drive-table", ["드라이브", "Worker", "단계", "보관 진행", "아카이브", "확인 필요"], model.drives.map(driveRow), "드라이브 없음"));
+		drives.replaceChildren(table("connection-drive-table", ["드라이브", "연결", "Worker", "단계", "보관 진행", "아카이브", "확인 필요"], model.drives.map(driveRow), "드라이브 없음"));
       agents.replaceChildren(table("connection-agent-table", ["Agent", "Agent Host", "CLI", "제어 모드", "상태"], model.sessions.map(agentRow), "Agent 없음"));
       hosts.replaceChildren(table("connection-host-table", ["Agent Host", "상태", "감지된 CLI", "heartbeat"], model.hosts.map((host) => hostRow(host, focusHost)), "Agent Host 없음"));
       if (!scrolled && (focusWorker || focusHost)) {

@@ -25,6 +25,9 @@ func TestWorkerInventoryProjectsUnclassifiedFoldersAndRoleCapacityStorageCandida
 	candidates := candidateInventory{{
 		VolumeID: "SOURCE-VOLUME", Revision: 3, PhysicalDeviceID: "SOURCE-PHYSICAL", WorkerID: "WORKER-WINDOWS",
 		StorageID: "source-main", Connected: true, ObservedAt: now,
+	}, {
+		VolumeID: "ZZ-DETACHED-VOLUME", Revision: 4, PhysicalDeviceID: "DETACHED-PHYSICAL", WorkerID: "WORKER-WINDOWS",
+		StorageID: "source-detached", Connected: false, ObservedAt: now,
 	}}
 	storages := storageInventory{
 		{StorageID: "archive-local", Role: vocabulary.StorageArchivePrimary, Root: filepath.Join(root, "archive"), WorkspaceDriveID: "ARCHIVE-VOLUME", PhysicalDeviceID: "ARCHIVE-PHYSICAL"},
@@ -33,6 +36,7 @@ func TestWorkerInventoryProjectsUnclassifiedFoldersAndRoleCapacityStorageCandida
 	}
 	statuses := statusInventory{{
 		WorkerID: "WORKER-WINDOWS", State: "ONLINE", Metrics: worker.Metrics{
+			ObservedAt:           now,
 			AccessibleStorageIDs: map[string]bool{"source-main": true, "archive-local": true, "archive-nas": true, "system-scratch": true},
 			AttachedVolumes: []worker.AttachedVolumeObservation{{
 				PhysicalDeviceID: "SOURCE-PHYSICAL", VolumeID: "SOURCE-VOLUME", StorageID: "source-main", ArchiveStorageID: "archive-source-volume",
@@ -58,12 +62,13 @@ func TestWorkerInventoryProjectsUnclassifiedFoldersAndRoleCapacityStorageCandida
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(views) != 1 {
+	if len(views) != 2 {
 		t.Fatalf("unclassified drive missing: %+v", views)
 	}
 	view := views[0]
 	if view.State != "UNCLASSIFIED" || view.ArchiveRunID != "" || view.WorkspaceDriveID != "SOURCE-VOLUME" ||
 		view.WorkerID != "WORKER-WINDOWS" || view.CandidateRevision != 3 || view.FolderDiscoveryRevision != 41 ||
+		view.ConnectionState != vocabulary.VolumeConnected || view.ConnectionWorkerID != "WORKER-WINDOWS" || !view.ConnectionObservedAt.Equal(now) ||
 		view.FolderDiscoveryState != vocabulary.FolderDiscoveryReady ||
 		view.InputRevision != 41 || view.FolderCount != 2 || view.FileCount != 16 || len(view.StorageCandidates) != 4 {
 		t.Fatalf("pre-run source inventory was not projected: %+v", view)
@@ -90,6 +95,16 @@ func TestWorkerInventoryProjectsUnclassifiedFoldersAndRoleCapacityStorageCandida
 	}
 	if strings.Contains(string(payload), root) || strings.Contains(string(payload), "system-scratch") {
 		t.Fatalf("projection exposed a root or selectable system storage: %s", payload)
+	}
+	detached := views[1]
+	if detached.WorkspaceDriveID != "ZZ-DETACHED-VOLUME" || detached.ConnectionState != vocabulary.VolumeDisconnected ||
+		detached.ConnectionWorkerID != "WORKER-WINDOWS" || !detached.ConnectionObservedAt.Equal(now) {
+		t.Fatalf("detached source was not synchronized from the current Worker snapshot: %+v", detached)
+	}
+	detachedSource := storageView(t, detached, "source-detached")
+	if detachedSource.Accessible || detachedSource.Role != vocabulary.StorageSourceMedia ||
+		detachedSource.AccessKind != vocabulary.StorageAccessAttachedVolume {
+		t.Fatalf("detached source remained accessible: %+v", detachedSource)
 	}
 
 	decision := organization.OrganizationDecision{

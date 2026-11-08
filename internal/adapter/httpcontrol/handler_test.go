@@ -1053,7 +1053,9 @@ func (workspace *archiveIntakeWorkspaceFixture) Projection(context.Context) ([]a
 		done("classification", "markers", "render", "qc", "archive")...), archive.PackageStored)
 	folders := []archiveintakeworkspace.FolderView{broken, renderDone("event-b", 64, 12), hold, renderDone("intro", 12, 2), ready, renderDone("render", 201, 96), source, sourceB}
 	drive := archiveintakeworkspace.DriveView{
-		WorkspaceDriveID: "VOLUME-1", ArchiveRunID: "ARCHIVE-RUN-1", ArchiveRunRevision: 1,
+		WorkspaceDriveID: "VOLUME-1", ConnectionState: vocabulary.VolumeConnected,
+		ConnectionObservedAt: now, ConnectionWorkerID: "WORKER-1",
+		ArchiveRunID: "ARCHIVE-RUN-1", ArchiveRunRevision: 1,
 		CandidateRevision: 7, FolderDiscoveryRevision: 7,
 		SessionID: "INTAKE-1", WorkerID: "WORKER-1", SourceVolumeID: "VOLUME-1", SourceStorageID: "source-main",
 		ArchiveStorageID: "archive-main", State: "HAS_HOLD", InputRevision: 7, FolderDiscoveryState: vocabulary.FolderDiscoveryReady, FileCount: 795, FolderCount: len(folders),
@@ -1146,7 +1148,9 @@ func (workspace *archiveIntakeWorkspaceFixture) Projection(context.Context) ([]a
 	reviewB.Folder, reviewB.ArchivePackageID = "review-b", "VP-20261029-REVIEW-B"
 	reviewA.InputRevision, reviewB.InputRevision = 3, 3
 	return []archiveintakeworkspace.DriveView{drive, {
-		WorkspaceDriveID: "VOLUME-2", ArchiveRunID: "ARCHIVE-RUN-2", ArchiveRunRevision: 1,
+		WorkspaceDriveID: "VOLUME-2", ConnectionState: vocabulary.VolumeUnknown,
+		ConnectionObservedAt: now.Add(-50 * time.Minute), ConnectionWorkerID: "WORKER-2",
+		ArchiveRunID: "ARCHIVE-RUN-2", ArchiveRunRevision: 1,
 		CandidateRevision: 3, FolderDiscoveryRevision: 3,
 		SessionID: "INTAKE-2", WorkerID: "WORKER-2", SourceVolumeID: "VOLUME-2", SourceStorageID: "source-review",
 		ArchiveStorageID: "archive-nas", State: "COMPLETED", ArchiveRunState: "COMPLETED", FolderDiscoveryState: vocabulary.FolderDiscoveryReady,
