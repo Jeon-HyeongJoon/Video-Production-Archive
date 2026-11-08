@@ -194,7 +194,7 @@ Agent 대화 칸은 Orca native chat과 같은 웹 셸형 채팅으로 취급한
 
 ## 9. 배포와 보안
 
-Archivist Host는 CLI를 실행할 PC마다 서비스로 설치하고 Control로만 outbound 연결한다. 운영 Windows PC의 자체 loop와 fixture는 Windows Service를 사용할 수 있지만, Codex·Claude의 사용자 구독 로그인을 쓰는 Host는 해당 CLI에 로그인한 같은 Windows 계정의 전용 scheduled task 또는 사용자 service로 실행한다. 다른 사용자의 profile에서 auth 파일을 복사하거나 `SYSTEM` profile에서 사용자 credential을 재사용하지 않는다. 현재 계정으로 직접 ChatGPT loop를 검증하는 macOS에서는 사용자 login session의 launch agent 또는 전경 process를 사용한다. Host PC에 inbound SSH나 HTTP 포트를 열지 않는다.
+Archivist Host는 CLI를 실행할 PC마다 설치하고 Control로만 outbound 연결한다. 운영 Windows PC의 자체 loop와 fixture는 Windows Service를 사용할 수 있지만, Codex·Claude의 사용자 구독 로그인을 쓰는 Host는 해당 CLI에 로그인한 현재 console 사용자의 `InteractiveToken` 예약 작업으로 실행한다. 설치 전에 같은 대화형 사용자 문맥에서 CLI 로그인 probe를 통과해야 하며, Control의 Turn을 받은 Host가 그 사용자 Session에서 CLI process를 구조화 stdio로 연다. Windows Terminal 화면이나 ANSI 출력을 중계하지 않으며 다른 사용자의 profile에서 auth 파일을 복사하거나 `SYSTEM`·SSH batch logon에서 사용자 credential을 재사용하지 않는다. 현재 계정으로 직접 ChatGPT loop를 검증하는 macOS에서는 사용자 login session의 launch agent 또는 전경 process를 사용한다. Host PC에 inbound SSH나 HTTP 포트를 열지 않는다. `LRH-020`
 
 Windows Credential Manager의 generic credential은 사용자 profile이 적재된 대화형 또는 전용 서비스 로그온에서는 사용할 수 있다. 그러나 OpenSSH 서비스 로그온처럼 Credential Manager가 사용할 로그온 세션이 없는 환경에서는 `CredWrite` 자체가 실패하므로 이를 Archivist Host의 유일한 secret 저장 경계로 두지 않는다.
 
@@ -259,6 +259,7 @@ Core에서 결정적으로 검증할 수 있는 계약은 구현 상태다.
 - 정제된 진행·실패 항목의 cursor 멱등 저장·투영 `LRH-013`
 - Codex app-server native thread mapping·재개와 공개 이벤트 정제 `LRH-018`
 - 승인 없는 native terminal·파일·Skill·보조 Agent와 정규화 진행 `LRH-019`
+- Windows 대화형 사용자 Codex 로그인과 Host process Session 경계 `LRH-020`
 - Tool Call→Command 상관관계와 receipt replay `MCP-002`
 - Codex stdio MCP 업무 도구 allowlist와 Turn 상관관계 `MCP-006`
 - 채팅과 ActionCard Approval 분리 `DSH-003`

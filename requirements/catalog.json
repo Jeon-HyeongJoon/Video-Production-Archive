@@ -3326,6 +3326,18 @@
       "level": "integration"
     },
     {
+      "id": "LRH-020",
+      "design": "windows-interactive-codex-host",
+      "statement": "Windows의 구독 로그인 Codex용 Archivist Host는 현재 로그인한 Windows 사용자의 대화형 예약 작업으로 실행하고 그 사용자 문맥의 Codex 로그인 검증을 통과한 뒤에만 local-codex Turn을 받아야 한다.",
+      "given": "로컬 터미널에서 Codex 로그인을 마친 Windows 사용자와 같은 PC의 비대화형 SSH·서비스 로그온 및 등록된 local-codex CLI가 있다.",
+      "when": "대화형 Archivist Host 설치 절차가 Codex 로그인을 검사하고 Host 예약 작업을 시작한다.",
+      "then": "로그인 검사는 현재 대화형 사용자 문맥에서 성공하고 예약 작업과 Archivist Host process는 같은 사용자 SID와 0이 아닌 대화형 Session ID를 사용하며 대시보드 Turn이 시작한 Codex process가 그 사용자 로그인을 상속할 수 있다.",
+      "test_file": "internal/application/controlruntime/windows_interactive_archivist_acceptance_test.go",
+      "test_name": "TestWindowsCodexHostRunsInAuthenticatedInteractiveTerminalSession",
+      "status": "implemented",
+      "level": "acceptance"
+    },
+    {
       "id": "MCP-006",
       "design": "codex-archive-stdio-mcp-bridge",
       "statement": "Codex용 stdio MCP Bridge는 Control 광고와 로컬 schema registry가 함께 허용한 Archive 업무 도구만 노출하고 현재 Turn 상관관계와 호출 상한을 보존해 Host loopback MCP로 전달해야 한다.",
