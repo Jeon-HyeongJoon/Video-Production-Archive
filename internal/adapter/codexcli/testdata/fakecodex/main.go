@@ -18,6 +18,10 @@ func main() {
 	if len(os.Args) < 2 || os.Args[1] != "app-server" {
 		os.Exit(2)
 	}
+	nativeTools := os.Getenv("ARCHIVE_CODEX_FIXTURE_NATIVE_TOOLS") == "1"
+	if nativeTools && !validNativeArguments(os.Args[2:]) {
+		os.Exit(8)
+	}
 	tracePath := os.Getenv("ARCHIVE_CODEX_FIXTURE_TRACE")
 	threadID := "codex-thread-fixed"
 	scanner := bufio.NewScanner(os.Stdin)
@@ -33,21 +37,36 @@ func main() {
 			respond(encoder, request.ID, map[string]any{"userAgent": "fake-codex"})
 		case "initialized":
 		case "thread/start":
+			if nativeTools && !validThreadParams(request.Params) {
+				os.Exit(9)
+			}
 			respond(encoder, request.ID, map[string]any{"thread": map[string]any{"id": threadID}})
 		case "thread/resume":
 			var params struct {
-				ThreadID string `json:"threadId"`
+				ThreadID       string `json:"threadId"`
+				ApprovalPolicy string `json:"approvalPolicy"`
+				Sandbox        string `json:"sandbox"`
 			}
 			if json.Unmarshal(request.Params, &params) != nil || params.ThreadID != threadID {
 				os.Exit(4)
 			}
+			if nativeTools && (params.ApprovalPolicy != "never" || params.Sandbox != "danger-full-access") {
+				os.Exit(9)
+			}
 			respond(encoder, request.ID, map[string]any{"thread": map[string]any{"id": threadID}})
 		case "turn/start":
 			var params struct {
-				ThreadID string `json:"threadId"`
+				ThreadID       string `json:"threadId"`
+				ApprovalPolicy string `json:"approvalPolicy"`
+				SandboxPolicy  struct {
+					Type string `json:"type"`
+				} `json:"sandboxPolicy"`
 			}
 			if json.Unmarshal(request.Params, &params) != nil || params.ThreadID != threadID {
 				os.Exit(5)
+			}
+			if nativeTools && (params.ApprovalPolicy != "never" || params.SandboxPolicy.Type != "dangerFullAccess") {
+				os.Exit(10)
 			}
 			turnID := "codex-turn-fixture"
 			respond(encoder, request.ID, map[string]any{"turn": map[string]any{"id": turnID}})
@@ -61,6 +80,24 @@ func main() {
 				"id": "message-commentary", "type": "agentMessage", "phase": "commentary",
 				"text": `선택 범위를 C:\Archive\private\source 에서 확인합니다.`,
 			})
+			if nativeTools {
+				notifyItem(encoder, "item/started", threadID, turnID, map[string]any{
+					"id": "command-1", "type": "commandExecution", "status": "inProgress",
+					"command": `type C:\Users\fixture\secret.txt`,
+				})
+				notifyItem(encoder, "item/completed", threadID, turnID, map[string]any{
+					"id": "file-1", "type": "fileChange", "status": "completed",
+				})
+				notifyItem(encoder, "item/started", threadID, turnID, map[string]any{
+					"id": "agent-1", "type": "collabAgentToolCall", "status": "inProgress",
+				})
+				notifyItem(encoder, "item/completed", threadID, turnID, map[string]any{
+					"id": "command-1", "type": "commandExecution", "status": "completed",
+				})
+				notifyItem(encoder, "item/completed", threadID, turnID, map[string]any{
+					"id": "agent-1", "type": "collabAgentToolCall", "status": "completed",
+				})
+			}
 			notifyItem(encoder, "item/started", threadID, turnID, map[string]any{
 				"id": "tool-1", "type": "mcpToolCall", "server": "archive",
 				"tool": "archive_run_status_v1", "status": "inProgress",
@@ -90,6 +127,53 @@ func main() {
 	if scanner.Err() != nil {
 		os.Exit(6)
 	}
+}
+
+func validNativeArguments(arguments []string) bool {
+	required := map[string]bool{
+		"shell_tool":   false,
+		"multi_agent":  false,
+		"skill_search": false,
+	}
+	settings := map[string]bool{
+		`approval_policy="never"`:           false,
+		`sandbox_mode="danger-full-access"`: false,
+	}
+	for index := 0; index+1 < len(arguments); index++ {
+		switch arguments[index] {
+		case "--enable":
+			if _, ok := required[arguments[index+1]]; ok {
+				required[arguments[index+1]] = true
+			}
+		case "--disable":
+			if _, ok := required[arguments[index+1]]; ok {
+				return false
+			}
+		case "-c":
+			if _, ok := settings[arguments[index+1]]; ok {
+				settings[arguments[index+1]] = true
+			}
+		}
+	}
+	for _, present := range required {
+		if !present {
+			return false
+		}
+	}
+	for _, present := range settings {
+		if !present {
+			return false
+		}
+	}
+	return true
+}
+
+func validThreadParams(payload json.RawMessage) bool {
+	var params struct {
+		ApprovalPolicy string `json:"approvalPolicy"`
+		Sandbox        string `json:"sandbox"`
+	}
+	return json.Unmarshal(payload, &params) == nil && params.ApprovalPolicy == "never" && params.Sandbox == "danger-full-access"
 }
 
 func respond(encoder *json.Encoder, id json.RawMessage, result any) {

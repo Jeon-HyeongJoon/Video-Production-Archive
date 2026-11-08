@@ -2091,7 +2091,7 @@
       ],
       "sources": [
         "docs/design/11-archivist-host.md §3, §6",
-        "requirements LRH-018"
+        "requirements LRH-018~019"
       ],
       "decided": "2026-11-08"
     },

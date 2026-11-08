@@ -28,19 +28,21 @@ var (
 	ErrCodexBoundaryViolation = errors.New("Codex crossed the Archive runtime boundary")
 )
 
-// Instructions bind Codex to the Archive business tools. The launch
-// configuration also disables Codex's shell, file, browser and connector tool
-// families; this text gives the model the same boundary in business language.
+// Instructions separate native workspace work from Archive domain effects.
+// Codex may use its local development tools, but the Archive MCP remains the
+// only authenticated route into Control commands and durable business state.
 const Instructions = archivistloop.DefaultInstructions + `
-Archive business tools are available only through the MCP server named "archive". You have no shell, file, web, browser, connector, plugin, or skill tools in this session; do not try to inspect the workspace.`
+Archive business tools are available only through the MCP server named "archive". Use native terminal, file, skill, and child-agent tools when they help with work in the configured workspace. Use Archive MCP tools for every Archive domain read or effect, including selections, classifications, runs, approvals, and durable records; never bypass that boundary with shell commands or direct Control requests. Do not expose reasoning, credentials, raw command output, or absolute paths in user-facing messages.`
 
-// The Archive integration deliberately uses only the native app-server chat
-// protocol and its Archive MCP. Disabling these feature families also keeps a
-// user's normal Codex plugins and development tools out of Archivist turns.
+// Native workspace tools and child agents are part of the Archivist surface.
+// Browser, connector, plugin, and media surfaces remain outside the v1
+// boundary; app-server receives only the Archive MCP configuration below.
 var disabledFeatures = []string{
-	"shell_tool", "unified_exec", "apps", "plugins", "multi_agent", "image_generation",
-	"browser_use", "computer_use", "view_image", "goals", "tool_suggest", "skill_search",
-	"hooks", "remote_plugin", "in_app_browser",
+	"apps", "plugins", "image_generation", "browser_use", "computer_use", "remote_plugin", "in_app_browser",
+}
+
+var enabledFeatures = []string{
+	"shell_tool", "multi_agent", "skill_search",
 }
 
 type Options struct {
@@ -232,7 +234,7 @@ func Run(ctx context.Context, options Options, tools archivistloop.ToolClient, p
 		return err
 	}
 	threadParams := map[string]any{
-		"cwd": options.WorkingDirectory, "approvalPolicy": "never", "sandbox": "read-only",
+		"cwd": options.WorkingDirectory, "approvalPolicy": "never", "sandbox": "danger-full-access",
 		"developerInstructions": Instructions,
 	}
 	method := "thread/start"
@@ -275,6 +277,7 @@ func Run(ctx context.Context, options Options, tools archivistloop.ToolClient, p
 		"threadId":       opened.Thread.ID,
 		"input":          []map[string]any{{"type": "text", "text": prompt}},
 		"approvalPolicy": "never", "cwd": options.WorkingDirectory,
+		"sandboxPolicy": map[string]any{"type": "dangerFullAccess"},
 	}
 	if model := strings.TrimSpace(options.Model); model != "" {
 		turnParams["model"] = model
@@ -295,7 +298,7 @@ func Run(ctx context.Context, options Options, tools archivistloop.ToolClient, p
 		return ErrCodexFailed
 	}
 
-	announcedTools := make(map[string]bool)
+	announcedItems := make(map[string]bool)
 	finalMessage := ""
 	pendingUnknownMessage := ""
 	emitProgress := func(value string) error {
@@ -333,10 +336,10 @@ func Run(ctx context.Context, options Options, tools archivistloop.ToolClient, p
 				if params.Item.Server != "archive" {
 					return ErrCodexBoundaryViolation
 				}
-				if announcedTools[params.Item.ID] {
+				if announcedItems[params.Item.ID] {
 					continue
 				}
-				announcedTools[params.Item.ID] = true
+				announcedItems[params.Item.ID] = true
 				name := params.Item.Tool
 				if definition, ok := mapping[name]; ok {
 					name = definition.Name
@@ -375,7 +378,20 @@ func Run(ctx context.Context, options Options, tools archivistloop.ToolClient, p
 				}
 			case "reasoning", "userMessage", "functionCallOutput":
 				// Reasoning and protocol bookkeeping never become public entries.
-			case "commandExecution", "fileChange", "webSearch", "imageGeneration", "collabAgentToolCall":
+			case "commandExecution", "fileChange", "collabAgentToolCall":
+				if announcedItems[params.Item.ID] {
+					continue
+				}
+				announcedItems[params.Item.ID] = true
+				summary := map[string]string{
+					"commandExecution":    "터미널 명령 실행",
+					"fileChange":          "파일 변경",
+					"collabAgentToolCall": "보조 Agent 작업",
+				}[params.Item.Type]
+				if err := emitProgress(summary); err != nil {
+					return err
+				}
+			case "webSearch", "imageGeneration":
 				return ErrCodexBoundaryViolation
 			}
 		case "item/agentMessage/delta", "item/reasoning/summaryTextDelta", "item/reasoning/summaryPartAdded", "item/reasoning/textDelta", "mcpToolCall/progress":
@@ -424,6 +440,9 @@ func appServerArguments(options Options, resultFile string) ([]string, error) {
 		"ARCHIVE_CODEX_MAX_CALLS":   fmt.Sprint(options.MaximumCalls),
 	}
 	arguments := []string{"app-server", "--listen", "stdio://"}
+	for _, feature := range enabledFeatures {
+		arguments = append(arguments, "--enable", feature)
+	}
 	for _, feature := range disabledFeatures {
 		arguments = append(arguments, "--disable", feature)
 	}
@@ -431,6 +450,7 @@ func appServerArguments(options Options, resultFile string) ([]string, error) {
 		{"mcp_servers", "{}"},
 		{"web_search", `"disabled"`},
 		{"approval_policy", `"never"`},
+		{"sandbox_mode", `"danger-full-access"`},
 	}
 	command, err := tomlString(options.MCPExecutable)
 	if err != nil {

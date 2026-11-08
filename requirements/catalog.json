@@ -3304,12 +3304,24 @@
     {
       "id": "LRH-018",
       "design": "codex-app-server-native-thread-adapter",
-      "statement": "Codex App Server Adapter는 같은 ArchivistSession을 영속 native CLI thread에 연결해 process 경계 뒤 재개하고 공개 Agent message와 Archive Tool Call만 정제된 Host 진행·최종 응답으로 변환해야 한다.",
+      "statement": "Codex App Server Adapter는 같은 ArchivistSession을 영속 native CLI thread에 연결해 process 경계 뒤 재개하고 공개 Agent message와 허용된 native·Archive Tool 진행만 정제된 Host 진행·최종 응답으로 변환해야 한다.",
       "given": "두 ArchivistTurn, process마다 새로 시작되는 Codex app-server fixture, Session 전용 상태 디렉터리와 reasoning·stderr·실제 경로를 포함한 비공개 fixture event가 있다.",
       "when": "같은 ArchivistSession의 두 Turn을 차례로 실행한다.",
-      "then": "첫 process는 thread를 만들고 둘째는 같은 thread를 resume하며 공개 commentary·Archive Tool 진행·최종 응답만 Host 계약으로 나오고 prompt·reasoning·stderr·실제 경로는 진행 출력과 native thread mapping에 남지 않는다.",
+      "then": "첫 process는 thread를 만들고 둘째는 같은 thread를 resume하며 공개 commentary·허용 Tool 진행·최종 응답만 Host 계약으로 나오고 prompt·reasoning·stderr·명령 출력·실제 경로는 진행 출력과 native thread mapping에 남지 않는다.",
       "test_file": "internal/adapter/codexcli/appserver_test.go",
       "test_name": "TestCodexAppServerResumesNativeThreadAndPublishesOnlySanitizedTurnEvents",
+      "status": "implemented",
+      "level": "integration"
+    },
+    {
+      "id": "LRH-019",
+      "design": "codex-unattended-native-agent-runtime",
+      "statement": "Codex App Server Adapter는 승인 요청 없는 danger-full-access 실행에서 native 터미널·파일·Skill·보조 Agent 도구를 제공하되 Archive 업무 효과는 Archive MCP 경계에 두고 native 도구 세부 정보는 정규화된 진행 항목으로만 투영해야 한다.",
+      "given": "승인 정책과 sandbox 및 feature 인수를 검사하고 native 명령·파일 변경·보조 Agent·Archive MCP item을 내는 Codex app-server fixture가 있다.",
+      "when": "Archivist Host가 Codex Turn을 시작해 native 도구와 Archive 도구를 함께 실행한다.",
+      "then": "thread와 Turn은 never 승인 및 danger-full-access로 시작되고 터미널·Skill·보조 Agent 기능은 켜지며 명령문·출력·경로 대신 터미널 명령 실행·파일 변경·보조 Agent 작업·Archive 업무 도구 진행만 Host 계약에 남는다.",
+      "test_file": "internal/adapter/codexcli/appserver_test.go",
+      "test_name": "TestCodexAppServerRunsNativeToolsWithoutApprovalSandbox",
       "status": "implemented",
       "level": "integration"
     },

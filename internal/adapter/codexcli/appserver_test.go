@@ -115,3 +115,57 @@ func TestCodexAppServerResumesNativeThreadAndPublishesOnlySanitizedTurnEvents(t 
 		t.Fatalf("native thread mapping contains the wrong data: %s", mapping)
 	}
 }
+
+// Requirement: LRH-019
+func TestCodexAppServerRunsNativeToolsWithoutApprovalSandbox(t *testing.T) {
+	temporary := t.TempDir()
+	fixture := filepath.Join(temporary, "fake-codex")
+	if runtime.GOOS == "windows" {
+		fixture += ".exe"
+	}
+	build := exec.Command("go", "build", "-o", fixture, "./testdata/fakecodex")
+	build.Dir = "."
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build fixture: %v: %s", err, output)
+	}
+	t.Setenv("ARCHIVE_CODEX_FIXTURE_NATIVE_TOOLS", "1")
+	state := filepath.Join(temporary, "state")
+	working := filepath.Join(temporary, "working")
+	if err := os.Mkdir(working, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	tools := &fixtureTools{available: []archivistloop.AvailableTool{{Name: "archive.run.status.v1", ActionClass: "READ"}}}
+	var records []emittedRecord
+	err := Run(context.Background(), Options{
+		CodexExecutable: fixture, MCPExecutable: fixture, WorkingDirectory: working,
+		StateDirectory: state, MCPURL: "http://127.0.0.1:18080/api/v1/archivist/mcp",
+		Runtime: archivistloop.RuntimeContext{
+			SessionID: "SESSION-NATIVE", TurnID: "TURN-NATIVE", FencingToken: 1,
+		},
+		MaximumCalls: 4,
+	}, tools, "터미널과 보조 Agent를 사용해 상태를 확인해", func(kind, summary string, resultIDs []string) error {
+		records = append(records, emittedRecord{kind: kind, summary: summary, resultIDs: resultIDs})
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"터미널 명령 실행", "파일 변경", "보조 Agent 작업", "아카이브 실행 상태 확인"}
+	for _, summary := range want {
+		found := false
+		for _, record := range records {
+			if record.summary == summary {
+				found = true
+			}
+			if strings.Contains(record.summary, "secret.txt") || strings.Contains(record.summary, `C:\`) {
+				t.Fatalf("native tool detail escaped into a public record: %#v", record)
+			}
+		}
+		if !found {
+			t.Fatalf("missing normalized progress %q in %#v", summary, records)
+		}
+	}
+	if records[len(records)-1].kind != "final" || records[len(records)-1].summary != "아카이브 상태를 확인했습니다." {
+		t.Fatalf("unexpected final record: %#v", records)
+	}
+}

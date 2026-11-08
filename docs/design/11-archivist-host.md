@@ -57,7 +57,7 @@ Host 설정은 같은 `archive-archivist` executable을 `archive-gpt`와 `archiv
 
 Windows의 `archive-codex` CLI Adapter는 일회성 `codex exec` 화면을 긁지 않고 Codex `app-server --listen stdio://`의 구조화 protocol을 사용한다. ArchivistSession 하나를 Codex의 영속 native thread 하나에 대응시키고, 실행 process가 끝나도 service 계정 전용 상태 디렉터리에 Session→thread reference만 원자적으로 보존한다. 다음 ArchivistTurn은 새 app-server process에서 `thread/resume`으로 같은 thread를 열고 `turn/start`로 입력한다. Control의 ArchivistSession·Turn이 업무 identity이고 native thread reference는 CLI 대화 재개용일 뿐 Command·Tool Call 멱등성의 원장이 아니다. prompt, raw terminal, reasoning, credential과 실제 파일 경로는 이 mapping에 저장하지 않는다. `LRH-018`
 
-app-server에는 사용자 설정의 MCP 목록을 비우고 Archive stdio MCP 하나만 필수로 주입한다. shell·unified exec·browser·computer use·apps·plugins·multi-agent·image·skill discovery 계열 기능을 끄고 `never` approval, read-only sandbox와 Archive 전용 developer instruction을 Turn마다 고정한다. Archive MCP bridge는 Control이 광고하고 로컬 schema registry가 허용한 업무 도구만 반환하며, 호출을 현재 Session·Turn·fencing과 결정적 Tool Call identity가 있는 Host loopback request로 바꾼다. `MCP-006`
+app-server에는 사용자 설정의 MCP 목록을 비우고 Archive stdio MCP 하나만 필수로 주입한다. local terminal·파일 변경·설치된 Skill·보조 Agent는 켜고 `never` approval과 `danger-full-access`를 thread·Turn마다 고정한다. browser·computer use·apps·plugins·외부 connector·image 계열은 끈다. Codex는 Host의 고정 workspace와 같은 로그인 계정 권한 안에서 native 도구를 사용하며 Archive 업무 조회·선택·판정·실행·승인·영속 기록은 Archive MCP를 통해서만 수행하도록 developer instruction을 고정한다. Archive MCP bridge는 Control이 광고하고 로컬 schema registry가 허용한 업무 도구만 반환하며, 호출을 현재 Session·Turn·fencing과 결정적 Tool Call identity가 있는 Host loopback request로 바꾼다. Control service credential은 Codex process에 전달하지 않는다. `LRH-019`, `MCP-006`
 
 다음 Orca 기능은 v1 Archivist Host에 포함하지 않는다.
 
@@ -141,11 +141,11 @@ ChatGPT plan의 직접 HTTP 경로는 `previous_response_id`를 사용하지 않
 
 local 경로도 현재 Turn 밖의 model conversation을 소유하지 않는다. 같은 process 안에서 assistant tool call과 MCP receipt를 Chat Completions message로 다음 round에 전달하고, process가 끊기면 같은 Control receipt 기반 checkpoint에서 다시 시작한다. 인증 없는 endpoint는 loopback HTTP만 허용하고 redirect를 따르지 않으므로 model 입력이 Host 밖으로 이동하지 않는다. `AGT-021`, `LRH-016`
 
-Codex app-server 경로는 ArchivistSession에 대응한 native thread를 process 경계 뒤에도 재개한다. 같은 Control Turn이 중단되어 checkpoint로 다시 claim되면 같은 native thread에 checkpoint 입력을 추가하고, 이미 완료된 Archive Tool Call은 Control receipt와 결정적 call identity로 replay하여 효과를 중복하지 않는다. app-server가 반환한 reasoning delta, command output, raw stderr와 filesystem path는 버리고, 공개 `agentMessage` commentary와 Archive MCP Tool item만 정제된 진행으로 바꾼다. terminal `agentMessage`만 `final_response`가 될 수 있다. `LRH-018`
+Codex app-server 경로는 ArchivistSession에 대응한 native thread를 process 경계 뒤에도 재개한다. 같은 Control Turn이 중단되어 checkpoint로 다시 claim되면 같은 native thread에 checkpoint 입력을 추가하고, 이미 완료된 Archive Tool Call은 Control receipt와 결정적 call identity로 replay하여 효과를 중복하지 않는다. app-server가 반환한 reasoning delta, command text·output, raw stderr와 filesystem path는 버린다. 공개 `agentMessage` commentary, Archive MCP Tool item과 native `commandExecution`·`fileChange`·`collabAgentToolCall`은 각각 업무 도구 이름·`터미널 명령 실행`·`파일 변경`·`보조 Agent 작업`으로만 정규화한다. terminal `agentMessage`만 `final_response`가 될 수 있다. `LRH-018~019`
 
 `TURN_COMPLETED`는 상태 문자열만 보내지 않는다. backend는 사람이 읽을 수 있는 `summary`와 정제된 `result_ids`를 가진 구조화 `final_response`를 반환하고, Host는 현재 fencing token과 단조 cursor로 이를 Control에 보낸다. Control은 final response가 없는 완료를 거부하고 ArchivistTurn과 같은 transaction으로 저장·투영한다. raw stdout, credential, resume token과 실제 filesystem path는 final response에 넣지 않는다.
 
-`TURN_PROGRESS`는 raw terminal cursor를 Control에 복제하는 통로가 아니다. Runtime Adapter가 사용자에게 공개할 내용으로 명시적으로 만든 `summary`만 `ProgressUpdate`로 보고한다. `TURN_FAILED`는 raw error 문자열 대신 정규화 `code`와 정제 `summary`를 가진 `FailureReport`를 요구한다. Control은 PROGRESS·FAILURE를 `ArchivistTurnEntry` append-only 기록으로 Turn cursor·상태와 한 SQLite transaction에 확정하고 중복 cursor를 늘리지 않는다. Entry schema에는 stdout·stderr·credential·filesystem path 필드가 없다. 계약 fixture와 Codex app-server fixture는 이 구조화 event stream을 검증한다. 실제 계정으로 인증된 Codex·Claude 정제 증적은 `LRH-014` acceptance 전까지 planned다. `LRH-013~014`, `LRH-018`
+`TURN_PROGRESS`는 raw terminal cursor를 Control에 복제하는 통로가 아니다. Runtime Adapter가 사용자에게 공개할 내용으로 명시적으로 만든 `summary`만 `ProgressUpdate`로 보고한다. native 도구 진행은 도구 종류만 남기고 명령·diff·하위 Agent prompt를 복제하지 않는다. `TURN_FAILED`는 raw error 문자열 대신 정규화 `code`와 정제 `summary`를 가진 `FailureReport`를 요구한다. Control은 PROGRESS·FAILURE를 `ArchivistTurnEntry` append-only 기록으로 Turn cursor·상태와 한 SQLite transaction에 확정하고 중복 cursor를 늘리지 않는다. Entry schema에는 stdout·stderr·credential·filesystem path 필드가 없다. 계약 fixture와 Codex app-server fixture는 이 구조화 event stream을 검증한다. 실제 계정으로 인증된 Codex·Claude 정제 증적은 `LRH-014` acceptance 전까지 planned다. `LRH-013~014`, `LRH-018~019`
 
 ## 7. 도구 호출 경계
 
@@ -258,6 +258,7 @@ Core에서 결정적으로 검증할 수 있는 계약은 구현 상태다.
 - runtime event cursor와 명시적 완료 `LRH-008`
 - 정제된 진행·실패 항목의 cursor 멱등 저장·투영 `LRH-013`
 - Codex app-server native thread mapping·재개와 공개 이벤트 정제 `LRH-018`
+- 승인 없는 native terminal·파일·Skill·보조 Agent와 정규화 진행 `LRH-019`
 - Tool Call→Command 상관관계와 receipt replay `MCP-002`
 - Codex stdio MCP 업무 도구 allowlist와 Turn 상관관계 `MCP-006`
 - 채팅과 ActionCard Approval 분리 `DSH-003`
@@ -269,6 +270,6 @@ Adapter 경계도 구현 상태다.
 - 사람·Archivist 공통 Command Bus와 정제된 아카이브 작업 공간 projection `COL-001~002`, `DSH-002`
 - Archivist Runtime·ActionCard fixture의 Chromium PNG golden `DSH-004`
 
-실제 Windows Archivist Host와 계약 fixture의 checkpoint 재개·중복 방지는 `LRH-011`, profile 없는 Windows 서비스 로그온의 DPAPI secret 경계는 `LRH-010` acceptance에서 검증했다. Codex app-server fixture의 native thread mapping·재개·정제 event 변환과 Archive stdio MCP bridge는 `LRH-018`, `MCP-006`으로 검증한다. 실제 계정으로 인증된 Codex 또는 Claude CLI의 전체 협업·강제 재시작 증적은 `LRH-009`, 실제 공개 이벤트 정제 증적은 `LRH-014` acceptance가 남아 있다. fixture 결과를 제3자 CLI의 실계정 증적으로 대체하지 않는다.
+실제 Windows Archivist Host와 계약 fixture의 checkpoint 재개·중복 방지는 `LRH-011`, profile 없는 Windows 서비스 로그온의 DPAPI secret 경계는 `LRH-010` acceptance에서 검증했다. Codex app-server fixture의 native thread mapping·재개·정제 event 변환, 승인 없는 native 도구 정책과 Archive stdio MCP bridge는 `LRH-018~019`, `MCP-006`으로 검증한다. 실제 계정으로 인증된 Codex 또는 Claude CLI의 전체 협업·강제 재시작 증적은 `LRH-009`, 실제 공개 이벤트 정제 증적은 `LRH-014` acceptance가 남아 있다. fixture 결과를 제3자 CLI의 실계정 증적으로 대체하지 않는다.
 
 macOS Keychain credential 왕복, ChatGPT OAuth Profile·token 회전, stateless streaming Responses 계약, loopback local Chat Completions Adapter, 제한 도구 루프와 실행 상한은 `CFG-015`, `AGT-016~021`로 구현됐다. Host process 계약에서 local model fixture가 Archive MCP 도구를 호출하고 receipt 뒤 최종 응답을 내는 수직 조립은 `LRH-016`으로 검증한다. 실제 macOS ChatGPT 계정의 읽기 도구 Turn은 `LRH-015`, 실제 자체 LLM의 읽기 도구 Turn은 `LRH-017` acceptance가 각각 소유한다. 현재 Mac 계정은 plan 사용 권한 동의 단계에서 차단되어 `LRH-015`를 planned로 유지하며, 실제 자체 LLM endpoint가 준비되기 전에는 `LRH-017`을 planned로 유지한다. 이 경계는 Codex·Claude의 native resume acceptance `LRH-009`, `LRH-014`를 대신하지 않으며 다계정 Router `AGT-001~015`도 구현됐다고 간주하지 않는다.
