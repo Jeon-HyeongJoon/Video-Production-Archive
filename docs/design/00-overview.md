@@ -59,7 +59,7 @@ Windows PC
 └── External media: source/archive copies
 ```
 
-macOS의 Control·Archivist 통합 배치에서는 같은 PC에 `archive-control`, `archivist-host`, `archive-archivist`를 둔다. `archive-archivist`는 Keychain OAuth Profile을 사용해 ChatGPT Responses 한 Turn과 제한된 Archive MCP 업무 도구만 실행한다.
+macOS의 Control·Archivist 통합 배치에서는 같은 PC에 `archive-control`, `archivist-host`, `archive-archivist`를 둔다. `archive-archivist`는 Keychain OAuth Profile의 ChatGPT Responses 또는 같은 Host의 loopback 자체 LLM 중 하나를 CLI ID로 고정하고 한 Turn과 제한된 Archive MCP 업무 도구만 실행한다.
 
 Worker가 다른 PC로 이동해도 Domain 계약과 Control API는 바뀌지 않는다.
 

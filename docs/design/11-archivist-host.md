@@ -17,7 +17,7 @@ Archive Control ── Command Bus ── Capability Registry
    │
    └── outbound authenticated stream ── Archivist Host
                                            │
-                                           ├── Embedded Core → archive-archivist GPT loop
+                                           ├── Embedded Core → archive-archivist ChatGPT/local loop
                                            ├── Embedded Core → Codex / Claude CLI
                                            └── Orca CLI backend (선택)
 ```
@@ -51,7 +51,9 @@ v1 기본 backend인 Embedded Core가 제공할 기능은 다음뿐이다.
 | CLI별 재개 | native resume token 우선, 없으면 정제된 checkpoint 사용 |
 | 재시작 조정 | stale runtime handle을 폐기하고 durable session으로 다시 해석 |
 
-`archive-archivist`는 Embedded Core가 실행하는 허용 CLI 중 하나다. 이 바이너리는 ChatGPT OAuth Profile에서 access token을 얻고 Responses API와 Host loopback MCP proxy 사이의 제한된 도구 루프를 수행한다. 별도 Session 저장소를 만들지 않고 한 process가 ArchivistTurn 하나만 처리한다. `EMBEDDED_CORE`는 process 감독 방식이고 ChatGPT는 model Provider이므로 RuntimeBackend enum을 추가하지 않는다. `AGT-016~020`
+`archive-archivist`는 Embedded Core가 실행하는 허용 CLI 중 하나다. 이 바이너리는 `chatgpt` Provider에서는 OAuth Profile의 access token으로 Responses API를 사용하고, `local` Provider에서는 같은 Host의 인증 없는 loopback OpenAI 호환 Chat Completions endpoint를 사용한다. 두 경로 모두 Host loopback MCP proxy 사이의 제한된 도구 루프를 수행하고 별도 Session 저장소를 만들지 않으며 한 process가 ArchivistTurn 하나만 처리한다. `EMBEDDED_CORE`는 process 감독 방식이고 model Provider 선택은 CLI 고정 인수이므로 RuntimeBackend enum을 추가하지 않는다. `AGT-016~021`, `LRH-016`
+
+Host 설정은 같은 `archive-archivist` executable을 `archive-gpt`와 `archive-local` 같은 서로 다른 CLI ID로 동시에 등록할 수 있다. 각 ArchivistSession은 사람이 고른 CLI ID에 고정되고 Turn 중 자동 전환하지 않는다. local 경로는 `--provider local --api-base http://127.0.0.1:<port>/v1 --model <slug>`를 고정 인수로 사용하며 model endpoint의 function tool call 지원이 필수다.
 
 다음 Orca 기능은 v1 Archivist Host에 포함하지 않는다.
 
@@ -132,6 +134,8 @@ Host 또는 backend 재시작 시 다음 순서를 따른다.
 이미 전달된 Turn의 lease를 만료 뒤 다시 claim하면 Control은 `delivered_request_id`, 마지막 runtime event cursor와 새 fencing token을 반환한다. Host는 같은 사용자 입력을 새 입력으로 확정하지 않으며 `INPUT_ACCEPTED`를 반복하지 않는다. native reference가 없는 Embedded Core는 원래 목표와 정제된 checkpoint로 backend를 다시 열고, `TURN_STARTED`부터 마지막 cursor 다음 값으로 보고한다. Control은 이미 전달된 Turn에 한해서 새 lease의 `TURN_STARTED`를 `LEASED → RUNNING` 재개 전이로 허용한다.
 
 ChatGPT plan의 직접 HTTP 경로는 `previous_response_id`를 사용하지 않는다. `archive-archivist`는 현재 Turn의 prompt, Host가 준 최소 checkpoint, 한 process 안에서 완료된 model output item과 Tool Call receipt만 다음 Responses round의 `input`으로 다시 보낸다. process가 끊기면 기존 Control receipt를 기준으로 checkpoint 실행을 새로 시작하며 같은 결정적 Tool Call ID와 멱등 key로 완료 효과를 replay한다. 긴 ArchiveRun은 model polling으로 유지하지 않고 기존 SYSTEM 재호출 Turn으로 이어 간다.
+
+local 경로도 현재 Turn 밖의 model conversation을 소유하지 않는다. 같은 process 안에서 assistant tool call과 MCP receipt를 Chat Completions message로 다음 round에 전달하고, process가 끊기면 같은 Control receipt 기반 checkpoint에서 다시 시작한다. 인증 없는 endpoint는 loopback HTTP만 허용하고 redirect를 따르지 않으므로 model 입력이 Host 밖으로 이동하지 않는다. `AGT-021`, `LRH-016`
 
 `TURN_COMPLETED`는 상태 문자열만 보내지 않는다. backend는 사람이 읽을 수 있는 `summary`와 정제된 `result_ids`를 가진 구조화 `final_response`를 반환하고, Host는 현재 fencing token과 단조 cursor로 이를 Control에 보낸다. Control은 final response가 없는 완료를 거부하고 ArchivistTurn과 같은 transaction으로 저장·투영한다. raw stdout, credential, resume token과 실제 filesystem path는 final response에 넣지 않는다.
 
@@ -228,9 +232,10 @@ Worker와 Archivist Host는 같은 PC에 설치할 수 있지만 identity, crede
 3. Embedded Core backend와 fake CLI integration fixture
 4. loopback MCP proxy와 Control MCP Adapter
 5. 아카이브 작업 공간의 직접 Command·Session·Turn·ActionCard projection과 golden
-6. 실제 Windows Host에서 Codex 또는 Claude CLI acceptance
-7. macOS Keychain과 실제 ChatGPT 계정으로 제한 도구 루프 acceptance
-8. 필요할 때만 Orca CLI compatibility backend와 다계정 Provider Router
+6. 같은 Host의 local model fixture와 Archive MCP를 통한 subprocess 수직 조립
+7. 실제 Windows Host에서 Codex 또는 Claude CLI acceptance
+8. macOS Keychain과 실제 ChatGPT 계정 및 실제 자체 LLM으로 제한 도구 루프 acceptance
+9. 필요할 때만 Orca CLI compatibility backend와 다계정 Provider Router
 
 Orca CLI backend는 v1 완료의 선행 조건이 아니다. Embedded Core acceptance가 먼저 통과하고 Orca 연동의 유지비가 실제 운영 이점을 줄 때 추가한다.
 
@@ -258,4 +263,4 @@ Adapter 경계도 구현 상태다.
 
 실제 Windows Archivist Host와 계약 fixture의 checkpoint 재개·중복 방지는 `LRH-011`, profile 없는 Windows 서비스 로그온의 DPAPI secret 경계는 `LRH-010` acceptance에서 검증했다. 실제 계정으로 인증된 Codex 또는 Claude CLI의 native resume 증적은 `LRH-009` acceptance가 남아 있다. fixture 결과를 제3자 CLI의 native resume 증적으로 대체하지 않는다.
 
-macOS Keychain credential 왕복, ChatGPT OAuth Profile·token 회전, stateless streaming Responses 계약, 제한 도구 루프와 실행 상한은 `CFG-015`, `AGT-016~020`으로 구현됐다. 실제 macOS ChatGPT 계정과 계정 model의 한정된 읽기 도구 Turn은 `LRH-015` acceptance가 소유한다. 현재 Mac 계정은 plan 사용 권한 동의 단계에서 차단되어 `LRH-015`를 planned로 유지한다. 이 경계는 Codex·Claude의 native resume acceptance `LRH-009`, `LRH-014`를 대신하지 않으며 다계정 Router `AGT-001~015`도 구현됐다고 간주하지 않는다.
+macOS Keychain credential 왕복, ChatGPT OAuth Profile·token 회전, stateless streaming Responses 계약, loopback local Chat Completions Adapter, 제한 도구 루프와 실행 상한은 `CFG-015`, `AGT-016~021`로 구현됐다. Host process 계약에서 local model fixture가 Archive MCP 도구를 호출하고 receipt 뒤 최종 응답을 내는 수직 조립은 `LRH-016`으로 검증한다. 실제 macOS ChatGPT 계정의 읽기 도구 Turn은 `LRH-015`, 실제 자체 LLM의 읽기 도구 Turn은 `LRH-017` acceptance가 각각 소유한다. 현재 Mac 계정은 plan 사용 권한 동의 단계에서 차단되어 `LRH-015`를 planned로 유지하며, 실제 자체 LLM endpoint가 준비되기 전에는 `LRH-017`을 planned로 유지한다. 이 경계는 Codex·Claude의 native resume acceptance `LRH-009`, `LRH-014`를 대신하지 않으며 다계정 Router `AGT-001~015`도 구현됐다고 간주하지 않는다.

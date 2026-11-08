@@ -16,6 +16,16 @@ clis:
       - keychain://archive-archivist/chatgpt-default
       - --model
       - REPLACE_WITH_ACCOUNT_MODEL_SLUG
+  - id: archive-local
+    executable: /Applications/Archive/bin/archive-archivist
+    fixed_arguments:
+      - run
+      - --provider
+      - local
+      - --api-base
+      - http://127.0.0.1:11434/v1
+      - --model
+      - REPLACE_WITH_LOCAL_TOOL_MODEL_SLUG
 workspace_roots:
   - id: archive-control-workspace
     path: /Users/archive/ArchiveWorkspace

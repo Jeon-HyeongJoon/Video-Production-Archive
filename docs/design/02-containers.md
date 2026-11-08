@@ -13,6 +13,7 @@ flowchart LR
     GPTLoop[archive-archivist] -->|loopback MCP proxy| Host
     Host -->|process + structured turn protocol| GPTLoop
     GPTLoop -->|OAuth Responses| Provider[ChatGPT account model]
+    GPTLoop -->|loopback Chat Completions| LocalModel[Local model endpoint]
     Control --> SQLite[(SQLite)]
     Control --> Secrets[OS Secret Store]
     Worker --> Tools[FFmpeg/ffprobe/STT]
@@ -43,7 +44,7 @@ HTTP와 MCP는 Domain 함수를 직접 호출하지 않고 같은 Command Bus를
 
 v1 Archive Control는 strict boot YAML에서 DB·listen·CIDR·Origin·Worker·Storage topology를 읽어 시작하며 `archive-control` 실행 파일이 `internal/adapter/controlruntime` 조립 Adapter를 열어 SQLite Command Store·카탈로그, 아카이브 작업 공간 projection과 Notification SSE를 하나의 HTTP Handler에 조립한다. Application 패키지는 이 구체 Adapter 조립을 import하지 않는다. Worker와 Archivist Host credential reference는 Windows의 `wincred://`·절대 `dpapi://`와 macOS의 `keychain://`를 허용하되 raw secret·상대 DPAPI 경로는 거부한다. 정적 아카이브 작업 공간과 health, 자산·전사·요약·검수·Job 조회·명령 API는 실제 peer CIDR 검사를 공통으로 통과하고 protocol DTO에서 Storage 경로를 제외한다. 같은 boot topology의 재시작은 멱등하지만 기존 Storage ID의 물리 identity나 root 변경은 시작 오류다. 사용자는 Archivist 없이도 Job을 직접 만들 수 있고, 사람 직접 Command와 Archivist Tool Call은 같은 Command Bus를 통과한다. 상태·명령·Event·receipt가 SQLite transaction으로 확정된 다음 공통 읽기 투영을 갱신한다. `CFG-006`, `CTL-001~004`, `COL-001`
 
-ArchivistSession·ArchivistTurn은 Control이 먼저 SQLite에 확정하고 Archivist Host가 outbound 연결로 claim한다. Host는 로컬 CLI process/PTY와 resume token만 감독하며 업무 상태나 승인 정책을 소유하지 않는다. 전체 Orca 앱은 배포 구성요소가 아니고, 최소 Embedded Core가 기본 runtime backend이며 Orca CLI 연동은 같은 Port의 선택형 Adapter다. Embedded Core는 Codex·Claude 외에도 `archive-archivist` 한 process를 실행해 ChatGPT account model과 loopback MCP 사이의 제한된 단일 Turn 루프를 제공한다. 자세한 계약은 [11. 로컬 CLI Archivist Host 설계](11-archivist-host.md)를 따른다. `LRH-001~008`, `AGT-016~020`, `CTL-005~006`
+ArchivistSession·ArchivistTurn은 Control이 먼저 SQLite에 확정하고 Archivist Host가 outbound 연결로 claim한다. Host는 로컬 CLI process/PTY와 resume token만 감독하며 업무 상태나 승인 정책을 소유하지 않는다. 전체 Orca 앱은 배포 구성요소가 아니고, 최소 Embedded Core가 기본 runtime backend이며 Orca CLI 연동은 같은 Port의 선택형 Adapter다. Embedded Core는 Codex·Claude 외에도 `archive-archivist` 한 process를 실행해 ChatGPT account model 또는 같은 Host의 자체 LLM과 loopback MCP 사이의 제한된 단일 Turn 루프를 제공한다. 자세한 계약은 [11. 로컬 CLI Archivist Host 설계](11-archivist-host.md)를 따른다. `LRH-001~008`, `LRH-016~017`, `AGT-016~021`, `CTL-005~006`
 
 ## 3. MediaOperation과 선택형 Runner
 

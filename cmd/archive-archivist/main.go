@@ -19,6 +19,7 @@ import (
 	"videoarchive/internal/adapter/archivistmcpclient"
 	"videoarchive/internal/adapter/chatgptauth"
 	"videoarchive/internal/adapter/chatgptresponses"
+	"videoarchive/internal/adapter/localmodel"
 	"videoarchive/internal/application/archivistloop"
 )
 
@@ -177,13 +178,14 @@ func runModels(ctx context.Context, arguments []string) int {
 func runTurn(ctx context.Context, arguments []string) int {
 	set := flag.NewFlagSet("run", flag.ContinueOnError)
 	set.SetOutput(os.Stderr)
+	provider := set.String("provider", environmentDefault("ARCHIVE_MODEL_PROVIDER", "chatgpt"), "model provider: chatgpt or local")
 	profileRef := set.String("profile-ref", strings.TrimSpace(os.Getenv("ARCHIVE_CHATGPT_PROFILE_REF")), "keychain:// ChatGPT profile reference")
 	issuer := set.String("issuer", environmentDefault("ARCHIVE_CHATGPT_ISSUER", "https://auth.openai.com"), "OpenID issuer")
-	apiBase := set.String("api-base", environmentDefault("ARCHIVE_CHATGPT_API_BASE", "https://api.openai.com/v1"), "Responses API base URL")
-	model := set.String("model", strings.TrimSpace(os.Getenv("ARCHIVE_CHATGPT_MODEL")), "account-available model slug")
+	apiBase := set.String("api-base", modelAPIBaseDefault(), "model API base URL")
+	model := set.String("model", modelDefault(), "model slug")
 	maximumRounds := set.Int("max-rounds", 8, "maximum model rounds")
 	maximumCalls := set.Int("max-tool-calls", 16, "maximum Archive tool calls")
-	if set.Parse(arguments) != nil || set.NArg() != 0 || strings.TrimSpace(*profileRef) == "" || strings.TrimSpace(*model) == "" {
+	if set.Parse(arguments) != nil || set.NArg() != 0 || strings.TrimSpace(*model) == "" {
 		fmt.Fprintln(os.Stderr, "invalid Archivist run options")
 		return 2
 	}
@@ -201,9 +203,23 @@ func runTurn(ctx context.Context, arguments []string) int {
 		fmt.Fprintln(os.Stderr, "Archivist runtime context is incomplete")
 		return 2
 	}
-	options := &commonOptions{profileRef: *profileRef, issuer: *issuer, apiBase: *apiBase}
-	modelClient, err := responsesClient(options)
-	if err != nil {
+	var modelClient archivistloop.ModelClient
+	switch strings.ToLower(strings.TrimSpace(*provider)) {
+	case "chatgpt":
+		if strings.TrimSpace(*profileRef) == "" {
+			fmt.Fprintln(os.Stderr, "Archivist model client is unavailable")
+			return 2
+		}
+		options := &commonOptions{profileRef: *profileRef, issuer: *issuer, apiBase: *apiBase}
+		modelClient, err = responsesClient(options)
+	case "local":
+		modelClient, err = localmodel.New(localmodel.Configuration{
+			BaseURL: *apiBase, HTTPClient: &http.Client{Timeout: 5 * time.Minute},
+		})
+	default:
+		err = errors.New("unknown model provider")
+	}
+	if err != nil || modelClient == nil {
 		fmt.Fprintln(os.Stderr, "Archivist model client is unavailable")
 		return 2
 	}
@@ -259,6 +275,20 @@ func environmentDefault(name, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+func modelAPIBaseDefault() string {
+	if value := strings.TrimSpace(os.Getenv("ARCHIVE_MODEL_API_BASE")); value != "" {
+		return value
+	}
+	return environmentDefault("ARCHIVE_CHATGPT_API_BASE", "https://api.openai.com/v1")
+}
+
+func modelDefault() string {
+	if value := strings.TrimSpace(os.Getenv("ARCHIVE_MODEL")); value != "" {
+		return value
+	}
+	return strings.TrimSpace(os.Getenv("ARCHIVE_CHATGPT_MODEL"))
 }
 
 func sanitizedFailure(err error) string {

@@ -3264,6 +3264,42 @@
       "test_name": "",
       "status": "planned",
       "level": "acceptance"
+    },
+    {
+      "id": "AGT-021",
+      "design": "local-model-chat-completions-adapter",
+      "statement": "Archive Archivist의 로컬 모델 Adapter는 같은 Host의 인증 없는 loopback OpenAI 호환 Chat Completions endpoint만 사용하고 구조화된 Archive 도구 호출과 receipt를 Provider 중립 model 응답으로 변환해야 한다.",
+      "given": "도구 호출 뒤 최종 응답을 반환하는 loopback Chat Completions test server와 Archive 도구 정의 및 receipt가 있다.",
+      "when": "로컬 모델 Adapter로 두 model round를 실행한다.",
+      "then": "credential header 없이 system·user·assistant 도구 호출·tool receipt가 순서대로 전송되고 구조화 Tool Call과 최종 텍스트가 반환되며 비-loopback endpoint는 거부된다.",
+      "test_file": "internal/adapter/localmodel/client_test.go",
+      "test_name": "TestLocalModelAdapterUsesLoopbackChatCompletionsAndPreservesToolReceipts",
+      "status": "implemented",
+      "level": "integration"
+    },
+    {
+      "id": "LRH-016",
+      "design": "local-model-archivist-vertical-assembly",
+      "statement": "Archivist Host의 process 실행 계약은 local Provider로 설정된 archive-archivist를 시작해 로컬 모델의 구조화 호출을 Archive MCP로 한 번 실행하고 receipt를 다음 model round에 전달해 정제된 최종 응답을 받아야 한다.",
+      "given": "로컬 model·MCP HTTP test server, ArchivistTurn runtime identity와 archive-archivist subprocess 실행 계획이 있다.",
+      "when": "Host process Runner가 local Provider의 ArchivistTurn을 실행한다.",
+      "then": "model 두 round와 Archive 도구 한 건만 실행되고 MCP envelope의 Session·Turn·fencing·멱등 상관관계 및 최종 한국어 응답·결과 ID가 Host 계약으로 반환된다.",
+      "test_file": "cmd/archive-archivist/main_test.go",
+      "test_name": "TestLocalArchivistCLICompletesToolTurnThroughHostProcessContract",
+      "status": "implemented",
+      "level": "integration"
+    },
+    {
+      "id": "LRH-017",
+      "design": "local-model-archivist-acceptance",
+      "statement": "실제 Host의 자체 LLM endpoint는 Archive 도구 호출을 지원하는 model로 한정된 읽기 도구를 한 번 호출하고 최종 한국어 응답으로 끝나는 ArchivistTurn을 완료해야 한다.",
+      "given": "실제 Host에서 loopback으로 실행 중인 지원 model과 격리된 Archive 읽기 도구가 있다.",
+      "when": "local Provider로 도구 사용 지시가 있는 ArchivistTurn을 실행한다.",
+      "then": "읽기 도구가 정확히 한 번 호출되고 설정된 상한 안에서 비어 있지 않은 최종 응답이 반환된다.",
+      "test_file": "",
+      "test_name": "",
+      "status": "planned",
+      "level": "acceptance"
     }
   ]
 }

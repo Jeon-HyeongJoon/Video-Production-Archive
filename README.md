@@ -24,9 +24,9 @@
 - Control 없이 파일 처리만 실행하는 `archive-media` CLI와, 필요할 때 같은 실행 파일에서 credential 인증 heartbeat·Step claim을 수행하는 선택형 `runner`
 - Worker·원본·아카이브·폴더 범위를 고정하는 ArchiveRun, 1단계 분류·렌더·QC·보관과 별도 2단계 STT·자막·텍스트·패키지 리비전·ArchiveCatalog
 - 세션 제어 모드, 구조화된 드라이브 선택 참조, MCP 업무 도구, ActionCard와 단계 완료 SYSTEM 재호출을 잇는 Archivist 협업 흐름
-- macOS Keychain에 보호된 ChatGPT Profile, stateless streaming Responses Adapter와 Archive 업무 도구만 사용하는 bounded `archive-archivist` 루프
+- macOS Keychain에 보호된 ChatGPT Profile·stateless streaming Responses Adapter, loopback 자체 LLM Chat Completions Adapter와 Archive 업무 도구만 사용하는 bounded `archive-archivist` 루프
 
-현재는 SQLite Command Unit of Work, Storage→논리 Volume 작업 공간 해석과 별도 PhysicalDevice I/O 충돌 키, 아카이브 sidecar export/import, 게시 장애 조정, Notification SSE 재연결, 독립 Capability 실행·증적·Archive Workspace 상태 투영과 CI 테스트 증적의 integration 계약까지 구현되어 있다. 등록 Storage 입고 카탈로그와 ffprobe·FFmpeg·whisper.cpp subprocess Adapter도 격리 fixture로 검증하며 FFmpeg speech audio 추출에서 timestamp Transcript 게시·최신 segment 검색, 검증된 SRT 자막, Archivist·사람 작성 리비전 요약 게시와 SQLite 내용 검수 복원까지 연결된다. `archive-control`은 boot 설정으로 같은 SQLite DB와 Storage topology를 열고 내부망 아카이브 작업 공간, 자산·전사·요약·검수·Job·Worker·Archivist Runtime 조회 API와 CSRF 보호 Job·Session·Turn 명령을 제공한다. `archive-media`는 같은 MediaOperation Adapter를 단독 CLI와 선택형 관리 Runner에서 함께 사용한다. 단독 실행은 Control·대시보드·SQLite·서비스 credential을 열지 않으며, `runner` 모드만 heartbeat, Step claim·결과와 실행 중 취소 stop·정리 결과를 전송한다. `archivist-host`는 허용된 로컬 CLI와 workspace만 실행하고 Control에 outbound heartbeat·Turn claim·event를 보내며 loopback MCP proxy를 제공한다. Control MCP Adapter는 versioned 업무 Capability만 같은 Command Bus에 연결한다. `archive-archivist`는 ChatGPT 계정 model과 그 MCP proxy를 잇는 단일 Turn 루프다. Archivist Host native resume, Windows Device Adapter, VJ 편집 기능과 다계정 Provider Router는 아직 남아 있다. 로컬 CLI 경로는 전체 Orca 앱 대신 최소 Embedded Core를 기본으로 하고 Orca CLI는 선택형 backend로 둔다. 실제 Windows Credential Manager·장치·CLI와 운영 ffprobe·FFmpeg·whisper.cpp 실행은 장비 acceptance로 검증한다.
+현재는 SQLite Command Unit of Work, Storage→논리 Volume 작업 공간 해석과 별도 PhysicalDevice I/O 충돌 키, 아카이브 sidecar export/import, 게시 장애 조정, Notification SSE 재연결, 독립 Capability 실행·증적·Archive Workspace 상태 투영과 CI 테스트 증적의 integration 계약까지 구현되어 있다. 등록 Storage 입고 카탈로그와 ffprobe·FFmpeg·whisper.cpp subprocess Adapter도 격리 fixture로 검증하며 FFmpeg speech audio 추출에서 timestamp Transcript 게시·최신 segment 검색, 검증된 SRT 자막, Archivist·사람 작성 리비전 요약 게시와 SQLite 내용 검수 복원까지 연결된다. `archive-control`은 boot 설정으로 같은 SQLite DB와 Storage topology를 열고 내부망 아카이브 작업 공간, 자산·전사·요약·검수·Job·Worker·Archivist Runtime 조회 API와 CSRF 보호 Job·Session·Turn 명령을 제공한다. `archive-media`는 같은 MediaOperation Adapter를 단독 CLI와 선택형 관리 Runner에서 함께 사용한다. 단독 실행은 Control·대시보드·SQLite·서비스 credential을 열지 않으며, `runner` 모드만 heartbeat, Step claim·결과와 실행 중 취소 stop·정리 결과를 전송한다. `archivist-host`는 허용된 로컬 CLI와 workspace만 실행하고 Control에 outbound heartbeat·Turn claim·event를 보내며 loopback MCP proxy를 제공한다. Control MCP Adapter는 versioned 업무 Capability만 같은 Command Bus에 연결한다. `archive-archivist`는 ChatGPT 계정 model 또는 같은 Host의 자체 LLM과 그 MCP proxy를 잇는 단일 Turn 루프다. Archivist Host native resume, Windows Device Adapter, VJ 편집 기능과 다계정 Provider Router는 아직 남아 있다. 로컬 CLI 경로는 전체 Orca 앱 대신 최소 Embedded Core를 기본으로 하고 Orca CLI는 선택형 backend로 둔다. 실제 Windows Credential Manager·장치·CLI와 운영 ffprobe·FFmpeg·whisper.cpp 실행은 장비 acceptance로 검증한다.
 
 영속 Dispatch Queue의 aging·Job 공정성, 전체 자원 snapshot heartbeat와 ResourceReservation·ExecutionLease·fencing token의 SQLite 원자 확정이 구현되어 있다. Control은 heartbeat 직후 ready Step을 평가해 Worker 자원을 예약한다. Worker는 lease를 claim해 실행하고 결과를 정산하며, 실행 중 취소는 lease를 먼저 fence한 뒤 process 종료와 임시 출력 정리를 확인해야 예약을 해제한다.
 
@@ -110,7 +110,7 @@ Worker가 연결되면 아카이브 작업 공간의 “Worker 연결” 상태 
 
 ## macOS 로컬 Archive Archivist
 
-`archive-archivist`는 대시보드 서버와 함께 둔 `archivist-host`가 한 Turn씩 실행하는 자체 GPT 루프다. Control의 영속 Session·Turn을 그대로 사용하며 별도 대화 DB나 범용 shell을 만들지 않는다. 모델에는 Control MCP와 로컬 schema registry 양쪽에 모두 존재하는 Archive 업무 도구만 제공한다.
+`archive-archivist`는 Archive Control과 함께 둔 `archivist-host`가 한 Turn씩 실행하는 Archivist 루프다. Control의 영속 Session·Turn을 그대로 사용하며 별도 대화 DB나 범용 shell을 만들지 않는다. 모델에는 Control MCP와 로컬 schema registry 양쪽에 모두 존재하는 Archive 업무 도구만 제공한다.
 
 ```bash
 make build
@@ -120,6 +120,17 @@ make build
 ```
 
 연결이 성공하면 `models`가 반환한 model slug 하나를 [`deploy/macos/archivist-host.example.yaml`](deploy/macos/archivist-host.example.yaml)의 `--model` 값에 넣는다. Host service credential과 ChatGPT Profile은 서로 다른 Keychain reference를 사용한다. 현재 선택한 계정이나 workspace가 `chatgpt.tokens.use.direct` 권한을 제공하지 않으면 실제 추론을 시작하지 않고, 다른 지원 billing 경로를 구성하기 전까지 실계정 acceptance는 planned로 남긴다.
+
+자체 LLM은 같은 Host에서 OpenAI 호환 `/v1/chat/completions`와 function tool call을 제공한 뒤 별도 Profile 없이 실행한다. 인증 없는 endpoint는 loopback만 허용한다. 실제 Turn은 Archivist Host가 runtime identity와 MCP URL을 넣어 실행하며, 아래 명령은 고정 인수 형태를 보여 주는 예시다.
+
+```bash
+./bin/archive-archivist run \
+  --provider local \
+  --api-base http://127.0.0.1:11434/v1 \
+  --model REPLACE_WITH_LOCAL_TOOL_MODEL_SLUG
+```
+
+ChatGPT와 자체 LLM을 함께 둘 때는 [`deploy/macos/archivist-host.example.yaml`](deploy/macos/archivist-host.example.yaml)처럼 같은 executable을 `archive-gpt`, `archive-local` 두 CLI ID로 등록한다. 실제 자체 LLM model acceptance는 `LRH-017`로 별도 확인한다.
 
 `reqcheck`는 다음 조건 중 하나라도 어기면 실패한다.
 
