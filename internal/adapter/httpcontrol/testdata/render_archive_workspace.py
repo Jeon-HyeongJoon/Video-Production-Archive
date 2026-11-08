@@ -10,22 +10,25 @@ from playwright.sync_api import expect, sync_playwright
 MENUS = ["작업 관리", "연결 관리"]
 DRIVE = "#/drives/VOLUME-1"
 SCENES: dict[str, dict[str, Any]] = {
-    "pre-run": {"route": DRIVE, "problems": ("3", "fault"), "phase": "intake", "prepare": "아카이브 실행 준비"},
+    "pre-run": {"route": DRIVE, "problems": ("3", "fault"), "phase": "intake", "prepare": "아카이브 실행 준비", "stages": ["todo", "todo", "todo"]},
     "stage-one": {
-        "route": DRIVE, "problems": ("6", "fault"), "phase": "stage1",
-        "progress": ("24%", "보관 191 / 795 영상", "보관 폴더 2 / 8"), "stt": ("STT · 1단계 4 폴더 남음", True),
+        "route": DRIVE, "problems": ("6", "fault"), "phase": "stage1", "stages": ["now", "todo", "part"],
+        "stage_problems": [("fault", "렌더 1"), ("decide", "분류 1"), ("decide", "보관 1")],
+        "progress": ("24%", "보관 191 / 795 영상", "보관 폴더 2 / 8"), "stt": None,
         "words": {"INPUT": "분류 확인 필요", "DEVICE": "저장소 연결 대기"}, "panels": ["broken", "hold", "source-b"], "stored": 1, "committed": 1,
         "detail": ("broken", ["분류", "렌더"]),
     },
     "stt-ready": {
-        "route": DRIVE, "problems": ("6", "fault"), "phase": "stt",
-        "progress": ("99%", "보관 790 / 795 영상", "보관 폴더 6 / 8"), "stt": ("STT 시작 · 4 폴더", False),
+        "route": DRIVE, "problems": ("6", "fault"), "phase": "stt", "stages": ["done", "ask", "part"],
+        "stage_problems": [("fault", "렌더 1"), ("decide", "분류 1")],
+        "progress": ("99%", "보관 790 / 795 영상", "보관 폴더 6 / 8"), "stt": "STT 시작 · 4 폴더",
         "words": {"INPUT": "분류 확인 필요"}, "panels": ["broken", "hold"], "stored": 5, "committed": 1,
         "detail": ("broken", ["분류", "렌더"]),
     },
     "complete": {
-        "route": DRIVE, "problems": ("6", "fault"), "phase": "done",
-        "progress": ("99%", "보관 790 / 795 영상", "보관 폴더 6 / 8 · STT 4 폴더"), "stt": ("STT 완료", True), "catalog": "CSV 795행 · 10. 31. 00:00 기록",
+        "route": DRIVE, "problems": ("6", "fault"), "phase": "done", "stages": ["done", "done", "done"],
+        "stage_problems": [("fault", "렌더 1"), ("decide", "분류 1")],
+        "progress": ("99%", "보관 790 / 795 영상", "보관 폴더 6 / 8 · STT 4 폴더"), "stt": None, "catalog": "CSV 795행 · 10. 31. 00:00 기록",
         "words": {"INPUT": "분류 확인 필요"}, "panels": ["broken", "hold", "ready"], "stored": 5, "committed": 1,
         "detail": ("ready", ["분류", "QC", "보관", "오디오 추출", "STT", "자막", "전사 텍스트", "패키지 추가"]),
     },
@@ -86,8 +89,36 @@ def check_contract(page) -> None:
         raise AssertionError(f"Archive Workspace visual contract failed: {contract}")
 
 
+def check_stage_summary(page, scene) -> None:
+    # The stage summary names three stages and the steps holding a problem; the
+    # step matrix opens only on request.
+    matrix = page.locator("#drive-overview .stage-matrix")
+    expect(matrix).to_have_attribute("data-open", "false")
+    expect(matrix.locator(".flow-node")).to_have_count(0)
+    expect(matrix.locator(".stage-chip span")).to_have_text(["1단계 정리", "2단계 전사", "기록"])
+    for chip, state in zip(matrix.locator(".stage-chip").all(), scene["stages"]):
+        expect(chip).to_have_attribute("data-state", state)
+    problems = scene.get("stage_problems", [])
+    expect(matrix.locator(".stage-problem")).to_have_text([text for _, text in problems])
+    for index, (signal, _) in enumerate(problems):
+        expect(matrix.locator(".stage-problem").nth(index)).to_have_attribute("data-signal", signal)
+    toggle = matrix.locator(".stage-toggle")
+    expect(toggle).to_have_text("단계 펼치기")
+    toggle.click()
+    expect(page.locator("#drive-overview .stage-matrix")).to_have_attribute("data-open", "true")
+    expect(page.locator("#drive-overview .flow-node")).to_have_count(12)
+    page.locator("#drive-overview .stage-toggle").click()
+    expect(page.locator("#drive-overview .flow-node")).to_have_count(0)
+
+
 def check_drive(page, scene) -> None:
     expect(page.locator('#drive-overview [data-fact="state"]')).to_have_attribute("data-phase", scene["phase"])
+    # Problems are counted once, in 확인 필요; an online Worker and a decided
+    # archive wait on the title's hover.
+    expect(page.locator('#drive-overview [data-fact="problems"]')).to_have_count(0)
+    expect(page.locator('#drive-overview [data-fact="worker"]')).to_have_count(0)
+    expect(page.locator('#drive-overview [data-fact="archive"]')).to_have_count(1 if "prepare" in scene else 0)
+    check_stage_summary(page, scene)
     if "prepare" in scene:
         expect(page.locator("#prepare-run")).to_have_text(scene["prepare"])
         expect(page.locator("#drive-progress")).to_have_count(0)
@@ -100,9 +131,12 @@ def check_drive(page, scene) -> None:
     expect(hover).to_have_attribute("title", re.compile(re.escape(counts)))
     expect(hover).to_have_attribute("title", re.compile(re.escape(folders)))
     expect(hover).to_have_attribute("title", re.compile(re.escape("범위 r7 고정 · 8 폴더 · 795 영상 · 211 GB")))
-    text, disabled = scene["stt"]
-    expect(page.locator("#start-stt")).to_have_text(text)
-    expect(page.locator("#start-stt")).to_be_disabled() if disabled else expect(page.locator("#start-stt")).to_be_enabled()
+    # Only a button a person can press now sits beside the title.
+    if scene["stt"]:
+        expect(page.locator("#start-stt")).to_have_text(scene["stt"])
+        expect(page.locator("#start-stt")).to_be_enabled()
+    else:
+        expect(page.locator("#start-stt")).to_have_count(0)
     if "catalog" in scene:
         expect(hover).to_have_attribute("title", re.compile(re.escape(scene["catalog"])))
     # Problems a person resolves here come first; the failed one opens itself.
@@ -120,13 +154,14 @@ def check_drive(page, scene) -> None:
         status = page.locator(f'#drive-folders .status-text[data-wait-reason="{reason}"]')
         expect(status).to_have_text(value)
         expect(status).to_have_attribute("data-signal", "decide")
-    # Resource waits, step names and item counts stay off the rows; only the
-    # disposition column may name a render.
+    # A row is the folder's name and state only. Resource waits, step names,
+    # disposition and video counts stay off it.
     expect(page.locator('#drive-folders .status-text[data-wait-reason="MEMORY"]')).to_have_count(0)
-    row_text = " ".join(page.evaluate("""() => [...document.querySelectorAll('#drive-folders .folder-row')].map((row) =>
-      [...row.children].filter((cell) => !cell.classList.contains('folder-disp')).map((cell) => cell.innerText).join(' '))"""))
-    if any(step in row_text for step in ("렌더", "QC", "오디오 추출", "자막", "전사 텍스트")):
-        raise AssertionError(f"folder rows exposed step names: {row_text}")
+    expect(page.locator("#drive-folders .folder-head span")).to_have_text(["폴더", "상태", ""])
+    row_text = " ".join(page.evaluate("() => [...document.querySelectorAll('#drive-folders .folder-row')].map((row) => row.innerText)"))
+    if any(word in row_text for word in ("렌더", "QC", "오디오 추출", "자막", "전사 텍스트", "그대로 보관", "소스 시퀀스", "보류")):
+        raise AssertionError(f"folder rows exposed steps or dispositions: {row_text}")
+    expect(page.locator('#drive-folders .folder-row[data-folder-id="broken"]')).to_have_attribute("title", "개별 렌더 · 2 영상")
     expect(page.locator('#drive-folders .folder-row .archive-badge[data-state="STORED"]')).to_have_count(scene["stored"])
     expect(page.locator('#drive-folders .folder-row .archive-badge[data-state="COMMITTED"]')).to_have_count(scene["committed"])
     folder, stages = scene["detail"]
@@ -134,19 +169,33 @@ def check_drive(page, scene) -> None:
         page.locator(f'#drive-folders .folder-row[data-folder-id="{folder}"]').click()
     detail = page.locator("#folder-detail")
     expect(detail).to_have_attribute("data-folder-id", folder)
+    expect(detail.locator(".detail-facts")).to_contain_text(" 영상")
     expect(detail.locator(".stage-row")).to_have_count(0)
     detail.locator(".steps-toggle").click()
     expect(detail.locator(".stage-row b")).to_have_text(stages)
     detail.locator(".steps-toggle").click()
+    if page.locator("#completed-work").count():
+        order = page.evaluate("() => document.querySelector('#drive-problems').getBoundingClientRect().top < document.querySelector('#completed-work').getBoundingClientRect().top")
+        if not order:
+            raise AssertionError("확인 필요 is not above 완료 내역")
 
 
 def check_jobs(page, scene) -> None:
-    expect(page.locator('#active-jobs .work-row[data-work-id="JOB-RUNNING"]')).to_have_count(1)
+    expect(page.locator("#jobs-title ~ .num")).to_have_count(0)
+    expect(page.locator("#new-job-open")).to_have_text("새 작업 생성")
+    expect(page.locator("#new-job-open")).to_have_attribute("aria-expanded", "false")
+    expect(page.locator("#new-job-form")).to_have_count(0)
+    expect(page.locator("#active-jobs .data-head span")).to_have_text(["작업", "상태", "진행", "최근"])
+    running = page.locator('#active-jobs .work-row[data-work-id="JOB-RUNNING"]')
+    expect(running).to_have_count(1)
+    expect(running).to_have_attribute("title", re.compile("Worker WORKER-1"))
+    expect(running.locator(".meter-bar")).to_have_count(1)
     expect(page.locator('#queued-jobs .work-row[data-work-id="JOB-QUEUED"]')).to_have_count(1)
+    expect(page.locator("#queued-jobs .meter-bar, #attention-jobs .meter-bar, #completed-jobs .meter-bar")).to_have_count(0)
     expect(page.locator("#attention-jobs")).to_have_attribute("open", "")
     expect(page.locator("#attention-jobs > summary")).to_have_text("확인 필요1")
     expect(page.locator('#attention-jobs .work-row[data-work-id="JOB-REVIEW"]')).to_have_count(1)
-    expect(page.locator("#completed-jobs")).to_have_attribute("open", "")
+    expect(page.locator("#completed-jobs")).not_to_have_attribute("open", "")
     expect(page.locator("#completed-jobs > summary")).to_have_text("완료1")
     completed = page.locator('#completed-jobs .work-row[data-work-id="ARCHIVE-RUN-1"]')
     expect(completed).to_have_attribute("href", "#/runs/ARCHIVE-RUN-1")
@@ -154,7 +203,18 @@ def check_jobs(page, scene) -> None:
 
 
 def check_job_detail(page, _scene) -> None:
-    expect(page.locator("#run-summary")).to_contain_text("ARCHIVE-RUN-1")
+    expect(page.locator('.page-head a[href="#/jobs"]')).to_have_count(0)
+    summary = page.locator("#run-summary")
+    expect(summary.locator(".job-fact span")).to_have_text(["원본 → 아카이브", "폴더", "영상"])
+    expect(summary).to_contain_text("VOLUME-1 → archive-main")
+    expect(summary).to_have_attribute("title", re.compile("작업 ID ARCHIVE-RUN-1"))
+    expect(summary).to_have_attribute("title", re.compile("Worker WORKER-1"))
+    # The run's open problems come first and lead to the drive that resolves them.
+    attention = page.locator("#run-attention .attention-link")
+    expect(attention).to_have_count(3)
+    expect(attention.first).to_have_attribute("data-signal", "fault")
+    expect(page.locator('#run-attention .attention-link[data-kind="hold"]')).to_have_attribute("href", "#/drives/VOLUME-1?folder=hold")
+    expect(page.locator("#run-scope")).not_to_have_attribute("open", "")
     expect(page.locator("#run-scope .data-row")).to_have_count(8)
     child = page.locator('#run-children .child-work[data-job-id="JOB-SOURCE"]')
     expect(child).to_have_count(1)
@@ -189,9 +249,12 @@ def main() -> None:
         page.goto(url + "/" + scene["route"], wait_until="networkidle")
         menu = scene.get("menu", "connections")
         expect(page.locator("#menu .menu-link[aria-current=page]")).to_have_attribute("data-menu", menu)
-        expect(page.locator("#job-count")).to_have_text("4")
-        expect(page.locator("#connection-count")).to_have_text("5")
-        expect(page.locator('#tree .workspace-card[data-work-id="JOB-RUNNING"]')).to_contain_text("JOB-RUNNING")
+        expect(page.locator("#menu .menu-count")).to_have_count(0)
+        # A workspace card shows the work's name and state; its ID, drive and
+        # Worker wait on hover.
+        card = page.locator('#tree .workspace-card[data-work-id="JOB-RUNNING"]')
+        expect(card).to_have_attribute("title", "행사 하이라이트 · JOB-RUNNING · 드라이브 없음 · WORKER-1")
+        expect(card).not_to_contain_text("JOB-RUNNING")
         count, signal = scene["problems"]
         expect(page.locator("#alert-count")).to_have_text(count)
         expect(page.locator("#alert-count")).to_have_attribute("data-signal", signal)
@@ -210,9 +273,14 @@ def main() -> None:
         check_contract(page)
         page.mouse.move(0, 0)
         page.evaluate("document.activeElement.blur()")
+        # The checks above may scroll the screen; the image is its first view.
+        page.evaluate("document.querySelector('#view').scrollTop = 0")
         page.evaluate("document.fonts.ready")
         page.screenshot(path=output, full_page=True, animations="disabled")
-        # The light theme is a choice this browser keeps; the default stays dark.
+        # The light theme is a settings choice this browser keeps; the default
+        # stays dark and the top bar carries no theme control.
+        expect(page.locator(".topbar #theme-switch")).to_have_count(0)
+        page.goto(url + "/#/settings", wait_until="networkidle")
         expect(page.locator('#theme-switch [data-theme-choice="dark"]')).to_have_attribute("aria-pressed", "true")
         page.locator('#theme-switch [data-theme-choice="light"]').click()
         expect(page.locator("html")).to_have_attribute("data-theme", "light")

@@ -16,11 +16,13 @@ with sync_playwright() as playwright:
     completed = page.locator('#completed-jobs .work-row[data-work-id="ARCHIVE-RUN-1"]')
     expect(completed).to_have_count(1)
     expect(completed).to_have_attribute("href", "#/runs/ARCHIVE-RUN-1")
+    # A card shows the work's name and state; job_id, drive and Worker wait on hover.
     running = page.locator('#tree .workspace-card[data-work-id="JOB-RUNNING"]')
-    expect(running).to_contain_text("JOB-RUNNING")
-    expect(running).to_contain_text("드라이브 없음")
-    expect(running).to_contain_text("WORKER-1")
+    expect(running).to_have_attribute("title", "행사 하이라이트 · JOB-RUNNING · 드라이브 없음 · WORKER-1")
+    expect(running.locator(".workspace-work-name")).to_have_text("행사 하이라이트")
     expect(running.locator(".workspace-state")).to_have_text("실행 중")
+    if any(value in running.inner_text() for value in ("JOB-RUNNING", "드라이브 없음", "WORKER-1")):
+        raise AssertionError(f"workspace card shows hover-only facts: {running.inner_text()!r}")
     expect(running).to_have_attribute("href", "#/jobs/JOB-RUNNING")
     running.click()
     expect(page).to_have_url(sys.argv[1] + "/#/jobs/JOB-RUNNING")

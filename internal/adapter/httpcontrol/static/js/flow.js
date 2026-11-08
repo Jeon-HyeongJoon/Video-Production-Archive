@@ -1,8 +1,12 @@
-// Stage matrix of one drive. The first-stage, optional second-stage and catalog
-// records do not form one total order, so nodes are grouped without connector
-// lines. Each node reports only the folders to which that stage applies.
+// Stage status of one drive. By default it is a three-stage summary — 1단계
+// 정리, 2단계 전사, 기록 — with the steps that hold a failure or a person's
+// decision named beside it. The full matrix opens on request: the first-stage,
+// optional second-stage and catalog records do not form one total order, so
+// its nodes are grouped without connector lines, and each node reports only the
+// folders to which that stage applies.
 
-import { el, svgIcon, label, humanWait, activeStates, formatCount, shortTime } from "./core.js";
+import { el, svgIcon, statusIcon, label, humanWait, activeStates, formatCount, shortTime } from "./core.js";
+import { notify, drivePhase } from "./store.js";
 
 const STEPS = ["classification", "markers", "render", "qc", "archive", "gate", "audio", "transcript", "fork", "add", "catalog"];
 
@@ -100,7 +104,45 @@ function tallyNode(drive, id) {
   return [node(drive, id, state, tallyLines(counts), badges), state];
 }
 
+// The summary's stage states follow the drive phase; the catalog record
+// follows its stored rows like its node does.
+const STAGE_STATES = {
+  intake: ["todo", "todo"], stage1: ["now", "todo"], stt: ["done", "ask"], stage2: ["done", "now"], done: ["done", "done"],
+};
+const STAGE_ICON = { todo: "idle", part: "idle", now: "work", ask: "decide", done: "done" };
+const PROBLEM_STEPS = ["classification", "markers", "render", "qc", "archive", "audio", "transcript", "subtitle", "transcript_text", "add"];
+const openFlows = new Set();
+
+function catalogState(drive) {
+  return drive.archive_run_state === "COMPLETED" && drive.catalog_row_count ? "done" : drive.catalog_row_count ? "part" : "todo";
+}
+
+function stageSummary(drive, open) {
+  const [one, two] = STAGE_STATES[drivePhase(drive)] || STAGE_STATES.intake;
+  const stages = [["one", "1단계 정리", one], ["two", "2단계 전사", two], ["record", "기록", catalogState(drive)]];
+  const problems = [];
+  for (const id of PROBLEM_STEPS) {
+    const counts = tally(drive, id);
+    if (counts.fault) problems.push(["fault", id, counts.fault]);
+    if (counts.decide) problems.push(["decide", id, counts.decide]);
+  }
+  problems.sort((left, right) => (left[0] === right[0] ? 0 : left[0] === "fault" ? -1 : 1));
+  const toggle = el("button", {
+    type: "button", class: "btn btn-sm stage-toggle", "aria-expanded": String(open),
+    onclick: () => { open ? openFlows.delete(drive.workspace_drive_id) : openFlows.add(drive.workspace_drive_id); notify(); },
+  }, open ? "단계 접기" : "단계 펼치기");
+  return el("div", { class: "stage-summary" },
+    el("ol", { class: "stage-track", "aria-label": `${drive.workspace_drive_id} 단계` }, ...stages.map(([id, name, state]) =>
+      el("li", { class: "stage-chip", "aria-label": `${name} · ${WORDS[state]}`, dataset: { stage: id, state } }, statusIcon(STAGE_ICON[state]), el("span", {}, name)))),
+    el("span", { class: "stage-problems" }, ...problems.map(([signal, id, count]) =>
+      el("span", { class: "stage-problem", dataset: { signal, step: id } }, statusIcon(signal), el("span", {}, `${label("stage", id)} ${formatCount(count)}`)))),
+    toggle);
+}
+
 export function stageMatrix(drive) {
+  const open = openFlows.has(drive.workspace_drive_id);
+  const summary = stageSummary(drive, open);
+  if (!open) return el("div", { class: "stage-matrix", dataset: { driveId: drive.workspace_drive_id, open: "false" } }, summary);
   const steps = STEPS.map((id) => {
     const area = el("span", { class: "flow-area" });
     const name = el("span", { class: "flow-name" });
@@ -124,7 +166,7 @@ export function stageMatrix(drive) {
       name.textContent = `${label("stage", "subtitle")} · ${label("stage", "transcript_text")}`;
       state = states.every((value) => value === "done") ? "done" : states.includes("now") ? "now" : states.some((value) => value !== "todo") ? "part" : "todo";
     } else if (id === "catalog") {
-      state = drive.archive_run_state === "COMPLETED" && drive.catalog_row_count ? "done" : drive.catalog_row_count ? "part" : "todo";
+      state = catalogState(drive);
       area.append(node(drive, id, state, [[drive.catalog_row_count ? `${formatCount(drive.catalog_row_count)}행 · ${shortTime(drive.catalog_updated_at)} 기록` : "실행 뒤 기록", ""]]));
       name.textContent = label("stage", id);
     } else {
@@ -137,7 +179,7 @@ export function stageMatrix(drive) {
     step.append(area, name);
     return step;
   });
-  return el("div", { class: "stage-matrix", dataset: { driveId: drive.workspace_drive_id } },
+  return el("div", { class: "stage-matrix", dataset: { driveId: drive.workspace_drive_id, open: "true" } }, summary,
     el("div", { class: "flow-stages", "aria-hidden": "true" },
       el("span", { class: "flow-stage", dataset: { stage: "one" } }, "1단계 정리"),
       el("span", { class: "flow-stage", dataset: { stage: "two" } }, "2단계 전사"),

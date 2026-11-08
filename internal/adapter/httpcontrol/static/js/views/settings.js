@@ -1,10 +1,11 @@
-// 설정: Archivist 목록과 추가, Archivist Host 상태. The screen calls them
-// Agent and Agent Host. Host, backend and workspace registration stay in the
-// local configuration files; the form takes only name, Host, detected CLI and
-// default control mode.
+// 설정: Archivist 목록과 추가, Archivist Host 상태, 화면 테마. The screen
+// calls them Agent and Agent Host. Host, backend and workspace registration
+// stay in the local configuration files; the form takes only name, Host,
+// detected CLI and default control mode.
 
 import { el, statusIcon, workerIcon, label, stateSignal, clockTime, mutation, newID, emptyState } from "../core.js";
 import { model, refresh, hostFor, activeTurn } from "../store.js";
+import { themeSwitch } from "../theme.js";
 
 function availability(session) {
   const host = hostFor(session);
@@ -67,7 +68,10 @@ export function mount(root) {
     el("section", { class: "panel table-panel", "aria-label": "Agent Host", id: "host-table" },
       el("div", { class: "panel-toolbar" }, el("b", { class: "panel-title" }, "Agent Host")),
       el("div", { class: "grid-row grid-head host-row" }, ...["Agent Host", "상태", "감지된 CLI", "heartbeat"].map((text) => el("span", {}, text))),
-      hostRows));
+      hostRows),
+    el("section", { class: "panel form-panel", "aria-label": "화면" },
+      el("div", { class: "panel-toolbar" }, el("b", { class: "panel-title" }, "화면")),
+      el("div", { class: "settings-form" }, el("div", { class: "field" }, el("span", {}, "테마"), themeSwitch()))));
 
   return {
     update() {

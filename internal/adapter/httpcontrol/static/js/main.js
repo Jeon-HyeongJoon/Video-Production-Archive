@@ -5,6 +5,7 @@
 import { byId, setLocked } from "./core.js";
 import { subscribe, startPolling, isStale } from "./store.js";
 import { currentRoute } from "./router.js";
+import { applyStoredTheme } from "./theme.js";
 import { mountTopbar } from "./topbar.js";
 import { mountSidebar } from "./sidebar.js";
 import { mountAgent } from "./agent.js";
@@ -16,6 +17,7 @@ import * as settings from "./views/settings.js";
 
 const screens = { drive, jobs, job: jobs, run: jobs, connections, search, settings };
 const root = byId("view");
+applyStoredTheme();
 const topbar = mountTopbar();
 const sidebar = mountSidebar();
 const agent = mountAgent(byId("archivist-pane"));

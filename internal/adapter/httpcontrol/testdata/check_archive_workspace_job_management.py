@@ -1,3 +1,4 @@
+import re
 import sys
 
 from playwright.sync_api import expect, sync_playwright
@@ -46,11 +47,16 @@ with sync_playwright() as playwright:
     attention.locator("summary").click()
     expect(attention.locator('.work-row[data-work-id="JOB-REVIEW"]')).to_be_visible()
 
-    expect(page.locator("#completed-jobs")).to_have_attribute("open", "")
-    # Settings and theme are global controls beside notifications, not a
-    # left-sidebar footer that competes with the scrollable work index.
-    expect(page.locator(".topbar-tools #theme-switch")).to_be_visible()
+    # Progress shows only on running rows; the Worker waits on each row's hover.
+    expect(page.locator("#active-jobs .work-row .meter-bar")).to_have_count(2)
+    expect(page.locator("#queued-jobs .meter-bar, #attention-jobs .meter-bar, #completed-jobs .meter-bar")).to_have_count(0)
+    expect(archive_run).to_have_attribute("title", re.compile("Worker WORKER-1"))
+
+    # Finished work starts folded; its count stays on the summary.
+    expect(page.locator("#completed-jobs")).not_to_have_attribute("open", "")
+    # Settings is a global control beside notifications, not a left-sidebar
+    # footer; the theme choice lives inside settings.
     expect(page.locator(".topbar-tools #open-settings")).to_be_visible()
     expect(page.locator(".topbar-tools #alert-wrap")).to_be_visible()
-    expect(page.locator(".sidebar #theme-switch, .sidebar #open-settings, .side-foot")).to_have_count(0)
+    expect(page.locator("#theme-switch, .sidebar #open-settings, .side-foot")).to_have_count(0)
     browser.close()

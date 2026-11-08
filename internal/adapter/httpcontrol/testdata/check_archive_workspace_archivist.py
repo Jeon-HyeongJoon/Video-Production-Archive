@@ -15,31 +15,46 @@ with sync_playwright() as playwright:
     if page.evaluate("getComputedStyle(document.querySelector('#archivist-thread')).overflowY") != "auto":
         raise AssertionError("Agent thread does not scroll on its own")
 
+    # The instruction stays visible; its references fold behind one row.
     expect(thread.locator(".message.user")).to_have_count(1)
-    expect(thread.locator(".message.user .ref-chip")).to_have_text(
-        ["WORKER-1", "VOLUME-1", "source-main", "archive-main", "8 폴더"]
-    )
-    start_card = thread.locator('[data-card-id="ACTION-CALL-ARCHIVE-RUN-1"]')
+    refs = thread.locator(".message.user .refs-fold")
+    expect(refs).not_to_have_attribute("open", "")
+    expect(refs.locator("summary")).to_have_text("참조 5")
+    expect(refs.locator(".ref-chip")).to_have_text(["WORKER-1", "VOLUME-1", "source-main", "archive-main", "8 폴더"])
+
+    # Recalls, progress, tool calls and settled cards fold behind 작업 내역.
+    fold = thread.locator("details.work-fold")
+    expect(fold).to_have_count(1)
+    expect(fold).not_to_have_attribute("open", "")
+    start_card = fold.locator('[data-card-id="ACTION-CALL-ARCHIVE-RUN-1"]')
     expect(start_card).to_contain_text("아카이브 실행 시작")
     expect(start_card).to_contain_text("VOLUME-1 → archive-main · 8 폴더")
     expect(start_card.locator("button")).to_have_count(0)
-
-    if scene in ("stage-one", "stt-ready"):
-        # The ArchiveRun work stays expanded until its explicit completion
-        # recall settles; completed earlier Turns do not fold alone.
-        expect(thread.locator("details.work-fold")).to_have_count(0)
-        expected_turns = 2 if scene == "stage-one" else 3
-        expect(thread.locator(".message.system")).to_have_count(expected_turns - 1)
-        expect(thread.locator(".turn-entry")).to_have_count(1 if scene == "stage-one" else 3)
-        expect(thread.locator(".turn-live .tool-row")).to_have_count(2 if scene == "stage-one" else 5)
+    expect(start_card).to_be_hidden()
+    expect(fold.locator(".message.system").first).to_be_hidden()
+    expect(thread.locator(".message.archivist > .message-body:visible")).to_have_count(1)
 
     if scene == "stage-one":
-        expect(thread.locator(".message.system")).to_contain_text("재호출 · 보류 발생 · hold")
-        expect(thread.locator(".message.system .token")).to_have_text("대기열")
+        # A running work shows only its last line beside the latest answer.
+        expect(fold.locator("summary")).to_have_text("작업 내역 · 도구 2 · 재호출 1")
+        expect(thread.locator(".message.archivist > .message-body:visible")).to_have_text("선택한 8 폴더의 분류·렌더 시작을 요청했습니다.")
+        live = thread.locator(".turn-live")
+        expect(live).to_have_count(1)
+        expect(live).to_contain_text("재호출")
+        expect(live).to_contain_text("보류 발생 · hold")
+        expect(live.locator(".token")).to_have_text("대기열")
         expect(page.locator("#archivist-availability")).to_have_text("처리 중")
         expect(page.locator("#archivist-message")).to_be_disabled()
         expect(page.locator("#archivist-disabled-reason")).to_have_text("응답 대기 · 대기열")
+        fold.locator("summary").click()
+        expect(fold.locator(".message.system")).to_have_count(1)
+        expect(fold.locator(".message.system").first).to_be_visible()
+        expect(fold.locator(".turn-entry")).to_have_count(1)
+        expect(fold.locator(".turn-trace .tool-row")).to_have_count(2)
     elif scene == "stt-ready":
+        expect(fold.locator("summary")).to_have_text("작업 내역 · 도구 5 · 재호출 2")
+        expect(thread.locator(".message.archivist > .message-body:visible")).to_contain_text("1단계가 끝났습니다")
+        expect(thread.locator(".turn-live")).to_have_count(0)
         expect(page.locator("#archivist-availability")).to_have_text("사용 가능")
         expect(page.locator("#archivist-message")).to_be_enabled()
         stt_card = thread.locator('[data-card-id="ACTION-CALL-STT-1"]')
@@ -65,9 +80,6 @@ with sync_playwright() as playwright:
     else:
         # Completed work keeps the initial instruction and final report visible.
         # Progress, recalls, prior answers and settled cards remain inspectable.
-        fold = thread.locator("details.work-fold")
-        expect(fold).to_have_count(1)
-        expect(fold).not_to_have_attribute("open", "")
         expect(fold.locator("summary")).to_contain_text("작업 내역 · 도구 6 ·")
         expect(thread.locator(".work-result > .message-body")).to_contain_text("완료했습니다")
         expect(fold.locator(".message.system").first).to_be_hidden()

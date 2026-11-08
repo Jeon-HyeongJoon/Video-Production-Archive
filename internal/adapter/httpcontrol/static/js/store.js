@@ -12,7 +12,7 @@ export const model = { workers: [], drives: [], hosts: [], sessions: [], jobs: [
 export const ui = {
   prepDriveID: "", prepRevision: 0, archiveID: "", intakeSessionID: newID("INTAKE"), archiveRunID: "", archiveRunKey: "", runStarting: false,
   folders: new Set(), prepFolderScroll: 0, hold: null,
-  folderView: "", openFolder: "", openSteps: "", jobSteps: false, jobCancel: "", jobAttentionOpen: true, jobCompletedOpen: true,
+  folderView: "", openFolder: "", openSteps: "", jobSteps: false, jobCancel: "", jobAttentionOpen: true, jobCompletedOpen: false, runScopeOpen: false,
   sessionID: "", focusCard: "", fresh: "", status: "", alertOpen: false, agentOpen: false,
 };
 

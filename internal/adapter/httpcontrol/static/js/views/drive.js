@@ -1,8 +1,9 @@
 // 드라이브 상세: one source drive as the unit of work. Its overview card holds
-// the phase, quiet video progress, Worker, archive and problem counts over the
-// stage status matrix of its ArchiveRun; the STT gate and run preparation sit beside the
-// title. Below come the problems a person resolves here and a table with one
-// row per folder; a folder's steps open only on request.
+// the phase and quiet video progress over the stage summary of its ArchiveRun;
+// only a button a person can press now sits beside the title. Below come the
+// problems a person resolves here, the completed results and a table with one
+// name-and-state row per folder; a folder's disposition, videos and steps open
+// only on request.
 
 import {
   el, svgIcon, icons, statusIcon, label, stageSignal, activeStates, formatCount, formatBytes,
@@ -58,15 +59,11 @@ function archiveBadge(state) {
   return el("b", { class: "archive-badge", dataset: { state } }, state === "STORED" ? "보관됨" : "확정됨");
 }
 
+// sttButton is the STT gate while it is open. Before and after that, the
+// overview's state and stage summary say where the run is.
 function sttButton(drive) {
-  const button = el("button", { type: "button", class: "btn primary", id: "start-stt", dataset: { action: "stt" } });
-  button.disabled = drive.archive_run_state !== "TRANSCRIPTION_READY" || !drive.archive_run_revision;
-  if (!button.disabled) button.dataset.signal = "decide";
-  button.textContent = drive.stage_two_remaining ? "STT 진행 중"
-    : drive.archive_run_state === "TRANSCRIPTION_READY" ? `STT 시작 · ${formatCount(drive.eligible_transcription_count)} 폴더`
-      : drive.stage_one_remaining ? `STT · 1단계 ${drive.stage_one_remaining} 폴더 남음`
-        : drive.archive_run_state === "COMPLETED" && !drive.eligible_transcription_count ? "STT 대상 없음"
-          : drive.archive_run_state === "COMPLETED" ? "STT 완료" : "STT";
+  const button = el("button", { type: "button", class: "btn primary", id: "start-stt", dataset: { action: "stt", signal: "decide" } },
+    `STT 시작 · ${formatCount(drive.eligible_transcription_count)} 폴더`);
   button.addEventListener("click", async () => {
     try {
       const result = await mutation(`/api/v1/archive-runs/${encodeURIComponent(drive.archive_run_id)}/transcription`, { idempotency_key: newID("STT"), expected_archive_run_revision: drive.archive_run_revision });
@@ -80,7 +77,7 @@ function sttButton(drive) {
   return button;
 }
 
-// overview is the drive's card: five facts and the stage matrix of its ArchiveRun.
+// overview is the drive's card: its facts and the stage summary of its ArchiveRun.
 function overview(drive) {
   return el("section", { class: "overview", id: "drive-overview", "aria-label": "진행" }, driveFacts(drive, "drive-progress"), stageMatrix(drive));
 }
@@ -173,7 +170,8 @@ function folderDetail(folder) {
   if (folder.can_add_transcription) notes.push(el("span", { class: "folder-note" }, "STT 추가 가능"));
   if (folder.transcription_job_id && folder.step_state === "COMPLETED") notes.push(el("span", { class: "folder-note" }, "STT 완료"));
   return el("div", { class: "folder-detail", id: "folder-detail", dataset: { folderId: folder.folder } },
-    el("span", { class: "detail-meta", title: [trace, `${formatCount(folder.video_count)} 영상`, formatBytes(folder.estimated_output_bytes)].filter(Boolean).join("\n") }, archiveResult || (folder.job_id ? `작업 ${folder.job_id}` : "작업 없음")),
+    el("span", { class: "detail-meta", title: [trace, formatBytes(folder.estimated_output_bytes)].filter(Boolean).join("\n") }, archiveResult || (folder.job_id ? `작업 ${folder.job_id}` : "작업 없음")),
+    el("span", { class: "detail-facts num" }, `${label("disposition", folder.disposition)} · ${formatCount(folder.video_count)} 영상`),
     notes.length ? el("div", { class: "detail-notes" }, ...notes) : null,
     el("div", { class: "detail-actions" },
       el("button", { type: "button", class: "btn btn-sm steps-toggle", "aria-expanded": String(showSteps), onclick: () => { ui.openSteps = showSteps ? "" : folder.folder; notify(); } },
@@ -181,14 +179,14 @@ function folderDetail(folder) {
     showSteps ? el("div", { class: "stage-list" }, ...((folder.stages || []).length ? folder.stages.map(stageRow) : [emptyState("단계 없음")])) : null);
 }
 
-// folderRow is one table row: the folder's signal and name, one state word
-// with its stored or committed badge, disposition, videos and step dots.
+// folderRow is one table row: the folder's signal and name and one state word
+// or its stored or committed badge. Disposition and videos wait on hover and
+// in the opened folder detail.
 function folderRow(folder) {
   const open = ui.openFolder === folder.folder;
   const problem = folderProblem(folder);
   const state = folderState(folder);
   const signal = folderSignal(folder);
-  const stages = folder.stages || [];
   const word = problem
     ? el("span", { class: "status-text", dataset: { signal: problem.signal, waitReason: problem.reason || undefined } }, problem.word)
     : folder.archive_state ? null : el("span", { class: "folder-word", dataset: { signal: state.signal } }, state.word);
@@ -196,9 +194,6 @@ function folderRow(folder) {
     onclick: () => { ui.openFolder = open ? "" : folder.folder; ui.openSteps = ""; notify(); } },
   el("span", { class: "folder-name" }, statusIcon(signal), el("b", {}, folder.folder)),
   el("span", { class: "folder-state" }, word, folder.archive_state ? archiveBadge(folder.archive_state) : null),
-  el("span", { class: "folder-disp" }, label("disposition", folder.disposition)),
-  el("span", { class: "folder-videos num" }, formatCount(folder.video_count)),
-  el("span", { class: "step-dots", "aria-hidden": "true" }, ...stages.map((stage) => el("i", { class: "step-dot", title: `${label("stage", stage.stage_id)} · ${label("step", stage.state)}`, dataset: { signal: stageSignal(stage) } }))),
   svgIcon(icons.expand));
   return open ? [row, folderDetail(folder)] : [row];
 }
@@ -258,35 +253,39 @@ function folderSection(drive) {
     view === "calendar"
       ? el("div", { class: "folder-table" }, calendar(folders))
       : el("div", { class: "folder-table folder-list", id: "drive-folders" },
-        el("div", { class: "folder-head", "aria-hidden": "true" }, ...["폴더", "상태", "처리 방식", "영상", "단계", ""].map((text) => el("span", {}, text))),
+        el("div", { class: "folder-head", "aria-hidden": "true" }, ...["폴더", "상태", ""].map((text) => el("span", {}, text))),
         ...(rows.length ? rows : [emptyState("폴더 없음")])));
 }
 
 function completedWorkSection(drive) {
   const items = drive.completed_work || [];
   if (!items.length) return null;
+  // A row shows the result, its folder and its stored or committed state. The
+  // disposition, source count, time, storage and package path wait on hover
+  // and in the ArchiveRun result the row opens.
   const rows = items.map((item) => {
-    const trace = [
+    const sourceCount = item.source_video_count > 1 ? `${formatCount(item.source_video_count)} → 1` : formatCount(item.source_video_count);
+    const facts = [
+      [label("disposition", item.disposition), item.profile_reference].filter(Boolean).join(" · "),
+      `원본 → 결과 ${sourceCount}`,
+      `완료 ${shortTime(item.completed_at)}`,
+      [item.archive_storage_id, item.archive_relative_path].filter(Boolean).join(" · "),
       item.archive_display_name,
       `패키지 ${item.archive_package_id}`,
       `작업 ${item.job_id}`,
       `실행 ${item.archive_run_id}`,
     ].filter(Boolean).join("\n");
-    const sourceCount = item.source_video_count > 1 ? `${formatCount(item.source_video_count)} → 1` : formatCount(item.source_video_count);
-    return el("a", { class: "completed-row", href: `#/runs/${encodeURIComponent(item.archive_run_id)}?result=${encodeURIComponent(item.archive_package_id)}`, dataset: { packageId: item.archive_package_id, jobId: item.job_id, archiveRunId: item.archive_run_id }, title: trace },
+    return el("a", { class: "completed-row", href: `#/runs/${encodeURIComponent(item.archive_run_id)}?result=${encodeURIComponent(item.archive_package_id)}`, dataset: { packageId: item.archive_package_id, jobId: item.job_id, archiveRunId: item.archive_run_id }, title: facts },
       el("span", { class: "completed-result" },
         el("b", {}, item.archive_video_file_name || item.archive_package_id),
         el("small", {}, item.folder)),
-      el("span", { class: "completed-kind" }, label("disposition", item.disposition), item.profile_reference ? el("small", {}, item.profile_reference) : null),
-      el("span", { class: "completed-source num" }, sourceCount),
-      el("span", { class: "completed-time num" }, shortTime(item.completed_at)),
-      el("span", { class: "completed-place" }, archiveBadge(item.archive_state), el("small", {}, item.archive_storage_id),
-        el("small", { class: "archive-relative-path", title: item.archive_relative_path || "" }, item.archive_relative_path || "—")));
+      el("span", { class: "completed-place" }, archiveBadge(item.archive_state)),
+      svgIcon(icons.next));
   });
   return el("section", { class: "section", id: "completed-work", "aria-label": "완료 내역" },
     el("h2", { class: "section-title" }, "완료 내역 ", el("span", { class: "num" }, String(items.length))),
-    el("div", { class: "completed-table" },
-      el("div", { class: "completed-head", "aria-hidden": "true" }, ...["결과", "작업", "원본 → 결과", "완료", "아카이브"].map((text) => el("span", {}, text))),
+    el("div", { class: "completed-table drive-completed" },
+      el("div", { class: "completed-head", "aria-hidden": "true" }, ...["결과", "상태", ""].map((text) => el("span", {}, text))),
       ...rows));
 }
 
@@ -401,7 +400,7 @@ export function mount(root, route) {
 
       // The STT gate of a run and the preparation of a new one sit beside the title.
       const buttons = [];
-      if (drive.archive_run_id) buttons.push(sttButton(drive));
+      if (drive.archive_run_state === "TRANSCRIPTION_READY" && drive.archive_run_revision) buttons.push(sttButton(drive));
       if (!isRunning(drive) && !preparing(drive)) {
         buttons.push(el("button", { type: "button", class: `btn${drive.archive_run_id ? "" : " primary"}`, id: "prepare-run", dataset: { action: "prepare" }, onclick: () => prepareDrive(drive) },
           drive.archive_run_id ? "새 아카이브 실행 준비" : "아카이브 실행 준비"));
@@ -411,13 +410,13 @@ export function mount(root, route) {
       const sections = [overview(drive)];
       if (ui.status) sections.push(el("p", { class: "status-line", role: "status", id: "command-status" }, ui.status));
       if (preparing(drive)) sections.push(prepPanel(drive));
-      const completed = completedWorkSection(drive);
-      if (completed) sections.push(completed);
       if (problems.length) {
         sections.push(el("section", { class: "section", id: "drive-problems", "aria-label": "확인 필요" },
           el("h2", { class: "section-title" }, "확인 필요 ", el("span", { class: "num" }, String(problems.length))),
           el("div", { class: "card-list" }, ...problems.map(([folder, problem]) => problemPanel(drive, folder, problem)))));
       }
+      const completed = completedWorkSection(drive);
+      if (completed) sections.push(completed);
       if (folders.length && drive.archive_run_id) sections.push(folderSection(drive));
       const previousFolderChoices = body.querySelector("#prep-folders");
       if (previousFolderChoices) ui.prepFolderScroll = previousFolderChoices.scrollTop;

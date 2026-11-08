@@ -1,11 +1,13 @@
 // 작업: every persisted Job has one addressable detail route. Other screens
 // link here by job_id; they do not create their own expandable Job detail.
+// Lists show a work's name, state, recent time and — only while it runs — its
+// progress; the Worker and IDs wait on hover.
 
 import {
-  el, token, statusIcon, label, stateSignal, stageSignal, finishedSteps, formatCount, formatPercent,
+  el, svgIcon, icons, token, statusIcon, label, stateSignal, stageSignal, finishedSteps, formatCount, formatPercent,
   shortTime, clockTime, meter, api, mutation, newID, emptyState,
 } from "../core.js";
-import { model, ui, notify, refresh, jobLane, driveName, workLane, workName } from "../store.js";
+import { model, ui, notify, refresh, jobLane, driveName, findDrive, folderProblem, workLane, workName } from "../store.js";
 
 const LANE = {
   fault: ["실패", "fault"], decide: ["사람 대기", "decide"], work: ["실행 중", "work"],
@@ -38,8 +40,8 @@ function linkedFolder(jobID) {
   return null;
 }
 
-function table(heads, rows, empty) {
-  return el("div", { class: "data-table jobs-table", role: "table" },
+function table(heads, rows, empty, className = "jobs-table") {
+  return el("div", { class: `data-table ${className}`, role: "table" },
     el("div", { class: "data-row data-head", role: "row" }, ...heads.map((head) => el("span", { role: "columnheader" }, head))),
     ...(rows.length ? rows : [emptyState(empty)]));
 }
@@ -52,29 +54,27 @@ function workStateText(work) {
   return { FAILED: "실패", ATTENTION: "확인 필요", ACTIVE: "실행 중", QUEUED: "대기열", COMPLETED: "완료" }[work.state] || work.state;
 }
 
-function workScope(work) {
-  return work.kind === "ARCHIVE_RUN"
-    ? `${formatCount(work.folder_count)} 폴더 · ${formatCount(work.video_count)} 영상`
-    : "독립 작업";
-}
+const WORK_HEADS = ["작업", "상태", "진행", "최근"];
 
 function workRow(work) {
   const lane = workLane(work);
   const pct = Math.round((work.progress || 0) * 100);
-  return el("a", { class: "data-row work-row", role: "row", href: workHref(work), dataset: { workId: work.work_id, kind: work.kind, lane } },
-    el("b", { class: "cell-main" }, workName(work)),
-    el("span", {}, workScope(work)),
-    el("span", {}, work.worker_id || "배정 없음"),
-    el("span", { class: "cell-state" }, statusIcon(lane === "queue" ? "idle" : lane),
-      el("span", { class: "job-state", dataset: { signal: ["fault", "decide"].includes(lane) ? lane : undefined } }, workStateText(work))),
-    el("span", { class: "cell-meter" }, meter(pct, lane === "done"), el("span", { class: "num job-progress" }, `${pct}%`)),
-    el("span", { class: "num muted" }, shortTime(work.last_event_at)));
+  const scope = work.kind === "ARCHIVE_RUN" ? `${formatCount(work.folder_count)} 폴더 · ${formatCount(work.video_count)} 영상` : "";
+  return el("a", {
+    class: "data-row work-row", role: "row", href: workHref(work), dataset: { workId: work.work_id, kind: work.kind, lane },
+    title: [work.work_id, `Worker ${work.worker_id || "배정 없음"}`].join("\n"),
+  },
+  el("span", { class: "cell-main" }, el("b", {}, workName(work)), scope ? el("small", { class: "work-scope num" }, scope) : null),
+  el("span", { class: "cell-state" }, statusIcon(lane === "queue" ? "idle" : lane),
+    el("span", { class: "job-state", dataset: { signal: ["fault", "decide"].includes(lane) ? lane : undefined } }, workStateText(work))),
+  lane === "work" ? el("span", { class: "cell-meter" }, meter(pct, false), el("span", { class: "num job-progress" }, `${pct}%`)) : el("span", {}),
+  el("span", { class: "num muted" }, shortTime(work.last_event_at)));
 }
 
 function workSection(title, work, empty, id = "") {
   return el("section", { class: "section jobs-section", id: id || undefined },
     el("h2", { class: "section-title" }, `${title} `, el("span", { class: "num" }, String(work.length))),
-    table(["작업", "범위", "Worker", "상태", "진행", "최근"], work.map(workRow), empty));
+    table(WORK_HEADS, work.map(workRow), empty));
 }
 
 function childRole(role) {
@@ -90,12 +90,11 @@ function childRow(child, media) {
     class: "child-work", open: media.isOpen(job.job_id), dataset: { jobId: job.job_id, lane },
     ontoggle: () => media.toggle(disclosure, body, job.job_id),
   },
-  el("summary", { class: "data-row job-row", role: "row", dataset: { jobId: job.job_id, lane } },
+  el("summary", { class: "data-row job-row", role: "row", title: `${job.job_id}\nWorker ${job.worker_id || "배정 없음"}`, dataset: { jobId: job.job_id, lane } },
     el("span", { class: "cell-main" },
       el("a", { href: `#/jobs/${encodeURIComponent(job.job_id)}`, onclick: (event) => event.stopPropagation() }, child.folder || childRole(child.role)),
       el("small", { class: "media-hint" }, "영상 정보")),
     el("span", {}, childRole(child.role)),
-    el("span", {}, job.worker_id || "배정 없음"),
     el("span", { class: "cell-state" }, statusIcon(LANE[lane]?.[1] || "idle"), el("span", {}, laneText(job))),
     el("span", { class: "cell-meter" }, meter(Math.round((job.progress || 0) * 100), lane === "done"), el("span", { class: "num" }, `${Math.round((job.progress || 0) * 100)}%`)),
     el("span", { class: "num muted child-recent" }, shortTime(job.last_event_at))), body);
@@ -220,6 +219,29 @@ function jobMediaDisclosure(jobID, media) {
   return disclosure;
 }
 
+// runAttention lists the folder problems of this run's fixed scope while the
+// run is still its drive's current one; an older run only reports its holds.
+function runAttention(summary, folderIDs) {
+  const drive = findDrive(summary.source_volume_id);
+  const scope = new Set(folderIDs);
+  const items = drive?.archive_run_id === summary.work_id
+    ? (drive.folders || []).filter((folder) => scope.has(folder.folder)).map((folder) => [folder, folderProblem(folder)]).filter(([, problem]) => problem)
+      .sort(([, left], [, right]) => (left.signal === right.signal ? 0 : left.signal === "fault" ? -1 : 1))
+    : [];
+  const driveHref = (folder = "") => `#/drives/${encodeURIComponent(summary.source_volume_id)}${folder ? `?folder=${encodeURIComponent(folder)}` : ""}`;
+  const rows = items.map(([folder, problem]) => el("a", { class: "attention-link", href: driveHref(folder.folder), dataset: { folderId: folder.folder, kind: problem.kind, signal: problem.signal } },
+    statusIcon(problem.signal), el("b", {}, problem.title), el("span", {}, folder.folder),
+    el("span", { class: "num muted" }, `영상 ${formatCount(folder.video_count)}`), svgIcon(icons.next)));
+  if (!rows.length && summary.hold_count > 0) {
+    rows.push(el("a", { class: "attention-link", href: driveHref(), dataset: { kind: "hold", signal: "decide" } },
+      statusIcon("decide"), el("b", {}, "분류 확인 필요"), el("span", { class: "num" }, `${formatCount(summary.hold_count)} 폴더`), el("span", {}), svgIcon(icons.next)));
+  }
+  if (!rows.length) return null;
+  return el("section", { class: "section jobs-section", id: "run-attention", "aria-label": "확인 필요" },
+    el("h2", { class: "section-title" }, "확인 필요 ", el("span", { class: "num" }, String(rows.length))),
+    el("div", { class: "attention-list" }, ...rows));
+}
+
 function renderRunDetail(root, detail, media, route) {
   const summary = detail?.summary;
   if (!summary) {
@@ -227,33 +249,35 @@ function renderRunDetail(root, detail, media, route) {
     return;
   }
   const lane = workLane(summary);
+  const source = summary.source_volume_id || summary.source_storage_id;
   const facts = [
-    ["작업 ID", summary.work_id], ["폴더", formatCount(summary.folder_count)], ["영상", formatCount(summary.video_count)],
-    ["Worker", summary.worker_id], ["원본", summary.source_volume_id || summary.source_storage_id], ["아카이브", summary.archive_storage_id],
-    ["하위 작업", formatCount(summary.child_job_count)], ["보류", formatCount(summary.hold_count)], ["결과", formatCount(summary.result_count)],
+    ["원본 → 아카이브", `${source || "—"} → ${summary.archive_storage_id || "—"}`], ["폴더", formatCount(summary.folder_count)], ["영상", formatCount(summary.video_count)],
   ];
-  const folders = (detail.folder_ids || []).map((folder) => el("div", { class: "data-row", role: "row" }, el("b", { class: "cell-main" }, folder)));
+  const trace = [
+    `작업 ID ${summary.work_id}`, `Worker ${summary.worker_id || "배정 없음"}`,
+    `하위 작업 ${formatCount(summary.child_job_count)}`, `결과 ${formatCount(summary.result_count)}`,
+  ].join("\n");
+  const folderIDs = detail.folder_ids || [];
+  const folders = folderIDs.map((folder) => el("div", { class: "data-row", role: "row" }, el("b", { class: "cell-main" }, folder)));
   const children = detail.children || [];
   const completed = detail.completed_work || [];
   const selectedPackage = route?.query?.get("result") || "";
   root.replaceChildren(...[
     el("div", { class: "page-head" },
-      el("div", { class: "page-title" }, el("h1", { id: "run-title" }, workName(summary)), token(workStateText(summary), LANE[lane]?.[1] || "idle")),
-      el("a", { class: "btn", href: "#/jobs" }, "작업 관리")),
-    el("section", { class: "panel job-summary", id: "run-summary" },
-      el("div", { class: "panel-toolbar" }, el("b", { class: "panel-title" }, "작업 정보")),
+      el("div", { class: "page-title" }, el("h1", { id: "run-title" }, workName(summary)), token(workStateText(summary), LANE[lane]?.[1] || "idle"))),
+    runAttention(summary, folderIDs),
+    el("section", { class: "panel job-summary", id: "run-summary", title: trace },
       el("div", { class: "job-facts" }, ...facts.map(([name, value]) => fact(name, value)))),
     el("section", { class: "section jobs-section", id: "run-children" },
       el("h2", { class: "section-title" }, "하위 작업 ", el("span", { class: "num" }, String(children.length))),
-      table(["대상", "단계", "Worker", "상태", "진행", "최근"], children.map((child) => childRow(child, media)), "하위 작업 없음")),
+      table(["대상", "단계", "상태", "진행", "최근"], children.map((child) => childRow(child, media)), "하위 작업 없음", "children-table")),
     completed.length ? el("section", { class: "section jobs-section", id: "run-results" },
       el("h2", { class: "section-title" }, "완료 결과 ", el("span", { class: "num" }, String(completed.length))),
       el("div", { class: "completed-table" },
         el("div", { class: "completed-head", "aria-hidden": "true" }, ...["결과", "작업", "원본 → 결과", "완료", "아카이브"].map((text) => el("span", {}, text))),
         ...completed.map((item) => runResultRow(item, item.archive_package_id === selectedPackage)))) : null,
-    el("section", { class: "section jobs-section", id: "run-scope" },
-      el("h2", { class: "section-title" }, "고정 폴더 범위 ", el("span", { class: "num" }, String(folders.length))),
-      el("div", { class: "data-table scope-table", role: "table" }, ...(folders.length ? folders : [emptyState("폴더 없음")])))
+    fold("run-scope", "고정 폴더 범위", folders.length, ui.runScopeOpen, (open) => { ui.runScopeOpen = open; },
+      el("div", { class: "data-table scope-table", role: "table" }, ...(folders.length ? folders : [emptyState("폴더 없음")]))),
   ].filter(Boolean));
 }
 
@@ -264,6 +288,10 @@ export function mount(root, route) {
   let loadError = "";
   let disposed = false;
   let request = null;
+  let createOpen = false;
+  let createPending = false;
+  let createError = "";
+  const createDraft = { target_title: "", template_name: "occasion-recording", control_mode: "ASSISTED" };
   const mediaCache = new Map();
   const mediaOpen = new Set();
   const mediaRequests = new Map();
@@ -318,6 +346,61 @@ export function mount(root, route) {
     }
   }
 
+  async function createJob(event) {
+    event.preventDefault();
+    if (createPending) return;
+    const jobID = newID("JOB");
+    createPending = true;
+    createError = "";
+    renderList();
+    try {
+      await mutation("/api/v1/jobs", {
+        job_id: jobID, command_id: newID("COMMAND"), idempotency_key: `${jobID}:create`,
+        reason: "작업 관리에서 생성", template_name: createDraft.template_name,
+        target_title: createDraft.target_title.trim(), control_mode: createDraft.control_mode, expected_revision: 0,
+      });
+      await refresh();
+      if (!disposed) window.location.hash = `#/jobs/${encodeURIComponent(jobID)}`;
+    } catch (error) {
+      createPending = false;
+      createError = error.message;
+      if (!disposed) renderList();
+    }
+  }
+
+  function createPanel() {
+    if (!createOpen) return null;
+    const title = el("input", {
+      id: "new-job-title", name: "target_title", required: true, autocomplete: "off", value: createDraft.target_title,
+      oninput: (event) => { createDraft.target_title = event.target.value; },
+    });
+    const template = el("select", {
+      id: "new-job-template", name: "template_name", value: createDraft.template_name,
+      onchange: (event) => { createDraft.template_name = event.target.value; },
+    },
+    ...[
+      ["occasion-recording", "행사 기록"], ["vj-compilation", "VJ 모음"],
+      ["final-edit", "최종 편집"], ["large-file-intake", "대용량 입고"],
+    ].map(([value, text]) => el("option", { value, selected: value === createDraft.template_name }, text)));
+    const mode = el("select", {
+      id: "new-job-mode", name: "control_mode",
+      onchange: (event) => { createDraft.control_mode = event.target.value; },
+    }, ...["ASSISTED", "ARCHIVIST", "MANUAL"].map((value) => el("option", {
+      value, selected: value === createDraft.control_mode,
+    }, label("mode", value))));
+    const submit = el("button", { type: "submit", class: "btn primary", id: "new-job-submit", disabled: createPending }, createPending ? "생성 중" : "생성");
+    const form = el("form", { id: "new-job-form", class: "job-create-form", onsubmit: createJob },
+      el("label", { class: "field" }, el("span", {}, "작업 이름"), title),
+      el("label", { class: "field" }, el("span", {}, "작업 유형"), template),
+      el("label", { class: "field" }, el("span", {}, "제어 모드"), mode),
+      el("div", { class: "form-actions" }, submit,
+        el("button", { type: "button", class: "btn", disabled: createPending, onclick: () => { createOpen = false; createError = ""; renderList(); } }, "취소"),
+        createError ? el("span", { id: "new-job-status", role: "status" }, createError) : null));
+    queueMicrotask(() => { if (!disposed && createOpen && !createDraft.target_title) title.focus(); });
+    return el("section", { class: "panel job-create-panel", id: "new-job", "aria-label": "새 작업 생성" },
+      el("div", { class: "panel-toolbar" }, el("b", { class: "panel-title" }, "새 작업 생성")), form);
+  }
+
   function renderList() {
     const work = [...model.work];
     const active = work.filter((item) => workLane(item) === "work");
@@ -325,20 +408,23 @@ export function mount(root, route) {
     const attention = work.filter((item) => ["fault", "decide"].includes(workLane(item)));
     const completed = work.filter((item) => workLane(item) === "done");
     root.replaceChildren(
-      el("div", { class: "page-head" }, el("div", { class: "page-title" }, el("h1", { id: "jobs-title" }, "작업 관리"), el("span", { class: "num muted" }, String(work.length)))),
+      el("div", { class: "page-head" }, el("div", { class: "page-title" }, el("h1", { id: "jobs-title" }, "작업 관리")),
+        el("button", { type: "button", class: "btn primary", id: "new-job-open", "aria-expanded": createOpen ? "true" : "false", onclick: () => { createOpen = !createOpen; createError = ""; renderList(); } },
+          svgIcon(icons.plus), "새 작업 생성")),
+      ...(createOpen ? [createPanel()] : []),
       el("div", { class: "jobs-sections" },
         workSection("진행 중", active, "진행 중인 작업 없음", "active-jobs"),
         workSection("작업 큐", queued, "대기 중인 작업 없음", "queued-jobs"),
         fold("attention-jobs", "확인 필요", attention.length, ui.jobAttentionOpen, (open) => { ui.jobAttentionOpen = open; },
-          table(["작업", "범위", "Worker", "상태", "진행", "최근"], attention.map(workRow), "확인 필요한 작업 없음")),
+          table(WORK_HEADS, attention.map(workRow), "확인 필요한 작업 없음")),
         fold("completed-jobs", "완료", completed.length, ui.jobCompletedOpen, (open) => { ui.jobCompletedOpen = open; },
-          table(["작업", "범위", "Worker", "상태", "진행", "최근"], completed.map(workRow), "완료 작업 없음"))));
+          table(WORK_HEADS, completed.map(workRow), "완료 작업 없음"))));
   }
 
   function renderDetail(job) {
     if (!job) {
       root.replaceChildren(
-        el("div", { class: "page-head" }, el("div", { class: "page-title" }, el("h1", {}, "작업 관리")), el("a", { class: "btn", href: "#/jobs" }, "작업 관리")),
+        el("div", { class: "page-head" }, el("div", { class: "page-title" }, el("h1", {}, "작업 관리"))),
         emptyState("작업을 찾을 수 없음"));
       return;
     }
@@ -360,8 +446,7 @@ export function mount(root, route) {
         el("div", { class: "page-title" }, el("h1", { id: "job-title" }, summary.target_title || summary.job_id),
           token(`${laneText(summary)} · ${summary.step_state}`, LANE[lane]?.[1] || stateSignal(summary.step_state))),
         el("div", { class: "detail-actions" },
-          cancellable && !confirm ? el("button", { type: "button", class: "btn danger", id: "cancel-job", dataset: { action: "cancel" }, onclick: () => { ui.jobCancel = job.job_id; notify(); } }, "작업 취소…") : null,
-          el("a", { class: "btn", href: "#/jobs" }, "작업 관리"))),
+          cancellable && !confirm ? el("button", { type: "button", class: "btn danger", id: "cancel-job", dataset: { action: "cancel" }, onclick: () => { ui.jobCancel = job.job_id; notify(); } }, "작업 취소…") : null)),
       resultPanel(completion(job.job_id)),
       el("section", { class: "panel job-summary", id: "job-summary" },
         el("div", { class: "panel-toolbar" }, el("b", { class: "panel-title" }, "작업 정보")),

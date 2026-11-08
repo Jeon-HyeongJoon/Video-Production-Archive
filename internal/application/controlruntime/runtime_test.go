@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -556,6 +557,32 @@ func TestBrowserCommandCreatesPersistentJobWithCSRFAndIdempotency(t *testing.T) 
 	if jobView.Code != http.StatusOK || !strings.Contains(jobView.Body.String(), `"template_name":"occasion-recording"`) ||
 		!strings.Contains(jobView.Body.String(), `"target_title":"가을 행사"`) || !strings.Contains(jobView.Body.String(), `"step_state":"QUEUED"`) {
 		t.Fatalf("persistent job view returned %d: %s", jobView.Code, jobView.Body.String())
+	}
+}
+
+// Requirement: DSH-032
+func TestArchiveWorkspaceCreatesPersistentJobAndNavigatesToItsDetail(t *testing.T) {
+	configuration := runtimeTestConfiguration(t)
+	server := httptest.NewUnstartedServer(nil)
+	configuration.AllowedOrigins = []string{"http://" + server.Listener.Addr().String()}
+	runtime, err := controlruntime.Open(context.Background(), configuration, "v1-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer runtime.Close()
+	server.Config.Handler = runtime.Handler()
+	server.Start()
+	defer server.Close()
+
+	python := os.Getenv("ARCHIVE_WORKSPACE_GOLDEN_PYTHON")
+	if python == "" {
+		python = "python3"
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	check := exec.CommandContext(ctx, python, filepath.Join("testdata", "check_archive_workspace_job_create.py"), server.URL)
+	if output, runErr := check.CombinedOutput(); runErr != nil {
+		t.Fatalf("check Archive Workspace job creation: %v\n%s\nrun `make visual-deps` before the test", runErr, output)
 	}
 }
 

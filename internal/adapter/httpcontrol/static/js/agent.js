@@ -1,9 +1,11 @@
 // Archivist pane, shown as "Agent": it holds the right side of every screen
 // and scrolls its conversation on its own.
 //
-// Fold rule (after Orca's native chat turn fold): a turn that is still running
-// shows its tool calls; once the turn settles, the final answer stays visible
-// and the work that produced it folds behind one "작업 내역" row.
+// Fold rule (after Orca's native chat turn fold): a person's instructions, the
+// latest answer and any decision waiting on a person stay visible. While the
+// work runs, only its last progress line shows beside the answer. Recalls,
+// progress, tool calls, earlier answers, settled cards and result IDs fold
+// behind one "작업 내역" row, and references fold behind one "참조 N" row.
 
 import { byId, el, svgIcon, icons, statusIcon, setStatusIcon, label, stateSignal, finishedTurns, formatCount, clockTime, mutation, newID, token } from "./core.js";
 import { model, ui, notify, refresh, currentSession, hostFor, activeTurn, driveSelection, selectionRefs, findDrive } from "./store.js";
@@ -61,9 +63,22 @@ function focusResult(resultID) {
   if (drive) go(`#/drives/${encodeURIComponent(drive.workspace_drive_id)}`);
 }
 
-function turnSource(turn) {
-  const system = turn.submitted_by === "SYSTEM" || turn.turn_id.startsWith("SYSTEM-RECALL-");
-  if (system) {
+function isSystem(turn) {
+  return turn.submitted_by === "SYSTEM" || turn.turn_id.startsWith("SYSTEM-RECALL-");
+}
+
+// refsFold keeps a selection's references behind one "참조 N" row.
+function refsFold(refs, key, open, className) {
+  const fold = el("details", { class: `refs-fold ${className}` },
+    el("summary", {}, "참조 ", el("span", { class: "num" }, String(refs.length))),
+    el("div", { class: "message-refs" }, ...refs.map((value) => el("span", { class: "ref-chip" }, value))));
+  fold.open = open.has(key);
+  fold.addEventListener("toggle", () => { fold.open ? open.add(key) : open.delete(key); });
+  return fold;
+}
+
+function turnSource(turn, open = new Set()) {
+  if (isSystem(turn)) {
     return el("div", { class: "message system", dataset: { turnId: turn.turn_id } },
       el("span", {}, `재호출 · ${turn.prompt || turn.request_id}`), el("span", { class: "num" }, clockTime(turn.created_at)),
       finishedTurns.has(turn.state) ? null : token(label("turn", turn.state), stateSignal(turn.state)));
@@ -72,7 +87,7 @@ function turnSource(turn) {
   return el("article", { class: "message user", dataset: { turnId: turn.turn_id } },
     el("div", { class: "message-head" }, el("span", {}, "담당자"), el("span", { class: "num" }, `${label("turn", turn.state)} · ${clockTime(turn.created_at)}`)),
     el("p", { class: "message-body" }, turn.prompt || turn.request_id),
-    refs.length ? el("div", { class: "message-refs" }, ...refs.map((value) => el("span", { class: "ref-chip" }, value))) : null);
+    refs.length ? refsFold(refs, `refs:${turn.turn_id}`, open, "turn-refs") : null);
 }
 
 function entryRow(entry) {
@@ -87,47 +102,42 @@ function appendResults(answer, results) {
     el("button", { type: "button", class: "ref-chip", onclick: () => focusResult(resultID) }, resultID))));
 }
 
-// A Turn can render expanded while its ArchiveRun work is active, or fold its
-// own trace when it is a standalone settled request.
-function renderTurn(turn, session, open, options = {}) {
+// liveLine is the one row a running Turn shows: its running tool call, else
+// its latest progress entry, else its queued state.
+function liveLine(turn) {
+  const entries = turn.entries || [];
+  const calls = turn.tool_calls || [];
+  const running = [...calls].reverse().find((call) => call.state === "RUNNING");
+  const row = running ? toolRow(running)
+    : entries.length ? entryRow(entries[entries.length - 1])
+      : calls.length ? toolRow(calls[calls.length - 1])
+        : el("div", { class: "turn-entry", dataset: { kind: "STATE", signal: "work" } },
+          el("span", { class: "turn-entry-kind" }, isSystem(turn) ? "재호출" : "진행"),
+          el("span", {}, isSystem(turn) ? turn.prompt || turn.request_id : ""), token(label("turn", turn.state), stateSignal(turn.state)));
+  return el("div", { class: "turn-live", dataset: { turnId: turn.turn_id } }, row);
+}
+
+// traceTurn is one Turn inside the 작업 내역 fold: its recall, its answer,
+// progress entries and tool calls, and its settled cards.
+function traceTurn(turn, session, options = {}) {
   const settled = finishedTurns.has(turn.state);
-  const expanded = options.expanded === true;
   const rows = [];
-  if (options.source !== false) rows.push(turnSource(turn));
+  if (options.source) rows.push(turnSource(turn));
   const calls = turn.tool_calls || [];
   const entries = (turn.entries || []).filter((entry) => !(options.excludeFailure && entry.kind === "FAILURE"));
-  const summary = turn.final_response?.summary;
-  const results = turn.final_response?.result_ids || [];
-  const showSummary = options.summary !== false;
-  if (calls.length || entries.length || (showSummary && summary) || !settled) {
+  const summary = options.summary ? turn.final_response?.summary : "";
+  if (calls.length || entries.length || summary) {
     const answer = el("article", { class: "message archivist", dataset: { turnId: turn.turn_id, settled: String(settled) } },
       el("div", { class: "message-head" }, el("span", {}, "Agent"), el("span", { class: "num" }, settled ? `${label("turn", turn.state)} · ${clockTime(turn.updated_at)}` : label("turn", turn.state))));
-    if (settled && !expanded) {
-      if (showSummary && summary) answer.append(el("p", { class: "message-body" }, summary));
-      if (showSummary) appendResults(answer, results);
-      if (calls.length || entries.length) {
-        const work = el("details", { class: "turn-work", dataset: { turnId: turn.turn_id } },
-          el("summary", {}, `작업 내역 · 도구 ${calls.length} · ${minutesBetween(turn.created_at, turn.updated_at)}`),
-          ...entries.map(entryRow), ...calls.map(toolRow));
-        work.open = open.has(turn.turn_id);
-        work.addEventListener("toggle", () => { work.open ? open.add(turn.turn_id) : open.delete(turn.turn_id); });
-        answer.append(work);
-      }
-    } else {
-      if (showSummary && summary) answer.append(el("p", { class: "message-body" }, summary));
-      if (showSummary) appendResults(answer, results);
-      answer.append(el("div", { class: "turn-live" },
-        ...entries.map(entryRow), ...calls.map(toolRow),
-        !entries.length && !calls.length && !summary ? el("span", { class: "muted" }, label("turn", turn.state)) : null));
+    if (summary) {
+      answer.append(el("p", { class: "message-body" }, summary));
+      appendResults(answer, turn.final_response?.result_ids || []);
     }
+    if (calls.length || entries.length) answer.append(el("div", { class: "turn-trace" }, ...entries.map(entryRow), ...calls.map(toolRow)));
     rows.push(answer);
   }
-  const cardMode = options.cards || "all";
   for (const card of session.action_cards || []) {
-    if (card.archivist_turn_id !== turn.turn_id) continue;
-    if (cardMode === "pending" && card.state !== "PENDING") continue;
-    if (cardMode === "settled" && card.state === "PENDING") continue;
-    if (cardMode !== "none") rows.push(actionCard(card));
+    if (card.archivist_turn_id === turn.turn_id && card.state !== "PENDING") rows.push(actionCard(card));
   }
   return rows;
 }
@@ -145,38 +155,54 @@ function workUnits(turns) {
   return units;
 }
 
-function renderWork(unit, session, open) {
-  const origin = unit.turns.find((turn) => turn.turn_id === turn.work_context?.origin_turn_id) || unit.turns[0];
+// renderUnit draws one request: a standalone Turn, or every Turn of one
+// ArchiveRun work. Only instructions, the latest answer, a running Turn's last
+// line and pending cards stay outside the fold.
+function renderUnit(unit, session, open) {
+  const turns = unit.turns;
+  const origin = (unit.workID && turns.find((turn) => turn.turn_id === turn.work_context?.origin_turn_id)) || turns[0];
+  const active = [...turns].reverse().find((turn) => !finishedTurns.has(turn.state));
   const final = unit.workID
-    ? unit.turns.find((turn) => turn.work_context?.trigger === "ARCHIVE_RUN_COMPLETE" && finishedTurns.has(turn.state))
+    ? turns.find((turn) => turn.work_context?.trigger === "ARCHIVE_RUN_COMPLETE" && finishedTurns.has(turn.state))
     : (finishedTurns.has(origin.state) ? origin : null);
-  if (!final || !unit.workID) return unit.turns.flatMap((turn) => renderTurn(turn, session, open, { expanded: Boolean(unit.workID) }));
+  const settled = Boolean(final) && !active;
+  const shown = (final?.final_response?.summary ? final : null) || [...turns].reverse().find((turn) => turn.final_response?.summary);
+  const failed = settled && !shown ? final : null;
+  const failure = failed ? [...(failed.entries || [])].reverse().find((entry) => entry.kind === "FAILURE") : null;
 
-  const rows = [turnSource(origin)];
-  const calls = unit.turns.reduce((count, turn) => count + (turn.tool_calls || []).length, 0);
-  const failure = [...(final.entries || [])].reverse().find((entry) => entry.kind === "FAILURE");
-  const answer = el("article", { class: "message archivist work-result", dataset: { workId: unit.workID, settled: "true" } },
-    el("div", { class: "message-head" }, el("span", {}, "Agent"), el("span", { class: "num" }, `${label("turn", final.state)} · ${clockTime(final.updated_at)}`)));
-  if (final.final_response?.summary) {
-    answer.append(el("p", { class: "message-body" }, final.final_response.summary));
-    appendResults(answer, final.final_response.result_ids || []);
-  } else if (failure) {
-    answer.append(entryRow(failure));
-  }
-  const trace = el("details", { class: "turn-work work-fold", dataset: { workId: unit.workID } },
-    el("summary", {}, `작업 내역 · 도구 ${calls} · ${minutesBetween(origin.created_at, final.updated_at)}`));
+  const rows = [];
+  for (const turn of turns) if (turn === origin || !isSystem(turn)) rows.push(turnSource(turn, open));
+
   const body = el("div", { class: "work-fold-body" });
-  for (const turn of unit.turns) body.append(...renderTurn(turn, session, open, {
-    expanded: true, source: turn !== origin, summary: turn !== final, excludeFailure: turn === final, cards: "settled",
-  }));
-  if (body.childElementCount) {
-    trace.append(body);
-    trace.open = open.has(unit.workID);
-    trace.addEventListener("toggle", () => { trace.open ? open.add(unit.workID) : open.delete(unit.workID); });
-    answer.append(trace);
+  if (shown) appendResults(body, shown.final_response.result_ids || []);
+  for (const turn of turns) {
+    body.append(...traceTurn(turn, session, { source: turn !== origin && isSystem(turn), summary: turn !== shown, excludeFailure: turn === failed }));
   }
-  rows.push(answer);
-  for (const turn of unit.turns) {
+  const calls = turns.reduce((count, turn) => count + (turn.tool_calls || []).length, 0);
+  const recalls = turns.filter((turn) => turn !== origin && isSystem(turn)).length;
+  const key = unit.workID || origin.turn_id;
+  let fold = null;
+  if (body.childElementCount) {
+    const end = (final || active || turns[turns.length - 1]).updated_at;
+    fold = el("details", { class: `turn-work${unit.workID ? " work-fold" : ""}`, dataset: { workId: unit.workID, turnId: unit.workID ? undefined : origin.turn_id } },
+      el("summary", {}, `작업 내역 · 도구 ${calls}${recalls ? ` · 재호출 ${recalls}` : ""}${settled ? ` · ${minutesBetween(origin.created_at, end)}` : ""}`), body);
+    fold.open = open.has(key);
+    fold.addEventListener("toggle", () => { fold.open ? open.add(key) : open.delete(key); });
+  }
+
+  if (shown || active || failure || fold) {
+    const head = active ? label("turn", active.state) : shown ? `${label("turn", shown.state)} · ${clockTime(shown.updated_at)}` : `${label("turn", origin.state)} · ${clockTime(origin.updated_at)}`;
+    const answer = el("article", {
+      class: `message archivist${unit.workID && settled ? " work-result" : ""}`,
+      dataset: { turnId: unit.workID ? undefined : origin.turn_id, workId: unit.workID, settled: String(settled) },
+    }, el("div", { class: "message-head" }, el("span", {}, "Agent"), el("span", { class: "num" }, head)));
+    if (shown) answer.append(el("p", { class: "message-body" }, shown.final_response.summary));
+    else if (failure) answer.append(entryRow(failure));
+    if (active) answer.append(liveLine(active));
+    if (fold) answer.append(fold);
+    rows.push(answer);
+  }
+  for (const turn of turns) {
     for (const card of session.action_cards || []) {
       if (card.archivist_turn_id === turn.turn_id && card.state === "PENDING") rows.push(actionCard(card));
     }
@@ -193,12 +219,13 @@ export function mountAgent(container) {
   const availabilityIcon = statusIcon("idle");
   const thread = el("div", { id: "archivist-thread", class: "pane-thread", "aria-live": "polite" });
   const chips = el("div", { id: "selection-chips", class: "pane-chips" });
+  const refCount = el("span", { class: "num" });
+  const refs = el("details", { id: "pane-refs", class: "refs-fold pane-refs" }, el("summary", {}, "참조 ", refCount), chips);
   const message = el("textarea", { id: "archivist-message", name: "prompt", rows: "2", required: true, placeholder: "Agent에게 지시", "aria-label": "메시지" });
   const send = el("button", { type: "submit", class: "pane-send", "aria-label": "전송", title: "전송", dataset: { action: "send" } }, svgIcon(icons.up));
   const reason = el("span", { id: "archivist-disabled-reason", class: "pane-reason" });
   const form = el("form", { id: "archivist-compose", class: "pane-compose" },
-    el("div", { class: "pane-refs" }, el("span", { class: "muted" }, "참조"), chips),
-    el("div", { class: "pane-input" }, message, send), reason);
+    refs, el("div", { class: "pane-input" }, message, send), reason);
   // Below the narrowest two-column width the pane slides in from the right
   // edge over the screen; the handle on that edge opens and closes it.
   const handle = byId("agent-handle");
@@ -257,7 +284,7 @@ export function mountAgent(container) {
       const stuck = !thread.childElementCount || thread.scrollHeight - thread.scrollTop - thread.clientHeight < 24;
       const turns = session?.turns || [];
       const placed = new Set(turns.map((turn) => turn.turn_id));
-      const rows = session ? workUnits(turns).flatMap((unit) => renderWork(unit, session, openWork)) : [];
+      const rows = session ? workUnits(turns).flatMap((unit) => renderUnit(unit, session, openWork)) : [];
       for (const card of session?.action_cards || []) if (!placed.has(card.archivist_turn_id)) rows.push(actionCard(card));
       thread.replaceChildren(...(rows.length ? rows : [el("p", { class: "empty" }, "대화 없음")]));
       const target = ui.focusCard ? thread.querySelector(`[data-card-id="${CSS.escape(ui.focusCard)}"]`) : null;
@@ -268,9 +295,10 @@ export function mountAgent(container) {
 
       const screenDrive = route.name === "drive" ? findDrive(route.driveID) : null;
       currentSelection = driveSelection(screenDrive);
-      const refs = selectionRefs(currentSelection);
-      chips.replaceChildren(...(refs.length ? refs.map((value) => el("span", { class: "selection-chip" }, value)) : screenDrive ? [el("span", { class: "muted" }, "선택 미완료")] : []));
-      chips.parentElement.hidden = !refs.length && !screenDrive;
+      const selected = selectionRefs(currentSelection);
+      chips.replaceChildren(...selected.map((value) => el("span", { class: "selection-chip" }, value)));
+      refCount.textContent = selected.length ? String(selected.length) : "선택 미완료";
+      refs.hidden = !selected.length && !screenDrive;
       message.disabled = !available;
       send.disabled = !available;
       message.placeholder = `${session?.name || "Agent"}에게 지시`;

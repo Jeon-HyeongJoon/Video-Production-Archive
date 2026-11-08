@@ -1,3 +1,4 @@
+import re
 import sys
 
 from playwright.sync_api import expect, sync_playwright
@@ -12,7 +13,7 @@ with sync_playwright() as playwright:
     expect(page.locator('#menu [data-menu="jobs"]')).to_have_attribute("aria-current", "page")
     expect(page.locator('#menu [data-menu="jobs"] .menu-label')).to_have_text("작업 관리")
     expect(page.locator('#menu [data-menu="status"]')).to_have_count(0)
-    expect(page.locator("#job-count")).to_have_text("4")
+    expect(page.locator("#menu .menu-count")).to_have_count(0)
     expect(page.locator('#active-jobs .work-row[data-work-id="JOB-RUNNING"]')).to_have_count(1)
     expect(page.locator('#queued-jobs .work-row[data-work-id="JOB-QUEUED"]')).to_have_count(1)
     attention = page.locator("#attention-jobs")
@@ -24,19 +25,17 @@ with sync_playwright() as playwright:
     attention.locator("summary").click()
     expect(attention).to_have_attribute("open", "")
     completed_section = page.locator("#completed-jobs")
-    expect(completed_section).to_have_attribute("open", "")
+    expect(completed_section).not_to_have_attribute("open", "")
     expect(completed_section.locator(":scope > summary")).to_have_text("완료1")
     completed = completed_section.locator('.work-row[data-work-id="ARCHIVE-RUN-1"]')
     expect(completed).to_have_attribute("href", "#/runs/ARCHIVE-RUN-1")
     expect(completed).to_contain_text("8 폴더 · 795 영상")
     completed_section.locator(":scope > summary").click()
-    expect(completed_section).not_to_have_attribute("open", "")
-    completed_section.locator(":scope > summary").click()
     expect(completed_section).to_have_attribute("open", "")
     completed.click()
 
     expect(page).to_have_url(base_url + "/#/runs/ARCHIVE-RUN-1")
-    expect(page.locator("#run-summary")).to_contain_text("ARCHIVE-RUN-1")
+    expect(page.locator("#run-summary")).to_have_attribute("title", re.compile("작업 ID ARCHIVE-RUN-1"))
     expect(page.locator("#run-summary")).to_contain_text("795")
     expect(page.locator("#run-scope .data-row")).to_have_count(8)
     result = page.locator('#run-results [data-package-id="VP-20261030-SOURCE"]')

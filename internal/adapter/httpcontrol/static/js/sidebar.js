@@ -1,31 +1,16 @@
 // 사이드바: two primary menus and a scrollable work index. ArchiveRun cards
-// group their internal Jobs; unrelated Template Jobs remain standalone.
+// group their internal Jobs; unrelated Template Jobs remain standalone. A card
+// shows only the work's name and state; its ID, drive and Worker wait on hover.
 
-import { byId, el, svgIcon, icons, statusIcon, formatCount } from "./core.js";
+import { byId, el, svgIcon, icons, statusIcon } from "./core.js";
 import { model, driveName, findDrive, workLane, workName } from "./store.js";
 import { menus } from "./router.js";
 
-const THEME_KEY = "archive.theme";
 const MENU_ICON = { jobs: icons.jobs, connections: icons.workers };
 const LANE_LABEL = {
   fault: "실패", decide: "확인 필요", work: "실행 중", resource: "자원 대기", queue: "대기열", done: "완료",
 };
 const LANE_RANK = { fault: 5, decide: 4, work: 3, resource: 2, queue: 1, done: 0 };
-
-function storedTheme() {
-  try {
-    return localStorage.getItem(THEME_KEY);
-  } catch {
-    return null;
-  }
-}
-
-function applyTheme(theme) {
-  document.documentElement.dataset.theme = theme === "light" ? "light" : "dark";
-  for (const button of byId("theme-switch").querySelectorAll("[data-theme-choice]")) {
-    button.setAttribute("aria-pressed", String(button.dataset.themeChoice === document.documentElement.dataset.theme));
-  }
-}
 
 function workspaceContext(work) {
   const drive = findDrive(work.source_volume_id);
@@ -49,12 +34,7 @@ function workspaceCard(work, route) {
   el("span", { class: "workspace-card-head" },
     statusIcon(lane === "queue" ? "idle" : lane),
     el("b", { class: "workspace-work-name" }, workName(work)),
-    el("span", { class: "workspace-state", dataset: { signal: ["fault", "decide"].includes(lane) ? lane : undefined } }, state)),
-  el("span", { class: "workspace-card-meta" },
-    el("span", { class: "workspace-drive" }, context.drive),
-    el("span", { "aria-hidden": "true" }, "·"),
-    el("span", { class: "workspace-worker num" }, context.worker)),
-  el("span", { class: "workspace-card-id num" }, work.work_id));
+    el("span", { class: "workspace-state", dataset: { signal: ["fault", "decide"].includes(lane) ? lane : undefined } }, state)));
 }
 
 function orderedWorkspaces() {
@@ -70,25 +50,9 @@ function orderedWorkspaces() {
 
 export function mountSidebar() {
   const nav = byId("menu");
-  const counts = {
-    jobs: el("span", { class: "menu-count num", id: "job-count" }),
-    connections: el("span", { class: "menu-count num", id: "connection-count" }),
-  };
   nav.replaceChildren(...menus.map((menu) => el("a", { href: menu.path, class: "menu-link", dataset: { menu: menu.id } },
-    svgIcon(MENU_ICON[menu.id]), el("span", { class: "menu-label" }, menu.label), counts[menu.id])));
+    svgIcon(MENU_ICON[menu.id]), el("span", { class: "menu-label" }, menu.label))));
   const tree = byId("tree");
-
-  applyTheme(storedTheme());
-  byId("theme-switch").addEventListener("click", (event) => {
-    const choice = event.target.closest("[data-theme-choice]")?.dataset.themeChoice;
-    if (!choice) return;
-    try {
-      localStorage.setItem(THEME_KEY, choice);
-    } catch {
-      // The choice still holds until this page is closed.
-    }
-    applyTheme(choice);
-  });
 
   return {
     update(route) {
@@ -100,8 +64,6 @@ export function mountSidebar() {
       if (route.menu === "settings") settings.setAttribute("aria-current", "page");
       else settings.removeAttribute("aria-current");
 
-      counts.jobs.textContent = formatCount(model.work.length);
-      counts.connections.textContent = formatCount(model.workers.length + model.drives.length + model.sessions.length);
       const workspaces = orderedWorkspaces();
       tree.replaceChildren(
         el("span", { class: "tree-title" }, "워크스페이스"),
