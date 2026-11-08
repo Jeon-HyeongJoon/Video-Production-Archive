@@ -215,6 +215,11 @@ export function mountAgent(container) {
   // start the conversation at its latest turn once it has.
   document.fonts?.ready.then(() => { thread.scrollTop = thread.scrollHeight; });
   select.addEventListener("change", () => { ui.sessionID = select.value; notify(); });
+  message.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" || event.shiftKey || event.isComposing) return;
+    event.preventDefault();
+    if (!message.disabled && !send.disabled) form.requestSubmit();
+  });
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     const session = currentSession();
@@ -236,7 +241,7 @@ export function mountAgent(container) {
       handle.setAttribute("aria-expanded", String(ui.agentOpen));
       const session = currentSession();
       const before = select.value;
-      select.replaceChildren(...model.sessions.map((item) => el("option", { value: item.session_id }, item.name || item.session_id)));
+      select.replaceChildren(...model.sessions.map((item) => el("option", { value: item.session_id }, `${item.cli_id} · ${item.name || item.session_id}`)));
       if (model.sessions.some((item) => item.session_id === before)) select.value = before;
       if (session) select.value = session.session_id;
       const host = hostFor(session);

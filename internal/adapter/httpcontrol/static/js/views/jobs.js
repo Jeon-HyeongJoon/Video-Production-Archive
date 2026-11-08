@@ -117,9 +117,11 @@ function resultPanel(found) {
   if (!found) return null;
   const { item, drive } = found;
   const source = `${formatCount(item.source_video_count)} → 1`;
+  const resultHref = `#/runs/${encodeURIComponent(item.archive_run_id)}?result=${encodeURIComponent(item.archive_package_id)}`;
   return el("section", { class: "panel job-result", id: "job-result", dataset: { packageId: item.archive_package_id } },
     el("div", { class: "panel-toolbar" }, el("b", { class: "panel-title" }, "완료 결과"),
-      token(item.archive_state === "COMMITTED" ? "확정됨" : "보관됨", item.archive_state === "COMMITTED" ? "done" : "idle")),
+      token(item.archive_state === "COMMITTED" ? "확정됨" : "보관됨", item.archive_state === "COMMITTED" ? "done" : "idle"),
+      el("a", { class: "btn archive-result-link", href: resultHref }, "아카이브 결과")),
     el("div", { class: "job-result-grid" },
       fact("결과 영상", item.archive_video_file_name || item.archive_package_id, "wide"),
       fact("원본 폴더", item.folder),
@@ -127,6 +129,7 @@ function resultPanel(found) {
       fact("원본 → 결과", source),
       fact("완료", shortTime(item.completed_at)),
       fact("아카이브", item.archive_storage_id),
+      fact("아카이브 위치", item.archive_relative_path || "—", "wide"),
       fact("Profile", item.profile_reference),
       fact("패키지", item.archive_package_id),
       fact("실행", item.archive_run_id),
@@ -150,13 +153,14 @@ function timelineRow(item) {
     el("b", {}, item.kind), el("span", {}, item.summary || item.reference || "—"));
 }
 
-function runResultRow(item) {
-  return el("div", { class: "completed-row", dataset: { packageId: item.archive_package_id, jobId: item.job_id } },
+function runResultRow(item, selected) {
+  return el("div", { class: "completed-row", dataset: { packageId: item.archive_package_id, jobId: item.job_id, selected: selected ? "true" : undefined } },
     el("span", { class: "completed-result" }, el("b", {}, item.archive_video_file_name || item.archive_package_id), el("small", {}, item.folder)),
     el("span", { class: "completed-kind" }, label("disposition", item.disposition), item.profile_reference ? el("small", {}, item.profile_reference) : null),
     el("span", { class: "completed-source num" }, `${formatCount(item.source_video_count)} → 1`),
     el("span", { class: "completed-time num" }, shortTime(item.completed_at)),
-    el("span", { class: "completed-place" }, token(item.archive_state === "COMMITTED" ? "확정됨" : "보관됨", item.archive_state === "COMMITTED" ? "done" : "idle"), el("small", {}, item.archive_storage_id)));
+    el("span", { class: "completed-place" }, token(item.archive_state === "COMMITTED" ? "확정됨" : "보관됨", item.archive_state === "COMMITTED" ? "done" : "idle"),
+      el("small", {}, item.archive_storage_id), el("small", { class: "archive-relative-path", title: item.archive_relative_path || "" }, item.archive_relative_path || "—")));
 }
 
 function mediaDate(value) {
@@ -216,7 +220,7 @@ function jobMediaDisclosure(jobID, media) {
   return disclosure;
 }
 
-function renderRunDetail(root, detail, media) {
+function renderRunDetail(root, detail, media, route) {
   const summary = detail?.summary;
   if (!summary) {
     root.replaceChildren(emptyState("아카이브 작업을 찾을 수 없음"));
@@ -231,6 +235,7 @@ function renderRunDetail(root, detail, media) {
   const folders = (detail.folder_ids || []).map((folder) => el("div", { class: "data-row", role: "row" }, el("b", { class: "cell-main" }, folder)));
   const children = detail.children || [];
   const completed = detail.completed_work || [];
+  const selectedPackage = route?.query?.get("result") || "";
   root.replaceChildren(...[
     el("div", { class: "page-head" },
       el("div", { class: "page-title" }, el("h1", { id: "run-title" }, workName(summary)), token(workStateText(summary), LANE[lane]?.[1] || "idle")),
@@ -245,7 +250,7 @@ function renderRunDetail(root, detail, media) {
       el("h2", { class: "section-title" }, "완료 결과 ", el("span", { class: "num" }, String(completed.length))),
       el("div", { class: "completed-table" },
         el("div", { class: "completed-head", "aria-hidden": "true" }, ...["결과", "작업", "원본 → 결과", "완료", "아카이브"].map((text) => el("span", {}, text))),
-        ...completed.map(runResultRow))) : null,
+        ...completed.map((item) => runResultRow(item, item.archive_package_id === selectedPackage)))) : null,
     el("section", { class: "section jobs-section", id: "run-scope" },
       el("h2", { class: "section-title" }, "고정 폴더 범위 ", el("span", { class: "num" }, String(folders.length))),
       el("div", { class: "data-table scope-table", role: "table" }, ...(folders.length ? folders : [emptyState("폴더 없음")])))
@@ -397,7 +402,7 @@ export function mount(root, route) {
             workDetail = null;
           }
         }
-        if (!disposed) renderRunDetail(root, workDetail, media);
+        if (!disposed) renderRunDetail(root, workDetail, media, nextRoute);
         return;
       }
       const job = model.jobs.find((item) => item.job_id === nextRoute.jobID);

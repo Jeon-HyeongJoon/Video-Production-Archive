@@ -58,7 +58,7 @@ function workspaceCard(work, route) {
 }
 
 function orderedWorkspaces() {
-  return [...model.work].sort((left, right) => {
+  return model.work.filter((work) => workLane(work) !== "done").sort((left, right) => {
     const leftLane = workLane(left);
     const rightLane = workLane(right);
     const lane = LANE_RANK[rightLane] - LANE_RANK[leftLane];

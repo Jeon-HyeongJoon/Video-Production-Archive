@@ -280,7 +280,7 @@ func TestWorkspaceShowsReservationAdjustedWorkerCapacity(t *testing.T) {
 
 // Requirement: DSH-016
 func TestWorkspaceCardsOpenPersistentJobDetail(t *testing.T) {
-	testControlHTTPWorkspace(t, func(t *testing.T, handler http.Handler) {
+	testControlHTTPScene(t, sceneComplete, func(t *testing.T, handler http.Handler) {
 		assertArchiveWorkspaceScript(t, handler, "check_archive_workspace_jobs.py")
 	})
 }
@@ -848,7 +848,8 @@ func newArchiveWorkSceneFixture(scene archiveWorkspaceScene, at time.Time) archi
 				Disposition: vocabulary.OrganizationCompileSourceSequence, ProfileReference: "h264-1080p-20mbps",
 				SourceVideoCount: 86, ArchiveStorageID: run.ArchiveStorageID, ArchivePackageID: "VP-20261030-SOURCE",
 				ArchiveDate: "2026-10-30", ArchiveDisplayName: "2026-10-30 · source · source.mp4",
-				ArchiveVideoFileName: "source.mp4", ArchiveState: archive.PackageCommitted, CompletedAt: at.Add(2 * time.Hour),
+				ArchiveVideoFileName: "source.mp4", ArchiveRelativePath: "packages/2026/10/30/VP-20261030-SOURCE/revisions/000001",
+				ArchiveState: archive.PackageCommitted, CompletedAt: at.Add(2 * time.Hour),
 			}}
 			run.ResultCount = len(view.CompletedWork)
 			view.Summary = run
@@ -1121,7 +1122,8 @@ func (workspace *archiveIntakeWorkspaceFixture) Projection(context.Context) ([]a
 				SourceVideoCount: completed.VideoCount, ArchiveStorageID: "archive-main",
 				ArchivePackageID: completed.ArchivePackageID, ArchiveDate: completed.ArchiveDate,
 				ArchiveDisplayName: completed.ArchiveDisplayName, ArchiveVideoFileName: completed.ArchiveVideoFileName,
-				ArchiveState: completed.ArchiveState, CompletedAt: now.Add(time.Duration(180-index) * time.Minute),
+				ArchiveRelativePath: "packages/2026/10/30/" + completed.ArchivePackageID + "/revisions/000001",
+				ArchiveState:        completed.ArchiveState, CompletedAt: now.Add(time.Duration(180-index) * time.Minute),
 			})
 		}
 		drive.CompletedWork = append(drive.CompletedWork, archiveintakeworkspace.CompletedWorkView{
@@ -1129,7 +1131,8 @@ func (workspace *archiveIntakeWorkspaceFixture) Projection(context.Context) ([]a
 			Disposition: vocabulary.OrganizationRenderRecordings, ProfileReference: "h264-1080p-6mbps",
 			SourceVideoCount: 1, ArchiveStorageID: "archive-main", ArchivePackageID: "VP-20261029-LECTURE",
 			ArchiveDate: "2026-10-29", ArchiveDisplayName: "2026-10-29 · 2026-10-29/lecture · lecture.mov",
-			ArchiveVideoFileName: "lecture.mp4", ArchiveState: archive.PackageStored, CompletedAt: now.Add(-21 * time.Hour),
+			ArchiveVideoFileName: "lecture.mp4", ArchiveRelativePath: "packages/2026/10/29/VP-20261029-LECTURE/revisions/000001",
+			ArchiveState: archive.PackageStored, CompletedAt: now.Add(-21 * time.Hour),
 		})
 	}
 	drive.Folders = folders

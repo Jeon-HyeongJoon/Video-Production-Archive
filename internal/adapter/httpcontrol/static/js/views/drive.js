@@ -273,14 +273,15 @@ function completedWorkSection(drive) {
       `실행 ${item.archive_run_id}`,
     ].filter(Boolean).join("\n");
     const sourceCount = item.source_video_count > 1 ? `${formatCount(item.source_video_count)} → 1` : formatCount(item.source_video_count);
-    return el("a", { class: "completed-row", href: `#/runs/${encodeURIComponent(item.archive_run_id)}`, dataset: { packageId: item.archive_package_id, jobId: item.job_id, archiveRunId: item.archive_run_id }, title: trace },
+    return el("a", { class: "completed-row", href: `#/runs/${encodeURIComponent(item.archive_run_id)}?result=${encodeURIComponent(item.archive_package_id)}`, dataset: { packageId: item.archive_package_id, jobId: item.job_id, archiveRunId: item.archive_run_id }, title: trace },
       el("span", { class: "completed-result" },
         el("b", {}, item.archive_video_file_name || item.archive_package_id),
         el("small", {}, item.folder)),
       el("span", { class: "completed-kind" }, label("disposition", item.disposition), item.profile_reference ? el("small", {}, item.profile_reference) : null),
       el("span", { class: "completed-source num" }, sourceCount),
       el("span", { class: "completed-time num" }, shortTime(item.completed_at)),
-      el("span", { class: "completed-place" }, archiveBadge(item.archive_state), el("small", {}, item.archive_storage_id)));
+      el("span", { class: "completed-place" }, archiveBadge(item.archive_state), el("small", {}, item.archive_storage_id),
+        el("small", { class: "archive-relative-path", title: item.archive_relative_path || "" }, item.archive_relative_path || "—")));
   });
   return el("section", { class: "section", id: "completed-work", "aria-label": "완료 내역" },
     el("h2", { class: "section-title" }, "완료 내역 ", el("span", { class: "num" }, String(items.length))),

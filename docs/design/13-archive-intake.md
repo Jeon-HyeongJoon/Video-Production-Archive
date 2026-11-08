@@ -106,7 +106,7 @@ Transcript 게시가 성공하면 Worker는 versioned 결정 규칙으로 구간
 
 패키지는 `metadata.json`, `files.csv`, `events.jsonl`, manifest와 README만으로 DB 없이 복원할 수 있는 형식을 유지한다. Storage 절대 root, mount path, credential과 executable 경로를 넣지 않는다. 실제 제품 복원 명령과 실제 패키지 acceptance test는 `ARC-007` planned다.
 
-새 패키지는 처리 날짜로 나뉜 상대경로에 둔다. 결과 영상 파일명은 단일 입력이면 원래 영상명, 여러 컷 통합이면 MediaFolder의 마지막 이름에서 만들며 Windows에서 안전하도록 정규화한다. 패키지 ID는 이름과 별개인 불변 identity로 유지하고, metadata와 ArchiveCatalog에는 원래 이름과 전체 상대경로도 함께 남긴다. 화면은 처리 날짜·결과 영상명을 주 정보로, 패키지 ID를 추적용 보조 정보로 보여준다. 완료된 Folder Job의 `ORGANIZED_MEDIA` 출력은 원본 드라이브의 완료 내역에 ArchiveRun을 넘어 유지한다. ArchiveRun 상태만으로 완료 내역을 만들지 않으며 실제 ArchivePackage 출력과 출력 기록 시각을 기준으로 한다. `ARC-013`, `DSH-023~024`
+새 패키지는 처리 날짜로 나뉜 상대경로에 둔다. 결과 영상 파일명은 단일 입력이면 원래 영상명, 여러 컷 통합이면 MediaFolder의 마지막 이름에서 만들며 Windows에서 안전하도록 정규화한다. 패키지 ID는 이름과 별개인 불변 identity로 유지하고, metadata와 ArchiveCatalog에는 원래 이름과 전체 상대경로도 함께 남긴다. 화면은 처리 날짜·결과 영상명을 주 정보로, 패키지 ID를 추적용 보조 정보로 보여준다. 완료된 Folder Job의 `ORGANIZED_MEDIA` 출력은 원본 드라이브의 완료 내역에 ArchiveRun을 넘어 유지한다. ArchiveRun 상태만으로 완료 내역을 만들지 않으며 실제 ArchivePackage 출력과 출력 기록 시각을 기준으로 한다. 완료 내역은 출력의 Storage root를 제외한 Package 상대경로를 보존해 같은 ArchiveRun 상세의 정확한 결과로 이동한다. `ARC-013`, `DSH-023~025`
 
 ArchiveCatalog는 아카이브 저장소 최상단의 `archive-catalog.csv` 하나이며 원본 영상 하나당 한 행이다. 다른 ArchiveRun이나 원본 드라이브라도 같은 `ARCHIVE_PRIMARY`를 대상으로 하면 이 파일에 이어서 기록한다. 행 identity는 원본 드라이브 ID와 OriginalAsset ID의 조합이다. 앞 열은 사람이 읽는 `원본 생성 시각 | 원본 영상명`과 `아카이브 처리일 | 결과 영상명` 쌍이고, 두 날짜를 합치거나 서로 대체하지 않는다. 뒤에는 원본 상대경로·상태·판정, 길이·크기·컨테이너·전체 bitrate, video/audio stream 규격, 결과 Profile과 영상·Transcript·TranscriptText·Subtitle 상대경로를 두며 추적용 드라이브·자산·판정·패키지 ID와 checksum은 마지막에 둔다. 값이 관찰되지 않은 메타데이터는 추정하지 않고 빈 칸으로 남긴다.
 
@@ -153,7 +153,7 @@ Archivist용 MCP는 드라이브·폴더 조회, 1단계 시작, 상태 조회, 
 - 상태: 모든 드라이브·Worker의 실패와 사람 대기를 묶지 않고 문제 하나마다 카드로 보이고, 카드를 누르면 그 문제를 펼친 드라이브 상세로 이동한다. 지금 하는 일은 처리 중인 드라이브의 단계 상태 행렬이다.
 - 드라이브 목록: 원본 드라이브를 실행 전·처리 중·완료로 묶고 Worker·아카이브 저장소·단계·보관 영상 진행·실패와 확인 필요 수를 한 줄로 보인다.
 - 드라이브 상세: 단계·보관 진행·Worker·아카이브·확인 필요 다섯 사실과 연결선 없는 단계 상태 행렬을 담은 개요 카드, 제목 옆 STT 버튼과 실행 준비 버튼, 실행 준비(아카이브 후보의 역할·접근 방식·용량, 폴더 범위, 예상 용량, 시작 불가 이유), ArchiveRun을 넘어 유지하는 완료 내역, 확인 필요 칸, 최신 실행의 폴더 표를 둔다. 완료 내역은 실제 보관된 결과 영상명·처리 방식·원본 수·완료 시각·아카이브 Storage·보관 상태를 최신 순서로 보이고, 행을 누르면 해당 `job_id`의 작업 상세로 이동한다. 접근 불가 후보는 비활성이고 SMTP는 표시하지 않는다.
-- 작업 관리: 최상단에 실행·자원 대기·대기열 Job을 모두 보이고, 그 아래 실패·사람 입력 대기 Job의 확인 필요 목록과 끝난 Job의 완료 목록을 각각 접고 펼칠 수 있게 둔다. 작업 관리·Worker·드라이브 완료 내역은 같은 `#/jobs/<job_id>` 상세로 이동하며, 상세에서 Job identity·Step·취소·ArchivePackage 완료 결과를 본다.
+- 작업 관리: 최상단에 실행·자원 대기·대기열 관리 작업을 모두 보이고, 그 아래 실패·사람 입력 대기 관리 작업의 확인 필요 목록과 끝난 관리 작업의 완료 목록을 각각 접고 펼칠 수 있게 둔다. 완료 작업은 왼쪽 워크스페이스에서 제거하고 이 완료 목록에 유지한다. ArchiveRun 상세는 하위 Job과 ArchivePackage 완료 결과를 함께 보며 완료 Job 상세의 `아카이브 결과`는 같은 실행의 정확한 Package 결과와 root 기준 상대경로로 이동한다.
 - Worker: 처리 중인 드라이브, 드라이브에 속하지 않은 Job, 아카이브 저장소 접근과 자원을 보인다.
 
 STT 버튼은 1단계 남은 실행 작업이 있으면 그 수와 함께 비활성, 게이트 통과 시 활성, 시작 뒤 진행 중으로 표시한다. 드라이브 단계는 `실행 전 → 1단계 정리 중 → STT 시작 가능 → 2단계 전사 중 → 완료` 순서이고, 폴더 단계 순서 `분류·소스 타임라인·렌더·QC·보관 | 오디오 추출·STT·자막과 전사 텍스트·패키지 추가`는 폴더 행의 단계 점과 펼친 세부에서만 보인다. 단계 점과 폴더 행은 영속 StepState와 저장된 WaitReason만 사용한다. `INPUT`·`APPROVAL`·`DEVICE`는 확인 필요 칸과 폴더 행 글자, `MEMORY`·`SCRATCH`·`SLOT`·`DISK`·`IDLE`·`PRIORITY`는 진행 중과 세부의 이유 label로 표시한다. `DSH-006`, `DSH-008`

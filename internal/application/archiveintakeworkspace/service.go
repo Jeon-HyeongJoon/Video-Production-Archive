@@ -413,7 +413,8 @@ func (service *Service) completedWork(
 						SourceVideoCount: sourceCount, ArchiveStorageID: output.StorageID,
 						ArchivePackageID: output.ID, ArchiveDate: presentation.ArchiveDate,
 						ArchiveDisplayName: presentation.DisplayName, ArchiveVideoFileName: presentation.VideoFileName,
-						ArchiveState: packageState, CompletedAt: step.OutputRecord.RecordedAt,
+						ArchiveRelativePath: completedWorkRelativePath(output, targets[output.ID]),
+						ArchiveState:        packageState, CompletedAt: step.OutputRecord.RecordedAt,
 					})
 				}
 			}
@@ -429,6 +430,25 @@ func (service *Service) completedWork(
 		})
 	}
 	return result, nil
+}
+
+func completedWorkRelativePath(output execution.StepOutput, target execution.OutputTarget) string {
+	relativePath := strings.TrimSpace(output.RelativePath)
+	if relativePath == "" {
+		relativePath = strings.TrimSpace(target.RelativePath)
+	}
+	if relativePath == "" {
+		return ""
+	}
+	clean := path.Clean(strings.ReplaceAll(relativePath, `\`, "/"))
+	if clean == "." || clean == ".." || path.IsAbs(clean) || strings.HasPrefix(clean, "../") {
+		return ""
+	}
+	directory := path.Dir(clean)
+	if directory == "." {
+		return ""
+	}
+	return directory
 }
 
 func completedWorkSources(decision organization.OrganizationDecision, originalAssetID string) ([]string, int) {

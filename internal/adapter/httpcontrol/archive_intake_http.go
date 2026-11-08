@@ -44,7 +44,8 @@ func (handler *Handler) archiveIntakeProjection(writer http.ResponseWriter, requ
 				SourceVideoCount: completed.SourceVideoCount, ArchiveStorageID: completed.ArchiveStorageID,
 				ArchivePackageID: completed.ArchivePackageID, ArchiveDate: completed.ArchiveDate,
 				ArchiveDisplayName: completed.ArchiveDisplayName, ArchiveVideoFileName: completed.ArchiveVideoFileName,
-				ArchiveState: string(completed.ArchiveState), CompletedAt: completed.CompletedAt,
+				ArchiveRelativePath: completed.ArchiveRelativePath,
+				ArchiveState:        string(completed.ArchiveState), CompletedAt: completed.CompletedAt,
 			})
 		}
 		for _, candidate := range value.StorageCandidates {

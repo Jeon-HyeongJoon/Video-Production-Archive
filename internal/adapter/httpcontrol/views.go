@@ -149,6 +149,7 @@ type driveCompletedWorkView struct {
 	ArchiveDate          string    `json:"archive_date"`
 	ArchiveDisplayName   string    `json:"archive_display_name"`
 	ArchiveVideoFileName string    `json:"archive_video_file_name"`
+	ArchiveRelativePath  string    `json:"archive_relative_path"`
 	ArchiveState         string    `json:"archive_state"`
 	CompletedAt          time.Time `json:"completed_at"`
 }
@@ -423,7 +424,8 @@ func projectWorkDetail(value archivework.View) workDetailView {
 			SourceVideoCount: completed.SourceVideoCount, ArchiveStorageID: completed.ArchiveStorageID,
 			ArchivePackageID: completed.ArchivePackageID, ArchiveDate: completed.ArchiveDate,
 			ArchiveDisplayName: completed.ArchiveDisplayName, ArchiveVideoFileName: completed.ArchiveVideoFileName,
-			ArchiveState: string(completed.ArchiveState), CompletedAt: completed.CompletedAt,
+			ArchiveRelativePath: completed.ArchiveRelativePath,
+			ArchiveState:        string(completed.ArchiveState), CompletedAt: completed.CompletedAt,
 		})
 	}
 	return result

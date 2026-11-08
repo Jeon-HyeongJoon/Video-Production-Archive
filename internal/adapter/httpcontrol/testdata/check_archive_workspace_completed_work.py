@@ -19,6 +19,7 @@ with sync_playwright() as playwright:
     expect(source.locator(".completed-source")).to_have_text("86 → 1")
     expect(source.locator(".completed-place")).to_contain_text("확정됨")
     expect(source.locator(".completed-place")).to_contain_text("archive-main")
+    expect(source.locator(".archive-relative-path")).to_have_text("packages/2026/10/30/VP-20261030-SOURCE/revisions/000001")
     trace = source.get_attribute("title") or ""
     if "VP-20261030-SOURCE" not in trace or "JOB-SOURCE" not in trace:
         raise AssertionError(f"completed result lost trace IDs: {trace!r}")
@@ -36,6 +37,8 @@ with sync_playwright() as playwright:
         raise AssertionError(f"older ArchiveRun result disappeared: {history!r}")
     if any(item.get("folder") in {"hold", "broken"} for item in history):
         raise AssertionError(f"non-result folder appeared as completed work: {history!r}")
+    if not all(item.get("archive_relative_path", "").startswith("packages/") for item in history):
+        raise AssertionError(f"completed work lost package-relative locations: {history!r}")
     if "C:\\" in str(history) or "/Volumes/" in str(history):
         raise AssertionError(f"storage root leaked into completed work: {history!r}")
     browser.close()

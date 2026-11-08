@@ -410,7 +410,10 @@ func TestCompletedWorkProjectionRetainsOlderPackageWithoutCountingHoldAsOutput(t
 	}
 	organizeSpec := &execution.StepExecutionSpec{
 		Parameters: execution.StepExecutionParameters{ArchiveRunID: "ARCHIVE-RUN-OLD", MediaFolder: oldDecision.Folder},
-		Outputs:    []execution.OutputTarget{{ID: "VP-20261104-CLIP", Kind: execution.OutputOrganizedMedia, StorageID: "ARCHIVE-1"}},
+		Outputs: []execution.OutputTarget{{
+			ID: "VP-20261104-CLIP", Kind: execution.OutputOrganizedMedia, StorageID: "ARCHIVE-1",
+			RelativePath: "packages/2026/11/04/VP-20261104-CLIP/revisions/000001/metadata.json",
+		}},
 	}
 	jobs := workstationJobs{
 		"ARCHIVE-RUN-NEW": archiveRunSnapshot(t, archiverun.State{
@@ -429,6 +432,7 @@ func TestCompletedWorkProjectionRetainsOlderPackageWithoutCountingHoldAsOutput(t
 				{Workflow: workflow.Step{ID: "organize", State: workflow.Completed}, ExecutionSpec: organizeSpec,
 					OutputRecord: &execution.StepOutputRecord{RecordedAt: completedAt, Outputs: []execution.StepOutput{{
 						ID: "VP-20261104-CLIP", Kind: execution.OutputOrganizedMedia, StorageID: "ARCHIVE-1",
+						RelativePath: "packages/2026/11/04/VP-20261104-CLIP/revisions/000001/metadata.json",
 					}}},
 				},
 				{Workflow: workflow.Step{ID: "archive_catalog", State: workflow.Completed}},
@@ -454,6 +458,7 @@ func TestCompletedWorkProjectionRetainsOlderPackageWithoutCountingHoldAsOutput(t
 	completed := views[0].CompletedWork[0]
 	if completed.ArchiveRunID != "ARCHIVE-RUN-OLD" || completed.ArchivePackageID != "VP-20261104-CLIP" ||
 		completed.ArchiveVideoFileName != "CLIP.mp4" || completed.SourceVideoCount != 2 || completed.ArchiveStorageID != "ARCHIVE-1" ||
+		completed.ArchiveRelativePath != "packages/2026/11/04/VP-20261104-CLIP/revisions/000001" ||
 		completed.ArchiveState != archive.PackageCommitted || !completed.CompletedAt.Equal(completedAt) {
 		t.Fatalf("completed package facts were not projected: %+v", completed)
 	}

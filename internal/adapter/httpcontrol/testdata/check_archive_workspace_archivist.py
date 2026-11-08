@@ -10,6 +10,7 @@ with sync_playwright() as playwright:
     page.goto(sys.argv[1], wait_until="networkidle")
     # The pane is part of every screen; nothing opens it.
     expect(page.locator("#archivist-panel")).to_be_visible()
+    expect(page.locator("#archivist-session-select option:checked")).to_have_text("codex · Archive Archivist")
     thread = page.locator("#archivist-thread")
     if page.evaluate("getComputedStyle(document.querySelector('#archivist-thread')).overflowY") != "auto":
         raise AssertionError("Agent thread does not scroll on its own")
@@ -46,6 +47,21 @@ with sync_playwright() as playwright:
         expect(stt_card).to_contain_text("결정 대기")
         expect(stt_card).to_contain_text("ARCHIVE-RUN-1 · 대상 4 폴더")
         expect(stt_card.locator("button")).to_have_count(2)
+
+        def capture_turn(route):
+            route.fulfill(status=201, content_type="application/json", body='{"data":{"turn_id":"TURN-KEYBOARD"}}')
+
+        page.route("**/api/v1/archivist-sessions/*/turns", capture_turn)
+        message = page.locator("#archivist-message")
+        message.fill("첫 줄")
+        message.press("Shift+Enter")
+        message.type("둘째 줄")
+        expect(message).to_have_value("첫 줄\n둘째 줄")
+        with page.expect_request("**/api/v1/archivist-sessions/*/turns") as turn_request:
+            message.press("Enter")
+        if turn_request.value.post_data_json["prompt"] != "첫 줄\n둘째 줄":
+            raise AssertionError(f"Enter submitted the wrong prompt: {turn_request.value.post_data_json}")
+        expect(message).to_have_value("")
     else:
         # Completed work keeps the initial instruction and final report visible.
         # Progress, recalls, prior answers and settled cards remain inspectable.

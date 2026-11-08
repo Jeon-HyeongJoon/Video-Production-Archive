@@ -106,6 +106,7 @@ type CompletedWorkView struct {
 	ArchiveDate          string
 	ArchiveDisplayName   string
 	ArchiveVideoFileName string
+	ArchiveRelativePath  string
 	ArchiveState         archive.PackageState
 	CompletedAt          time.Time
 }
