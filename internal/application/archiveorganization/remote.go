@@ -187,7 +187,7 @@ func (service *RemoteStartService) Start(ctx context.Context, request StartReque
 		Actor: command.Actor{Type: vocabulary.ActorSystem, ID: "archive-intake-coordinator"}, RequestedVia: "APPLICATION",
 		TargetID: inspectionJobID, ExpectedRevision: 0, IdempotencyKey: request.IdempotencyKey + ":inspection",
 		Parameters: map[string]any{
-			"template_name": template.Name, "target_title": candidate.VolumeID, "control_mode": workflow.AssistedMode,
+			"template_name": template.Name, "target_title": candidate.VolumeID,
 			"execution_priority":   resource.Immediate,
 			"required_storage_ids": []string{candidate.StorageID, archiveStorage.StorageID},
 			"physical_device_ids":  []string{candidate.PhysicalDeviceID},

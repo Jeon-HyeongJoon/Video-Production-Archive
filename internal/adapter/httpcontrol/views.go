@@ -29,7 +29,6 @@ type jobSummaryView struct {
 	Revision               uint64      `json:"revision"`
 	TemplateName           string      `json:"template_name"`
 	TargetTitle            string      `json:"target_title"`
-	ControlMode            string      `json:"control_mode"`
 	CurrentStepID          string      `json:"current_step_id"`
 	StepState              string      `json:"step_state"`
 	Progress               float64     `json:"progress"`
@@ -235,7 +234,6 @@ type archivistSessionView struct {
 	Backend         string              `json:"backend"`
 	CLIID           string              `json:"cli_id"`
 	WorkspaceRootID string              `json:"workspace_root_id"`
-	ControlMode     string              `json:"control_mode"`
 	JobID           string              `json:"job_id,omitempty"`
 	CreatedAt       time.Time           `json:"created_at"`
 	Turns           []archivistTurnView `json:"turns"`
@@ -254,6 +252,7 @@ type archivistTurnView struct {
 	Entries        []archivistruntime.TurnEntry            `json:"entries"`
 	ToolCalls      []archivistToolCallView                 `json:"tool_calls"`
 	DriveSelection *archivistruntime.DriveSelection        `json:"drive_selection,omitempty"`
+	WorkReference  *archivistruntime.WorkReference         `json:"work_reference,omitempty"`
 	WorkContext    *archivistruntime.ArchiveRunWorkContext `json:"work_context,omitempty"`
 }
 
@@ -446,7 +445,7 @@ func projectWorkDetail(value archivework.View) workDetailView {
 func projectJobSummary(value archiveworkspace.JobSummary) jobSummaryView {
 	result := jobSummaryView{
 		JobID: value.JobID, Revision: value.Revision, TemplateName: value.TemplateName, TargetTitle: value.TargetTitle,
-		ControlMode: string(value.ControlMode), CurrentStepID: value.CurrentStepID, StepState: string(value.StepState),
+		CurrentStepID: value.CurrentStepID, StepState: string(value.StepState),
 		Progress: value.Progress, ExecutorKind: string(value.ExecutorKind), ActorID: value.ActorID, WorkerID: value.WorkerID,
 		ArchivistAction: value.ArchivistAction, ToolCallStatus: string(value.ToolCallStatus), WaitReason: string(value.WaitReason),
 		ErrorClass: value.ErrorClass, LastEventAt: value.LastEventAt, LogReference: value.LogReference,

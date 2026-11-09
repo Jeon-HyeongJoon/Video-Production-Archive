@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"videoarchive/internal/core/vocabulary"
-	"videoarchive/internal/core/workflow"
 )
 
 var (
@@ -33,7 +32,6 @@ type SessionSpec struct {
 	Backend         vocabulary.RuntimeBackend
 	CLIID           string
 	WorkspaceRootID string
-	ControlMode     workflow.ControlMode
 }
 
 type Session struct {
@@ -43,23 +41,18 @@ type Session struct {
 	Backend         vocabulary.RuntimeBackend
 	CLIID           string
 	WorkspaceRootID string
-	ControlMode     workflow.ControlMode
 }
 
 func NewSession(spec SessionSpec) (Session, error) {
 	session := Session{
 		ID: strings.TrimSpace(spec.ID), Name: strings.TrimSpace(spec.Name), ArchivistHostID: strings.TrimSpace(spec.ArchivistHostID), Backend: spec.Backend,
-		CLIID: strings.TrimSpace(spec.CLIID), WorkspaceRootID: strings.TrimSpace(spec.WorkspaceRootID), ControlMode: spec.ControlMode,
+		CLIID: strings.TrimSpace(spec.CLIID), WorkspaceRootID: strings.TrimSpace(spec.WorkspaceRootID),
 	}
 	if session.Name == "" {
 		session.Name = session.ID
 	}
-	if session.ControlMode == "" {
-		session.ControlMode = workflow.AssistedMode
-	}
 	if session.ID == "" || session.ArchivistHostID == "" || !session.Backend.Valid() ||
-		session.CLIID == "" || session.WorkspaceRootID == "" ||
-		(session.ControlMode != workflow.ArchivistMode && session.ControlMode != workflow.AssistedMode && session.ControlMode != workflow.ManualMode) {
+		session.CLIID == "" || session.WorkspaceRootID == "" {
 		return Session{}, ErrInvalidSession
 	}
 	return session, nil
@@ -92,8 +85,43 @@ type Turn struct {
 	LastRuntimeCursor  uint64
 	FinalResponse      *FinalResponse
 	DriveSelection     *DriveSelection
+	WorkReference      *WorkReference
 	WorkContext        *ArchiveRunWorkContext
 	SubmittedBy        vocabulary.ActorType
+}
+
+type WorkKind string
+
+const (
+	WorkJob        WorkKind = "JOB"
+	WorkArchiveRun WorkKind = "ARCHIVE_RUN"
+)
+
+type WorkReference struct {
+	Kind     WorkKind `json:"kind"`
+	WorkID   string   `json:"work_id"`
+	Revision uint64   `json:"revision"`
+}
+
+func NewWorkReference(source WorkReference) (WorkReference, error) {
+	reference := source
+	reference.WorkID = strings.TrimSpace(source.WorkID)
+	if (reference.Kind != WorkJob && reference.Kind != WorkArchiveRun) || reference.WorkID == "" || reference.Revision == 0 {
+		return WorkReference{}, ErrInvalidTurn
+	}
+	return reference, nil
+}
+
+func AttachWorkReference(turn Turn, work WorkReference) (Turn, error) {
+	normalized, err := NewWorkReference(work)
+	if err != nil || turn.ID == "" {
+		return turn, ErrInvalidTurn
+	}
+	if turn.WorkReference != nil && *turn.WorkReference != normalized {
+		return turn, ErrInvalidTurn
+	}
+	turn.WorkReference = &normalized
+	return turn, nil
 }
 
 type ArchiveRunWorkTrigger string
@@ -188,10 +216,14 @@ func NewDriveSelection(source DriveSelection) (DriveSelection, error) {
 }
 
 func NewTurn(id, sessionID, requestID string) (Turn, error) {
-	return NewTurnWithDriveSelection(id, sessionID, requestID, nil)
+	return NewTurnWithReferences(id, sessionID, requestID, nil, nil)
 }
 
 func NewTurnWithDriveSelection(id, sessionID, requestID string, source *DriveSelection) (Turn, error) {
+	return NewTurnWithReferences(id, sessionID, requestID, source, nil)
+}
+
+func NewTurnWithReferences(id, sessionID, requestID string, source *DriveSelection, work *WorkReference) (Turn, error) {
 	turn := Turn{
 		ID: strings.TrimSpace(id), SessionID: strings.TrimSpace(sessionID), RequestID: strings.TrimSpace(requestID),
 		State: vocabulary.ArchivistTurnQueued, SubmittedBy: vocabulary.ActorHuman,
@@ -206,11 +238,22 @@ func NewTurnWithDriveSelection(id, sessionID, requestID string, source *DriveSel
 		}
 		turn.DriveSelection = &selection
 	}
+	if work != nil {
+		updated, err := AttachWorkReference(turn, *work)
+		if err != nil {
+			return Turn{}, err
+		}
+		turn = updated
+	}
 	return turn, nil
 }
 
 func NewSystemTurnWithDriveSelection(id, sessionID, requestID string, source DriveSelection) (Turn, error) {
-	turn, err := NewTurnWithDriveSelection(id, sessionID, requestID, &source)
+	return NewSystemTurnWithReferences(id, sessionID, requestID, source, nil)
+}
+
+func NewSystemTurnWithReferences(id, sessionID, requestID string, source DriveSelection, work *WorkReference) (Turn, error) {
+	turn, err := NewTurnWithReferences(id, sessionID, requestID, &source, work)
 	if err != nil {
 		return Turn{}, err
 	}

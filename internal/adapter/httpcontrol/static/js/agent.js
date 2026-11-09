@@ -67,6 +67,27 @@ function isSystem(turn) {
   return turn.submitted_by === "SYSTEM" || turn.turn_id.startsWith("SYSTEM-RECALL-");
 }
 
+function workReference(route, selection) {
+  if (route.name === "job") {
+    const job = model.jobs.find((item) => item.job_id === route.jobID);
+    return job?.revision ? { kind: "JOB", work_id: job.job_id, revision: job.revision } : null;
+  }
+  if (route.name === "run") {
+    const drive = model.drives.find((item) => item.archive_run_id === route.workID);
+    return drive?.archive_run_revision ? { kind: "ARCHIVE_RUN", work_id: route.workID, revision: drive.archive_run_revision } : null;
+  }
+  if (selection?.archive_run_id && selection.archive_run_revision) {
+    return { kind: "ARCHIVE_RUN", work_id: selection.archive_run_id, revision: selection.archive_run_revision };
+  }
+  return null;
+}
+
+function referenceLabels(selection, work) {
+  const values = selectionRefs(selection);
+  if (work) values.unshift(`${work.kind === "JOB" ? "작업" : "아카이브 실행"} · ${work.work_id} · r${work.revision}`);
+  return values;
+}
+
 // refsFold keeps a selection's references behind one "참조 N" row.
 function refsFold(refs, key, open, className) {
   const fold = el("details", { class: `refs-fold ${className}` },
@@ -83,7 +104,7 @@ function turnSource(turn, open = new Set()) {
       el("span", {}, `재호출 · ${turn.prompt || turn.request_id}`), el("span", { class: "num" }, clockTime(turn.created_at)),
       finishedTurns.has(turn.state) ? null : token(label("turn", turn.state), stateSignal(turn.state)));
   }
-  const refs = selectionRefs(turn.drive_selection);
+  const refs = referenceLabels(turn.drive_selection, turn.work_reference);
   return el("article", { class: "message user", dataset: { turnId: turn.turn_id } },
     el("div", { class: "message-head" }, el("span", {}, "담당자"), el("span", { class: "num" }, `${label("turn", turn.state)} · ${clockTime(turn.created_at)}`)),
     el("p", { class: "message-body" }, turn.prompt || turn.request_id),
@@ -213,6 +234,7 @@ function renderUnit(unit, session, open) {
 export function mountAgent(container) {
   const openWork = new Set();
   let currentSelection = null;
+  let currentWork = null;
   let focused = "";
   const select = el("select", { id: "archivist-session-select", "aria-label": "Agent 선택" });
   const availability = el("span", { id: "archivist-availability" });
@@ -253,7 +275,8 @@ export function mountAgent(container) {
     if (!session || send.disabled) return;
     try {
       await mutation(`/api/v1/archivist-sessions/${encodeURIComponent(session.session_id)}/turns`, {
-        turn_id: newID("TURN"), request_id: newID("REQUEST"), prompt: message.value, drive_selection: currentSelection || undefined,
+        turn_id: newID("TURN"), request_id: newID("REQUEST"), prompt: message.value,
+        drive_selection: currentSelection || undefined, work_reference: currentWork || undefined,
       });
       form.reset();
       await refresh();
@@ -279,7 +302,7 @@ export function mountAgent(container) {
       availability.textContent = text;
       availability.dataset.signal = signal;
       setStatusIcon(availabilityIcon, signal);
-      select.title = session ? `${session.archivist_host_id} · ${session.cli_id} · ${session.control_mode || "ASSISTED"}` : "";
+      select.title = session ? `${session.archivist_host_id} · ${session.cli_id}` : "";
 
       const stuck = !thread.childElementCount || thread.scrollHeight - thread.scrollTop - thread.clientHeight < 24;
       const turns = session?.turns || [];
@@ -295,7 +318,8 @@ export function mountAgent(container) {
 
       const screenDrive = route.name === "drive" ? findDrive(route.driveID) : route.name === "jobs" ? findDrive(ui.prepDriveID) : null;
       currentSelection = driveSelection(screenDrive);
-      const selected = selectionRefs(currentSelection);
+      currentWork = workReference(route, currentSelection);
+      const selected = referenceLabels(currentSelection, currentWork);
       chips.replaceChildren(...selected.map((value) => el("span", { class: "selection-chip" }, value)));
       refCount.textContent = selected.length ? String(selected.length) : "선택 미완료";
       refs.hidden = !selected.length && !screenDrive;

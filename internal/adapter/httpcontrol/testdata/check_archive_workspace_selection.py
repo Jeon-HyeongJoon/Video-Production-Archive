@@ -70,8 +70,8 @@ with sync_playwright() as playwright:
         expect(page.locator("input[type=checkbox]")).to_have_count(0)
         expect(page.locator("#drive-progress")).to_have_attribute("title", re.compile(re.escape("범위 r7 고정 · 8 폴더 · 795 영상 · 211 GB")))
         expect(page.locator("#drive-title")).to_have_attribute("title", re.compile(re.escape("→ archive-main")))
-        expect(page.locator("#selection-chips .selection-chip")).to_have_text(["WORKER-1", "VOLUME-1", "source-main", "archive-main", "8 폴더"])
+        expect(page.locator("#selection-chips .selection-chip")).to_have_text(["아카이브 실행 · ARCHIVE-RUN-1 · r1", "WORKER-1", "VOLUME-1", "source-main", "archive-main", "8 폴더"])
         # The references stay folded behind one row until a person opens it.
         expect(page.locator("#pane-refs")).not_to_have_attribute("open", "")
-        expect(page.locator("#pane-refs > summary")).to_have_text("참조 5")
+        expect(page.locator("#pane-refs > summary")).to_have_text("참조 6")
     browser.close()

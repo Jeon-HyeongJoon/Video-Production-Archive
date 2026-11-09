@@ -8,7 +8,7 @@
 
 - 사용자가 버튼·폼 또는 API로 ArchivistSession 없이 새 Job과 도메인 명령을 직접 시작한다.
 - 사용자가 채팅으로 ArchivistTurn을 만들고 Archivist에게 목표와 후속 지시를 전달한다.
-- Archivist가 인증된 MCP allowlist Capability로 조회하고, Session에 저장된 제어 모드와 ActionClass에 따라 Command를 실행하거나 ActionCard를 제안한다.
+- Archivist가 인증된 MCP allowlist Capability로 조회하고, ActionClass에 따라 Command를 실행하거나 ActionCard를 제안한다.
 - 사용자와 Archivist가 만든 Command·Event·결과를 같은 작업 상세와 다음 ArchivistTurn 문맥에서 이어서 본다.
 - 사용자가 실행 중인 Job·Step·ArchivistTurn에 개입하고 취소·재시도·승인 같은 후속 행동을 선택한다.
 
@@ -32,17 +32,19 @@ Command·Event·실행 증적 ─> 공통 작업 상세 ─> 사용자 화면 + 
 
 요구사항: `COL-001`
 
-## 3. 제어 모드와 실행 경계
+## 3. 협업 연속성과 실행 경계
 
-| 제어 모드 | 사람 직접 Command | Archivist 조회 | Archivist 상태 변경 |
-|---|---|---|---|
-| `MANUAL` | 허용 | 허용 | 거부. 대화와 조회만 가능 |
-| `ASSISTED` | 허용 | 허용 | ActionCard 제안만 가능 |
-| `ARCHIVIST` | 허용 | 허용 | 인증된 MCP allowlist의 비파괴 `PROCESS`는 직접 Command 가능 |
+| ActionClass | 사람 직접 Command | Archivist MCP |
+|---|---|---|
+| `READ` | 허용 | allowlist 조회 |
+| `PROCESS` | 허용 | 인증된 allowlist에서 직접 Command |
+| `GATED` | 명시적 사람 결정 필요 | ActionCard만 제안 |
+| `DESTRUCTIVE` | boot policy·Approval·Confirmation 필요 | ActionCard만 제안하고 직접 실행 금지 |
+| `MANAGE` | 로컬 설정 파일과 재시작 | 원격 실행 금지 |
 
-`GATED`와 `DESTRUCTIVE` 명령은 어느 제어 모드에서도 Archivist가 직접 실행하지 않는다. `MANUAL`에서는 거부하고 `ASSISTED`·`ARCHIVIST`에서는 ActionCard, 현재 expected revision과 유효한 사람 Approval을 요구한다. 파괴적 명령은 필요한 경우 Confirmation도 별도로 요구한다. Archivist가 직접 실행할 수 있는 명령도 좁은 업무 Capability allowlist를 통과하며 raw shell·terminal·임의 path 도구는 제공하지 않는다.
+Job·Step·ArchivistSession에는 누가 다음에 조작할지를 고정하는 설정을 두지 않는다. 사람과 Archivist는 같은 작업 ID와 최신 revision을 사용하며 각 Command의 Actor와 requested_via로 실제 행위자를 기록한다. Archivist의 token·quota·인증·Host 문제가 생겨도 Worker 실행은 유지되고 사람 직접 경로로 같은 작업을 계속한다. 반대로 진행 중 작업을 넘길 때는 `JOB | ARCHIVE_RUN`, work ID, revision을 가진 `WorkReference`를 ArchivistTurn에 고정한다. Archivist는 `archive.work.reference.get.v1`으로 이 참조를 읽고 최신 Event와 receipt를 조회해 이어서 처리하며 채팅 본문에서 대상을 추론하지 않는다. `COL-001`, `COL-004`
 
-ActionCard는 모든 Archivist 행동의 필수 중간 단계가 아니다. `ASSISTED` 제안과 승인 필요한 명령 후보만 기록한다. `ARCHIVIST` 모드에서 허용된 일반 처리는 ArchivistToolCall과 Command receipt로 바로 추적한다.
+ActionCard는 모든 Archivist 행동의 필수 중간 단계가 아니다. 승인 필요한 명령 후보만 기록한다. 허용된 일반 처리는 ArchivistToolCall과 Command receipt로 바로 추적한다.
 
 요구사항: `SEC-001~003`, `MCP-002`, `DSH-003`, `COL-002`. 외부 Provider Router의 별도 allowlist 계약인 `AGT-012`는 planned다.
 
@@ -52,7 +54,6 @@ ActionCard는 모든 Archivist 행동의 필수 중간 단계가 아니다. `ASS
 
 ```text
 job_id, template_name, target_title
-control_mode
 current_step_id, step_state, progress
 executor_kind, actor_id, worker_id
 archivist_host_id, archivist_session_id, archivist_turn_id, archivist_turn_state
@@ -76,16 +77,16 @@ Archivist Session 영역은 Host 상태, backend, CLI, workspace label, 현재 T
 사용자는 작업함이 비어 있어도 Template 기반 Job을 만들고 허용된 도메인 API를 직접 호출할 수 있다. 이 경로는 Archivist 부재 시 폴백이 아니라 정상적인 첫 번째 실행 경로다.
 
 - create, pause, resume, cancel, retry
-- ControlMode를 `ARCHIVIST`, `ASSISTED`, `MANUAL`로 전환
+- 현재 작업 ID·revision을 유지한 채 사람 또는 Archivist가 다음 명령을 제출
 - 입력·metadata·검수 결과 기록
 - 승인 대상과 리비전을 확인한 뒤 Approval 기록
 - 같은 Command Bus를 통한 허용된 도메인 기능 실행
 
-설정의 Archivist 추가는 CSRF 검증 뒤 이름·사전 등록된 Archivist Host·감지된 CLI·기본 제어 모드만 받는다. backend와 workspace는 Host 시작 설정이 결정하며 Archivist Host 등록 자체도 설정 파일과 Host 설치가 소유한다. 채팅 제출은 ArchivistTurn을 먼저 저장하고 durable Session·Turn ID를 반환한다. 화면에서 고른 Worker·원본·아카이브 Storage·폴더 범위는 ID와 revision으로 Turn에 붙이며 본문에서 추론하지 않는다. `CTL-003~006`, `COL-003`, `DSH-012`
+설정의 Archivist 추가는 CSRF 검증 뒤 이름·사전 등록된 Archivist Host·감지된 CLI만 받는다. backend와 workspace는 Host 시작 설정이 결정하며 Archivist Host 등록 자체도 설정 파일과 Host 설치가 소유한다. 채팅 제출은 ArchivistTurn을 먼저 저장하고 durable Session·Turn ID를 반환한다. 화면에서 고른 Worker·원본·아카이브 Storage·폴더 범위는 ID와 revision으로 Turn에 붙이며 본문에서 추론하지 않는다. `CTL-003~006`, `COL-003`, `DSH-012`
 
 ActionCard의 채팅 분리는 승인 경계에만 적용한다. 채팅의 “진행”은 Archivist에게 후속 행동을 요청할 수 있지만 그 자체를 Approval 또는 ActionCard 제출로 해석하지 않는다. 명시적 카드 조작 시 현재 리비전을 다시 검사한다. `DSH-003`
 
-Archivist가 `ASSISTED` 모드에서 제안한 비승인 ActionCard도 SQLite에 먼저 저장하고 아카이브 작업 공간에 `PENDING`으로 투영한다. 사용자의 명시적 카드 실행·거절 API는 일반 브라우저 명령과 같은 Origin·JSON·CSRF 검사를 통과한 뒤 `PENDING → EXECUTING` compare-and-swap으로 카드를 먼저 선점한다. 한 요청만 선점에 성공하므로 실행과 거절이 경합해도 둘 다 종결될 수 없다. 실행은 카드에 고정된 Command·parameter·expected revision을 공통 Command Bus로 제출하고, ArchiveRun을 시작한 카드라면 카드가 속한 Session·Turn에 같은 ArchiveRun 업무 문맥도 묶은 뒤 `COMPLETED`로 바꾼다. 실패하면 안전하게 `PENDING`으로 돌리고 같은 멱등 receipt로 재시도한다. 거절은 actor·시각·사유가 있는 immutable 기록과 `REJECTED` projection만 남기며 Command를 만들지 않는다. `COMPLETED`·`REJECTED` 카드는 다시 조작할 수 없다. `DSH-005`
+Archivist가 제안한 `GATED`·`DESTRUCTIVE` ActionCard는 SQLite에 먼저 저장하고 아카이브 작업 공간에 `PENDING`으로 투영한다. 사용자의 명시적 카드 실행·거절 API는 일반 브라우저 명령과 같은 Origin·JSON·CSRF 검사를 통과한 뒤 `PENDING → EXECUTING` compare-and-swap으로 카드를 먼저 선점한다. 한 요청만 선점에 성공하므로 실행과 거절이 경합해도 둘 다 종결될 수 없다. 실행은 카드에 고정된 Command·parameter·expected revision을 공통 Command Bus로 제출하고, ArchiveRun을 시작한 카드라면 카드가 속한 Session·Turn에 같은 ArchiveRun 업무 문맥도 묶은 뒤 `COMPLETED`로 바꾼다. 실패하면 안전하게 `PENDING`으로 돌리고 같은 멱등 receipt로 재시도한다. 거절은 actor·시각·사유가 있는 immutable 기록과 `REJECTED` projection만 남기며 Command를 만들지 않는다. `COMPLETED`·`REJECTED` 카드는 다시 조작할 수 없다. `DSH-005`
 
 초기 웹 Command API는 CSRF session을 먼저 발급하고 exact Origin·JSON Content-Type·double-submit token을 검증한다. 이미 유효한 CSRF cookie가 있는 브라우저는 같은 token을 재사용하므로 두 번째 탭이 첫 탭의 조작을 무효화하지 않는다. Template 기반 Job 생성은 revision 0에서 새 Aggregate를 같은 Command Unit of Work로 만들며, 취소는 요청의 expected revision과 StepState 전이표를 모두 통과해야 한다. 미시작 Step은 즉시 정산하고 실행 중 Step은 별도 CancellationRequest와 Worker stop·정리 확인을 거친다. 성공 뒤 rebuild 가능한 projection을 갱신하고 멱등 재전송에서는 최초 명령 결과로 같은 투영을 복구한다. `CTL-003~004`, `CAN-001~005`
 
@@ -108,7 +109,7 @@ Provider, Worker registry, Archivist Host, 인증, Storage와 파괴적 기능 �
 
 상태 신호에서 `DISCONNECTED`는 실패, `CONNECTED`는 완료, 연결을 관측할 수 없는 `UNKNOWN`은 중립이다. 드라이브의 아카이브 진행 상태와 연결 상태는 서로 덮어쓰지 않고 별도 항목으로 함께 표시한다.
 
-메뉴 분리와 기능 수준별 화면 재구성은 [14. 아카이브 작업 공간 UX·UI 설계 기준](14-archive-workspace-ux.md)의 확정 결정을 따른다. 화면 틀은 상단 막대, 왼쪽 사이드바, 본문, 오른쪽 Archivist 대화 칸의 네 자리다(결정 9-2, 결정 10~18). 사이드바 메뉴는 작업 관리·연결 관리의 두 route이고 작업 관리가 첫 메뉴이자 기본 화면이다. 메뉴에는 개수를 붙이지 않는다. 메뉴 아래에는 미완료 관리 작업을 이름·상태만 보이는 카드 하나씩 표시하는 스크롤 가능한 워크스페이스 목록을 두고 작업 ID·드라이브·Worker는 카드의 마우스 오버로 보인다. 완료 관리 작업은 이 목록에서 제거하고 작업 관리의 완료 목록과 영속 상세에만 유지한다. 아카이브 접수는 선택한 폴더 수와 무관하게 ArchiveRun 카드 하나이며 검사·Folder·STT Job은 그 실행 상세의 하위 작업이다. ArchiveRun을 참조하지 않는 Template Job만 독립 카드로 같은 `job_id` 상세에 이동한다. 이 카드는 새 aggregate를 만들지 않는다. 상단 막대는 지금 위치와 검색 칸에 이어 설정·모든 대상의 실패와 사람 대기를 하나씩 보여 주는 알림 버튼을 우상단에 두고, 테마 전환은 설정 화면 안에 둔다. 작업 관리는 최상단의 `새 작업 생성`에서 아카이브 또는 독립 Template 작업을 고른다. 아카이브는 연결 원본·아카이브 저장소·READY 폴더 범위를 선택해 ArchiveRun을 만들고 그 상세로, Template는 이름·Template·제어 모드를 기존 Job Command Bus에 제출해 `job_id` 상세로 이동하며, 이어서 실행 중 ArchiveRun과 독립 Job, 자원 대기·대기열 관리 작업의 작업 큐, 실패·사람 입력 대기 관리 작업의 확인 필요 목록, 처음에는 접힌 끝난 관리 작업의 완료 목록을 둔다. 확인 필요와 완료 목록은 각각 접고 펼칠 수 있게 둔다. 작업 행은 이름·상태·최근 시각을 보이고 진행률은 실행 중 행에만, Worker와 ID는 마우스 오버로 둔다. 작업 큐는 별도 원장이 아니라 저장된 ArchiveRun·Job·Step의 projection이다. ArchiveRun 상세는 그 실행 범위의 확인 필요 폴더를 맨 위에 두어 해결할 드라이브 상세로 이동시키고, 원본→아카이브·폴더 수·영상 수를 보이며 identity·Worker·하위 작업 수·결과 수는 마우스 오버로, 고정 폴더 범위는 처음에 접힌 목록으로 두고 하위 Job·ArchivePackage 완료 결과를 결합한다. 하위 Job은 주소 가능한 Job 상세와 취소 경계를 유지한다. 완료 Job의 `아카이브 결과` 조작과 드라이브 완료 행은 같은 ArchiveRun 상세의 정확한 Package 결과를 선택하며 Storage root가 아닌 검증된 패키지 상대경로를 보여준다. 연결 관리는 Worker PC·논리 드라이브·Agent와 Agent Host를 한 화면의 독립 영역으로 모으고 Worker 자원·Storage 접근, 드라이브의 Worker·단계·아카이브, Agent의 Host·CLI·제어 모드를 보인다. 드라이브 행은 주소 가능한 드라이브 상세로 이동한다. 검색은 메뉴가 아니라 상단 막대의 검색 칸에서 연 결과 화면이다. Archivist는 모든 route의 오른쪽에 늘 열린 대화 칸으로 두고 화면에는 Agent로 표기한다. 고정 fixture를 실제 Chromium viewport로 렌더링한 운영체제별 PNG golden과 폭별 배치 검사로 검증한다. `DSH-004`, `DSH-007`, `DSH-009`, `DSH-014`, `DSH-016`, `DSH-019`, `DSH-024~026`, `DSH-028`, `DSH-032~033`
+메뉴 분리와 기능 수준별 화면 재구성은 [14. 아카이브 작업 공간 UX·UI 설계 기준](14-archive-workspace-ux.md)의 확정 결정을 따른다. 화면 틀은 상단 막대, 왼쪽 사이드바, 본문, 오른쪽 Archivist 대화 칸의 네 자리다(결정 9-2, 결정 10~18). 사이드바 메뉴는 작업 관리·연결 관리의 두 route이고 작업 관리가 첫 메뉴이자 기본 화면이다. 메뉴에는 개수를 붙이지 않는다. 메뉴 아래에는 미완료 관리 작업을 이름·상태만 보이는 카드 하나씩 표시하는 스크롤 가능한 워크스페이스 목록을 두고 작업 ID·드라이브·Worker는 카드의 마우스 오버로 보인다. 완료 관리 작업은 이 목록에서 제거하고 작업 관리의 완료 목록과 영속 상세에만 유지한다. 아카이브 접수는 선택한 폴더 수와 무관하게 ArchiveRun 카드 하나이며 검사·Folder·STT Job은 그 실행 상세의 하위 작업이다. ArchiveRun을 참조하지 않는 Template Job만 독립 카드로 같은 `job_id` 상세에 이동한다. 이 카드는 새 aggregate를 만들지 않는다. 상단 막대는 지금 위치와 검색 칸에 이어 설정·모든 대상의 실패와 사람 대기를 하나씩 보여 주는 알림 버튼을 우상단에 두고, 테마 전환은 설정 화면 안에 둔다. 작업 관리는 최상단의 `새 작업 생성`에서 아카이브 또는 독립 Template 작업을 고른다. 아카이브는 연결 원본·아카이브 저장소·READY 폴더 범위를 선택해 ArchiveRun을 만들고 그 상세로, Template는 이름·Template을 기존 Job Command Bus에 제출해 `job_id` 상세로 이동하며, 이어서 실행 중 ArchiveRun과 독립 Job, 자원 대기·대기열 관리 작업의 작업 큐, 실패·사람 입력 대기 관리 작업의 확인 필요 목록, 처음에는 접힌 끝난 관리 작업의 완료 목록을 둔다. 확인 필요와 완료 목록은 각각 접고 펼칠 수 있게 둔다. 작업 행은 이름·상태·최근 시각을 보이고 진행률은 실행 중 행에만, Worker와 ID는 마우스 오버로 둔다. 작업 큐는 별도 원장이 아니라 저장된 ArchiveRun·Job·Step의 projection이다. ArchiveRun 상세는 그 실행 범위의 확인 필요 폴더를 맨 위에 두어 해결할 드라이브 상세로 이동시키고, 원본→아카이브·폴더 수·영상 수를 보이며 identity·Worker·하위 작업 수·결과 수는 마우스 오버로, 고정 폴더 범위는 처음에 접힌 목록으로 두고 하위 Job·ArchivePackage 완료 결과를 결합한다. 하위 Job은 주소 가능한 Job 상세와 취소 경계를 유지한다. 완료 Job의 `아카이브 결과` 조작과 드라이브 완료 행은 같은 ArchiveRun 상세의 정확한 Package 결과를 선택하며 Storage root가 아닌 검증된 패키지 상대경로를 보여준다. 연결 관리는 Worker PC·논리 드라이브·Agent와 Agent Host를 한 화면의 독립 영역으로 모으고 Worker 자원·Storage 접근, 드라이브의 Worker·단계·아카이브, Agent의 Host·CLI를 보인다. 드라이브 행은 주소 가능한 드라이브 상세로 이동한다. 검색은 메뉴가 아니라 상단 막대의 검색 칸에서 연 결과 화면이다. Archivist는 모든 route의 오른쪽에 늘 열린 대화 칸으로 두고 화면에는 Agent로 표기한다. 고정 fixture를 실제 Chromium viewport로 렌더링한 운영체제별 PNG golden과 폭별 배치 검사로 검증한다. `DSH-004`, `DSH-007`, `DSH-009`, `DSH-014`, `DSH-016`, `DSH-019`, `DSH-024~026`, `DSH-028`, `DSH-032~033`
 
 ArchiveRun과 Job은 펼침 패널의 임시 데이터가 아니라 각각 `archive_run_id`와 `job_id`를 가진 영속 객체다. 작업 관리와 왼쪽 워크스페이스는 ArchiveRun 및 독립 Job의 관리 작업 projection을 사용하되 왼쪽 워크스페이스는 완료 상태를 제외한다. 작업 관리의 완료 ArchiveRun 참조는 `#/runs/<archive_run_id>` 상세로, 드라이브 완료 내역과 완료 Job의 아카이브 결과 참조는 `#/runs/<archive_run_id>?result=<archive_package_id>`로 이동하고, 그 상세의 하위 실행은 `#/jobs/<job_id>`로 이동한다. ArchiveRun 상세는 고정 폴더 범위와 검사·Folder·STT Job 및 ArchiveCompletionEntry를 결합하고 Storage root 대신 Package 상대경로를 포함한다. Job 상세는 최신 리비전·StepState·WaitReason·진행·Worker를 보존한다. 두 projection은 원장이 아니므로 Control 시작 시 영속 ArchiveRun과 Job aggregate에서 재구성한다. 이전 버전에서 시작해 ArchiveRun aggregate snapshot은 없지만 현재 드라이브 projection과 archive_run_id가 남은 실행은 그 드라이브의 고정 범위·Worker·Storage와 연결 Job으로 ArchiveRun 상위 작업을 복원하며 내부 Job을 독립 작업으로 펼치지 않는다. `DSH-001`, `DSH-016`, `DSH-019`, `DSH-024~025`, `DSH-028~029`, `CTL-007`
 
@@ -128,7 +129,7 @@ Provider 계정의 인증 실패는 별도 수신 역할에 보내는 알림으�
 
 드라이브 상세는 원본 드라이브 하나의 inventory와 이력을 보는 자리다. ArchiveRun이 없어도 READY inventory의 폴더 구조를 표시하고, 폴더를 펼치면 그 폴더의 영상별 파일명·root-relative 경로·크기·filesystem 수정 시각을 보여 준다. 영상 행은 펼치기 전에는 만들지 않으며 절대 root와 mount path는 내리지 않는다. 새 ArchiveRun의 원본·아카이브 저장소·폴더 범위 선택과 생성은 작업 관리에만 있고 드라이브 상세에는 실행 준비·범위 체크박스·시작 조작이 없다. 기존 실행이 있으면 개요 카드에 단계·보관 진행 사실을 두고 확인 필요와 완료 내역을 유지한다. 제목 옆에는 기존 ArchiveRun이 STT 시작 가능할 때의 STT gate만 둔다. 그 아래 확인 필요·완료 내역·폴더 구조를 둔다. 완료 내역은 실제로 완료된 1단계 Folder Job의 `ORGANIZED_MEDIA` 출력 하나를 행 하나로 하며 결과 영상명·원본 폴더·보관됨/확정됨을 보이고, 처리 방식·원본 수에서 결과 하나로 이어지는 수치·완료 시각·아카이브 Storage·Package 상대경로는 마우스 오버와 그 결과의 ArchiveRun 상세에서 보인다. 행을 누르면 같은 ArchiveRun 상세의 Package 결과가 선택된다. 최신 ArchiveRun이 바뀌어도 이전 행을 유지하고, 실행 상태가 완료여도 HOLD·실패처럼 ArchivePackage 출력이 없으면 행을 만들지 않는다. Worker가 꺼져 있으면 Worker 사실을 실패 신호로 표시하고 마지막 응답 시각은 마우스 오버로 보인다. 확인 필요 칸은 실패를 먼저, 알림에서 온 폴더를 펼친 채로 연다. 보류 폴더는 서버가 구조화된 입력 근거로 계산한 실행 가능 작업만 선택지로 보이고, `작업 선택`을 눌러야 명시적 override Command를 보낸다. 자동 조건을 만족하지 않는 그대로 보관이나 실제 renderer가 처리할 수 없는 소스 시퀀스는 선택지에 넣지 않는다. 보관됨과 확정됨을 합치지 않는다. 보관 결과의 주 표기는 처리 날짜와 원본에서 만든 결과 영상명이며 opaque ArchiveRun·Job·Package ID는 title의 추적 보조 정보로만 남긴다. `ORG-003`, `ORG-012`, `DSH-006~008`, `DSH-010`, `DSH-013`, `DSH-019`, `DSH-022~025`, `DSH-033`
 
-Archivist 대화 칸은 화면에 Agent로 표기하며 Orca native chat과 같은 웹 셸형 채팅으로 사용한다. 로컬 CLI의 raw ANSI 화면을 복제하지 않고 선택한 Session 이름과 실제 CLI ID, 사용 가능·처리 중·Host 꺼짐·Archivist 없음 중 하나의 상태를 보이며, Archivist Host·제어 모드는 마우스 오버로 보이고 사용자·Archivist·SYSTEM Turn, 정제된 ArchivistTurnEntry, Archivist 응답 요약과 결과 ID, Tool Call 기록을 표시한다. 입력은 Enter로 전송하고 Shift+Enter만 줄바꿈하며 IME 조합을 확정하는 Enter는 전송으로 처리하지 않는다. Codex의 native terminal·파일·Skill·보조 Agent 작업도 같은 Turn 안에서 수행하되 화면에는 명령문·출력·diff·하위 Agent prompt가 아니라 정규화된 진행 이름만 표시한다. ArchiveRunWorkContext가 같은 최초 Turn과 SYSTEM 재호출 Turn은 하나의 업무로 묶는다. 업무는 사람의 지시와 최신 Archivist 응답, 결정 대기 ActionCard만 펼쳐 두고, 실행 중이면 진행 중 Turn의 마지막 진행 한 줄을 함께 보인다. 정제된 진행·재호출·Tool Call·이전 응답·처리된 ActionCard·결과 ID는 `작업 내역 · 도구 N · 재호출 N`의 접힌 영역에 보존하고, 전체 완료 재호출 Turn이 terminal 상태가 되면 최초 지시와 최종 응답 또는 최종 실패만 남긴 채 접힌 영역에 소요 시간을 더한다. raw terminal 화면·stdout·stderr·비공개 추론은 저장하거나 표시하지 않는다. 사용자 Turn에는 그 Turn에 고정된 선택 참조를 `참조 N`의 접힌 줄로 붙여 과거 지시의 대상을 남기고, 입력 칸의 현재 선택 참조도 같은 접힌 줄로 둔다. ActionCard는 카드를 요청한 Turn의 업무 문맥에 끼운다. 완료·거절 카드는 접힌 영역에 보존하지만 `PENDING` ActionCard는 접힘 밖에 남겨 조작 가능하게 한다. 현재 생성하는 비승인 카드는 `실행` 또는 `거절`을 자체 결정 기록으로 남기고 두 결정을 혼합하지 않는다. GATED 카드의 `승인`은 아카이브 확정 오케스트레이션과 함께 `ARC-012`에서 활성화한다. 선택 요청 카드는 실행 대신 드라이브 목록으로 이동한다. 알림의 Agent 결정 대기 항목은 대화 칸에서 그 카드를 강조한다. Host가 offline이거나 Archivist가 Turn 처리 중이면 입력을 비활성화하고 저장된 이유를 표시한다. 선택 참조 칩은 구조화된 Turn 참조를 보여줄 뿐 본문 문구를 선택으로 해석하지 않는다. 설정의 Archivist 추가 화면은 Host 연결 상태를 함께 보여주고 감지된 CLI가 없는 Host에서는 CLI 선택과 추가를 비활성화한다. `DSH-011`, `DSH-012`, `LRH-012~014`, `LRH-018~019`
+Archivist 대화 칸은 화면에 Agent로 표기하며 Orca native chat과 같은 웹 셸형 채팅으로 사용한다. 로컬 CLI의 raw ANSI 화면을 복제하지 않고 선택한 Session 이름과 실제 CLI ID, 사용 가능·처리 중·Host 꺼짐·Archivist 없음 중 하나의 상태를 보이며, Archivist Host는 마우스 오버로 보이고 사용자·Archivist·SYSTEM Turn, 정제된 ArchivistTurnEntry, Archivist 응답 요약과 결과 ID, Tool Call 기록을 표시한다. 입력은 Enter로 전송하고 Shift+Enter만 줄바꿈하며 IME 조합을 확정하는 Enter는 전송으로 처리하지 않는다. Codex의 native terminal·파일·Skill·보조 Agent 작업도 같은 Turn 안에서 수행하되 화면에는 명령문·출력·diff·하위 Agent prompt가 아니라 정규화된 진행 이름만 표시한다. ArchiveRunWorkContext가 같은 최초 Turn과 SYSTEM 재호출 Turn은 하나의 업무로 묶는다. 업무는 사람의 지시와 최신 Archivist 응답, 결정 대기 ActionCard만 펼쳐 두고, 실행 중이면 진행 중 Turn의 마지막 진행 한 줄을 함께 보인다. 정제된 진행·재호출·Tool Call·이전 응답·처리된 ActionCard·결과 ID는 `작업 내역 · 도구 N · 재호출 N`의 접힌 영역에 보존하고, 전체 완료 재호출 Turn이 terminal 상태가 되면 최초 지시와 최종 응답 또는 최종 실패만 남긴 채 접힌 영역에 소요 시간을 더한다. raw terminal 화면·stdout·stderr·비공개 추론은 저장하거나 표시하지 않는다. 사용자 Turn에는 그 Turn에 고정된 DriveSelection과 WorkReference를 `참조 N`의 접힌 줄로 붙여 과거 지시의 대상을 남기고, Job 또는 ArchiveRun 상세에서 보내는 입력에도 현재 work ID·revision을 자동 고정한다. ActionCard는 카드를 요청한 Turn의 업무 문맥에 끼운다. 완료·거절 카드는 접힌 영역에 보존하지만 `PENDING` ActionCard는 접힘 밖에 남겨 조작 가능하게 한다. 현재 생성하는 비승인 카드는 `실행` 또는 `거절`을 자체 결정 기록으로 남기고 두 결정을 혼합하지 않는다. GATED 카드의 `승인`은 아카이브 확정 오케스트레이션과 함께 `ARC-012`에서 활성화한다. 선택 요청 카드는 실행 대신 드라이브 목록으로 이동한다. 알림의 Agent 결정 대기 항목은 대화 칸에서 그 카드를 강조한다. Host가 offline이거나 Archivist가 Turn 처리 중이면 입력을 비활성화하고 저장된 이유를 표시한다. 구조화된 참조 칩은 Turn 참조를 보여줄 뿐 본문 문구를 선택으로 해석하지 않는다. 설정의 Archivist 추가 화면은 Host 연결 상태를 함께 보여주고 감지된 CLI가 없는 Host에서는 CLI 선택과 추가를 비활성화한다. `DSH-011`, `DSH-012`, `COL-004`, `LRH-012~014`, `LRH-018~019`
 
 화면 폭이 바뀌어도 현재 route의 조작 순서를 보존하고 Archivist 대화 칸은 늘 오른쪽에 둔다. 두 열이 들어가는 720px 이상에서는 사이드바가 상단 막대 아래 본문 왼쪽(1280px 이상 232px, 1024px 이상 208px, 그보다 좁으면 메뉴 아이콘만 둔 56px)을, 대화 칸이 본문 오른쪽 전체 높이(1280px 이상 360px, 1024px 이상 320px, 그보다 좁으면 300px)를 차지하고 본문과 대화 기록이 각자 scroll한다. 720px 미만에서는 사이드바 메뉴가 상단 막대 아래 한 줄이 되고, 오른쪽 가장자리 손잡이로 여는 대화 칸이 viewport 오른쪽에 전체 높이로 열리며 대화 기록은 칸 안에서만 scroll한다. 넓은 표와 실행 준비 선택 영역은 문서 전체가 아니라 자기 영역 안에서만 이동한다. 기준 PNG golden과 390·820·1024·1440·2560px에서 문서 가로 넘침, 메뉴 줄바꿈, 개요→확인 필요→폴더 순서와 사이드바·대화 칸 위치를 검사한다. `DSH-009`
 

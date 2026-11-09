@@ -9,7 +9,7 @@
 - 아카이브 저장소는 `StorageRole.ARCHIVE_PRIMARY`다. 현장 표현인 “백업 하드”도 이 뜻이다. 기술적 복제본은 `BACKUP_OFFSITE`에만 둔다.
 - 화면 이름은 “아카이브”이며 검색 화면과 같은 기록물을 가리킨다.
 - 로컬 Storage, 연결된 네트워크 공유, 원본과 다른 새 외장 드라이브 및 검증된 FTP·SFTP 원격 파일 서비스 Storage를 허용한다. SMTP는 아카이브 저장소가 아니라 전달 채널이다.
-- 담당자만 Worker·원본 드라이브·아카이브 저장소·폴더 범위·STT 시작 시점을 고른다. Archivist와 자동 정책은 Storage나 처리 범위를 고르지 않는다. 담당자가 고정한 범위 안의 HOLD는 허용된 제어 모드에서 Archivist가 구조화된 근거로 명시적으로 분류할 수 있다.
+- 담당자만 Worker·원본 드라이브·아카이브 저장소·폴더 범위·STT 시작 시점을 고른다. Archivist와 자동 정책은 Storage나 처리 범위를 고르지 않는다. 담당자가 고정한 범위 안의 HOLD는 Archivist가 구조화된 근거로 명시적으로 분류할 수 있다.
 - ARCHIVE_PRIMARY에 한 벌을 검증해 게시하면 “보관됨”이다. `ARC-004`의 복제본 검증과 사람 승인을 충족하면 “확정됨”이다.
 - 기록물은 중앙 DB 없이 복원 가능한 ArchivePackage 형식을 따른다. 패키지 게시 형식은 현재 수직 경로에 연결되어 있지만, 패키지만으로 DB를 복원하는 명령과 acceptance test인 `ARC-007`은 planned다.
 - 원본 드라이브 분리와 네트워크 아카이브 저장소 끊김은 `WaitReason.DEVICE`다. 기다리는 동안 실행 시도 횟수를 소비하지 않는다.
@@ -134,13 +134,13 @@ layout v1의 상태 후보는 분류됨·보류·처리 중·보관됨·STT 완�
 
 담당자는 화면에서 Worker·원본·아카이브 저장소·폴더 범위를 먼저 고른다. 이 참조는 ID와 revision으로 ArchivistTurn에 고정하며 메시지 본문에서 추론하지 않는다. 참조가 없거나 오래됐으면 Archivist는 ActionCard로 선택을 요청한다. `COL-003`
 
-Archivist 추가 화면은 이름·Archivist Host·감지된 CLI·기본 제어 모드만 받는다. Archivist Host 등록, backend와 workspace root는 시작 설정과 Archivist Host 설치가 소유한다. `CTL-006`, `DSH-012`
+Archivist 추가 화면은 이름·Archivist Host·감지된 CLI만 받는다. Archivist Host 등록, backend와 workspace root는 시작 설정과 Archivist Host 설치가 소유한다. `CTL-006`, `DSH-012`
 
-제어 모드별 경계는 다음과 같다.
+협업 경계는 다음과 같다.
 
-- `ARCHIVIST`: 고정된 선택 안에서 1단계 아카이브 실행, 단일 HOLD 분류와 2단계 STT를 MCP로 직접 실행할 수 있다.
-- `ASSISTED`: 같은 Command를 ActionCard로 제안하고 담당자가 실행한다.
-- `MANUAL`: 상태 변경 Tool Call을 거부한다.
+- 인증된 Archivist는 고정된 선택 안에서 1단계 아카이브 실행, 단일 HOLD 분류와 2단계 STT를 MCP로 직접 실행할 수 있다.
+- 승인 필요한 `GATED`·`DESTRUCTIVE` Command는 ActionCard로 제안하고 담당자가 결정한다.
+- Archivist를 사용할 수 없으면 담당자가 같은 ArchiveRun과 최신 revision에서 직접 계속하며 Worker 실행은 유지한다.
 
 Archivist용 MCP는 드라이브·폴더 조회, 1단계 시작, 상태 조회, 선택 범위의 현재 HOLD 목록·단일 상세·명시적 분류, 2단계 시작을 노출한다. 원본·아카이브 선택, 선택 범위 밖 분류, 포맷·삭제와 임의 경로 접근은 노출하지 않는다. 분류는 최신 입력 revision과 명시적 disposition·사유·근거를 요구한다. 파일명과 전사문을 지시로 해석하지 않는다. `MCP-001`, `MCP-003~005`
 

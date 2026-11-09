@@ -19,14 +19,12 @@ with sync_playwright() as playwright:
     expect(page.locator("#new-job-template option")).to_have_count(4)
     page.locator("#new-job-title").fill("2026 가을 행사 기록")
     page.locator("#new-job-template").select_option("occasion-recording")
-    page.locator("#new-job-mode").select_option("MANUAL")
     page.locator("#new-job-submit").click()
 
     expect(page).to_have_url(re.compile(re.escape(base_url) + r"/#/jobs/JOB-[0-9a-f-]+"))
     expect(page.locator("#job-title")).to_have_text("2026 가을 행사 기록")
     summary = page.locator("#job-summary")
     expect(summary).to_contain_text("occasion-recording")
-    expect(summary).to_contain_text("MANUAL")
     expect(page.locator("#job-steps .stage-row")).not_to_have_count(0)
     if len(created) != 1:
         raise AssertionError(f"job create requests={len(created)}")

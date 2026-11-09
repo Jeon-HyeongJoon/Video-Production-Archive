@@ -35,7 +35,7 @@ Archivist Host는 Archivist 역할이 아니다. 특정 PC에서 CLI 프로세�
 
 Control의 `archivist_session_id`와 `archivist_turn_id`만 영속 identity다. Orca terminal ID, PID, PTY handle 같은 `runtime_handle`은 프로세스 수명에 한정하며 DB identity로 저장하지 않는다.
 
-Archivist 추가 화면은 이름·`archivist_host_id`·감지된 `cli_id`·기본 제어 모드만 받는다. `runtime_backend`와 `workspace_root_id`는 사전 등록된 Host 설정에서 결정하고 화면이 임의 값을 받지 않는다. 고정된 Host가 offline이면 ArchivistTurn을 기다리게 하고 다른 PC로 자동 우회하지 않는다. 재배정은 사람이 명시적으로 선택한 별도 Command로만 허용한다. `CTL-006`, `DSH-012`
+Archivist 추가 화면은 이름·`archivist_host_id`·감지된 `cli_id`만 받는다. `runtime_backend`와 `workspace_root_id`는 사전 등록된 Host 설정에서 결정하고 화면이 임의 값을 받지 않는다. 고정된 Host가 offline이면 ArchivistTurn을 기다리게 하고 다른 PC로 자동 우회하지 않는다. 재배정은 사람이 명시적으로 선택한 별도 Command로만 허용한다. `CTL-006`, `DSH-012`
 
 ## 3. 최소 런타임 코어
 
@@ -160,9 +160,9 @@ archivist_turn_lease_fencing_token
 idempotency_key
 ```
 
-Control의 MCP Adapter는 도구를 좁은 Application Service 입력으로 변환한다. 조회는 정제된 결과를 반환하고 상태 변경은 사람의 직접 명령과 같은 Command Bus를 통과한다. 모든 영속 업무를 서버 Adapter 없이 직접 실행하는 공통 Capability Registry는 `APP-001` planned 경계다. 제공 도구는 업무 의미 allowlist로 제한하며 `run_shell`, 임의 terminal 입력, 임의 path 읽기·이동·삭제를 제공하지 않는다.
+Control의 MCP Adapter는 도구를 좁은 Application Service 입력으로 변환한다. 조회는 정제된 결과를 반환하고 상태 변경은 사람의 직접 명령과 같은 Command Bus를 통과한다. `archive.work.reference.get.v1`은 현재 Turn에 고정된 `WorkReference`만 반환해 작업 도중 이관 대상의 종류·ID·revision을 채팅 본문과 분리한다. 모든 영속 업무를 서버 Adapter 없이 직접 실행하는 공통 Capability Registry는 `APP-001` planned 경계다. 제공 도구는 업무 의미 allowlist로 제한하며 `run_shell`, 임의 terminal 입력, 임의 path 읽기·이동·삭제를 제공하지 않는다. `COL-004`
 
-ArchivistToolCall receipt가 이미 있으면 최초 결과를 반환한다. timeout이나 CLI 재개 뒤에도 같은 호출이 Command를 다시 만들지 않는다. 인증된 MCP Capability는 Session에 저장된 제어 모드를 사용한다. `MANUAL`의 상태 변경은 거부하고, `ASSISTED`에서는 ActionCard만 만들며, `ARCHIVIST`에서는 allowlist의 비파괴 `PROCESS` Command를 직접 실행할 수 있다. 파괴적 작업과 `GATED` 작업은 `ASSISTED`·`ARCHIVIST`에서 ActionCard를 만들 수만 있고, 별도의 사람 Approval과 최신 expected revision 없이 실행하지 않는다.
+ArchivistToolCall receipt가 이미 있으면 최초 결과를 반환한다. timeout이나 CLI 재개 뒤에도 같은 호출이 Command를 다시 만들지 않는다. 인증된 MCP Capability는 allowlist의 비파괴 `PROCESS` Command를 직접 실행할 수 있다. 파괴적 작업과 `GATED` 작업은 ActionCard를 만들 수만 있고, 별도의 사람 Approval과 최신 expected revision 없이 실행하지 않는다.
 
 재개된 CLI가 같은 Tool Call ID와 ActionCard ID를 다시 보고하면 저장소는 새 행을 만들지 않는다. 기존 ActionCard 제안 내용이 같으면 현재 투영 상태를 보존하고, 특히 `COMPLETED`를 `PENDING`으로 되돌리지 않는다. 같은 ID의 제안 내용이 다르면 idempotency 충돌로 거부한다.
 
@@ -182,7 +182,7 @@ Action Card: 제안 Command, 대상, expected revision, 사유, 근거, 승인 �
 
 채팅 입력은 ArchivistTurn을 만들고 Control에 확정된 뒤 Host로 전달한다. 채팅 텍스트의 “진행”은 Archivist에게 후속 Tool Call을 요청할 수 있지만 Approval은 아니다. 승인 필요한 명령은 ActionCard의 명시적 조작만 Approval 또는 Command 후보를 만들며 제출 시 현재 리비전을 다시 검사한다.
 
-Archive Intake Turn은 담당자가 화면에서 고른 Worker·원본·아카이브 Storage·폴더 범위를 구조화된 ID와 revision으로 고정한다. Archivist는 본문에서 대상 드라이브를 추론하지 않고, 고정 참조 안에서 드라이브·폴더 조회, 1·2단계 시작, 현재 HOLD 목록·단일 구조화 근거 조회와 명시적 분류 Capability만 호출한다. Storage와 범위 선택은 사람 전용이며 선택 밖 분류는 거부한다. `COL-003`, `MCP-003~005`
+Archive Intake Turn은 담당자가 화면에서 고른 Worker·원본·아카이브 Storage·폴더 범위를 구조화된 ID와 revision으로 고정한다. 이미 진행 중인 Job 또는 ArchiveRun 상세에서 지시하면 별도의 `WorkReference`가 같은 Turn에 고정된다. Archivist는 본문에서 대상 드라이브나 작업을 추론하지 않고, 고정 참조 안에서 드라이브·폴더 조회, 작업 상태 조회, 1·2단계 시작, 현재 HOLD 목록·단일 구조화 근거 조회와 명시적 분류 Capability만 호출한다. Storage와 범위 선택은 사람 전용이며 선택 밖 분류는 거부한다. `COL-003~004`, `MCP-003~005`
 
 긴 작업은 한 Turn 안에서 기다리지 않는다. Archivist가 1단계를 시작한 Turn을 완료한 뒤 Control은 같은 Session에 1단계 완료·전체 완료·새 HOLD 계기별 SYSTEM 재호출 Turn을 정확히 한 번 제출한다. ArchiveRun을 연결할 때 최초 Turn에 `work_id=archive_run_id`, `origin_turn_id`, `ARCHIVE_RUN_STARTED` 계기를 저장하고 각 SYSTEM Turn은 같은 ID와 명시적 재호출 계기를 저장한다. 화면은 prompt 문장을 해석하지 않고 이 `ArchiveRunWorkContext`로만 Turn을 묶는다. Host가 offline이면 Turn은 QUEUED로 남고 Worker의 아카이브 실행은 계속된다. 재호출 전달은 기존 ArchivistTurnLease·fencing·cursor 규칙을 그대로 사용한다. `LRH-012`
 
@@ -225,8 +225,8 @@ Worker와 Archivist Host는 같은 PC에 설치할 수 있지만 identity, crede
 1. ArchivistSession이 없는 빈 작업함에서 사람이 버튼·폼·API로 Job을 직접 만들고 작업 상세를 확인한다.
 2. 사전 등록된 Windows Host와 CLI를 선택해 ArchivistSession을 만들고 같은 Job 문맥으로 ArchivistTurn을 제출한다.
 3. 같은 ArchivistTurn ID가 Host의 로컬 CLI에 한 번만 전달되고 CLI가 MCP 조회 도구로 자산과 Job 상태를 읽는다.
-4. `ARCHIVIST` 모드의 허용된 비파괴 Command는 공통 Command Bus에서 한 번 실행되어 사람이 만든 Event와 같은 작업 상세에 나타난다.
-5. `ASSISTED` 또는 승인 필요한 상태 변경은 ActionCard로 표시되고, 사람이 명시적으로 조작한 경우만 Approval 또는 Command가 만들어진다.
+4. 인증된 Archivist의 허용된 비파괴 Command는 공통 Command Bus에서 한 번 실행되어 사람이 만든 Event와 같은 작업 상세에 나타난다.
+5. 승인 필요한 상태 변경은 ActionCard로 표시되고, 사람이 명시적으로 조작한 경우만 Approval 또는 Command가 만들어진다.
 6. 사람이 API로 추가 변경한 현재 상태를 다음 ArchivistTurn이 다시 읽어 이어서 처리한다.
 7. Host 연결과 CLI process를 강제로 끊고 다시 시작한다.
 8. 같은 ArchivistSession이 재개되고 완료된 Tool Call과 Command를 중복 실행하지 않은 채 최종 응답을 끝낸다.

@@ -5,28 +5,25 @@ import (
 	"testing"
 
 	"videoarchive/internal/core/vocabulary"
-	"videoarchive/internal/core/workflow"
 )
 
 // Requirement: COL-002
-func TestArchivistCommandPolicyRoutesDirectActionCardOrDenialFromModeAndActionClass(t *testing.T) {
+func TestArchivistCommandPolicyRoutesByActionClassWithoutCreationMode(t *testing.T) {
 	tests := []struct {
 		name   string
-		mode   workflow.ControlMode
 		action vocabulary.ActionClass
 		want   CommandRoute
 		denied bool
 	}{
-		{name: "manual process", mode: workflow.ManualMode, action: vocabulary.ActionProcess, denied: true},
-		{name: "manual destructive", mode: workflow.ManualMode, action: vocabulary.ActionDestructive, denied: true},
-		{name: "assisted process", mode: workflow.AssistedMode, action: vocabulary.ActionProcess, want: RouteActionCard},
-		{name: "archivist gated", mode: workflow.ArchivistMode, action: vocabulary.ActionGated, want: RouteActionCard},
-		{name: "archivist destructive", mode: workflow.ArchivistMode, action: vocabulary.ActionDestructive, want: RouteActionCard},
-		{name: "archivist process", mode: workflow.ArchivistMode, action: vocabulary.ActionProcess, want: RouteDirectCommand},
+		{name: "process", action: vocabulary.ActionProcess, want: RouteDirectCommand},
+		{name: "gated", action: vocabulary.ActionGated, want: RouteActionCard},
+		{name: "destructive", action: vocabulary.ActionDestructive, want: RouteActionCard},
+		{name: "read is not a state change", action: vocabulary.ActionRead, denied: true},
+		{name: "manage is outside MCP", action: vocabulary.ActionManage, denied: true},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			route, err := RouteArchivistCommand(test.mode, test.action)
+			route, err := RouteArchivistCommand(test.action)
 			if test.denied {
 				if !errors.Is(err, ErrArchivistCommandDenied) || route != "" {
 					t.Fatalf("denied case returned route=%s err=%v", route, err)

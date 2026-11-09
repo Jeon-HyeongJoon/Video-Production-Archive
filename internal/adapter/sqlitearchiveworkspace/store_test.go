@@ -61,7 +61,7 @@ func TestArchiveWorkspaceProjectsJobStatusInterventionAndOperationalDetailWithou
 	}
 
 	running := byID["JOB-RUNNING"]
-	if running.ControlMode != workflow.ArchivistMode || running.CurrentStepID != "STEP-1" ||
+	if running.CurrentStepID != "STEP-1" ||
 		running.StepState != workflow.Running || running.Progress != 0.45 ||
 		running.ArchivistAction != "render.create_rendition" || running.ToolCallStatus != archiveworkspace.ToolCallRunning ||
 		running.WorkerID != "WORKER-1" || running.Worker == nil || running.Worker.AvailableMemoryBytes != 12<<30 ||
@@ -112,7 +112,7 @@ func archiveWorkspaceInput(jobID string, state workflow.StepState, waitReason vo
 	return archiveworkspace.ProjectionInput{
 		Job: archiveworkspace.Job{
 			ID: jobID, Revision: 4, TemplateName: "OccasionRecording", TargetTitle: "Office Event",
-			ControlMode: workflow.ArchivistMode, CurrentStepID: "STEP-1",
+			CurrentStepID: "STEP-1",
 		},
 		Steps: []archiveworkspace.StepStatus{{
 			ID: "STEP-1", State: state, Progress: progress,

@@ -41,7 +41,7 @@ Archivist 경로: Host·CLI 선택 → ArchivistSession → ArchivistTurn → MC
 공통 결과: Command·Event·증적 → 같은 작업 상세 → 사람과 다음 ArchivistTurn이 이어서 처리
 ```
 
-사람의 직접 경로는 ArchivistSession이나 AI 가용성을 요구하지 않는다. 인증된 MCP Capability의 Archivist 상태 변경은 저장된 `MANUAL` 제어 모드에서 거부한다. `ASSISTED` 또는 `GATED`·`DESTRUCTIVE` 명령은 ActionCard로 제안하고, 저장된 `ARCHIVIST` 제어 모드의 비파괴 `PROCESS`만 직접 실행할 수 있다.
+사람의 직접 경로는 ArchivistSession이나 AI 가용성을 요구하지 않는다. 작업은 생성 시 협업 방식을 고정하지 않으며 사람과 Archivist가 같은 작업 ID·리비전 문맥을 이어서 사용한다. 인증된 MCP Capability의 비파괴 `PROCESS`는 직접 실행하고 `GATED`·`DESTRUCTIVE` 명령은 ActionCard로 제안한다.
 
 ## 3. 운영 불변 조건
 

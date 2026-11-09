@@ -164,7 +164,7 @@ func linkedJob(id, template, title, runID, folder string, state workflow.StepSta
 		spec = &execution.StepExecutionSpec{Parameters: execution.StepExecutionParameters{ArchiveRunID: runID, MediaFolder: folder}}
 	}
 	return job.State{
-		ID: id, Revision: 1, TemplateName: template, TargetTitle: title, ControlMode: workflow.AssistedMode, CurrentStepID: "step",
+		ID: id, Revision: 1, TemplateName: template, TargetTitle: title, CurrentStepID: "step",
 		Steps: []job.Step{{Workflow: workflow.Step{ID: "step", State: state}, ExecutionSpec: spec, LastEventAt: at}},
 	}
 }
@@ -172,7 +172,7 @@ func linkedJob(id, template, title, runID, folder string, state workflow.StepSta
 func summaryOf(state job.State, stepState workflow.StepState, progress float64) archiveworkspace.JobSummary {
 	return archiveworkspace.JobSummary{
 		JobID: state.ID, Revision: state.Revision, TemplateName: state.TemplateName, TargetTitle: state.TargetTitle,
-		ControlMode: state.ControlMode, CurrentStepID: state.CurrentStepID, StepState: stepState, Progress: progress,
+		CurrentStepID: state.CurrentStepID, StepState: stepState, Progress: progress,
 		ExecutorKind: vocabulary.ExecutorWorker, WorkerID: "worker-windows", LastEventAt: state.Steps[0].LastEventAt,
 	}
 }

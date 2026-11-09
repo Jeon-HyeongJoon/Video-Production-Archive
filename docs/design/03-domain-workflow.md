@@ -97,7 +97,7 @@ stateDiagram-v2
 - 새 ExecutionLease의 fencing token은 이전 값보다 커야 하며 늦게 돌아온 Worker의 결과는 거부한다.
 - 결과 정산은 같은 token의 동일 결과를 replay하는 결과 receipt와 후속 observer용 completion outbox를 같은 transaction에 기록한다. `WRK-009`, `WRK-014`
 - 만료된 RUNNING Step은 idempotency receipt와 결과 receipt를 먼저 확인한다. 실제 게시 파일은 있지만 결과 receipt가 없는 중단을 자동 조정하는 경계는 `EXE-003` planned이므로 그 경우를 안전한 재실행으로 간주하지 않는다.
-- ControlMode를 MANUAL로 바꿔도 StepState와 Worker ExecutionLease는 유지한다.
+- 사람과 Archivist 사이에서 같은 영속 작업을 이어가도 StepState와 Worker ExecutionLease는 유지한다.
 
 ## 5. Retry 분류
 
@@ -178,7 +178,7 @@ SOURCE_MEDIA 원본은 이동하거나 이름을 바꾸지 않는다. 1단계 Fo
 
 ```text
 StepState: QUEUED/WAITING/RESERVED/RUNNING/VERIFYING/PAUSED/FAILED/COMPLETED/CANCELLED
-ControlMode: ARCHIVIST/ASSISTED/MANUAL
+Collaboration actor: HUMAN/ARCHIVIST (Command마다 기록하며 Step 속성이 아님)
 ```
 
 Archivist가 만든 변경 계획은 Command를 실행하기 전 Action Card로 표시한다. 승인 결과도 별도 Event로 남기며 대화 텍스트 자체를 승인으로 간주하지 않는다.

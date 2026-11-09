@@ -147,7 +147,8 @@ export const labels = {
   turn: { QUEUED: "대기열", LEASED: "전달 중", SUBMITTED: "전달됨", RUNNING: "처리 중", WAITING: "대기", COMPLETED: "완료", FAILED: "실패", CANCELLED: "취소" },
   tool: {
     "archive.intake.selection.get.v1": "선택 확인", "archive.run.status.v1": "진행 조회", "archive.run.start.v1": "아카이브 실행 시작",
-    "archive.run.transcription.start.v1": "STT 시작", "archive.jobs.get.v1": "작업 조회", "archive.assets.search.v1": "자료 검색", "archive.jobs.create.v1": "작업 생성",
+    "archive.run.transcription.start.v1": "STT 시작", "archive.jobs.get.v1": "작업 조회", "archive.work.reference.get.v1": "이어갈 작업 확인",
+    "archive.assets.search.v1": "자료 검색", "archive.jobs.create.v1": "작업 생성",
   },
   call: { COMPLETED: "완료", ACTION_CARD: "결정 요청", FAILED: "실패", RUNNING: "처리 중" },
   card: { "archive_run.start": "아카이브 실행 시작", "archive_run.transcription.start": "STT 시작", "archive_intake.selection.required": "선택 필요", "job.create": "작업 생성" },
@@ -157,7 +158,6 @@ export const labels = {
 	volumeConnection: { CONNECTED: "연결됨", DISCONNECTED: "연결 해제됨", UNKNOWN: "확인 불가" },
   transcriptQuality: { SEGMENT_TOO_LONG: "긴 구간", LOW_TEXT_DENSITY: "낮은 문자 밀도" },
   admission: { OFFLINE: "꺼짐", DISABLED: "사용 안 함", NOT_ACCEPTING_WORK: "정리 중" },
-  mode: { ASSISTED: "제안 · 담당자 실행", ARCHIVIST: "허용된 처리 직접 실행", MANUAL: "상태 변경 없음" },
 };
 
 export function label(group, value) {

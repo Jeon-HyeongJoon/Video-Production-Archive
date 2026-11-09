@@ -52,20 +52,18 @@ type Step struct {
 }
 
 type State struct {
-	ID                   string               `json:"id"`
-	Revision             uint64               `json:"revision"`
-	TemplateName         string               `json:"template_name"`
-	TargetTitle          string               `json:"target_title"`
-	ControlMode          workflow.ControlMode `json:"control_mode"`
-	CurrentStepID        string               `json:"current_step_id"`
-	Steps                []Step               `json:"steps"`
-	LastDispatchSequence uint64               `json:"last_dispatch_sequence"`
+	ID                   string `json:"id"`
+	Revision             uint64 `json:"revision"`
+	TemplateName         string `json:"template_name"`
+	TargetTitle          string `json:"target_title"`
+	CurrentStepID        string `json:"current_step_id"`
+	Steps                []Step `json:"steps"`
+	LastDispatchSequence uint64 `json:"last_dispatch_sequence"`
 }
 
 type CreateParameters struct {
 	TemplateName            string                                 `json:"template_name"`
 	TargetTitle             string                                 `json:"target_title"`
-	ControlMode             workflow.ControlMode                   `json:"control_mode"`
 	ExecutionPriority       resource.ExecutionPriority             `json:"execution_priority,omitempty"`
 	RequiredStorageIDs      []string                               `json:"required_storage_ids,omitempty"`
 	PhysicalDeviceIDs       []string                               `json:"physical_device_ids,omitempty"`
@@ -104,7 +102,7 @@ func (handler *Handler) create(envelope command.Envelope, snapshot command.Snaps
 		return command.Change{}, command.DeterministicFailure("INVALID_JOB", ErrInvalidJob)
 	}
 	template, ok := templateByName(strings.TrimSpace(parameters.TemplateName))
-	if !ok || strings.TrimSpace(parameters.TargetTitle) == "" || !validControlMode(parameters.ControlMode) {
+	if !ok || strings.TrimSpace(parameters.TargetTitle) == "" {
 		return command.Change{}, command.DeterministicFailure("INVALID_JOB", ErrInvalidJob)
 	}
 	if err := template.Validate(); err != nil {
@@ -134,7 +132,7 @@ func (handler *Handler) create(envelope command.Envelope, snapshot command.Snaps
 		step := Step{
 			Workflow: workflow.Step{
 				ID: definition.ID, Dependencies: append([]string(nil), definition.DependsOn...), State: workflow.Queued,
-				ControlMode: parameters.ControlMode, MaxAttempts: 3, ApprovalRequired: definition.ApprovalRequired,
+				MaxAttempts: 3, ApprovalRequired: definition.ApprovalRequired,
 			},
 			ResourceClass: definition.ResourceClass, ExecutorKind: definition.ExecutorKind,
 			FallbackExecutorKind:    definition.FallbackExecutorKind,
@@ -213,7 +211,7 @@ func (handler *Handler) create(envelope command.Envelope, snapshot command.Snaps
 	}
 	state := State{
 		ID: envelope.TargetID, Revision: 1, TemplateName: template.Name,
-		TargetTitle: strings.TrimSpace(parameters.TargetTitle), ControlMode: parameters.ControlMode,
+		TargetTitle:   strings.TrimSpace(parameters.TargetTitle),
 		CurrentStepID: currentStepID, Steps: steps,
 	}
 	return stateChange(envelope, state, "JobCreated", map[string]any{
@@ -286,7 +284,7 @@ func decodeState(snapshot command.Snapshot) (State, error) {
 	var state State
 	if snapshot.TargetID == "" || snapshot.Revision == 0 || len(snapshot.State) == 0 || json.Unmarshal(snapshot.State, &state) != nil ||
 		state.ID != snapshot.TargetID || state.Revision != snapshot.Revision || state.TemplateName == "" || state.TargetTitle == "" ||
-		!validControlMode(state.ControlMode) || state.currentStep() == nil {
+		state.currentStep() == nil {
 		return State{}, ErrInvalidJob
 	}
 	return state, nil
@@ -322,10 +320,6 @@ func decodeParameters(source map[string]any, target any) error {
 		return err
 	}
 	return json.Unmarshal(payload, target)
-}
-
-func validControlMode(mode workflow.ControlMode) bool {
-	return mode == workflow.ArchivistMode || mode == workflow.AssistedMode || mode == workflow.ManualMode
 }
 
 func templateByName(name string) (pipeline.Template, bool) {

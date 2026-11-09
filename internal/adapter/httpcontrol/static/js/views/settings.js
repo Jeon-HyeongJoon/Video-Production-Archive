@@ -1,7 +1,7 @@
 // 설정: Archivist 목록과 추가, Archivist Host 상태, 화면 테마. The screen
 // calls them Agent and Agent Host. Host, backend and workspace registration
 // stay in the local configuration files; the form takes only name, Host,
-// detected CLI and default control mode.
+// detected CLI.
 
 import { el, statusIcon, workerIcon, label, stateSignal, clockTime, mutation, newID, emptyState } from "../core.js";
 import { model, refresh, hostFor, activeTurn } from "../store.js";
@@ -18,15 +18,12 @@ export function mount(root) {
   const list = el("div", { id: "archivist-list" });
   const hostSelect = el("select", { id: "archivist-host-select", name: "archivist_host_id", required: true });
   const cliSelect = el("select", { id: "archivist-cli-select", name: "cli_id", required: true });
-  const modeSelect = el("select", { id: "archivist-mode-select", name: "control_mode" },
-    ...["ASSISTED", "ARCHIVIST", "MANUAL"].map((mode) => el("option", { value: mode }, `${mode} · ${label("mode", mode)}`)));
   const submit = el("button", { type: "submit", class: "btn primary", id: "archivist-add-submit" }, "추가");
   const status = el("span", { id: "archivist-add-status", role: "status" });
   const form = el("form", { id: "archivist-add", class: "settings-form" },
     el("label", { class: "field" }, el("span", {}, "이름"), el("input", { name: "name", required: true, autocomplete: "off" })),
     el("label", { class: "field" }, el("span", {}, "Agent Host"), hostSelect),
     el("label", { class: "field" }, el("span", {}, "CLI"), cliSelect),
-    el("label", { class: "field" }, el("span", {}, "기본 제어 모드"), modeSelect),
     el("div", { class: "form-actions" }, submit, status));
 
   function renderOptions() {
@@ -47,7 +44,7 @@ export function mount(root) {
     event.preventDefault();
     const data = Object.fromEntries(new FormData(form));
     try {
-      await mutation("/api/v1/archivist-sessions", { session_id: newID("ARCHIVIST"), name: data.name, archivist_host_id: data.archivist_host_id, cli_id: data.cli_id, control_mode: data.control_mode });
+      await mutation("/api/v1/archivist-sessions", { session_id: newID("ARCHIVIST"), name: data.name, archivist_host_id: data.archivist_host_id, cli_id: data.cli_id });
       form.reset();
       status.textContent = "추가됨";
       await refresh();
@@ -61,7 +58,7 @@ export function mount(root) {
     el("div", { class: "page-head" }, el("div", { class: "page-title" }, el("h1", { title: "등록·정책 변경 · 설정 파일 수정 뒤 서비스 재시작" }, "설정"))),
     el("section", { class: "panel table-panel", "aria-label": "Agent" },
       el("div", { class: "panel-toolbar" }, el("b", { class: "panel-title" }, "Agent")),
-      el("div", { class: "grid-row grid-head archivist-row" }, ...["이름", "Agent Host", "CLI", "제어 모드", "상태"].map((text) => el("span", {}, text))),
+      el("div", { class: "grid-row grid-head archivist-row" }, ...["이름", "Agent Host", "CLI", "상태"].map((text) => el("span", {}, text))),
       list),
     el("section", { class: "panel form-panel", "aria-label": "Agent 추가" },
       el("div", { class: "panel-toolbar" }, el("b", { class: "panel-title" }, "Agent 추가")), form),
@@ -79,7 +76,6 @@ export function mount(root) {
         const [text, signal] = availability(session);
         return el("div", { class: "grid-row archivist-row", dataset: { sessionId: session.session_id } },
           el("b", {}, session.name || session.session_id), el("span", { class: "num" }, session.archivist_host_id), el("span", { class: "num" }, session.cli_id),
-          el("span", { class: "num" }, session.control_mode || "ASSISTED"),
           el("span", { class: "state", dataset: { signal } }, statusIcon(signal), text));
       }) : [emptyState("Agent 없음")]));
       hostRows.replaceChildren(...model.hosts.map((host) => {

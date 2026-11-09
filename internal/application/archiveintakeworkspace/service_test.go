@@ -104,7 +104,7 @@ func TestArchiveRunProjectionPreservesFixedStageWaitReasonsAndArchiveStates(t *t
 		}),
 		"JOB-RENDER": jobSnapshot(t, job.State{
 			ID: "JOB-RENDER", Revision: 4, TemplateName: "archive-intake-render-recordings", TargetTitle: "recordings",
-			ControlMode: workflow.AssistedMode, CurrentStepID: "render", Steps: []job.Step{
+			CurrentStepID: "render", Steps: []job.Step{
 				{Workflow: workflow.Step{ID: "render", State: workflow.Waiting, WaitReason: workflow.WaitMemory}, Progress: 0.4},
 				{Workflow: workflow.Step{ID: "qc", State: workflow.Queued}},
 				{Workflow: workflow.Step{ID: "organize", State: workflow.Queued}},
@@ -113,7 +113,7 @@ func TestArchiveRunProjectionPreservesFixedStageWaitReasonsAndArchiveStates(t *t
 		}),
 		"JOB-INTERVIEW": jobSnapshot(t, job.State{
 			ID: "JOB-INTERVIEW", Revision: 6, TemplateName: "archive-intake-as-is", TargetTitle: "interviews",
-			ControlMode: workflow.AssistedMode, CurrentStepID: "archive_catalog", Steps: []job.Step{
+			CurrentStepID: "archive_catalog", Steps: []job.Step{
 				{Workflow: workflow.Step{ID: "qc", State: workflow.Completed}},
 				{Workflow: workflow.Step{ID: "organize", State: workflow.Completed}, OutputRecord: &execution.StepOutputRecord{
 					Outputs: []execution.StepOutput{{ID: "VP-20261030-INTERVIEW", Kind: execution.OutputOrganizedMedia}},
@@ -123,7 +123,7 @@ func TestArchiveRunProjectionPreservesFixedStageWaitReasonsAndArchiveStates(t *t
 		}),
 		"JOB-DEVICE": jobSnapshot(t, job.State{
 			ID: "JOB-DEVICE", Revision: 5, TemplateName: "archive-intake-render-recordings", TargetTitle: "device-wait",
-			ControlMode: workflow.AssistedMode, CurrentStepID: "organize", Steps: []job.Step{
+			CurrentStepID: "organize", Steps: []job.Step{
 				{Workflow: workflow.Step{ID: "render", State: workflow.Completed}},
 				{Workflow: workflow.Step{ID: "qc", State: workflow.Completed}},
 				{Workflow: workflow.Step{ID: "organize", State: workflow.Waiting, WaitReason: workflow.WaitDevice}, WaitTargetStorageID: "ARCHIVE-1"},
@@ -132,7 +132,7 @@ func TestArchiveRunProjectionPreservesFixedStageWaitReasonsAndArchiveStates(t *t
 		}),
 		"JOB-COMMITTED": jobSnapshot(t, job.State{
 			ID: "JOB-COMMITTED", Revision: 6, TemplateName: "archive-intake-as-is", TargetTitle: "committed-no-stt",
-			ControlMode: workflow.AssistedMode, CurrentStepID: "archive_catalog", Steps: []job.Step{
+			CurrentStepID: "archive_catalog", Steps: []job.Step{
 				{Workflow: workflow.Step{ID: "qc", State: workflow.Completed}},
 				{Workflow: workflow.Step{ID: "organize", State: workflow.Completed}, OutputRecord: &execution.StepOutputRecord{
 					Outputs: []execution.StepOutput{{ID: "VP-20261030-COMMITTED", Kind: execution.OutputOrganizedMedia}},
@@ -142,7 +142,7 @@ func TestArchiveRunProjectionPreservesFixedStageWaitReasonsAndArchiveStates(t *t
 		}),
 		"STT-JOB-INTERVIEW": jobSnapshot(t, job.State{
 			ID: "STT-JOB-INTERVIEW", Revision: 3, TemplateName: "archive-transcription", TargetTitle: "interviews",
-			ControlMode: workflow.AssistedMode, CurrentStepID: "transcript", Steps: []job.Step{
+			CurrentStepID: "transcript", Steps: []job.Step{
 				{Workflow: workflow.Step{ID: "audio", State: workflow.Completed}, ExecutionSpec: archiveRunSpec("RUN-9", "interviews")},
 				{Workflow: workflow.Step{ID: "transcript", State: workflow.Waiting, WaitReason: workflow.WaitSlot}},
 				{Workflow: workflow.Step{ID: "subtitle", State: workflow.Queued}},
@@ -276,14 +276,14 @@ func TestArchiveRunProjectionCarriesPersistedTranscriptQualityAssessment(t *test
 		}),
 		"JOB-1": jobSnapshot(t, job.State{
 			ID: "JOB-1", Revision: 1, TemplateName: "archive-intake-as-is", TargetTitle: "recording",
-			ControlMode: workflow.AssistedMode, CurrentStepID: "organize", Steps: []job.Step{{
+			CurrentStepID: "organize", Steps: []job.Step{{
 				Workflow:     workflow.Step{ID: "organize", State: workflow.Completed},
 				OutputRecord: &execution.StepOutputRecord{Outputs: []execution.StepOutput{{ID: "VP-1", Kind: execution.OutputOrganizedMedia}}},
 			}},
 		}),
 		"STT-JOB-1": jobSnapshot(t, job.State{
 			ID: "STT-JOB-1", Revision: 3, TemplateName: "archive-transcription", TargetTitle: "recording",
-			ControlMode: workflow.AssistedMode, CurrentStepID: "transcript", Steps: []job.Step{{
+			CurrentStepID: "transcript", Steps: []job.Step{{
 				Workflow: workflow.Step{ID: "transcript", State: workflow.Completed},
 				ExecutionSpec: &execution.StepExecutionSpec{
 					Parameters: execution.StepExecutionParameters{ArchiveRunID: "ARCHIVE-RUN-1", MediaFolder: "recording"},
@@ -351,14 +351,14 @@ func TestArchiveRunProjectionUsesLatestCompletedCatalogPublicationTime(t *testin
 				}),
 				"JOB-1": jobSnapshot(t, job.State{
 					ID: "JOB-1", Revision: 2, TemplateName: "archive-intake-as-is", TargetTitle: "recording",
-					ControlMode: workflow.AssistedMode, CurrentStepID: "archive_catalog", Steps: []job.Step{{
+					CurrentStepID: "archive_catalog", Steps: []job.Step{{
 						Workflow:    workflow.Step{ID: "archive_catalog", State: workflow.Completed},
 						LastEventAt: stageOneAt, ExecutionSpec: archiveRunSpec("ARCHIVE-RUN-1", "recording"),
 					}},
 				}),
 				"STT-JOB-1": jobSnapshot(t, job.State{
 					ID: "STT-JOB-1", Revision: 2, TemplateName: "archive-transcription", TargetTitle: "recording",
-					ControlMode: workflow.AssistedMode, CurrentStepID: "archive_catalog", Steps: []job.Step{{
+					CurrentStepID: "archive_catalog", Steps: []job.Step{{
 						Workflow:    workflow.Step{ID: "archive_catalog", State: test.stageTwoState},
 						LastEventAt: stageTwoAt, ExecutionSpec: archiveRunSpec("ARCHIVE-RUN-1", "recording"),
 					}},
@@ -425,7 +425,7 @@ func TestCompletedWorkProjectionRetainsOlderPackageWithoutCountingHoldAsOutput(t
 		}),
 		"JOB-OLD": jobSnapshot(t, job.State{
 			ID: "JOB-OLD", Revision: 6, TemplateName: "archive-intake-source-sequence", TargetTitle: oldDecision.Folder,
-			ControlMode: workflow.AssistedMode, CurrentStepID: "archive_catalog", Steps: []job.Step{
+			CurrentStepID: "archive_catalog", Steps: []job.Step{
 				{Workflow: workflow.Step{ID: "source_timeline", State: workflow.Completed}, ExecutionSpec: archiveRunSpec("ARCHIVE-RUN-OLD", oldDecision.Folder)},
 				{Workflow: workflow.Step{ID: "sequence_render", State: workflow.Completed}},
 				{Workflow: workflow.Step{ID: "qc", State: workflow.Completed}},
@@ -688,7 +688,7 @@ func (starter *resolvedFolderStarterFixture) StartResolvedFolder(
 		starter.effects[idempotencyKey] = true
 		starter.jobs["JOB-RESOLVED-HOLD"] = jobSnapshot(starter.t, job.State{
 			ID: "JOB-RESOLVED-HOLD", Revision: 1, TemplateName: "archive-intake-as-is", TargetTitle: decision.Folder,
-			ControlMode: workflow.AssistedMode, CurrentStepID: "qc", Steps: []job.Step{{
+			CurrentStepID: "qc", Steps: []job.Step{{
 				Workflow:      workflow.Step{ID: "qc", State: workflow.Queued},
 				ExecutionSpec: archiveRunSpec(archiveRun.ID, decision.Folder),
 			}},

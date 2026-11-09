@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"videoarchive/internal/core/vocabulary"
-	"videoarchive/internal/core/workflow"
 )
 
 var (
@@ -94,9 +93,8 @@ func (registry *HostRegistry) Allows(spec SessionSpec) bool {
 }
 
 // ConfiguredSessionSpec resolves runtime-owned backend and workspace binding.
-// Browser input can choose only the registered Host, detected CLI and default
-// control mode.
-func (registry *HostRegistry) ConfiguredSessionSpec(id, name, archivistHostID, cliID string, mode workflow.ControlMode) (SessionSpec, error) {
+// Browser input can choose only the registered Host and detected CLI.
+func (registry *HostRegistry) ConfiguredSessionSpec(id, name, archivistHostID, cliID string) (SessionSpec, error) {
 	registry.mu.RLock()
 	defer registry.mu.RUnlock()
 	definition, exists := registry.definitions[archivistHostID]
@@ -122,7 +120,7 @@ func (registry *HostRegistry) ConfiguredSessionSpec(id, name, archivistHostID, c
 	}
 	return SessionSpec{
 		ID: id, Name: name, ArchivistHostID: archivistHostID, Backend: vocabulary.RuntimeBackend(backends[0]),
-		CLIID: cliID, WorkspaceRootID: workspaces[0], ControlMode: mode,
+		CLIID: cliID, WorkspaceRootID: workspaces[0],
 	}, nil
 }
 

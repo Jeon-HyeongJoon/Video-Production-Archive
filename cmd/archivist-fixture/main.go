@@ -66,7 +66,7 @@ func main() {
 			"idempotency_key": "fixture-action:" + turnID, "input_digest": "fixture-action-v1",
 			"tool": "archive.jobs.create.v1", "input": map[string]any{
 				"job_id": jobID, "template_name": "occasion-recording", "target_title": "Runtime resume acceptance",
-				"control_mode": "ASSISTED", "reason": "Runtime resume acceptance proposal",
+				"reason": "Runtime resume acceptance proposal",
 			},
 		}
 		if err := callMCP(client, mcpURL, actionPayload, http.StatusAccepted); err != nil {

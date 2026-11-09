@@ -43,7 +43,6 @@ type createJobRequest struct {
 	Reason           string `json:"reason"`
 	TemplateName     string `json:"template_name"`
 	TargetTitle      string `json:"target_title"`
-	ControlMode      string `json:"control_mode"`
 	ExpectedRevision uint64 `json:"expected_revision"`
 }
 
@@ -66,7 +65,7 @@ func (handler *Handler) createJob(writer http.ResponseWriter, request *http.Requ
 		CommandID: payload.CommandID, CommandType: job.CreateCommand, TargetID: payload.JobID,
 		ExpectedRevision: payload.ExpectedRevision, IdempotencyKey: payload.IdempotencyKey, Reason: payload.Reason,
 		Parameters: map[string]any{
-			"template_name": payload.TemplateName, "target_title": payload.TargetTitle, "control_mode": payload.ControlMode,
+			"template_name": payload.TemplateName, "target_title": payload.TargetTitle,
 		},
 	}))
 	if err != nil {

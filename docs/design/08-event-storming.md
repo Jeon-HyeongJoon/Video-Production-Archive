@@ -116,7 +116,7 @@ flowchart LR
 | 11 | 담당자 또는 허용된 Archivist | `VerifyArchiveCatalog` | `ArchiveCatalogVerified` 후보 | 결과 폴더·package·결과 영상·루트 CSV의 1:1과 폴더별 원본 행을 읽기 전용 대조 |
 | 12 | 담당자 또는 허용된 Archivist | `RebuildArchiveCatalog` | `ArchiveCatalogRebuilt` 후보 | 유효한 metadata·manifest에서 전체 projection을 검증 후 원자 교체 |
 
-Storage와 폴더 범위 선택은 담당자만 실행한다. Archivist는 고정 참조 안에서 1·2단계 시작과 현재 HOLD 목록·단일 근거 조회를 수행하고, 허용된 제어 모드에서는 최신 HOLD 하나에 명시적 분류를 추가할 수 있다. 선택 밖 분류와 파괴적 작업은 거부한다. Archivist Host가 offline이어도 Worker 실행은 계속되고 재호출 Turn만 기다린다. `ARC-010~011`, `COL-003`, `LRH-012`, `MCP-003~005`
+Storage와 폴더 범위 선택은 담당자만 실행한다. Archivist는 고정 참조 안에서 1·2단계 시작과 현재 HOLD 목록·단일 근거 조회를 수행하고 최신 HOLD 하나에 명시적 분류를 추가할 수 있다. 선택 밖 분류와 파괴적 작업은 거부한다. Archivist Host가 offline이어도 Worker 실행은 계속되고 재호출 Turn만 기다린다. `ARC-010~011`, `COL-003`, `LRH-012`, `MCP-003~005`
 
 예외는 항목별로 격리한다. 손상 입력·지원하지 않는 codec은 해당 영상 실패, 일시 process 오류는 재시도, 원본 또는 네트워크 Storage 단절과 실행 중 용량 부족은 시도 횟수를 소비하지 않는 `WAITING/DEVICE`다. 실행 가능한 작업이 없으면 ArchiveRun을 완료로 보고하되 HOLD는 별도 확인 필요 상태로 유지한다.
 
@@ -241,13 +241,13 @@ Timeline은 clip ID, in/out, 순서, cut marker를 가진다. Timeline 리비전
 
 ## 11. 사람 개입, Archivist와 파괴적 명령
 
-### 11.1 제어 모드 변경
+### 11.1 작업 연속성과 행위자 전환
 
 | 실행자 | 명령 | 이벤트 | 불변식 |
 |---|---|---|---|
-| 담당자 | `ChangeControlMode(MANUAL)` | `ControlModeChanged` | 실행 리스와 StepState를 바꾸지 않음 |
-| 담당자 | 도메인별 수동 명령 | 해당 도메인 이벤트 | Archivist와 같은 Command Bus 사용 |
-| 담당자 | `ChangeControlMode(ASSISTED/ARCHIVIST)` | `ControlModeChanged` | 최신 이벤트와 현재 상태를 다시 읽은 뒤 Archivist가 계획 |
+| 담당자 | 같은 작업의 다음 도메인 명령 | 해당 도메인 이벤트 | Archivist가 사용할 수 없어도 같은 작업 ID·revision과 Command Bus를 사용하고 실행 리스와 StepState를 바꾸지 않음 |
+| 담당자 | ArchivistTurn에 기존 작업 참조 전달 | `ArchivistTurnQueued` | 최신 이벤트와 현재 상태를 읽은 뒤 Archivist가 이어서 계획 |
+| Archivist | 허용된 MCP 업무 명령 | 해당 도메인 이벤트 | 생성 시 협업 방식 설정 없이 ActorType.ARCHIVIST provenance를 남김 |
 
 ### 11.2 Archivist 세션, 로컬 CLI와 Provider 폴백
 
@@ -267,11 +267,11 @@ Archivist 경로: 사용자 지시 → ArchivistTurn → MCP 조회·Tool Call �
 | 4 | Runtime backend | `AcceptArchivistTurnInput` | ArchivistTurn | `ArchivistTurnSubmitted` | 수락을 실행 시작으로 보지 않음 |
 | 5 | Runtime backend | `StartArchivistTurn` | ArchivistTurn | `ArchivistTurnStarted` | 명시적 시작 event만 RUNNING으로 전이 |
 | 6 | Archivist | `RecordArchivistToolCall` | ArchivistToolCall | `ArchivistToolCallRecorded` | receipt가 있으면 최초 결과 replay |
-| 7 | Archivist | 허용된 Command 또는 `ProposeActionCard` | 대상 Aggregate·ActionCard | 도메인 Event 또는 `ActionCardProposed` | 저장된 제어 모드·ActionClass·인증된 MCP Capability로 분기 |
+| 7 | Archivist | 허용된 Command 또는 `ProposeActionCard` | 대상 Aggregate·ActionCard | 도메인 Event 또는 `ActionCardProposed` | ActionClass·인증된 MCP Capability로 분기 |
 | 8 | 담당자 | `RecordApproval` 또는 제안 Command 제출 | Approval·대상 Aggregate | `ApprovalRecorded` 또는 도메인 Event | 최신 expected revision 재검사 |
 | 9 | Runtime backend | `CompleteArchivistTurn` | ArchivistTurn | `ArchivistTurnCompleted` | idle·화면 문자열이 아닌 구조화 event 요구 |
 
-인증된 MCP Capability는 Session에 저장된 제어 모드를 사용한다. `MANUAL`에서는 Archivist 상태 변경을 거부하고, `ASSISTED`에서는 ActionCard만 만들며, `ARCHIVIST`에서는 allowlist의 비파괴 `PROCESS`를 직접 실행한다. `GATED`와 `DESTRUCTIVE`는 직접 실행하지 않으며 `ASSISTED`·`ARCHIVIST`에서 사람 Approval 경계로 보낸다. 채팅 문구와 요청 본문의 제어 모드는 Approval이나 권한 입력이 아니다. `COL-001~002`, `DSH-003`
+인증된 MCP Capability는 allowlist의 비파괴 `PROCESS`를 직접 실행한다. `GATED`와 `DESTRUCTIVE`는 직접 실행하지 않고 사람 Approval 경계의 ActionCard로 보낸다. 작업·Session 생성 입력에는 협업 방식 설정이 없으며 채팅 문구는 Approval이나 권한 입력이 아니다. `COL-001~002`, `DSH-003`
 
 Host나 CLI가 끊기면 durable ArchivistSession은 유지하고 runtime handle만 폐기한다. native resume token 또는 정제된 checkpoint로 재개하며, 완료 Tool Call 결과는 다시 실행하지 않는다. 만료된 lease 뒤 이전 fencing token의 event와 Tool Call은 거부한다. `LRH-003~008`, `MCP-002`
 
@@ -302,7 +302,7 @@ RecordApproval(target=Volume revision)
 |---|---|---|
 | Template | StepDefinition ID 유일성, 의존성 존재, 순환 없음 | 실행 상태 |
 | Job | Template snapshot과 대상 참조, Step 생성의 완전성 | 개별 Step 실행 상태의 장기 잠금 |
-| Step | StepState, Wait Reason, 시도 횟수, 제어 모드, 실행 리스, 펜싱 토큰, 리비전 | subprocess와 파일 내용 |
+| Step | StepState, Wait Reason, 시도 횟수, 실행 리스, 펜싱 토큰, 리비전 | subprocess와 파일 내용 |
 | OriginalAsset | 최초 checksum과 원래 이름의 불변성 | 파생 아티팩트 생애주기 |
 | Artifact | provenance 완전성, 검증 후 한 번만 게시 | 임시 출력 |
 | Approval | 승인자, 대상, 대상 리비전, 결정, 사유, 근거의 추가 전용 기록 | 대상 자체의 상태 |

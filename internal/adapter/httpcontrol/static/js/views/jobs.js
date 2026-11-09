@@ -295,7 +295,7 @@ export function mount(root, route) {
   let createOpen = false;
   let createPending = false;
   let createError = "";
-  const createDraft = { kind: "ARCHIVE", target_title: "", template_name: "occasion-recording", control_mode: "ASSISTED" };
+  const createDraft = { kind: "ARCHIVE", target_title: "", template_name: "occasion-recording" };
   const mediaCache = new Map();
   const mediaOpen = new Set();
   const mediaRequests = new Map();
@@ -361,7 +361,7 @@ export function mount(root, route) {
       await mutation("/api/v1/jobs", {
         job_id: jobID, command_id: newID("COMMAND"), idempotency_key: `${jobID}:create`,
         reason: "작업 관리에서 생성", template_name: createDraft.template_name,
-        target_title: createDraft.target_title.trim(), control_mode: createDraft.control_mode, expected_revision: 0,
+        target_title: createDraft.target_title.trim(), expected_revision: 0,
       });
       await refresh();
       if (!disposed) window.location.hash = `#/jobs/${encodeURIComponent(jobID)}`;
@@ -484,17 +484,10 @@ export function mount(root, route) {
       ["occasion-recording", "행사 기록"], ["vj-compilation", "VJ 모음"],
       ["final-edit", "최종 편집"], ["large-file-intake", "대용량 입고"],
     ].map(([value, text]) => el("option", { value, selected: value === createDraft.template_name }, text)));
-    const mode = el("select", {
-      id: "new-job-mode", name: "control_mode",
-      onchange: (event) => { createDraft.control_mode = event.target.value; },
-    }, ...["ASSISTED", "ARCHIVIST", "MANUAL"].map((value) => el("option", {
-      value, selected: value === createDraft.control_mode,
-    }, label("mode", value))));
     const submit = el("button", { type: "submit", class: "btn primary", id: "new-job-submit", disabled: createPending }, createPending ? "생성 중" : "생성");
     const form = el("form", { id: "new-job-form", class: "job-create-form", onsubmit: createJob },
       el("label", { class: "field" }, el("span", {}, "작업 이름"), title),
       el("label", { class: "field" }, el("span", {}, "작업 유형"), template),
-      el("label", { class: "field" }, el("span", {}, "제어 모드"), mode),
       el("div", { class: "form-actions" }, submit,
         el("button", { type: "button", class: "btn", disabled: createPending, onclick: () => { createOpen = false; createError = ""; renderList(); } }, "취소"),
         createError ? el("span", { id: "new-job-status", role: "status" }, createError) : null));
@@ -549,7 +542,7 @@ export function mount(root, route) {
     const lane = laneOf(summary);
     const linked = linkedFolder(job.job_id);
     const facts = [
-      ["작업 ID", summary.job_id], ["Template", summary.template_name], ["제어 모드", summary.control_mode],
+      ["작업 ID", summary.job_id], ["Template", summary.template_name],
       ["리비전", `r${summary.revision}`], ["Worker", summary.worker_id || "배정 없음"],
       ["현재 단계", summary.current_step_id], ["최근", shortTime(summary.last_event_at)],
       ["원본 위치", linked ? `${driveName(linked.drive)} / ${linked.folder.folder}` : "—"],

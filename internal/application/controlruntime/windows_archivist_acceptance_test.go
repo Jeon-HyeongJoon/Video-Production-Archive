@@ -101,7 +101,7 @@ workspace_roots:
 
 	cookie, csrfToken := runtimeSession(t, runtime.Handler())
 	origin := "http://127.0.0.1:8080"
-	humanJob := `{"job_id":"JOB-HUMAN-WINDOWS-1","command_id":"COMMAND-HUMAN-WINDOWS-1","idempotency_key":"windows-acceptance:human-job","reason":"Windows collaboration acceptance","template_name":"occasion-recording","target_title":"Human initiated work","control_mode":"MANUAL","expected_revision":0}`
+	humanJob := `{"job_id":"JOB-HUMAN-WINDOWS-1","command_id":"COMMAND-HUMAN-WINDOWS-1","idempotency_key":"windows-acceptance:human-job","reason":"Windows collaboration acceptance","template_name":"occasion-recording","target_title":"Human initiated work","expected_revision":0}`
 	if response := runtimeRequest(runtime.Handler(), http.MethodPost, "/api/v1/jobs", humanJob, cookie, csrfToken, origin); response.Code != http.StatusCreated {
 		t.Fatalf("human Command returned %d: %s", response.Code, response.Body.String())
 	}

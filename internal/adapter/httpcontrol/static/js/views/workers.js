@@ -98,7 +98,6 @@ function agentRow(session) {
     el("b", { class: "cell-main" }, session.name || session.session_id),
     el("span", { class: "num" }, session.archivist_host_id),
     el("span", { class: "num" }, session.cli_id),
-    el("span", {}, label("mode", session.control_mode || "ASSISTED")),
     el("span", { class: "cell-state", dataset: { signal } }, statusIcon(signal), text));
 }
 
@@ -143,7 +142,7 @@ export function mount(root, route) {
       root.querySelector("#connection-agent-count").textContent = String(model.sessions.length);
       workers.replaceChildren(...(model.workers.length ? model.workers.map((worker) => workerCard(worker, focusWorker)) : [emptyState("Worker PC 없음")]));
 		drives.replaceChildren(table("connection-drive-table", ["드라이브", "연결", "Worker", "단계", "보관 진행", "아카이브", "확인 필요"], model.drives.map(driveRow), "드라이브 없음"));
-      agents.replaceChildren(table("connection-agent-table", ["Agent", "Agent Host", "CLI", "제어 모드", "상태"], model.sessions.map(agentRow), "Agent 없음"));
+		agents.replaceChildren(table("connection-agent-table", ["Agent", "Agent Host", "CLI", "상태"], model.sessions.map(agentRow), "Agent 없음"));
       hosts.replaceChildren(table("connection-host-table", ["Agent Host", "상태", "감지된 CLI", "heartbeat"], model.hosts.map((host) => hostRow(host, focusHost)), "Agent Host 없음"));
       if (!scrolled && (focusWorker || focusHost)) {
         const selector = focusWorker ? `[data-worker-id="${CSS.escape(focusWorker)}"]` : `[data-host-id="${CSS.escape(focusHost)}"]`;

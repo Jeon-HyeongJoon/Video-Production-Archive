@@ -167,7 +167,7 @@ flowchart LR
 | Job | Template snapshot, Step DAG, StepState, WaitReason, lease, 실행 명세·출력 기록 | ArchiveRun 전체 선택 범위 |
 | ArchivePackage | 결과 영상, provenance, sidecar, manifest, revision, 보관 상태 | Control의 queue 상태 |
 | ArchiveCatalog | Archive Storage의 현재 검색·추적 투영 | package 전 HOLD·처리 중 상태 |
-| ArchivistSession·Turn | 대화 identity, Host·CLI, 제어 모드, lease·fencing, 정제된 항목 | Worker subprocess와 미디어 파일 경로 |
+| ArchivistSession·Turn | 대화 identity, Host·CLI, lease·fencing, 정제된 항목 | Worker subprocess와 미디어 파일 경로 |
 
 ArchiveRun은 영속 업무 identity와 선택 일관성 경계다. 현재 1·2단계 진행 상태는 최신 OrganizationDecision과 소유 Job을 읽어 계산한다. 명령의 STT 게이트는 Core 규칙을 사용하지만 화면의 실행 상태는 별도 요약 함수로 계산하므로 후속 단일화가 필요하다.
 

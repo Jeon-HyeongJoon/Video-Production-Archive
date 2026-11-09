@@ -81,6 +81,10 @@ func TestArchiveRunRecallQueuesOneSystemTurnPerTriggerWhileHostIsOffline(t *test
 			stored.Turn.WorkContext.OriginTurnID != turn.ID {
 			t.Fatalf("Turn was not joined by structured ArchiveRun work context: %+v", stored.Turn)
 		}
+		if stored.Turn.WorkReference == nil || stored.Turn.WorkReference.Kind != archivistruntime.WorkArchiveRun ||
+			stored.Turn.WorkReference.WorkID != "ARCHIVE-RUN-1" || stored.Turn.WorkReference.Revision != 1 {
+			t.Fatalf("Turn did not retain the persistent ArchiveRun handoff reference: %+v", stored.Turn)
+		}
 		triggers[stored.Turn.WorkContext.Trigger] = true
 		if stored.Turn.SubmittedBy == vocabulary.ActorSystem {
 			systemTurns++

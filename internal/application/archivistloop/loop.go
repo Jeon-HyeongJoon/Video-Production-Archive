@@ -290,8 +290,9 @@ func validResultID(value string) bool {
 func ToolProgress(name string) string {
 	summaries := map[string]string{
 		"archive.jobs.get.v1": "작업 상태 확인", "archive.assets.search.v1": "아카이브 자료 조회",
-		"archive.jobs.create.v1": "작업 요청", "archive.intake.selection.get.v1": "선택 범위 확인",
-		"archive.run.status.v1": "아카이브 실행 상태 확인", "archive.organization.holds.list.v1": "보류 목록 확인",
+		"archive.jobs.create.v1": "작업 요청", "archive.work.reference.get.v1": "이어갈 작업 확인",
+		"archive.intake.selection.get.v1": "선택 범위 확인",
+		"archive.run.status.v1":           "아카이브 실행 상태 확인", "archive.organization.holds.list.v1": "보류 목록 확인",
 		"archive.organization.hold.get.v1": "보류 항목 근거 확인", "archive.organization.hold.classify.v1": "보류 항목 분류 요청",
 		"archive.run.start.v1": "아카이브 실행 요청", "archive.run.transcription.start.v1": "전사 실행 요청",
 	}
@@ -335,6 +336,10 @@ func knownTools() map[string]ToolDefinition {
 			Name: "archive.jobs.get.v1", ProviderName: "archive_jobs_get_v1", Description: "Get one persistent Archive job by job ID.",
 			Parameters: objectSchema(map[string]any{"job_id": stringProperty("Persistent job ID")}, "job_id"),
 		},
+		"archive.work.reference.get.v1": {
+			Name: "archive.work.reference.get.v1", ProviderName: "archive_work_reference_get_v1", Description: "Read the persistent work kind, ID, and revision fixed to this turn for mid-work handoff.",
+			Parameters: objectSchema(map[string]any{}),
+		},
 		"archive.assets.search.v1": {
 			Name: "archive.assets.search.v1", ProviderName: "archive_assets_search_v1", Description: "Search archived assets by text, codec, and duration range.",
 			Parameters: objectSchema(map[string]any{
@@ -345,7 +350,7 @@ func knownTools() map[string]ToolDefinition {
 			}),
 		},
 		"archive.jobs.create.v1": {
-			Name: "archive.jobs.create.v1", ProviderName: "archive_jobs_create_v1", Description: "Create or propose one Archive job within the current control mode.",
+			Name: "archive.jobs.create.v1", ProviderName: "archive_jobs_create_v1", Description: "Create one persistent Archive job through the shared command path.",
 			Parameters: objectSchema(map[string]any{
 				"job_id": stringProperty("New persistent job ID"), "template_name": stringProperty("Registered template name"),
 				"target_title": stringProperty("Human-readable target title"), "reason": stringProperty("Why the job is requested"),

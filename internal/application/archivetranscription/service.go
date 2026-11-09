@@ -19,7 +19,6 @@ import (
 	"videoarchive/internal/core/pipeline"
 	"videoarchive/internal/core/resource"
 	"videoarchive/internal/core/vocabulary"
-	"videoarchive/internal/core/workflow"
 )
 
 var (
@@ -195,7 +194,7 @@ func (service *Service) createJob(request StartRequest, archiveRun archiverun.St
 		IdempotencyKey: request.IdempotencyKey + ":job:" + recording.ArchivePackageID,
 		Parameters: map[string]any{
 			"template_name": template.Name, "target_title": recording.FolderID,
-			"control_mode": workflow.AssistedMode, "execution_priority": resource.Immediate,
+			"execution_priority":   resource.Immediate,
 			"required_storage_ids": []string{archiveRun.ArchiveStorageID},
 			"physical_device_ids":  nonEmptyString(archiveRun.SourcePhysicalDeviceID),
 			"step_execution_specs": map[string]execution.StepExecutionSpec{"audio": spec},

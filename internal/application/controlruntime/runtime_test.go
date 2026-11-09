@@ -27,6 +27,7 @@ import (
 	"videoarchive/internal/adapter/sqlitestorage"
 	"videoarchive/internal/adapter/workerconfig"
 	"videoarchive/internal/application/archiveorganization"
+	"videoarchive/internal/application/archivistcontrol"
 	"videoarchive/internal/application/workerclient"
 	"videoarchive/internal/core/archive"
 	"videoarchive/internal/core/asset"
@@ -39,7 +40,6 @@ import (
 	"videoarchive/internal/core/transcription"
 	"videoarchive/internal/core/vocabulary"
 	"videoarchive/internal/core/worker"
-	"videoarchive/internal/core/workflow"
 )
 
 // Requirement: CTL-002
@@ -503,7 +503,7 @@ func TestBrowserCommandCreatesPersistentJobWithCSRFAndIdempotency(t *testing.T) 
 		t.Fatal(err)
 	}
 
-	create := `{"job_id":"JOB-HTTP-1","command_id":"COMMAND-CREATE-1","idempotency_key":"JOB-HTTP-1:create","reason":"operator created occasion job","template_name":"occasion-recording","target_title":"가을 행사","control_mode":"MANUAL","expected_revision":0}`
+	create := `{"job_id":"JOB-HTTP-1","command_id":"COMMAND-CREATE-1","idempotency_key":"JOB-HTTP-1:create","reason":"operator created occasion job","template_name":"occasion-recording","target_title":"가을 행사","expected_revision":0}`
 	denied := runtimeRequest(runtime.Handler(), http.MethodPost, "/api/v1/jobs", create, nil, "", "")
 	if denied.Code != http.StatusForbidden {
 		t.Fatalf("mutation without browser proof returned %d: %s", denied.Code, denied.Body.String())
@@ -594,7 +594,7 @@ func TestControlRebuildsMissingJobProjectionFromAuthoritativeLedgerAtStartup(t *
 		t.Fatal(err)
 	}
 	cookie, token := runtimeSession(t, runtime.Handler())
-	create := `{"job_id":"JOB-REBUILD-1","command_id":"COMMAND-REBUILD-1","idempotency_key":"JOB-REBUILD-1:create","reason":"create rebuild fixture","template_name":"occasion-recording","target_title":"재구축 작업","control_mode":"MANUAL","expected_revision":0}`
+	create := `{"job_id":"JOB-REBUILD-1","command_id":"COMMAND-REBUILD-1","idempotency_key":"JOB-REBUILD-1:create","reason":"create rebuild fixture","template_name":"occasion-recording","target_title":"재구축 작업","expected_revision":0}`
 	created := runtimeRequest(runtime.Handler(), http.MethodPost, "/api/v1/jobs", create, cookie, token, "http://127.0.0.1:8080")
 	if created.Code != http.StatusCreated {
 		runtime.Close()
@@ -647,7 +647,7 @@ func TestBrowserCancelCommandUsesExpectedRevisionAndWorkflowTransition(t *testin
 	defer runtime.Close()
 	cookie, token := runtimeSession(t, runtime.Handler())
 	origin := "http://127.0.0.1:8080"
-	create := `{"job_id":"JOB-CANCEL-1","command_id":"COMMAND-CREATE","idempotency_key":"JOB-CANCEL-1:create","reason":"create cancellable job","template_name":"final-edit","target_title":"최종 편집본","control_mode":"ASSISTED","expected_revision":0}`
+	create := `{"job_id":"JOB-CANCEL-1","command_id":"COMMAND-CREATE","idempotency_key":"JOB-CANCEL-1:create","reason":"create cancellable job","template_name":"final-edit","target_title":"최종 편집본","expected_revision":0}`
 	if response := runtimeRequest(runtime.Handler(), http.MethodPost, "/api/v1/jobs", create, cookie, token, origin); response.Code != http.StatusCreated {
 		t.Fatalf("create returned %d: %s", response.Code, response.Body.String())
 	}
@@ -668,7 +668,7 @@ func TestBrowserCancelCommandUsesExpectedRevisionAndWorkflowTransition(t *testin
 }
 
 // Requirement: CTL-006
-func TestArchivistAddAPIAcceptsOnlyNameRegisteredHostDetectedCLIAndControlMode(t *testing.T) {
+func TestArchivistAddAPIAcceptsOnlyNameRegisteredHostAndDetectedCLI(t *testing.T) {
 	configuration := runtimeTestConfiguration(t)
 	runtime, err := controlruntime.Open(context.Background(), configuration, "v1-test")
 	if err != nil {
@@ -676,7 +676,7 @@ func TestArchivistAddAPIAcceptsOnlyNameRegisteredHostDetectedCLIAndControlMode(t
 	}
 	cookie, token := runtimeSession(t, runtime.Handler())
 	origin := "http://127.0.0.1:8080"
-	payload := `{"session_id":"SESSION-HTTP-1","name":"Archive Archivist","archivist_host_id":"archivist-windows","cli_id":"codex","control_mode":"ASSISTED"}`
+	payload := `{"session_id":"SESSION-HTTP-1","name":"Archive Archivist","archivist_host_id":"archivist-windows","cli_id":"codex"}`
 	if denied := runtimeRequest(runtime.Handler(), http.MethodPost, "/api/v1/archivist-sessions", payload, nil, "", ""); denied.Code != http.StatusForbidden {
 		t.Fatalf("session mutation without browser proof returned %d: %s", denied.Code, denied.Body.String())
 	}
@@ -709,8 +709,7 @@ func TestArchivistAddAPIAcceptsOnlyNameRegisteredHostDetectedCLIAndControlMode(t
 	defer restarted.Close()
 	view := runtimeRequest(restarted.Handler(), http.MethodGet, "/api/v1/archivist-sessions", "", nil, "", "")
 	if view.Code != http.StatusOK || !strings.Contains(view.Body.String(), `"archivist_host_id":"archivist-windows"`) ||
-		!strings.Contains(view.Body.String(), `"workspace_root_id":"video-project"`) ||
-		!strings.Contains(view.Body.String(), `"control_mode":"ASSISTED"`) {
+		!strings.Contains(view.Body.String(), `"workspace_root_id":"video-project"`) || strings.Contains(view.Body.String(), `"control_mode"`) {
 		t.Fatalf("durable pinned session response=%d %s", view.Code, view.Body.String())
 	}
 }
@@ -865,7 +864,7 @@ func TestControlMCPExposesOnlyAuthenticatedVersionedBusinessCapabilities(t *test
 			t.Fatalf("MCP exposed forbidden capability %q: %s", forbidden, body)
 		}
 	}
-	setupRunningArchivistTurn(t, runtime, "SESSION-MCP-1", "TURN-MCP-1", "REQUEST-MCP-1", workflow.AssistedMode)
+	setupRunningArchivistTurn(t, runtime, "SESSION-MCP-1", "TURN-MCP-1", "REQUEST-MCP-1")
 	unsafe := `{"session_id":"SESSION-MCP-1","turn_id":"TURN-MCP-1","fencing_token":1,"tool_call_id":"CALL-UNSAFE","command_id":"COMMAND-UNSAFE","idempotency_key":"unsafe:1","input_digest":"sha256:unsafe","tool":"run_shell","input":{}}`
 	response := mcpRequest(proxy, http.MethodPost, "/mcp/v1/call", unsafe, "local-cli-does-not-receive-service-secret")
 	if response.Code != http.StatusNotFound || !strings.Contains(response.Body.String(), "MCP_CAPABILITY_NOT_FOUND") {
@@ -886,18 +885,22 @@ func TestHumanAndArchivistCommandsShareOneLedgerAndWorkspaceReadModel(t *testing
 	defer runtime.Close()
 	cookie, token := runtimeSession(t, runtime.Handler())
 	origin := "http://127.0.0.1:8080"
-	human := `{"job_id":"JOB-HUMAN-1","command_id":"COMMAND-HUMAN-1","idempotency_key":"JOB-HUMAN-1:create","reason":"operator starts shared work","template_name":"occasion-recording","target_title":"사람 시작 작업","control_mode":"ARCHIVIST","expected_revision":0}`
+	human := `{"job_id":"JOB-HUMAN-1","command_id":"COMMAND-HUMAN-1","idempotency_key":"JOB-HUMAN-1:create","reason":"operator starts shared work","template_name":"occasion-recording","target_title":"사람 시작 작업","expected_revision":0}`
 	if response := runtimeRequest(runtime.Handler(), http.MethodPost, "/api/v1/jobs", human, cookie, token, origin); response.Code != http.StatusCreated {
 		t.Fatalf("human command returned %d: %s", response.Code, response.Body.String())
 	}
-	setupRunningArchivistTurn(t, runtime, "SESSION-COLLAB-1", "TURN-COLLAB-1", "REQUEST-COLLAB-1", workflow.ArchivistMode)
+	setupRunningArchivistTurn(t, runtime, "SESSION-COLLAB-1", "TURN-COLLAB-1", "REQUEST-COLLAB-1")
 	read := `{"session_id":"SESSION-COLLAB-1","turn_id":"TURN-COLLAB-1","fencing_token":1,"tool_call_id":"CALL-READ-1","command_id":"COMMAND-READ-1","idempotency_key":"CALL-READ-1","input_digest":"sha256:read","tool":"archive.jobs.get.v1","input":{"job_id":"JOB-HUMAN-1"}}`
 	if response := mcpRequest(runtime.MCPHandler(), http.MethodPost, "/mcp/v1/call", read, "runtime-service-secret"); response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "사람 시작 작업") {
 		t.Fatalf("archivist could not read human work context: %d %s", response.Code, response.Body.String())
 	}
-	archivist := `{"session_id":"SESSION-COLLAB-1","turn_id":"TURN-COLLAB-1","fencing_token":1,"tool_call_id":"CALL-CREATE-1","command_id":"COMMAND-ARCHIVIST-1","idempotency_key":"CALL-CREATE-1","input_digest":"sha256:create","tool":"archive.jobs.create.v1","input":{"job_id":"JOB-ARCHIVIST-1","template_name":"final-edit","target_title":"Archivist 시작 작업","control_mode":"MANUAL","reason":"archivist starts allowed work"}}`
+	archivist := `{"session_id":"SESSION-COLLAB-1","turn_id":"TURN-COLLAB-1","fencing_token":1,"tool_call_id":"CALL-CREATE-1","command_id":"COMMAND-ARCHIVIST-1","idempotency_key":"CALL-CREATE-1","input_digest":"sha256:create","tool":"archive.jobs.create.v1","input":{"job_id":"JOB-ARCHIVIST-1","template_name":"final-edit","target_title":"Archivist 시작 작업","reason":"archivist starts allowed work"}}`
 	if response := mcpRequest(runtime.MCPHandler(), http.MethodPost, "/mcp/v1/call", archivist, "runtime-service-secret"); response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"revision":1`) {
 		t.Fatalf("archivist command returned %d: %s", response.Code, response.Body.String())
+	}
+	humanContinuation := `{"command_id":"COMMAND-HUMAN-CONTINUE-1","idempotency_key":"JOB-ARCHIVIST-1:human-continue","reason":"operator continues after Archivist unavailable","expected_revision":1}`
+	if response := runtimeRequest(runtime.Handler(), http.MethodPost, "/api/v1/jobs/JOB-ARCHIVIST-1/cancel", humanContinuation, cookie, token, origin); response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"revision":2`) {
+		t.Fatalf("human could not continue Archivist work: %d %s", response.Code, response.Body.String())
 	}
 	workspace := runtimeRequest(runtime.Handler(), http.MethodGet, "/api/v1/jobs", "", nil, "", "")
 	if workspace.Code != http.StatusOK || !strings.Contains(workspace.Body.String(), "JOB-HUMAN-1") || !strings.Contains(workspace.Body.String(), "JOB-ARCHIVIST-1") {
@@ -938,12 +941,8 @@ func TestExplicitActionCardExecutionRunsProposedCommandAndUpdatesProjection(t *t
 		t.Fatal(err)
 	}
 	defer runtime.Close()
-	setupRunningArchivistTurn(t, runtime, "SESSION-ACTION-1", "TURN-ACTION-1", "REQUEST-ACTION-1", workflow.AssistedMode)
-	proposal := `{"session_id":"SESSION-ACTION-1","turn_id":"TURN-ACTION-1","fencing_token":1,"tool_call_id":"CALL-ACTION-1","command_id":"COMMAND-ACTION-1","idempotency_key":"CALL-ACTION-1","input_digest":"sha256:action","tool":"archive.jobs.create.v1","input":{"job_id":"JOB-ACTION-1","template_name":"final-edit","target_title":"카드 실행 작업","control_mode":"ARCHIVIST","reason":"archivist proposes assisted work"}}`
-	proposed := mcpRequest(runtime.MCPHandler(), http.MethodPost, "/mcp/v1/call", proposal, "runtime-service-secret")
-	if proposed.Code != http.StatusAccepted || !strings.Contains(proposed.Body.String(), `"action_card_id":"ACTION-CALL-ACTION-1"`) {
-		t.Fatalf("proposal returned %d: %s", proposed.Code, proposed.Body.String())
-	}
+	setupRunningArchivistTurn(t, runtime, "SESSION-ACTION-1", "TURN-ACTION-1", "REQUEST-ACTION-1")
+	seedJobActionCard(t, configuration.DatabasePath, "ACTION-CALL-ACTION-1", "COMMAND-ACTION-1", "JOB-ACTION-1", "카드 실행 작업")
 	before := runtimeRequest(runtime.Handler(), http.MethodGet, "/api/v1/archivist-sessions", "", nil, "", "")
 	if !strings.Contains(before.Body.String(), `"action_card_id":"ACTION-CALL-ACTION-1"`) || !strings.Contains(before.Body.String(), `"state":"PENDING"`) {
 		t.Fatalf("pending ActionCard not projected: %s", before.Body.String())
@@ -959,11 +958,7 @@ func TestExplicitActionCardExecutionRunsProposedCommandAndUpdatesProjection(t *t
 		t.Fatalf("completed ActionCard or Job projection missing: sessions=%s job=%s", after.Body.String(), job.Body.String())
 	}
 
-	rejectProposal := `{"session_id":"SESSION-ACTION-1","turn_id":"TURN-ACTION-1","fencing_token":1,"tool_call_id":"CALL-ACTION-REJECT-1","command_id":"COMMAND-ACTION-REJECT-1","idempotency_key":"CALL-ACTION-REJECT-1","input_digest":"sha256:action-reject","tool":"archive.jobs.create.v1","input":{"job_id":"JOB-ACTION-REJECT-1","template_name":"final-edit","target_title":"거절할 카드 작업","control_mode":"ARCHIVIST","reason":"archivist proposes rejected work"}}`
-	proposed = mcpRequest(runtime.MCPHandler(), http.MethodPost, "/mcp/v1/call", rejectProposal, "runtime-service-secret")
-	if proposed.Code != http.StatusAccepted || !strings.Contains(proposed.Body.String(), `"action_card_id":"ACTION-CALL-ACTION-REJECT-1"`) {
-		t.Fatalf("reject proposal returned %d: %s", proposed.Code, proposed.Body.String())
-	}
+	seedJobActionCard(t, configuration.DatabasePath, "ACTION-CALL-ACTION-REJECT-1", "COMMAND-ACTION-REJECT-1", "JOB-ACTION-REJECT-1", "거절할 카드 작업")
 	rejected := runtimeRequest(runtime.Handler(), http.MethodPost, "/api/v1/action-cards/ACTION-CALL-ACTION-REJECT-1/reject", `{"reason":"담당자 범위와 다름"}`, cookie, token, "http://127.0.0.1:8080")
 	if rejected.Code != http.StatusOK || !strings.Contains(rejected.Body.String(), `"state":"REJECTED"`) {
 		t.Fatalf("explicit card rejection returned %d: %s", rejected.Code, rejected.Body.String())
@@ -977,10 +972,7 @@ func TestExplicitActionCardExecutionRunsProposedCommandAndUpdatesProjection(t *t
 		t.Fatalf("rejected card changed domain state: sessions=%s job=%d execute=%d %s", afterReject.Body.String(), rejectedJob.Code, refusedExecution.Code, refusedExecution.Body.String())
 	}
 
-	raceProposal := `{"session_id":"SESSION-ACTION-1","turn_id":"TURN-ACTION-1","fencing_token":1,"tool_call_id":"CALL-ACTION-RACE-1","command_id":"COMMAND-ACTION-RACE-1","idempotency_key":"CALL-ACTION-RACE-1","input_digest":"sha256:action-race","tool":"archive.jobs.create.v1","input":{"job_id":"JOB-ACTION-RACE-1","template_name":"final-edit","target_title":"경합 카드 작업","control_mode":"ARCHIVIST","reason":"race action card"}}`
-	if proposed = mcpRequest(runtime.MCPHandler(), http.MethodPost, "/mcp/v1/call", raceProposal, "runtime-service-secret"); proposed.Code != http.StatusAccepted {
-		t.Fatalf("race proposal returned %d: %s", proposed.Code, proposed.Body.String())
-	}
+	seedJobActionCard(t, configuration.DatabasePath, "ACTION-CALL-ACTION-RACE-1", "COMMAND-ACTION-RACE-1", "JOB-ACTION-RACE-1", "경합 카드 작업")
 	start := make(chan struct{})
 	responses := make(chan *httptest.ResponseRecorder, 2)
 	var wait sync.WaitGroup
@@ -1021,6 +1013,29 @@ func TestExplicitActionCardExecutionRunsProposedCommandAndUpdatesProjection(t *t
 }
 
 type runtimeSecret string
+
+func seedJobActionCard(t *testing.T, databasePath, cardID, commandID, jobID, title string) {
+	t.Helper()
+	card := archivistcontrol.ActionCardProjection{
+		ID: cardID, ArchivistTurnID: "TURN-ACTION-1", CommandType: job.CreateCommand,
+		TargetID: jobID, ExpectedRevision: 0, State: "PENDING", CommandID: commandID,
+		IdempotencyKey: cardID, Reason: "approval-gated proposal", Basis: []string{"policy: GATED"},
+		Parameters: map[string]any{"template_name": "final-edit", "target_title": title},
+	}
+	payload, err := json.Marshal(card)
+	if err != nil {
+		t.Fatal(err)
+	}
+	database, err := sql.Open("sqlite", databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if _, err := database.Exec(`INSERT INTO archivist_action_cards(action_card_id, session_id, turn_id, payload) VALUES (?, ?, ?, ?)`,
+		card.ID, "SESSION-ACTION-1", card.ArchivistTurnID, payload); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func (secret runtimeSecret) Resolve(string) (string, error) { return string(secret), nil }
 
@@ -1063,7 +1078,7 @@ func TestWorkerClaimsReservedStepAndAtomicallySettlesResultReservationAndProject
 	}
 	defer runtime.Close()
 	cookie, token := runtimeSession(t, runtime.Handler())
-	create := `{"job_id":"JOB-WORKER-LOOP-1","command_id":"COMMAND-WORKER-LOOP-1","idempotency_key":"JOB-WORKER-LOOP-1:create","reason":"worker protocol integration","template_name":"large-file-intake","target_title":"대용량 입고","control_mode":"ARCHIVIST","expected_revision":0}`
+	create := `{"job_id":"JOB-WORKER-LOOP-1","command_id":"COMMAND-WORKER-LOOP-1","idempotency_key":"JOB-WORKER-LOOP-1:create","reason":"worker protocol integration","template_name":"large-file-intake","target_title":"대용량 입고","expected_revision":0}`
 	if response := runtimeRequest(runtime.Handler(), http.MethodPost, "/api/v1/jobs", create, cookie, token, "http://127.0.0.1:8080"); response.Code != http.StatusCreated {
 		t.Fatalf("create returned %d: %s", response.Code, response.Body.String())
 	}
@@ -1123,7 +1138,7 @@ func TestReservedJobCancellationAtomicallyFencesLeaseAndReleasesReservation(t *t
 	}
 	defer runtime.Close()
 	cookie, token := runtimeSession(t, runtime.Handler())
-	create := `{"job_id":"JOB-RESERVED-CANCEL-1","command_id":"COMMAND-RESERVED-CREATE","idempotency_key":"JOB-RESERVED-CANCEL-1:create","reason":"reserved cancellation integration","template_name":"large-file-intake","target_title":"예약 취소","control_mode":"MANUAL","expected_revision":0}`
+	create := `{"job_id":"JOB-RESERVED-CANCEL-1","command_id":"COMMAND-RESERVED-CREATE","idempotency_key":"JOB-RESERVED-CANCEL-1:create","reason":"reserved cancellation integration","template_name":"large-file-intake","target_title":"예약 취소","expected_revision":0}`
 	if response := runtimeRequest(runtime.Handler(), http.MethodPost, "/api/v1/jobs", create, cookie, token, "http://127.0.0.1:8080"); response.Code != http.StatusCreated {
 		t.Fatalf("create returned %d: %s", response.Code, response.Body.String())
 	}
@@ -1227,7 +1242,7 @@ func TestWorkerCancellationStopAndCleanupSettlesJobRemainderAtomically(t *testin
 		t.Fatal(err)
 	}
 	cookie, token := runtimeSession(t, runtime.Handler())
-	create := `{"job_id":"JOB-CANCEL-LOOP-1","command_id":"COMMAND-CANCEL-LOOP-CREATE","idempotency_key":"JOB-CANCEL-LOOP-1:create","reason":"Worker cancellation loop","template_name":"occasion-recording","target_title":"실행 중 정리 취소","control_mode":"ARCHIVIST","expected_revision":0}`
+	create := `{"job_id":"JOB-CANCEL-LOOP-1","command_id":"COMMAND-CANCEL-LOOP-CREATE","idempotency_key":"JOB-CANCEL-LOOP-1:create","reason":"Worker cancellation loop","template_name":"occasion-recording","target_title":"실행 중 정리 취소","expected_revision":0}`
 	if response := runtimeRequest(runtime.Handler(), http.MethodPost, "/api/v1/jobs", create, cookie, token, "http://127.0.0.1:8080"); response.Code != http.StatusCreated {
 		t.Fatalf("create returned %d: %s", response.Code, response.Body.String())
 	}
@@ -1306,7 +1321,7 @@ func TestCancellationPartialReleasesStoppedProcessAndUncertainProcessQuarantines
 	if response := workerProtocolRequest(runtime.Handler(), "/worker/v1/steps/cancellation-result", uncertainResult, "service-secret"); response.Code != http.StatusOK {
 		t.Fatalf("uncertain cancellation result returned %d: %s", response.Code, response.Body.String())
 	}
-	queuedCreate := `{"job_id":"JOB-AFTER-UNCERTAIN","command_id":"COMMAND-AFTER-UNCERTAIN","idempotency_key":"JOB-AFTER-UNCERTAIN:create","reason":"must remain queued while Worker is isolated","template_name":"large-file-intake","target_title":"격리 뒤 작업","control_mode":"ARCHIVIST","expected_revision":0}`
+	queuedCreate := `{"job_id":"JOB-AFTER-UNCERTAIN","command_id":"COMMAND-AFTER-UNCERTAIN","idempotency_key":"JOB-AFTER-UNCERTAIN:create","reason":"must remain queued while Worker is isolated","template_name":"large-file-intake","target_title":"격리 뒤 작업","expected_revision":0}`
 	if response := runtimeRequest(runtime.Handler(), http.MethodPost, "/api/v1/jobs", queuedCreate, cookie, token, "http://127.0.0.1:8080"); response.Code != http.StatusCreated {
 		t.Fatalf("queued job creation returned %d: %s", response.Code, response.Body.String())
 	}
@@ -1488,7 +1503,7 @@ func workerSuccessResult(t *testing.T, databasePath, jobID, stepID string, fenci
 
 func createRunningWorkerJob(t *testing.T, handler http.Handler, databasePath string, cookie *http.Cookie, token, jobID string, snapshotID uint64, observedAt time.Time) {
 	t.Helper()
-	create := fmt.Sprintf(`{"job_id":%q,"command_id":%q,"idempotency_key":%q,"reason":"race setup","template_name":"large-file-intake","target_title":"Worker 실행","control_mode":"ARCHIVIST","expected_revision":0}`, jobID, "COMMAND-CREATE-"+jobID, jobID+":create")
+	create := fmt.Sprintf(`{"job_id":%q,"command_id":%q,"idempotency_key":%q,"reason":"race setup","template_name":"large-file-intake","target_title":"Worker 실행","expected_revision":0}`, jobID, "COMMAND-CREATE-"+jobID, jobID+":create")
 	if response := runtimeRequest(handler, http.MethodPost, "/api/v1/jobs", create, cookie, token, "http://127.0.0.1:8080"); response.Code != http.StatusCreated {
 		t.Fatalf("create %s returned %d: %s", jobID, response.Code, response.Body.String())
 	}
@@ -1779,11 +1794,11 @@ func mcpRequest(handler http.Handler, method, path, body, credential string) *ht
 	return recorder
 }
 
-func setupRunningArchivistTurn(t *testing.T, runtime *controlruntime.Runtime, sessionID, turnID, requestID string, mode workflow.ControlMode) {
+func setupRunningArchivistTurn(t *testing.T, runtime *controlruntime.Runtime, sessionID, turnID, requestID string) {
 	t.Helper()
 	cookie, token := runtimeSession(t, runtime.Handler())
 	origin := "http://127.0.0.1:8080"
-	session := fmt.Sprintf(`{"session_id":%q,"name":"Test Archivist","archivist_host_id":"archivist-windows","cli_id":"codex","control_mode":%q}`, sessionID, mode)
+	session := fmt.Sprintf(`{"session_id":%q,"name":"Test Archivist","archivist_host_id":"archivist-windows","cli_id":"codex"}`, sessionID)
 	if response := runtimeRequest(runtime.Handler(), http.MethodPost, "/api/v1/archivist-sessions", session, cookie, token, origin); response.Code != http.StatusCreated {
 		t.Fatalf("session create returned %d: %s", response.Code, response.Body.String())
 	}

@@ -1,6 +1,8 @@
 package workflow
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -45,14 +47,26 @@ func TestWorkflowAllowsOnlyDeclaredTransitionsAndFreezesTerminalState(t *testing
 }
 
 // Requirement: WFL-003
-func TestManualTakeoverPreservesWorkerExecutionLeaseAndState(t *testing.T) {
+func TestHumanContinuationPreservesWorkerExecutionLeaseAndState(t *testing.T) {
 	lease := &ExecutionLease{OwnerWorkerID: "worker-1", ExpiresAt: time.Now().Add(time.Minute), FencingToken: 7}
-	s := Step{State: Running, ControlMode: ArchivistMode, ExecutionLease: lease}
-	if err := s.TakeManualControl(); err != nil {
+	step := Step{ID: "render", State: Running, ExecutionLease: lease}
+	before, err := json.Marshal(step)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if s.ControlMode != ManualMode || s.ExecutionLease != lease || s.State != Running {
-		t.Fatalf("unexpected takeover result: %+v", s)
+	agentActor := struct {
+		Type vocabulary.ActorType
+		ID   string
+	}{Type: vocabulary.ActorArchivist, ID: "archivist-1"}
+	humanActor := agentActor
+	humanActor.Type, humanActor.ID = vocabulary.ActorHuman, "operator-1"
+	after, err := json.Marshal(step)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if agentActor == humanActor || !bytes.Equal(before, after) || bytes.Contains(after, []byte("control_mode")) ||
+		step.ExecutionLease != lease || step.State != Running {
+		t.Fatalf("continuation changed persistent work execution: agent=%+v human=%+v step=%+v", agentActor, humanActor, step)
 	}
 }
 
@@ -162,9 +176,6 @@ func TestTerminalStepRejectsEveryPublicMutation(t *testing.T) {
 	now := time.Now()
 	for _, state := range []StepState{Completed, Failed, Cancelled} {
 		s := Step{State: state, MaxAttempts: 2}
-		if err := s.TakeManualControl(); !errors.Is(err, ErrIllegalTransition) {
-			t.Fatalf("%s manual mutation accepted: %v", state, err)
-		}
 		if err := s.RecordFailure(Failure{Class: FailureTransient}); !errors.Is(err, ErrIllegalTransition) {
 			t.Fatalf("%s failure mutation accepted: %v", state, err)
 		}

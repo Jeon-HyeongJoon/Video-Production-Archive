@@ -28,7 +28,6 @@ import (
 	"videoarchive/internal/core/summary"
 	"videoarchive/internal/core/transcription"
 	"videoarchive/internal/core/worker"
-	"videoarchive/internal/core/workflow"
 )
 
 var ErrInvalidConfiguration = errors.New("HTTP control configuration is invalid")
@@ -69,8 +68,9 @@ type ArchiveIntakeSelector interface {
 
 type ArchivistWorkspace interface {
 	CreateSession(context.Context, archivistruntime.SessionSpec, string) (archivistcontrol.SessionRecord, error)
-	CreateArchivist(context.Context, string, string, string, string, workflow.ControlMode) (archivistcontrol.SessionRecord, error)
+	CreateArchivist(context.Context, string, string, string, string) (archivistcontrol.SessionRecord, error)
 	SubmitTurnWithDriveSelection(context.Context, string, string, string, string, *archivistruntime.DriveSelection) (archivistcontrol.TurnRecord, error)
+	SubmitTurnWithReferences(context.Context, string, string, string, string, *archivistruntime.DriveSelection, *archivistruntime.WorkReference) (archivistcontrol.TurnRecord, error)
 	Projection(context.Context) ([]archivistcontrol.SessionProjection, error)
 	HostStatuses() []archivistruntime.HostStatus
 	HostProfiles() []archivistruntime.HostProfile

@@ -323,7 +323,7 @@ func claimHarness(t *testing.T, withSpec, tamper bool) (http.Handler, *sqlitecom
 	}
 	parameters := map[string]any{
 		"template_name": "archive-intake-render-recordings", "target_title": "render",
-		"control_mode": workflow.ArchivistMode, "required_storage_ids": []string{"scratch-main"},
+		"required_storage_ids": []string{"scratch-main"},
 	}
 	if withSpec {
 		parameters["step_execution_specs"] = map[string]execution.StepExecutionSpec{"render": spec}

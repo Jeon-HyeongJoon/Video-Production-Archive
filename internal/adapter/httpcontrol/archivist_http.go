@@ -15,7 +15,6 @@ import (
 	"videoarchive/internal/core/command"
 	"videoarchive/internal/core/security"
 	"videoarchive/internal/core/vocabulary"
-	"videoarchive/internal/core/workflow"
 )
 
 func (handler *Handler) archivistHostStatuses(writer http.ResponseWriter, _ *http.Request) {
@@ -42,15 +41,15 @@ func (handler *Handler) archivistSessions(writer http.ResponseWriter, request *h
 		view := archivistSessionView{
 			SessionID: projection.Session.ID, Name: projection.Session.Name, ArchivistHostID: projection.Session.ArchivistHostID,
 			Backend: string(projection.Session.Backend), CLIID: projection.Session.CLIID,
-			WorkspaceRootID: projection.Session.WorkspaceRootID, ControlMode: string(projection.Session.ControlMode),
-			JobID: projection.JobID, CreatedAt: projection.CreatedAt,
+			WorkspaceRootID: projection.Session.WorkspaceRootID,
+			JobID:           projection.JobID, CreatedAt: projection.CreatedAt,
 		}
 		for _, turn := range projection.Turns {
 			turnView := archivistTurnView{
 				TurnID: turn.ID, RequestID: turn.RequestID, State: turn.State,
 				Prompt: safeArchivistPrompt(turn.Prompt), SubmittedBy: string(turn.SubmittedBy),
 				CreatedAt: turn.CreatedAt, UpdatedAt: turn.UpdatedAt, FinalResponse: turn.FinalResponse,
-				Entries: turn.Entries, DriveSelection: turn.DriveSelection, WorkContext: turn.WorkContext,
+				Entries: turn.Entries, DriveSelection: turn.DriveSelection, WorkReference: turn.WorkReference, WorkContext: turn.WorkContext,
 			}
 			for _, call := range turn.ToolCalls {
 				turnView.ToolCalls = append(turnView.ToolCalls, archivistToolCallView{
@@ -108,7 +107,6 @@ type createArchivistSessionRequest struct {
 	CLIID           string `json:"cli_id"`
 	WorkspaceRootID string `json:"workspace_root_id"`
 	JobID           string `json:"job_id"`
-	ControlMode     string `json:"control_mode"`
 }
 
 func (handler *Handler) createArchivistSession(writer http.ResponseWriter, request *http.Request) {
@@ -121,12 +119,12 @@ func (handler *Handler) createArchivistSession(writer http.ResponseWriter, reque
 	}
 	var record archivistcontrol.SessionRecord
 	var err error
-	if strings.TrimSpace(payload.Name) != "" || strings.TrimSpace(payload.ControlMode) != "" {
+	if strings.TrimSpace(payload.Name) != "" {
 		if strings.TrimSpace(payload.Backend) != "" || strings.TrimSpace(payload.WorkspaceRootID) != "" || strings.TrimSpace(payload.JobID) != "" {
 			writeArchivistError(writer, archivistcontrol.ErrInvalidRequest)
 			return
 		}
-		record, err = handler.archivists.CreateArchivist(request.Context(), payload.SessionID, payload.Name, payload.ArchivistHostID, payload.CLIID, workflow.ControlMode(payload.ControlMode))
+		record, err = handler.archivists.CreateArchivist(request.Context(), payload.SessionID, payload.Name, payload.ArchivistHostID, payload.CLIID)
 	} else {
 		record, err = handler.archivists.CreateSession(request.Context(), archivistruntime.SessionSpec{
 			ID: payload.SessionID, ArchivistHostID: payload.ArchivistHostID,
@@ -139,7 +137,7 @@ func (handler *Handler) createArchivistSession(writer http.ResponseWriter, reque
 	}
 	writeJSON(writer, http.StatusCreated, map[string]any{"data": map[string]any{
 		"session_id": record.Session.ID, "archivist_host_id": record.Session.ArchivistHostID,
-		"name": record.Session.Name, "control_mode": record.Session.ControlMode,
+		"name":    record.Session.Name,
 		"backend": record.Session.Backend, "cli_id": record.Session.CLIID,
 		"workspace_root_id": record.Session.WorkspaceRootID, "job_id": record.JobID,
 	}})
@@ -150,6 +148,7 @@ type createArchivistTurnRequest struct {
 	RequestID      string                           `json:"request_id"`
 	Prompt         string                           `json:"prompt"`
 	DriveSelection *archivistruntime.DriveSelection `json:"drive_selection,omitempty"`
+	WorkReference  *archivistruntime.WorkReference  `json:"work_reference,omitempty"`
 }
 
 func (handler *Handler) createArchivistTurn(writer http.ResponseWriter, request *http.Request) {
@@ -166,8 +165,8 @@ func (handler *Handler) createArchivistTurn(writer http.ResponseWriter, request 
 		copy.SelectedBy = principal.ID
 		payload.DriveSelection = &copy
 	}
-	record, err := handler.archivists.SubmitTurnWithDriveSelection(
-		request.Context(), request.PathValue("sessionID"), payload.TurnID, payload.RequestID, payload.Prompt, payload.DriveSelection,
+	record, err := handler.archivists.SubmitTurnWithReferences(
+		request.Context(), request.PathValue("sessionID"), payload.TurnID, payload.RequestID, payload.Prompt, payload.DriveSelection, payload.WorkReference,
 	)
 	if err != nil {
 		writeArchivistError(writer, err)

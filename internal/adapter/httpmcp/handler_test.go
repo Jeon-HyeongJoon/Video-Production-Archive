@@ -16,13 +16,13 @@ import (
 	"videoarchive/internal/application/archivetranscription"
 	"videoarchive/internal/application/archiveworkspace"
 	"videoarchive/internal/application/archivistcontrol"
+	"videoarchive/internal/application/archivistloop"
 	"videoarchive/internal/core/archivistruntime"
 	"videoarchive/internal/core/catalog"
 	"videoarchive/internal/core/command"
 	"videoarchive/internal/core/mediaanalysis"
 	"videoarchive/internal/core/organization"
 	"videoarchive/internal/core/vocabulary"
-	"videoarchive/internal/core/workflow"
 )
 
 // Requirement: MCP-001
@@ -48,32 +48,17 @@ func TestAuthenticatedMCPListsAndRoutesVersionedDriveBusinessCapabilities(t *tes
 		!strings.Contains(response.Body.String(), `"workspace_drive_id":"VOLUME-1"`) {
 		t.Fatalf("drive status capability did not route: %d %s", response.Code, response.Body.String())
 	}
-	start := archiveToolCall("CALL-START", ToolArchiveRunStart, `{"archive_run_id":"ARCHIVE-RUN-1","control_mode":"ARCHIVIST"}`)
+	start := archiveToolCall("CALL-START", ToolArchiveRunStart, `{"archive_run_id":"ARCHIVE-RUN-1"}`)
 	if response := mcpTestRequest(handler, http.MethodPost, "/mcp/v1/call", start, "secret"); response.Code != http.StatusOK {
 		t.Fatalf("archive run start did not route: %d %s", response.Code, response.Body.String())
 	}
-	stt := archiveToolCall("CALL-STT", ToolArchiveTranscriptionStart, `{"control_mode":"ARCHIVIST"}`)
+	stt := archiveToolCall("CALL-STT", ToolArchiveTranscriptionStart, `{}`)
 	if response := mcpTestRequest(handler, http.MethodPost, "/mcp/v1/call", stt, "secret"); response.Code != http.StatusOK {
 		t.Fatalf("archive transcription start did not route: %d %s", response.Code, response.Body.String())
 	}
 	if fixture.runs.calls != 1 || fixture.transcriptions.calls != 1 || fixture.runs.request.ArchiveRunID != "ARCHIVE-RUN-1" ||
 		fixture.transcriptions.request.ArchiveRunID != "ARCHIVE-RUN-1" {
 		t.Fatalf("drive capabilities did not reach their application boundaries: %+v", fixture)
-	}
-	cards := []archivistcontrol.ActionCardProjection{}
-	assistedRuns := &fixtureArchiveRuns{}
-	assisted, err := New(Configuration{
-		Archivists: fixtureArchivistRuntime{selection: archiveIntakeSelectionFixture(t), controlMode: workflow.AssistedMode, cards: &cards},
-		Catalog:    fixtureCatalog{}, ArchiveWorkspace: fixtureArchiveWorkspace{}, Commands: fixtureCommands{}, Drives: fixtureDrives{},
-		ArchiveRuns: assistedRuns, ArchiveTranscriptions: &fixtureArchiveTranscriptions{},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	proposal := mcpTestRequest(assisted, http.MethodPost, "/mcp/v1/call", start, "secret")
-	if proposal.Code != http.StatusAccepted || assistedRuns.calls != 0 || len(cards) != 1 ||
-		cards[0].CommandType != archiveorganization.StartActionCardCommand || cards[0].Parameters["archive_storage_id"] != "ARCHIVE-1" {
-		t.Fatalf("stored ASSISTED mode did not produce a fixed-selection ActionCard: %d %s calls=%d cards=%+v", proposal.Code, proposal.Body.String(), assistedRuns.calls, cards)
 	}
 }
 
@@ -98,25 +83,12 @@ func TestDriveMCPKeepsSelectionAndDestructiveAuthorityOutsideArchivist(t *testin
 	if fixture.runs.calls != 0 || fixture.transcriptions.calls != 0 {
 		t.Fatalf("forbidden tools changed drive state: %+v", fixture)
 	}
-	manualRuns := &fixtureArchiveRuns{}
-	manual, err := New(Configuration{
-		Archivists: fixtureArchivistRuntime{selection: archiveIntakeSelectionFixture(t), controlMode: workflow.ManualMode},
-		Catalog:    fixtureCatalog{}, ArchiveWorkspace: fixtureArchiveWorkspace{}, Commands: fixtureCommands{}, Drives: fixtureDrives{},
-		ArchiveRuns: manualRuns, ArchiveTranscriptions: &fixtureArchiveTranscriptions{},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	denied := mcpTestRequest(manual, http.MethodPost, "/mcp/v1/call", archiveToolCall("CALL-MANUAL", ToolArchiveRunStart, `{"archive_run_id":"ARCHIVE-RUN-1","control_mode":"ARCHIVIST"}`), "secret")
-	if denied.Code != http.StatusForbidden || manualRuns.calls != 0 {
-		t.Fatalf("message input bypassed stored MANUAL mode: %d %s calls=%d", denied.Code, denied.Body.String(), manualRuns.calls)
-	}
 }
 
 // Requirement: MCP-004
 func TestMCPListsSelectedHoldsAndReturnsSingleStructuredEvidenceWithoutStoragePaths(t *testing.T) {
 	state := holdReviewDriveState(t)
-	handler := holdReviewMCPHandler(t, state, workflow.ArchivistMode)
+	handler := holdReviewMCPHandler(t, state)
 
 	list := mcpTestRequest(handler, http.MethodPost, "/mcp/v1/call", archiveToolCall("CALL-HOLDS", ToolOrganizationHoldsList, `{}`), "secret")
 	listBody := list.Body.String()
@@ -147,7 +119,7 @@ func TestMCPListsSelectedHoldsAndReturnsSingleStructuredEvidenceWithoutStoragePa
 // Requirement: MCP-005
 func TestMCPClassifiesOneSelectedCurrentHoldWithArchivistProvenance(t *testing.T) {
 	state := holdReviewDriveState(t)
-	handler := holdReviewMCPHandler(t, state, workflow.ArchivistMode)
+	handler := holdReviewMCPHandler(t, state)
 	input := `{"folder":"recordings","expected_input_revision":7,"disposition":"RENDER_RECORDINGS","target_video_bitrate_kbps":20000,"reason":"two independent long recordings","basis":["ASSET-A","ASSET-B"]}`
 	response := mcpTestRequest(handler, http.MethodPost, "/mcp/v1/call", archiveToolCall("CALL-CLASSIFY", ToolOrganizationHoldClassify, input), "secret")
 	if response.Code != http.StatusOK || len(state.overrides) != 1 {
@@ -175,7 +147,7 @@ func TestMCPClassifiesOneSelectedCurrentHoldWithArchivistProvenance(t *testing.T
 func TestDriveToolUsesTurnSelectionIDsAndRevisionInsteadOfConflictingMessageInput(t *testing.T) {
 	handler, fixture := driveMCPFixture(t)
 	call := archiveToolCall("CALL-FIXED-SELECTION", ToolArchiveRunStart,
-		`{"archive_run_id":"ARCHIVE-RUN-1","control_mode":"ARCHIVIST","worker_id":"WORKER-EVIL","archive_storage_id":"ARCHIVE-EVIL","folder_ids":["other"]}`)
+		`{"archive_run_id":"ARCHIVE-RUN-1","worker_id":"WORKER-EVIL","archive_storage_id":"ARCHIVE-EVIL","folder_ids":["other"]}`)
 	response := mcpTestRequest(handler, http.MethodPost, "/mcp/v1/call", call, "secret")
 	request := fixture.runs.request
 	if response.Code != http.StatusOK || request.ExpectedWorkerID != "WORKER-1" || request.ExpectedSourceStorageID != "SOURCE-1" ||
@@ -192,10 +164,34 @@ func TestDriveToolUsesTurnSelectionIDsAndRevisionInsteadOfConflictingMessageInpu
 	if err != nil {
 		t.Fatal(err)
 	}
-	missingResponse := mcpTestRequest(missing, http.MethodPost, "/mcp/v1/call", archiveToolCall("CALL-MISSING", ToolArchiveRunStart, `{"archive_run_id":"ARCHIVE-RUN-2","control_mode":"ARCHIVIST"}`), "secret")
+	missingResponse := mcpTestRequest(missing, http.MethodPost, "/mcp/v1/call", archiveToolCall("CALL-MISSING", ToolArchiveRunStart, `{"archive_run_id":"ARCHIVE-RUN-2"}`), "secret")
 	if missingResponse.Code != http.StatusAccepted || len(cards) != 1 || cards[0].CommandType != "archive_intake.selection.required" ||
 		!strings.Contains(missingResponse.Body.String(), "ACTION-SELECT-CALL-MISSING") {
 		t.Fatalf("missing selection did not end in a selection ActionCard: %d %s cards=%+v", missingResponse.Code, missingResponse.Body.String(), cards)
+	}
+}
+
+// Requirement: COL-004
+func TestMCPReadsStructuredWorkReferenceForMidWorkHandoff(t *testing.T) {
+	reference := archivistruntime.WorkReference{Kind: archivistruntime.WorkJob, WorkID: "JOB-HANDOFF-1", Revision: 9}
+	handler, err := New(Configuration{
+		Archivists: fixtureArchivistRuntime{work: &reference}, Catalog: fixtureCatalog{},
+		ArchiveWorkspace: fixtureArchiveWorkspace{}, Commands: fixtureCommands{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := mcpTestRequest(handler, http.MethodPost, "/mcp/v1/call",
+		archiveToolCall("CALL-WORK-REFERENCE", ToolWorkReferenceGet, `{}`), "secret")
+	body := response.Body.String()
+	if response.Code != http.StatusOK || !strings.Contains(body, `"kind":"JOB"`) ||
+		!strings.Contains(body, `"work_id":"JOB-HANDOFF-1"`) || !strings.Contains(body, `"revision":9`) {
+		t.Fatalf("structured work handoff reference was not returned: %d %s", response.Code, body)
+	}
+	definitions, mapping := archivistloop.SelectTools([]archivistloop.AvailableTool{{Name: ToolWorkReferenceGet, ActionClass: string(vocabulary.ActionRead)}})
+	if len(definitions) != 1 || definitions[0].Name != ToolWorkReferenceGet ||
+		mapping["archive_work_reference_get_v1"].Name != ToolWorkReferenceGet {
+		t.Fatalf("Archivist loop did not expose the advertised work reference capability: definitions=%+v mapping=%+v", definitions, mapping)
 	}
 }
 
@@ -237,7 +233,7 @@ type fixtureArchivistRuntime struct {
 	selection    archivistruntime.DriveSelection
 	selectionErr bool
 	cards        *[]archivistcontrol.ActionCardProjection
-	controlMode  workflow.ControlMode
+	work         *archivistruntime.WorkReference
 }
 
 func (fixtureArchivistRuntime) Authenticate(hostID, credential string) error {
@@ -265,11 +261,11 @@ func (fixture fixtureArchivistRuntime) TurnDriveSelection(context.Context, strin
 	return fixture.selection, nil
 }
 
-func (fixture fixtureArchivistRuntime) SessionControlMode(context.Context, string) (workflow.ControlMode, error) {
-	if fixture.controlMode == "" {
-		return workflow.ArchivistMode, nil
+func (fixture fixtureArchivistRuntime) TurnWorkReference(context.Context, string, string) (archivistruntime.WorkReference, error) {
+	if fixture.work == nil {
+		return archivistruntime.WorkReference{}, archivistcontrol.ErrInvalidRequest
 	}
-	return fixture.controlMode, nil
+	return archivistruntime.NewWorkReference(*fixture.work)
 }
 
 func (fixture fixtureArchivistRuntime) BindArchiveRun(context.Context, string, string, string, uint64) error {
@@ -349,10 +345,10 @@ type holdReviewState struct {
 	overrides []archiveintakeworkspace.OverrideCommand
 }
 
-func holdReviewMCPHandler(t *testing.T, state *holdReviewState, mode workflow.ControlMode) *Handler {
+func holdReviewMCPHandler(t *testing.T, state *holdReviewState) *Handler {
 	t.Helper()
 	handler, err := New(Configuration{
-		Archivists: fixtureArchivistRuntime{selection: archiveIntakeSelectionFixture(t), controlMode: mode},
+		Archivists: fixtureArchivistRuntime{selection: archiveIntakeSelectionFixture(t)},
 		Catalog:    fixtureCatalog{}, ArchiveWorkspace: fixtureArchiveWorkspace{}, Commands: fixtureCommands{},
 		Drives: fixtureDrives{state: state}, ArchiveRuns: &fixtureArchiveRuns{}, ArchiveTranscriptions: &fixtureArchiveTranscriptions{},
 	})

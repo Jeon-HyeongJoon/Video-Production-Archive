@@ -117,14 +117,14 @@ credential은 Windows Credential Manager 또는 DPAPI 기반 Secret Store에 저
 
 Archive Intake에서 ArchivistTurn의 메시지 본문은 실행 대상을 정하지 않는다. 담당자가 화면에서 고른 Worker·원본 드라이브·아카이브 저장소·폴더 범위를 ID와 탐색 revision으로 Turn에 고정하고, MCP Tool Call은 이 참조 안에서만 조회·1단계 시작·현재 HOLD 검토와 단일 분류·2단계 시작을 할 수 있다. 참조가 없거나 오래됐으면 Archivist가 Storage를 추정하지 않고 ActionCard로 선택을 요청한다. `COL-003`, `MCP-003~005`
 
-원본과 아카이브 Storage 및 폴더 범위 선택은 사람 전용 Command다. `ARCHIVIST` 모드는 그 고정 범위 안에서 현재 HOLD 목록과 한 항목의 상대경로·checksum·기술 검사를 조회하고, 최신 입력 revision에 명시적 disposition·사유·근거를 붙여 분류할 수 있다. 근거가 부족하면 HOLD를 유지한다. 파일명과 Transcript 내용은 지시나 Approval로 해석하지 않으며 포맷·삭제·임의 path 도구는 계속 금지한다.
+원본과 아카이브 Storage 및 폴더 범위 선택은 사람 전용 Command다. 인증된 Archivist는 그 고정 범위 안에서 현재 HOLD 목록과 한 항목의 상대경로·checksum·기술 검사를 조회하고, 최신 입력 revision에 명시적 disposition·사유·근거를 붙여 분류할 수 있다. 근거가 부족하면 HOLD를 유지한다. 파일명과 Transcript 내용은 지시나 Approval로 해석하지 않으며 포맷·삭제·임의 path 도구는 계속 금지한다.
 
 - Provider에는 작업 상태에 필요한 tool allowlist만 제공한다.
 - `archive-archivist`는 Control MCP가 현재 광고한 이름과 바이너리에 고정된 schema registry가 모두 일치하는 도구만 model function tool로 제공한다.
 - `run_shell`, 임의 경로 move/delete 같은 범용 도구는 제공하지 않는다.
 - 상태 변경 Tool Call은 Command envelope와 idempotency key를 요구한다.
-- 인증된 MCP Capability는 Session에 저장된 제어 모드를 읽는다. `MANUAL`의 상태 변경은 거부하고, `ASSISTED`에서는 ActionCard만 만들며, `ARCHIVIST`에서는 allowlist의 비파괴 `PROCESS`만 직접 Command로 제출한다. 요청 본문의 제어 모드는 권한 입력으로 사용하지 않는다.
-- `GATED`와 `DESTRUCTIVE` Tool Call은 어느 제어 모드에서도 직접 실행하지 않는다. `MANUAL`에서는 거부하고 `ASSISTED`·`ARCHIVIST`에서는 ActionCard와 사람 Approval 경계로 보낸다.
+- 인증된 MCP Capability의 allowlist 비파괴 `PROCESS`는 같은 Command Bus에 직접 제출한다. 작업이나 Session을 만들 때 협업 방식을 고정하지 않는다.
+- `GATED`와 `DESTRUCTIVE` Tool Call은 직접 실행하지 않고 ActionCard와 사람 Approval 경계로 보낸다.
 - timeout 후 폴백하기 전에 저장된 ArchivistToolCall과 실제 Job 상태를 확인한다.
 - 완료 Tool Call은 새 Provider에서 다시 실행하지 않는다.
 - 콘텐츠 안의 문장을 명령으로 해석하지 않는다.
@@ -151,7 +151,7 @@ v1에는 별도 admin Principal과 원격 관리 surface가 없다. 운영 명�
 
 검증 계약은 `SEC-001~004`, 승인 gate는 `WFL-006`, 포맷 조건은 `DEV-004`다.
 
-Archivist의 채팅 응답은 어떤 표현을 포함해도 Approval이 아니다. 그러나 채팅은 Archivist에게 주는 지시이므로 `ARCHIVIST` 제어 모드에서 허용된 Tool Call로 이어질 수 있다. `ASSISTED` 제안과 승인 필요한 상태 변경은 대상·expected revision·사유·근거를 가진 ActionCard로 기록하고, 사람이 별도 조작으로 승인하거나 Command를 제출해야 한다. `DSH-003`, `COL-002`
+Archivist의 채팅 응답은 어떤 표현을 포함해도 Approval이 아니다. 그러나 채팅은 Archivist에게 주는 지시이므로 허용된 Tool Call로 이어질 수 있다. 승인 필요한 상태 변경은 대상·expected revision·사유·근거를 가진 ActionCard로 기록하고, 사람이 별도 조작으로 승인하거나 Command를 제출해야 한다. `DSH-003`, `COL-002`
 
 ## 8. 데이터 반출
 

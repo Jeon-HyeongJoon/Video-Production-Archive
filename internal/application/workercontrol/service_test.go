@@ -16,7 +16,7 @@ func TestCommittedResultIsAcceptedWhileDurableCompletionRetriesFollowUps(t *test
 	now := time.Date(2026, 11, 6, 4, 0, 0, 0, time.UTC)
 	state := job.State{
 		ID: "JOB-1", Revision: 2, TemplateName: "fixture", TargetTitle: "fixture",
-		ControlMode: workflow.AssistedMode, CurrentStepID: "work",
+		CurrentStepID: "work",
 		Steps: []job.Step{{
 			Workflow:     workflow.Step{ID: "work", State: workflow.Completed, MaxAttempts: 1},
 			ExecutorKind: vocabulary.ExecutorWorker, Progress: 1, LastEventAt: now,
@@ -52,7 +52,7 @@ func TestCommittedCancellationIsAcceptedWhileDurableCompletionRetriesFollowUps(t
 	now := time.Date(2026, 11, 6, 4, 30, 0, 0, time.UTC)
 	state := job.State{
 		ID: "JOB-CANCEL", Revision: 4, TemplateName: "fixture", TargetTitle: "fixture",
-		ControlMode: workflow.AssistedMode, CurrentStepID: "work",
+		CurrentStepID: "work",
 		Steps: []job.Step{{
 			Workflow:     workflow.Step{ID: "work", State: workflow.Cancelled, MaxAttempts: 1},
 			ExecutorKind: vocabulary.ExecutorWorker, LastEventAt: now,

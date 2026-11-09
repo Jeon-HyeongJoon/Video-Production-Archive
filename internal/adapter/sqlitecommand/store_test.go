@@ -109,7 +109,7 @@ func TestWorkerCompletionOutboxSurvivesRestartAndResultReplay(t *testing.T) {
 	}
 	queued := job.State{
 		ID: "JOB-OUTBOX", Revision: 1, TemplateName: "archive-intake-as-is", TargetTitle: "clip",
-		ControlMode: workflow.AssistedMode, CurrentStepID: "organize",
+		CurrentStepID: "organize",
 		Steps: []job.Step{{
 			Workflow:     workflow.Step{ID: "organize", State: workflow.Queued, MaxAttempts: 3},
 			ExecutorKind: vocabulary.ExecutorWorker, RequiredProcessingKinds: []vocabulary.ProcessingKind{vocabulary.ProcessingOrganize},
@@ -237,7 +237,7 @@ func seedClaimedWorkerStep(t *testing.T, store *Store, now time.Time, jobID stri
 	}
 	queued := job.State{
 		ID: jobID, Revision: 1, TemplateName: "archive-intake-as-is", TargetTitle: "clip",
-		ControlMode: workflow.AssistedMode, CurrentStepID: "organize",
+		CurrentStepID: "organize",
 		Steps: []job.Step{{
 			Workflow:     workflow.Step{ID: "organize", State: workflow.Queued, MaxAttempts: 3},
 			ExecutorKind: vocabulary.ExecutorWorker, RequiredProcessingKinds: []vocabulary.ProcessingKind{vocabulary.ProcessingOrganize},
@@ -361,8 +361,8 @@ func TestExpiredRunningLeaseReturnsStepToQueue(t *testing.T) {
 	compositeStepID := jobID + "/" + stepID
 	queued := job.State{
 		ID: jobID, Revision: 1, TemplateName: "archive-intake-inspection", TargetTitle: "selected folder",
-		ControlMode: workflow.AssistedMode, CurrentStepID: stepID,
-		Steps: []job.Step{{Workflow: workflow.Step{ID: stepID, State: workflow.Queued, Attempt: 1, MaxAttempts: 3}}},
+		CurrentStepID: stepID,
+		Steps:         []job.Step{{Workflow: workflow.Step{ID: stepID, State: workflow.Queued, Attempt: 1, MaxAttempts: 3}}},
 	}
 	queuedBytes, err := json.Marshal(queued)
 	if err != nil {

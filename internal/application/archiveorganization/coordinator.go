@@ -24,7 +24,6 @@ import (
 	"videoarchive/internal/core/rendering"
 	"videoarchive/internal/core/resource"
 	"videoarchive/internal/core/vocabulary"
-	"videoarchive/internal/core/workflow"
 )
 
 var ErrInvalidRequest = errors.New("invalid archive intake request")
@@ -383,7 +382,7 @@ func (coordinator *Coordinator) createFolderJob(request Request, decision organi
 		Actor: command.Actor{Type: vocabulary.ActorSystem, ID: "archive-intake-coordinator"}, RequestedVia: "APPLICATION",
 		TargetID: jobID, ExpectedRevision: 0, IdempotencyKey: request.IdempotencyKey + ":job:" + decision.Folder,
 		Parameters: map[string]any{
-			"template_name": template.Name, "target_title": decision.Folder, "control_mode": workflow.AssistedMode,
+			"template_name": template.Name, "target_title": decision.Folder,
 			"execution_priority":         request.ExecutionPriority,
 			"required_storage_ids":       []string{request.Session.Session.StorageID, strings.TrimSpace(request.ArchiveStorageID)},
 			"physical_device_ids":        []string{request.Session.Session.PhysicalDeviceID},

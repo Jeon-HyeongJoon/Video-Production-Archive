@@ -555,7 +555,7 @@ Archivist는 작업 우선순위를 제안할 수 있지만 자원 최소치와 
 ### 10.1 기본 원칙
 
 - 첫 화면의 목적: Archivist가 관리하는 Job·Step·Tool Call·Worker 실행의 현재 업무 현황 파악
-- 버튼과 폼: pause, retry, cancel, 제어 모드 변경, 필요한 입력·승인과 Archivist 부재 시 직접 실행
+- 버튼과 폼: pause, retry, cancel, 필요한 입력·승인과 Archivist 부재 시 직접 실행
 - 작업 그래프와 표: 상태, 진행률, 선행 관계 확인
 - 채팅: 검색, 계획 생성, 오류 설명, 일괄 작업 제안
 - 채팅에서 생성한 변경은 실행 계획 카드로 보여준 뒤 승인 버튼으로 실행
@@ -564,9 +564,9 @@ Archivist는 작업 우선순위를 제안할 수 있지만 자원 최소치와 
 
 ### 10.2 주요 화면
 
-1. 작업함: Archivist 제어 모드, 현재 Step·Tool Call, 대기, 실행, 승인 대기, 실패
+1. 작업함: 현재 Step·Tool Call, 대기, 실행, 승인 대기, 실패
 2. 작업 상세: DAG, 진행률, Event, 로그 참조, 결과, Worker, 사람 개입
-3. 실패·개입: 오류 분류, 재시도, 일시정지, 제어 모드 전환, Archivist에게 질문
+3. 실패·개입: 오류 분류, 재시도, 일시정지, Archivist에게 질문
 4. Worker·자원: CPU, memory, GPU/VRAM, scratch, PhysicalDevice lock과 안전 해제 가능 여부
 5. 채팅 보조: 현재 Job과 화면을 문맥으로 설명·분석·계획 제안
 
@@ -574,17 +574,17 @@ Archivist는 작업 우선순위를 제안할 수 있지만 자원 최소치와 
 
 ### 10.3 사람 개입
 
-작업에 실행 상태와 제어 모드를 따로 둔다.
+작업은 사람과 Archivist가 공유하며 생성 시 협업 방식을 고정하지 않는다. 다음 명령의 Actor가 누가 이어서 수행했는지를 남긴다.
 
 ```text
 execution_state:
   queued | running | waiting_input | paused | failed | completed | cancelled
 
-control_mode:
-  archivist | assisted | manual
+next_actor:
+  human | archivist
 ```
 
-사람이 `manual` 제어권을 가져가면 Archivist의 실행 lease를 해제한다. 사람의 변경이 끝난 뒤 Archivist에게 다시 넘기면 최신 이벤트를 바탕으로 재계획한다.
+사람과 Archivist 사이에서 작업을 이어가도 Worker 실행 lease와 StepState는 유지한다. Archivist가 token·quota·인증·Host 문제로 사용할 수 없으면 사람은 같은 작업 ID와 최신 revision으로 계속하고, 다시 Archivist에게 넘길 때도 최신 이벤트를 바탕으로 재계획한다.
 
 ### 10.4 채팅 기반 질문과 오류 분석
 
@@ -871,7 +871,7 @@ auth_mode: local
 | 기능군 | Archivist | v1 internal-operator |
 |---|---:|---:|
 | 조회·분석 | 인증된 MCP allowlist | 가능 |
-| 프록시·STT·썸네일 | 저장된 ARCHIVIST 제어 모드의 비파괴 PROCESS만 | 가능 |
+| 프록시·STT·썸네일 | 인증된 MCP allowlist의 비파괴 PROCESS만 | 가능 |
 | 워크플로 변경 | ActionCard 제안 | 확인·수정 |
 | 아카이브 확정 | 요청 | 명시 확인 |
 | 기존 아카이브 대체 | 불가 | boot policy+대상 확인 |

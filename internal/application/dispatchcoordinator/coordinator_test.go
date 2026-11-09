@@ -22,9 +22,9 @@ func TestDispatchAdmissionWaitsWithResourceReasonAndResumesAfterCapacityReturns(
 	now := time.Date(2026, time.October, 31, 12, 0, 0, 0, time.UTC)
 	target := job.State{
 		ID: "JOB-TARGET", Revision: 1, TemplateName: "resource-test", TargetTitle: "대기 후 재개",
-		ControlMode: workflow.ArchivistMode, CurrentStepID: "render",
+		CurrentStepID: "render",
 		Steps: []job.Step{{
-			Workflow:      workflow.Step{ID: "render", State: workflow.Queued, ControlMode: workflow.ArchivistMode, MaxAttempts: 3},
+			Workflow:      workflow.Step{ID: "render", State: workflow.Queued, MaxAttempts: 3},
 			ResourceClass: vocabulary.ResourceHeavy, ExecutorKind: vocabulary.ExecutorWorker,
 			RequiredProcessingKinds: []vocabulary.ProcessingKind{vocabulary.ProcessingRender},
 			LastEventAt:             now, ReadyAt: now.Add(-time.Minute), ExecutionPriority: resource.Background,

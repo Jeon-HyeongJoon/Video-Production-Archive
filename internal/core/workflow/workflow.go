@@ -36,14 +36,6 @@ const (
 	WaitPriority = vocabulary.WaitPriority
 )
 
-type ControlMode string
-
-const (
-	ArchivistMode ControlMode = "ARCHIVIST"
-	AssistedMode  ControlMode = "ASSISTED"
-	ManualMode    ControlMode = "MANUAL"
-)
-
 var (
 	ErrIllegalTransition  = errors.New("illegal step state transition")
 	ErrApprovalRequired   = errors.New("step requires approval")
@@ -71,7 +63,6 @@ type Step struct {
 	Dependencies     []string
 	State            StepState
 	WaitReason       WaitReason
-	ControlMode      ControlMode
 	ExecutionLease   *ExecutionLease
 	Attempt          int
 	MaxAttempts      int
@@ -129,14 +120,6 @@ var allowedTransitions = map[StepState]map[StepState]bool{
 	Verifying: {Completed: true, Queued: true, Failed: true, Cancelled: true},
 	Paused:    {Queued: true, Cancelled: true},
 	Failed:    {}, Completed: {}, Cancelled: {},
-}
-
-func (s *Step) TakeManualControl() error {
-	if isTerminal(s.State) {
-		return ErrIllegalTransition
-	}
-	s.ControlMode = ManualMode
-	return nil
 }
 
 func (s *Step) RecoverExpiredLease(now time.Time) bool {

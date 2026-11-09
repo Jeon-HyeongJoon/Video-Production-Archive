@@ -63,6 +63,11 @@ with sync_playwright() as playwright:
         expect(stt_card).to_contain_text("ARCHIVE-RUN-1 · 대상 4 폴더")
         expect(stt_card.locator("button")).to_have_count(2)
 
+        # A message sent from persistent work detail pins its kind, ID, and
+        # revision instead of relying on text in the prompt.
+        page.goto(sys.argv[1] + "/#/runs/ARCHIVE-RUN-1", wait_until="networkidle")
+        expect(page.locator("#selection-chips .selection-chip")).to_have_text(["아카이브 실행 · ARCHIVE-RUN-1 · r1"])
+
         def capture_turn(route):
             route.fulfill(status=201, content_type="application/json", body='{"data":{"turn_id":"TURN-KEYBOARD"}}')
 
@@ -74,7 +79,8 @@ with sync_playwright() as playwright:
         expect(message).to_have_value("첫 줄\n둘째 줄")
         with page.expect_request("**/api/v1/archivist-sessions/*/turns") as turn_request:
             message.press("Enter")
-        if turn_request.value.post_data_json["prompt"] != "첫 줄\n둘째 줄":
+        payload = turn_request.value.post_data_json
+        if payload["prompt"] != "첫 줄\n둘째 줄" or payload.get("work_reference") != {"kind": "ARCHIVE_RUN", "work_id": "ARCHIVE-RUN-1", "revision": 1}:
             raise AssertionError(f"Enter submitted the wrong prompt: {turn_request.value.post_data_json}")
         expect(message).to_have_value("")
     else:

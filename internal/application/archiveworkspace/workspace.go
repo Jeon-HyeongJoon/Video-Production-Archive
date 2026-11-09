@@ -29,7 +29,6 @@ type Job struct {
 	Revision      uint64
 	TemplateName  string
 	TargetTitle   string
-	ControlMode   workflow.ControlMode
 	CurrentStepID string
 }
 
@@ -87,7 +86,6 @@ type JobSummary struct {
 	Revision               uint64
 	TemplateName           string
 	TargetTitle            string
-	ControlMode            workflow.ControlMode
 	CurrentStepID          string
 	StepState              workflow.StepState
 	Progress               float64
@@ -115,7 +113,7 @@ type JobView struct {
 
 func Project(input ProjectionInput) (JobView, error) {
 	if input.Job.ID == "" || input.Job.TemplateName == "" || input.Job.TargetTitle == "" ||
-		input.Job.CurrentStepID == "" || !validControlMode(input.Job.ControlMode) {
+		input.Job.CurrentStepID == "" {
 		return JobView{}, ErrInvalidProjection
 	}
 
@@ -142,8 +140,8 @@ func Project(input ProjectionInput) (JobView, error) {
 	summary := JobSummary{
 		JobID: input.Job.ID, Revision: input.Job.Revision,
 		TemplateName: input.Job.TemplateName, TargetTitle: input.Job.TargetTitle,
-		ControlMode: input.Job.ControlMode, CurrentStepID: current.ID,
-		StepState: current.State, Progress: current.Progress,
+		CurrentStepID: current.ID,
+		StepState:     current.State, Progress: current.Progress,
 		ExecutorKind: current.ExecutorKind, ActorID: current.ActorID, WorkerID: current.WorkerID,
 		WaitReason: current.WaitReason, ErrorClass: current.ErrorClass,
 		LastEventAt: current.LastEventAt, LogReference: current.LogReference,
@@ -163,10 +161,6 @@ func Project(input ProjectionInput) (JobView, error) {
 	summary.NeedsHumanIntervention, summary.InterventionReason = intervention(summary)
 
 	return JobView{Summary: summary, Steps: steps, ArchivistActions: actions, Workers: workers, Timeline: timeline}, nil
-}
-
-func validControlMode(mode workflow.ControlMode) bool {
-	return mode == workflow.ArchivistMode || mode == workflow.AssistedMode || mode == workflow.ManualMode
 }
 
 func validStep(step StepStatus) bool {

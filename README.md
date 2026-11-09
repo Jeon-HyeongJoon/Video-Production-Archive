@@ -23,7 +23,7 @@
 - strict YAML boot 설정, 재시작 가능한 SQLite Runtime, CIDR 보호 아카이브 작업 공간과 조회 API를 제공하는 `archive-control`
 - Control 없이 파일 처리만 실행하는 `archive-media` CLI와, 필요할 때 같은 실행 파일에서 credential 인증 heartbeat·Step claim을 수행하는 선택형 `runner`
 - Worker·원본·아카이브·폴더 범위를 고정하는 ArchiveRun, 1단계 분류·렌더·QC·보관과 별도 2단계 STT·자막·텍스트·패키지 리비전·ArchiveCatalog
-- 세션 제어 모드, 구조화된 드라이브 선택 참조, MCP 업무 도구, ActionCard와 단계 완료 SYSTEM 재호출을 잇는 Archivist 협업 흐름
+- 구조화된 드라이브 선택 참조, MCP 업무 도구, ActionCard와 단계 완료 SYSTEM 재호출을 잇는 Archivist 협업 흐름
 - macOS Keychain에 보호된 ChatGPT Profile·stateless streaming Responses Adapter, loopback 자체 LLM Chat Completions Adapter와 Archive 업무 도구만 사용하는 bounded `archive-archivist` 루프
 
 현재는 SQLite Command Unit of Work, 공유 연결 수명주기, Storage→논리 Volume 작업 공간 해석과 별도 PhysicalDevice I/O 충돌 키, Notification SSE 재연결, Archive Workspace 읽기 모델과 CI 테스트 증적 계약이 구현되어 있다. 패키지만으로 빈 DB를 복원하는 import, 게시 뒤 결과 보고 전 중단 조정과 모든 업무를 감싸는 공통 Capability Evidence Sink는 planned다. 등록 Storage 입고 카탈로그와 ffprobe·FFmpeg·whisper.cpp subprocess Adapter는 격리 fixture로 검증하며 FFmpeg speech audio 추출에서 timestamp Transcript·SRT·전사 텍스트·ArchivePackage 리비전까지 연결한다. 실제 한국어 모델 품질과 네트워크·원격 파일 Storage는 각각의 acceptance 전까지 planned다.

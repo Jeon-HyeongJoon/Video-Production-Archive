@@ -272,7 +272,7 @@ func TestWorkspaceSeparatesStoredAndCommittedArchiveRecords(t *testing.T) {
 }
 
 // Requirement: DSH-012
-func TestArchivistAddSettingsShowsOnlyNameHostDetectedCLIAndControlMode(t *testing.T) {
+func TestArchivistAddSettingsShowsOnlyNameHostAndDetectedCLI(t *testing.T) {
 	testControlHTTPWorkspace(t, func(t *testing.T, handler http.Handler) {
 		assertArchiveWorkspaceScript(t, handler, "check_archive_workspace_archivist_settings.py")
 	})
@@ -417,7 +417,7 @@ func testControlHTTPScene(t *testing.T, scene archiveWorkspaceScene, check func(
 	view, err := archiveworkspace.Project(archiveworkspace.ProjectionInput{
 		Job: archiveworkspace.Job{
 			ID: "JOB-RUNNING", Revision: 3, TemplateName: "occasion-recording", TargetTitle: "가을 행사 편집",
-			ControlMode: workflow.AssistedMode, CurrentStepID: "render",
+			CurrentStepID: "render",
 		},
 		Steps: []archiveworkspace.StepStatus{{
 			ID: "render", State: workflow.Running, Progress: 0.64, ExecutorKind: vocabulary.ExecutorWorker,
@@ -439,7 +439,7 @@ func testControlHTTPScene(t *testing.T, scene archiveWorkspaceScene, check func(
 	queuedView, err := archiveworkspace.Project(archiveworkspace.ProjectionInput{
 		Job: archiveworkspace.Job{
 			ID: "JOB-QUEUED", Revision: 1, TemplateName: "archive-copy", TargetTitle: "카메라 카드 보관",
-			ControlMode: workflow.AssistedMode, CurrentStepID: "copy",
+			CurrentStepID: "copy",
 		},
 		Steps: []archiveworkspace.StepStatus{{
 			ID: "copy", State: workflow.Queued, Progress: 0, ExecutorKind: vocabulary.ExecutorWorker,
@@ -455,7 +455,7 @@ func testControlHTTPScene(t *testing.T, scene archiveWorkspaceScene, check func(
 	waitingView, err := archiveworkspace.Project(archiveworkspace.ProjectionInput{
 		Job: archiveworkspace.Job{
 			ID: "JOB-REVIEW", Revision: 2, TemplateName: "final-edit", TargetTitle: "인터뷰 요약 검수",
-			ControlMode: workflow.ArchivistMode, CurrentStepID: "approve-summary",
+			CurrentStepID: "approve-summary",
 		},
 		Steps: []archiveworkspace.StepStatus{{
 			ID: "approve-summary", State: workflow.Waiting, Progress: 0.82, ExecutorKind: vocabulary.ExecutorHuman,
@@ -471,7 +471,7 @@ func testControlHTTPScene(t *testing.T, scene archiveWorkspaceScene, check func(
 	completedView, err := archiveworkspace.Project(archiveworkspace.ProjectionInput{
 		Job: archiveworkspace.Job{
 			ID: "JOB-SOURCE", Revision: 9, TemplateName: "archive-intake-source-sequence", TargetTitle: "source.mp4",
-			ControlMode: workflow.ManualMode, CurrentStepID: "organize",
+			CurrentStepID: "organize",
 		},
 		Steps: []archiveworkspace.StepStatus{{
 			ID: "organize", State: workflow.Completed, Progress: 1, ExecutorKind: vocabulary.ExecutorWorker,
@@ -690,6 +690,14 @@ func (chatOnlyArchivistWorkspace) SubmitTurnWithDriveSelection(_ context.Context
 	return archivistcontrol.TurnRecord{Turn: turn, Prompt: prompt, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}, nil
 }
 
+func (chatOnlyArchivistWorkspace) SubmitTurnWithReferences(_ context.Context, sessionID, turnID, requestID, prompt string, selection *archivistruntime.DriveSelection, work *archivistruntime.WorkReference) (archivistcontrol.TurnRecord, error) {
+	turn, err := archivistruntime.NewTurnWithReferences(turnID, sessionID, requestID, selection, work)
+	if err != nil {
+		return archivistcontrol.TurnRecord{}, err
+	}
+	return archivistcontrol.TurnRecord{Turn: turn, Prompt: prompt, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}, nil
+}
+
 func sceneWorkerState(scene archiveWorkspaceScene) string {
 	if scene == sceneStageOne {
 		return "BUSY"
@@ -777,7 +785,7 @@ func newArchivistSceneFixture(scene archiveWorkspaceScene, at time.Time) fixedAr
 		projections: []archivistcontrol.SessionProjection{{
 			Session: archivistruntime.Session{
 				ID: "SESSION-ARCHIVE-1", Name: "Archive Archivist", ArchivistHostID: "archivist-windows", Backend: vocabulary.RuntimeEmbeddedCore,
-				CLIID: "codex", WorkspaceRootID: "video-project", ControlMode: workflow.AssistedMode,
+				CLIID: "codex", WorkspaceRootID: "video-project",
 			},
 			CreatedAt: at, Turns: turns, ActionCards: cards,
 		}},
@@ -842,7 +850,7 @@ func newArchiveWorkSceneFixture(scene archiveWorkspaceScene, at time.Time) archi
 		}
 		sourceJob := archiveworkspace.JobSummary{
 			JobID: "JOB-SOURCE", Revision: 9, TemplateName: "archive-intake-source-sequence", TargetTitle: "source.mp4",
-			ControlMode: workflow.ManualMode, CurrentStepID: "organize", StepState: workflow.Completed, Progress: 1,
+			CurrentStepID: "organize", StepState: workflow.Completed, Progress: 1,
 			ExecutorKind: vocabulary.ExecutorWorker, WorkerID: "WORKER-1", LastEventAt: at.Add(2 * time.Hour),
 		}
 		view := archivework.View{
@@ -1210,11 +1218,15 @@ func (workspace fixedArchivistWorkspace) CreateSession(context.Context, archivis
 	return archivistcontrol.SessionRecord{}, errors.New("fixture is read-only")
 }
 
-func (workspace fixedArchivistWorkspace) CreateArchivist(context.Context, string, string, string, string, workflow.ControlMode) (archivistcontrol.SessionRecord, error) {
+func (workspace fixedArchivistWorkspace) CreateArchivist(context.Context, string, string, string, string) (archivistcontrol.SessionRecord, error) {
 	return archivistcontrol.SessionRecord{}, errors.New("fixture is read-only")
 }
 
 func (workspace fixedArchivistWorkspace) SubmitTurnWithDriveSelection(context.Context, string, string, string, string, *archivistruntime.DriveSelection) (archivistcontrol.TurnRecord, error) {
+	return archivistcontrol.TurnRecord{}, errors.New("fixture is read-only")
+}
+
+func (workspace fixedArchivistWorkspace) SubmitTurnWithReferences(context.Context, string, string, string, string, *archivistruntime.DriveSelection, *archivistruntime.WorkReference) (archivistcontrol.TurnRecord, error) {
 	return archivistcontrol.TurnRecord{}, errors.New("fixture is read-only")
 }
 

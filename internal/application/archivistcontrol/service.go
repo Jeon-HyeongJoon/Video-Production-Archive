@@ -12,7 +12,6 @@ import (
 	"videoarchive/internal/core/archivistruntime"
 	"videoarchive/internal/core/command"
 	"videoarchive/internal/core/vocabulary"
-	"videoarchive/internal/core/workflow"
 )
 
 var (
@@ -56,6 +55,7 @@ type TurnProjection struct {
 	Entries        []archivistruntime.TurnEntry
 	ToolCalls      []ToolCallProjection
 	DriveSelection *archivistruntime.DriveSelection
+	WorkReference  *archivistruntime.WorkReference
 	WorkContext    *archivistruntime.ArchiveRunWorkContext
 }
 
@@ -187,9 +187,9 @@ func (service *Service) CreateSession(ctx context.Context, spec archivistruntime
 	return record, nil
 }
 
-func (service *Service) CreateArchivist(ctx context.Context, sessionID, name, archivistHostID, cliID string, mode workflow.ControlMode) (SessionRecord, error) {
+func (service *Service) CreateArchivist(ctx context.Context, sessionID, name, archivistHostID, cliID string) (SessionRecord, error) {
 	spec, err := service.hosts.ConfiguredSessionSpec(
-		strings.TrimSpace(sessionID), strings.TrimSpace(name), strings.TrimSpace(archivistHostID), strings.TrimSpace(cliID), mode,
+		strings.TrimSpace(sessionID), strings.TrimSpace(name), strings.TrimSpace(archivistHostID), strings.TrimSpace(cliID),
 	)
 	if err != nil {
 		return SessionRecord{}, err
@@ -202,6 +202,10 @@ func (service *Service) SubmitTurn(ctx context.Context, sessionID, turnID, reque
 }
 
 func (service *Service) SubmitTurnWithDriveSelection(ctx context.Context, sessionID, turnID, requestID, prompt string, selection *archivistruntime.DriveSelection) (TurnRecord, error) {
+	return service.SubmitTurnWithReferences(ctx, sessionID, turnID, requestID, prompt, selection, nil)
+}
+
+func (service *Service) SubmitTurnWithReferences(ctx context.Context, sessionID, turnID, requestID, prompt string, selection *archivistruntime.DriveSelection, work *archivistruntime.WorkReference) (TurnRecord, error) {
 	prompt = strings.TrimSpace(prompt)
 	if prompt == "" {
 		return TurnRecord{}, ErrInvalidRequest
@@ -209,7 +213,7 @@ func (service *Service) SubmitTurnWithDriveSelection(ctx context.Context, sessio
 	if _, err := service.store.Session(ctx, strings.TrimSpace(sessionID)); err != nil {
 		return TurnRecord{}, err
 	}
-	turn, err := archivistruntime.NewTurnWithDriveSelection(turnID, sessionID, requestID, selection)
+	turn, err := archivistruntime.NewTurnWithReferences(turnID, sessionID, requestID, selection, work)
 	if err != nil {
 		return TurnRecord{}, err
 	}
@@ -253,7 +257,10 @@ func (service *Service) HandleRecallEvent(ctx context.Context, event RecallEvent
 	} else if !errors.Is(loadErr, ErrTurnNotFound) {
 		return TurnRecord{}, false, loadErr
 	}
-	turn, err := archivistruntime.NewSystemTurnWithDriveSelection(turnID, event.SessionID, "REQUEST-"+turnID, selection)
+	workReference := archivistruntime.WorkReference{
+		Kind: archivistruntime.WorkArchiveRun, WorkID: event.ArchiveRunID, Revision: selection.ArchiveRunRevision,
+	}
+	turn, err := archivistruntime.NewSystemTurnWithReferences(turnID, event.SessionID, "REQUEST-"+turnID, selection, &workReference)
 	if err != nil {
 		return TurnRecord{}, false, err
 	}
@@ -311,12 +318,15 @@ func (service *Service) TurnDriveSelection(ctx context.Context, sessionID, turnI
 	return archivistruntime.NewDriveSelection(*turn.Turn.DriveSelection)
 }
 
-func (service *Service) SessionControlMode(ctx context.Context, sessionID string) (workflow.ControlMode, error) {
-	record, err := service.store.Session(ctx, strings.TrimSpace(sessionID))
+func (service *Service) TurnWorkReference(ctx context.Context, sessionID, turnID string) (archivistruntime.WorkReference, error) {
+	turn, err := service.store.Turn(ctx, strings.TrimSpace(turnID))
 	if err != nil {
-		return "", err
+		return archivistruntime.WorkReference{}, err
 	}
-	return record.Session.ControlMode, nil
+	if turn.Turn.SessionID != strings.TrimSpace(sessionID) || turn.Turn.WorkReference == nil {
+		return archivistruntime.WorkReference{}, ErrInvalidRequest
+	}
+	return archivistruntime.NewWorkReference(*turn.Turn.WorkReference)
 }
 
 func (service *Service) BindArchiveRun(ctx context.Context, sessionID, turnID, archiveRunID string, revision uint64) error {
@@ -393,7 +403,7 @@ func (service *Service) Projection(ctx context.Context) ([]SessionProjection, er
 				Prompt: turn.Prompt, SubmittedBy: turn.Turn.SubmittedBy,
 				CreatedAt: turn.CreatedAt, UpdatedAt: turn.UpdatedAt,
 				FinalResponse: turn.Turn.FinalResponse, Entries: entries, ToolCalls: toolCalls,
-				DriveSelection: turn.Turn.DriveSelection, WorkContext: turn.Turn.WorkContext,
+				DriveSelection: turn.Turn.DriveSelection, WorkReference: turn.Turn.WorkReference, WorkContext: turn.Turn.WorkContext,
 			})
 		}
 		projection.ActionCards, err = service.store.ListActionCards(ctx, session.Session.ID)

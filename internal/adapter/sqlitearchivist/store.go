@@ -566,6 +566,12 @@ func (store *Store) BindArchiveRun(ctx context.Context, binding archivistcontrol
 	if err != nil {
 		return archivistcontrol.ErrInvalidRequest
 	}
+	turn.Turn, err = archivistruntime.AttachWorkReference(turn.Turn, archivistruntime.WorkReference{
+		Kind: archivistruntime.WorkArchiveRun, WorkID: normalized.ArchiveRunID, Revision: normalized.ArchiveRunRevision,
+	})
+	if err != nil {
+		return archivistcontrol.ErrInvalidRequest
+	}
 	updatedTurn, err := json.Marshal(turn)
 	if err != nil {
 		return err
