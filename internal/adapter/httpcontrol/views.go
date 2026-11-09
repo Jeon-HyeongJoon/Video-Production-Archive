@@ -117,6 +117,7 @@ type driveView struct {
 	FolderDiscoveryRevision    uint64                   `json:"folder_discovery_revision"`
 	FolderDiscoveryState       string                   `json:"folder_discovery_state"`
 	SessionID                  string                   `json:"session_id"`
+	SelectionSessionID         string                   `json:"selection_session_id"`
 	WorkerID                   string                   `json:"worker_id"`
 	SourceVolumeID             string                   `json:"source_volume_id"`
 	SourceStorageID            string                   `json:"source_storage_id"`
@@ -179,6 +180,7 @@ type driveFolderView struct {
 	ProfileReference     string                  `json:"profile_reference,omitempty"`
 	HoldReasons          []string                `json:"hold_reasons"`
 	WorkOptions          []driveWorkOptionView   `json:"work_options"`
+	Videos               []driveSourceVideoView  `json:"videos"`
 	VideoCount           int                     `json:"video_count"`
 	EstimatedOutputBytes uint64                  `json:"estimated_output_bytes"`
 	JobID                string                  `json:"job_id,omitempty"`
@@ -193,6 +195,13 @@ type driveFolderView struct {
 	ArchiveState         string                  `json:"archive_state,omitempty"`
 	CanAddTranscription  bool                    `json:"can_add_transcription"`
 	TranscriptQualities  []transcriptQualityView `json:"transcript_qualities"`
+}
+
+type driveSourceVideoView struct {
+	RelativePath string    `json:"relative_path"`
+	FileName     string    `json:"file_name"`
+	SizeBytes    uint64    `json:"size_bytes"`
+	ModifiedAt   time.Time `json:"modified_at,omitempty"`
 }
 
 type driveWorkOptionView struct {

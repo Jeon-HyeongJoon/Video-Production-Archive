@@ -89,7 +89,10 @@ func TestSelectedAttachedSourceReportsIncrementalDiscoveryStateWithoutBlocking(t
 			StorageID: task.storageID, Connected: true, AccessKind: vocabulary.StorageAccessAttachedVolume,
 			DiscoveryState: vocabulary.FolderDiscoveryReady, CapacityBytes: task.volume.CapacityBytes,
 			FreeBytes: task.volume.FreeBytes, DiscoveryRevision: 77,
-			Folders: []worker.MediaFolderObservation{{Folder: "first", VideoCount: 2, InputBytes: 200}, {Folder: "second", VideoCount: 3, InputBytes: 300}},
+			Folders: []worker.MediaFolderObservation{
+				{Folder: "first", VideoCount: 2, InputBytes: 200, Videos: []worker.MediaFileObservation{{RelativePath: "first/A001.mp4", FileName: "A001.mp4", SizeBytes: 120, ModifiedAt: time.Date(2026, 11, 9, 1, 0, 0, 0, time.UTC)}}},
+				{Folder: "second", VideoCount: 3, InputBytes: 300, Videos: []worker.MediaFileObservation{{RelativePath: "second/B001.mov", FileName: "B001.mov", SizeBytes: 180, ModifiedAt: time.Date(2026, 11, 9, 2, 0, 0, 0, time.UTC)}}},
+			},
 		}, nil
 	}
 
@@ -109,7 +112,9 @@ func TestSelectedAttachedSourceReportsIncrementalDiscoveryStateWithoutBlocking(t
 	}
 	close(release)
 	observations = waitForDiscoveryState(t, probe, volume, vocabulary.FolderDiscoveryReady)
-	if observations[0].DiscoveryRevision != 77 || len(observations[0].Folders) != 2 || observations[0].Folders[1].VideoCount != 3 {
+	if observations[0].DiscoveryRevision != 77 || len(observations[0].Folders) != 2 || observations[0].Folders[1].VideoCount != 3 ||
+		len(observations[0].Folders[1].Videos) != 1 || observations[0].Folders[1].Videos[0].RelativePath != "second/B001.mov" ||
+		observations[0].Folders[1].Videos[0].FileName != "B001.mov" || observations[0].Folders[1].Videos[0].SizeBytes != 180 {
 		t.Fatalf("completed discovery did not replace partial results: %+v", observations)
 	}
 

@@ -61,9 +61,19 @@ type AttachedVolumeObservation struct {
 }
 
 type MediaFolderObservation struct {
-	Folder     string `json:"folder"`
-	VideoCount int    `json:"video_count"`
-	InputBytes uint64 `json:"input_bytes"`
+	Folder     string                 `json:"folder"`
+	VideoCount int                    `json:"video_count"`
+	InputBytes uint64                 `json:"input_bytes"`
+	Videos     []MediaFileObservation `json:"videos,omitempty"`
+}
+
+// MediaFileObservation is the bounded, root-relative inventory fact shown for
+// one source video. It never contains a mount path or StorageRoot.
+type MediaFileObservation struct {
+	RelativePath string    `json:"relative_path"`
+	FileName     string    `json:"file_name"`
+	SizeBytes    uint64    `json:"size_bytes"`
+	ModifiedAt   time.Time `json:"modified_at,omitempty"`
 }
 
 type StorageObservation struct {
@@ -361,6 +371,9 @@ func cloneStorageObservations(source []StorageObservation) []StorageObservation 
 	for _, observation := range source {
 		copy := observation
 		copy.Folders = append([]MediaFolderObservation(nil), observation.Folders...)
+		for index := range copy.Folders {
+			copy.Folders[index].Videos = append([]MediaFileObservation(nil), observation.Folders[index].Videos...)
+		}
 		observations = append(observations, copy)
 	}
 	return observations

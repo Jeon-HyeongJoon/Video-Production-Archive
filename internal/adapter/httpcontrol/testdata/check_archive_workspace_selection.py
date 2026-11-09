@@ -5,9 +5,11 @@ from playwright.sync_api import expect, sync_playwright
 
 
 def prepared(page, drive):
-    page.goto(sys.argv[1] + f"/#/drives/{drive}", wait_until="networkidle")
-    page.locator("#prepare-run").click()
-    expect(page.locator("#drive-prep")).to_be_visible()
+    page.goto(sys.argv[1] + "/#/jobs", wait_until="networkidle")
+    page.locator("#new-job-open").click()
+    expect(page.locator('#new-work-kind [data-kind="ARCHIVE"]')).to_have_attribute("aria-pressed", "true")
+    page.locator(f'#prep-drives [data-drive-id="{drive}"]').click()
+    expect(page.locator("#archive-scope")).to_be_visible()
 
 
 scene = sys.argv[2]
@@ -15,7 +17,13 @@ with sync_playwright() as playwright:
     browser = playwright.chromium.launch()
     page = browser.new_page(viewport={"width": 1440, "height": 900}, color_scheme="light", locale="ko-KR")
     if scene == "pre-run":
-        # The drive fixes its Worker; only that Worker's archive candidates appear.
+        starts = []
+        def start_archive(route, request):
+            starts.append(request.post_data_json)
+            route.fulfill(status=201, content_type="application/json", body='{"data":{"archive_run_id":"ARCHIVE-RUN-CREATED","folder_count":1}}')
+        page.route("**/api/v1/archive-intake/runs", start_archive)
+        # Job Management fixes the source drive and therefore its Worker; only
+        # that Worker's archive candidates appear.
         prepared(page, "VOLUME-1")
         archives = page.locator("#prep-archives")
         expect(archives.locator(".option")).to_have_count(5)
@@ -39,19 +47,26 @@ with sync_playwright() as playwright:
         expect(archives.locator('[data-storage-id="archive-main"]')).to_have_attribute("aria-pressed", "true")
         expect(page.locator("#start-archive-run")).to_be_enabled()
         expect(page.locator("#selection-chips .selection-chip")).to_have_text(["WORKER-1", "VOLUME-1", "source-main", "archive-main", "1 폴더"])
+        page.locator("#start-archive-run").click()
+        expect(page).to_have_url(sys.argv[1] + "/#/runs/ARCHIVE-RUN-CREATED")
+        if len(starts) != 1 or starts[0]["session_id"] != "INTAKE-1" or starts[0]["source_volume_id"] != "VOLUME-1" or starts[0]["archive_storage_id"] != "archive-main" or starts[0]["folder_ids"] != ["event-a"]:
+            raise AssertionError(f"archive work create payload={starts}")
 
-        # A completed drive whose Worker is off has unknown live attachment state;
-        # historical results remain visible but a new run cannot be prepared.
+        # Drive detail is inventory/history only and never exposes creation.
         page.goto(sys.argv[1] + "/#/drives/VOLUME-2", wait_until="networkidle")
         expect(page.locator('#drive-overview [data-fact="connection"]')).to_contain_text("확인 불가")
-        expect(page.locator("#prepare-run")).to_be_disabled()
-        expect(page.locator("#prepare-run")).to_have_text("드라이브 연결 확인 불가")
-        expect(page.locator("#drive-prep, #start-archive-run")).to_have_count(0)
+        expect(page.locator("#prepare-run, #drive-prep, #start-archive-run, #archive-scope")).to_have_count(0)
     else:
-        # A running ArchiveRun keeps its archive and folder scope locked.
+        # A running ArchiveRun is not a source choice for another new work.
+        page.goto(sys.argv[1] + "/#/jobs", wait_until="networkidle")
+        page.locator("#new-job-open").click()
+        expect(page.locator('#prep-drives [data-drive-id="VOLUME-1"]')).to_have_count(0)
+        expect(page.locator("#archive-scope, #start-archive-run")).to_have_count(0)
+
+        # Its drive detail retains records and fixed-scope history only.
         page.goto(sys.argv[1] + "/#/drives/VOLUME-1", wait_until="networkidle")
         expect(page.locator("#drive-folders .folder-row")).to_have_count(8)
-        expect(page.locator("#prepare-run, #drive-prep, #start-archive-run")).to_have_count(0)
+        expect(page.locator("#prepare-run, #drive-prep, #start-archive-run, #archive-scope")).to_have_count(0)
         expect(page.locator("input[type=checkbox]")).to_have_count(0)
         expect(page.locator("#drive-progress")).to_have_attribute("title", re.compile(re.escape("범위 r7 고정 · 8 폴더 · 795 영상 · 211 GB")))
         expect(page.locator("#drive-title")).to_have_attribute("title", re.compile(re.escape("→ archive-main")))

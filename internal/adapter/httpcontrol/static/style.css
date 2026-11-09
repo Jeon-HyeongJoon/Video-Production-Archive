@@ -362,6 +362,14 @@ button.ref-chip{cursor:pointer}
 .step-dot[data-signal="resource"]{background:var(--muted)}
 .step-dot[data-signal="idle"]{background:transparent;border:1px solid var(--idle)}
 .folder-detail{padding:10px 14px 14px 36px;display:flex;flex-direction:column;gap:10px;border-top:1px solid var(--hair);background:var(--raised)}
+.path-separator{padding:0 5px;color:var(--faint);font-style:normal;font-weight:400}
+.source-video-list{border:1px solid var(--hair);border-radius:var(--radius);overflow:hidden;background:var(--surface)}
+.source-video-row{min-height:38px;padding:7px 10px;display:grid;grid-template-columns:minmax(0,1fr) 100px 90px;gap:12px;align-items:center;border-top:1px solid var(--hair);font-size:var(--text-xs)}
+.source-video-row:first-child{border-top:0}
+.source-video-head{min-height:30px;color:var(--muted);background:var(--raised)}
+.source-video-name{min-width:0;display:flex;flex-direction:column;gap:2px}
+.source-video-name b,.source-video-name small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.source-video-name small{color:var(--muted)}
 .detail-head{display:flex;align-items:center;justify-content:space-between;gap:10px}
 .detail-head b{font-size:var(--text-lg);font-weight:700;overflow-wrap:anywhere}
 .detail-meta,.detail-facts{color:var(--soft);font-size:var(--text-sm)}
@@ -483,6 +491,10 @@ button.cal-cell[aria-pressed="true"]{box-shadow:0 0 0 2px var(--surface),0 0 0 4
 /* ─── 작업 ─── */
 .jobs-sections{display:flex;flex-direction:column;gap:22px}
 .job-create-form{padding:16px;display:grid;grid-template-columns:minmax(220px,2fr) minmax(160px,1fr) minmax(180px,1fr) auto;gap:12px;align-items:end}
+.job-kind{margin-left:auto}
+.archive-create{padding:0 16px 16px;display:flex;flex-direction:column;gap:10px}
+.archive-create>.chooser-col{max-height:180px}
+.archive-create .start-bar{margin-top:0}
 .job-create-form .form-actions{min-height:38px;white-space:nowrap}
 .job-create-form #new-job-status{color:var(--fault-ink)}
 .jobs-section{gap:10px}

@@ -5,9 +5,13 @@
 
 import {
   el, svgIcon, icons, token, statusIcon, label, stateSignal, stageSignal, finishedSteps, formatCount, formatPercent,
-  shortTime, clockTime, meter, api, mutation, newID, emptyState,
+  formatBytes, shortTime, clockTime, meter, api, mutation, newID, emptyState,
 } from "../core.js";
-import { model, ui, notify, refresh, jobLane, driveName, findDrive, folderProblem, workLane, workName } from "../store.js";
+import {
+  model, ui, notify, refresh, jobLane, driveName, findDrive, folderProblem, workLane, workName,
+  isRunning, prepareDrive, syncPreparation, discoveredFolders, archiveCandidates,
+  folderDiscoveryReady, folderDiscoveryText, startBlocker,
+} from "../store.js";
 
 const LANE = {
   fault: ["실패", "fault"], decide: ["사람 대기", "decide"], work: ["실행 중", "work"],
@@ -291,7 +295,7 @@ export function mount(root, route) {
   let createOpen = false;
   let createPending = false;
   let createError = "";
-  const createDraft = { target_title: "", template_name: "occasion-recording", control_mode: "ASSISTED" };
+  const createDraft = { kind: "ARCHIVE", target_title: "", template_name: "occasion-recording", control_mode: "ASSISTED" };
   const mediaCache = new Map();
   const mediaOpen = new Set();
   const mediaRequests = new Map();
@@ -368,8 +372,106 @@ export function mount(root, route) {
     }
   }
 
-  function createPanel() {
-    if (!createOpen) return null;
+  function resetArchiveRunIntent() {
+    ui.archiveRunID = newID("ARCHIVE-RUN");
+    ui.archiveRunKey = newID("ARCHIVE-RUN-START");
+    ui.runStarting = false;
+  }
+
+  async function startArchiveRun(drive) {
+    if (ui.runStarting) return;
+    if (!ui.archiveRunID) resetArchiveRunIntent();
+    ui.runStarting = true;
+    createError = "";
+    renderList();
+    try {
+      const result = await mutation("/api/v1/archive-intake/runs", {
+        archive_run_id: ui.archiveRunID, idempotency_key: ui.archiveRunKey,
+        session_id: ui.intakeSessionID,
+        source_volume_id: drive.source_volume_id,
+        expected_candidate_revision: drive.candidate_revision || drive.input_revision,
+        archive_storage_id: ui.archiveID,
+        input_revision: drive.folder_discovery_revision || drive.input_revision,
+        folder_ids: [...ui.folders].sort(),
+      });
+      ui.prepDriveID = "";
+      await refresh();
+      if (!disposed) window.location.hash = `#/runs/${encodeURIComponent(result.archive_run_id)}`;
+    } catch (error) {
+      ui.runStarting = false;
+      createError = error.message;
+      if (!disposed) renderList();
+    }
+  }
+
+  function archiveOption(storage) {
+    return el("button", {
+      type: "button", class: "option", "aria-pressed": String(storage.storage_id === ui.archiveID), disabled: !storage.accessible,
+      dataset: { storageId: storage.storage_id, accessKind: storage.access_kind || "" },
+      onclick: () => { ui.archiveID = ui.archiveID === storage.storage_id ? "" : storage.storage_id; resetArchiveRunIntent(); renderList(); },
+    },
+    el("span", { class: "option-main" }, el("b", {}, storage.label || storage.storage_id)),
+    el("span", { class: "option-meta" }, `${label("storageRole", storage.role)} · ${label("storageAccess", storage.access_kind)}`,
+      el("small", {}, storage.accessible ? `여유 ${formatBytes(storage.free_bytes)} / ${formatBytes(storage.capacity_bytes)}` : "연결 필요")));
+  }
+
+  function archiveCreatePanel() {
+    const available = model.drives.filter((drive) => drive.connection_state === "CONNECTED" && !isRunning(drive));
+    const selectedDrive = findDrive(ui.prepDriveID);
+    const driveOptions = available.map((drive) => el("button", {
+      type: "button", class: "option", "aria-pressed": String(drive.workspace_drive_id === ui.prepDriveID),
+      dataset: { driveId: drive.workspace_drive_id },
+      onclick: async () => { createError = ""; await prepareDrive(drive); },
+    }, el("span", { class: "option-main" }, el("b", {}, driveName(drive))),
+    el("span", { class: "option-meta" }, `${drive.worker_id} · ${folderDiscoveryText(drive)}`)));
+    if (!selectedDrive) {
+      return el("div", { class: "archive-create", id: "archive-create" },
+        el("div", { class: "chooser-col", id: "prep-drives", "aria-label": "원본 드라이브" },
+          el("div", { class: "chooser-head" }, el("b", {}, "원본 드라이브"), el("span", { class: "chooser-value" }, "선택 없음")),
+          ...(driveOptions.length ? driveOptions : [emptyState("연결된 드라이브 없음")])),
+        createError ? el("span", { id: "new-job-status", role: "status" }, createError) : null);
+    }
+
+    syncPreparation(selectedDrive);
+    const folders = discoveredFolders(selectedDrive);
+    const ready = folderDiscoveryReady(selectedDrive);
+    const selected = folders.filter((folder) => ui.folders.has(folder.folder));
+    const all = el("input", { type: "checkbox", id: "select-all", "aria-label": "전체 선택", disabled: !ready });
+    all.checked = ready && folders.length > 0 && selected.length === folders.length;
+    all.indeterminate = selected.length > 0 && selected.length < folders.length;
+    all.addEventListener("change", () => { ui.folders = new Set(all.checked ? folders.map((folder) => folder.folder) : []); resetArchiveRunIntent(); renderList(); });
+    const picks = folders.map((folder) => {
+      const check = el("input", { type: "checkbox", "aria-label": `${folder.folder} 선택`, disabled: !ready });
+      check.checked = ui.folders.has(folder.folder);
+      check.addEventListener("change", () => { check.checked ? ui.folders.add(folder.folder) : ui.folders.delete(folder.folder); resetArchiveRunIntent(); renderList(); });
+      return el("label", { class: "folder-pick", dataset: { folderId: folder.folder } }, check,
+        el("span", { class: "folder-pick-name" }, folder.folder),
+        el("small", { class: "num" }, `${formatCount(folder.video_count)} 영상 · ${formatBytes(folder.estimated_output_bytes)}`));
+    });
+    const candidates = archiveCandidates(selectedDrive);
+    const videos = selected.reduce((sum, folder) => sum + (folder.video_count || 0), 0);
+    const bytes = selected.reduce((sum, folder) => sum + (folder.estimated_output_bytes || 0), 0);
+    const blocker = startBlocker(selectedDrive, selected);
+    const folderHeading = ready ? `탐색 r${selectedDrive.folder_discovery_revision} · ${folders.length}` : folderDiscoveryText(selectedDrive);
+    return el("div", { class: "archive-create", id: "archive-create" },
+      el("div", { class: "chooser-col", id: "prep-drives", "aria-label": "원본 드라이브" },
+        el("div", { class: "chooser-head" }, el("b", {}, "원본 드라이브"), el("span", { class: "chooser-value" }, driveName(selectedDrive))),
+        ...driveOptions),
+      el("div", { class: "chooser", id: "archive-scope" },
+        el("div", { class: "chooser-col", id: "prep-archives", "aria-label": "아카이브 저장소" },
+          el("div", { class: "chooser-head" }, el("b", {}, "아카이브 저장소"), el("span", { class: "chooser-value" }, ui.archiveID || "선택 없음")),
+          ...(candidates.length ? candidates.map(archiveOption) : [emptyState("후보 없음")])),
+        el("div", { class: "chooser-col", id: "prep-folders", "aria-label": "폴더" },
+          el("div", { class: "chooser-head" }, el("b", {}, "폴더"), el("span", { class: "chooser-value num" }, folderHeading)),
+          el("label", { class: "folder-pick folder-all" }, all, el("span", {}, "전체")),
+          ...(picks.length ? picks : [emptyState(selectedDrive.folder_discovery_state === "SCANNING" ? "검색 중" : selectedDrive.folder_discovery_state === "FAILED" ? "검색 실패" : "폴더 없음")]))),
+      el("div", { class: "start-bar" },
+        el("span", { id: "selection-summary", class: "num" }, `${selected.length} 폴더 · ${formatCount(videos)} 영상 · ${formatBytes(bytes)}`),
+        el("span", { id: "start-reason", class: "start-reason" }, createError || blocker),
+        el("button", { type: "button", class: "btn primary", id: "start-archive-run", disabled: Boolean(blocker) || ui.runStarting, onclick: () => startArchiveRun(selectedDrive) }, ui.runStarting ? "생성 중" : "아카이브 작업 생성")));
+  }
+
+  function templateCreatePanel() {
     const title = el("input", {
       id: "new-job-title", name: "target_title", required: true, autocomplete: "off", value: createDraft.target_title,
       oninput: (event) => { createDraft.target_title = event.target.value; },
@@ -397,11 +499,24 @@ export function mount(root, route) {
         el("button", { type: "button", class: "btn", disabled: createPending, onclick: () => { createOpen = false; createError = ""; renderList(); } }, "취소"),
         createError ? el("span", { id: "new-job-status", role: "status" }, createError) : null));
     queueMicrotask(() => { if (!disposed && createOpen && !createDraft.target_title) title.focus(); });
+    return form;
+  }
+
+  function createPanel() {
+    if (!createOpen) return null;
+    const kinds = el("div", { class: "seg job-kind", id: "new-work-kind", role: "group", "aria-label": "작업 종류" },
+      ...[["ARCHIVE", "아카이브"], ["TEMPLATE", "Template 작업"]].map(([value, text]) => el("button", {
+        type: "button", "aria-pressed": String(createDraft.kind === value), dataset: { kind: value },
+        onclick: () => { createDraft.kind = value; createError = ""; renderList(); },
+      }, text)));
     return el("section", { class: "panel job-create-panel", id: "new-job", "aria-label": "새 작업 생성" },
-      el("div", { class: "panel-toolbar" }, el("b", { class: "panel-title" }, "새 작업 생성")), form);
+      el("div", { class: "panel-toolbar" }, el("b", { class: "panel-title" }, "새 작업 생성"), kinds),
+      createDraft.kind === "ARCHIVE" ? archiveCreatePanel() : templateCreatePanel());
   }
 
   function renderList() {
+    const previousFolderChoices = root.querySelector("#prep-folders");
+    if (previousFolderChoices) ui.prepFolderScroll = previousFolderChoices.scrollTop;
     const work = [...model.work];
     const active = work.filter((item) => workLane(item) === "work");
     const queued = work.filter((item) => workLane(item) === "queue");
@@ -419,6 +534,8 @@ export function mount(root, route) {
           table(WORK_HEADS, attention.map(workRow), "확인 필요한 작업 없음")),
         fold("completed-jobs", "완료", completed.length, ui.jobCompletedOpen, (open) => { ui.jobCompletedOpen = open; },
           table(WORK_HEADS, completed.map(workRow), "완료 작업 없음"))));
+    const currentFolderChoices = root.querySelector("#prep-folders");
+    if (currentFolderChoices && ui.prepFolderScroll > 0) currentFolderChoices.scrollTop = ui.prepFolderScroll;
   }
 
   function renderDetail(job) {

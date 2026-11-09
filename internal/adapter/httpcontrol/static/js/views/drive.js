@@ -6,12 +6,12 @@
 // only on request.
 
 import {
-  el, svgIcon, icons, statusIcon, label, stageSignal, activeStates, formatCount, formatBytes,
+  el, svgIcon, icons, statusIcon, label, stageSignal, activeStates, formatCount, formatBytes, formatSize,
   shortTime, api, mutation, newID, emptyState,
 } from "../core.js";
 import {
-  model, ui, notify, refresh, findDrive, driveName, folderProblem, folderState, folderSignal, isRunning, preparing,
-  prepareDrive, syncPreparation, discoveredFolders, archiveCandidates, folderDiscoveryReady, folderDiscoveryText, startBlocker,
+  model, ui, notify, refresh, findDrive, driveName, folderProblem, folderState, folderSignal,
+  discoveredFolders,
 } from "../store.js";
 import { driveFacts } from "../overview.js";
 import { stageMatrix } from "../flow.js";
@@ -161,6 +161,7 @@ function problemPanel(drive, folder, problem) {
 
 function folderDetail(folder) {
   const showSteps = ui.openSteps === folder.folder;
+  const videos = folder.videos || [];
   const notes = [];
   const archiveResult = folder.archive_date && folder.archive_video_file_name
     ? `${folder.archive_date} · ${folder.archive_video_file_name}`
@@ -170,12 +171,18 @@ function folderDetail(folder) {
   if (folder.can_add_transcription) notes.push(el("span", { class: "folder-note" }, "STT 추가 가능"));
   if (folder.transcription_job_id && folder.step_state === "COMPLETED") notes.push(el("span", { class: "folder-note" }, "STT 완료"));
   return el("div", { class: "folder-detail", id: "folder-detail", dataset: { folderId: folder.folder } },
-    el("span", { class: "detail-meta", title: [trace, formatBytes(folder.estimated_output_bytes)].filter(Boolean).join("\n") }, archiveResult || (folder.job_id ? `작업 ${folder.job_id}` : "작업 없음")),
-    el("span", { class: "detail-facts num" }, `${label("disposition", folder.disposition)} · ${formatCount(folder.video_count)} 영상`),
+    el("span", { class: "detail-meta", title: [trace, formatBytes(folder.estimated_output_bytes)].filter(Boolean).join("\n") }, archiveResult || (folder.job_id ? `작업 ${folder.job_id}` : "원본 기록")),
+    el("span", { class: "detail-facts num" }, `${folder.disposition ? label("disposition", folder.disposition) : "미처리"} · ${formatCount(folder.video_count)} 영상 · ${formatBytes(folder.estimated_output_bytes)}`),
     notes.length ? el("div", { class: "detail-notes" }, ...notes) : null,
-    el("div", { class: "detail-actions" },
+    videos.length ? el("div", { class: "source-video-list", role: "table", "aria-label": `${folder.folder} 영상 기록물` },
+      el("div", { class: "source-video-row source-video-head", role: "row" }, ...["영상", "수정", "용량"].map((text) => el("span", { role: "columnheader" }, text))),
+      ...videos.map((video) => el("div", { class: "source-video-row", role: "row", dataset: { relativePath: video.relative_path }, title: video.relative_path },
+        el("span", { class: "source-video-name" }, el("b", {}, video.file_name || video.relative_path), el("small", {}, video.relative_path)),
+        el("span", { class: "num muted" }, video.modified_at ? shortTime(video.modified_at) : "—"),
+        el("span", { class: "num muted" }, video.size_bytes < 1024 ** 3 ? formatSize(video.size_bytes || 0) : formatBytes(video.size_bytes || 0))))) : emptyState("영상 기록 없음"),
+    folder.job_id ? el("div", { class: "detail-actions" },
       el("button", { type: "button", class: "btn btn-sm steps-toggle", "aria-expanded": String(showSteps), onclick: () => { ui.openSteps = showSteps ? "" : folder.folder; notify(); } },
-        showSteps ? "세부 단계 숨기기" : "세부 단계 보기")),
+        showSteps ? "세부 단계 숨기기" : "세부 단계 보기")) : null,
     showSteps ? el("div", { class: "stage-list" }, ...((folder.stages || []).length ? folder.stages.map(stageRow) : [emptyState("단계 없음")])) : null);
 }
 
@@ -189,10 +196,10 @@ function folderRow(folder) {
   const signal = folderSignal(folder);
   const word = problem
     ? el("span", { class: "status-text", dataset: { signal: problem.signal, waitReason: problem.reason || undefined } }, problem.word)
-    : folder.archive_state ? null : el("span", { class: "folder-word", dataset: { signal: state.signal } }, state.word);
+    : folder.archive_state ? null : el("span", { class: "folder-word", dataset: { signal: state.signal } }, folder.job_id || folder.disposition ? state.word : `${formatCount(folder.video_count)} 영상`);
   const row = el("button", { type: "button", class: "folder-row", "aria-expanded": String(open), title: `${label("disposition", folder.disposition)} · ${formatCount(folder.video_count)} 영상`, dataset: { folderId: folder.folder, signal },
     onclick: () => { ui.openFolder = open ? "" : folder.folder; ui.openSteps = ""; notify(); } },
-  el("span", { class: "folder-name" }, statusIcon(signal), el("b", {}, folder.folder)),
+  el("span", { class: "folder-name" }, statusIcon(signal), el("b", {}, ...folder.folder.split("/").flatMap((part, index) => index ? [el("i", { class: "path-separator" }, "/"), el("span", {}, part)] : [el("span", {}, part)]))),
   el("span", { class: "folder-state" }, word, folder.archive_state ? archiveBadge(folder.archive_state) : null),
   svgIcon(icons.expand));
   return open ? [row, folderDetail(folder)] : [row];
@@ -233,7 +240,12 @@ function calendar(folders) {
 }
 
 function folderSection(drive) {
-  const folders = drive.folders || [];
+  const scoped = new Map((drive.folders || []).map((folder) => [folder.folder, folder]));
+  const inventory = discoveredFolders(drive);
+  const folders = (inventory.length ? inventory : (drive.folders || [])).map((folder) => {
+    const current = scoped.get(folder.folder);
+    return current ? { ...folder, ...current, videos: folder.videos?.length ? folder.videos : current.videos } : folder;
+  });
   const dated = folders.filter((folder) => DATE.test(folder.folder)).length;
   const canCalendar = dated > 0 && dated >= folders.length * 0.6;
   const view = canCalendar ? (ui.folderView || "calendar") : "list";
@@ -245,9 +257,9 @@ function folderSection(drive) {
     if (current && current !== month) { month = current; rows.push(el("div", { class: "month-head" }, current)); }
     rows.push(...folderRow(folder));
   }
-  return el("section", { class: "section", "aria-label": "폴더" },
+  return el("section", { class: "section", id: "drive-contents", "aria-label": "드라이브 폴더와 영상 기록물" },
     el("div", { class: "section-head" },
-      el("h2", { class: "section-title" }, "폴더 ", el("span", { class: "num" }, String(folders.length))),
+      el("h2", { class: "section-title" }, "폴더 구조 ", el("span", { class: "num" }, String(folders.length))),
       canCalendar ? el("div", { class: "seg", role: "group", "aria-label": "보기" }, ...[["calendar", "달력"], ["list", "목록"]].map(([id, name]) =>
         el("button", { type: "button", "aria-pressed": String(view === id), onclick: () => { ui.folderView = id; notify(); } }, name))) : null),
     view === "calendar"
@@ -289,83 +301,6 @@ function completedWorkSection(drive) {
       ...rows));
 }
 
-async function startArchiveRun(drive) {
-  if (ui.runStarting) return;
-  if (!ui.archiveRunID) ui.archiveRunID = newID("ARCHIVE-RUN");
-  if (!ui.archiveRunKey) ui.archiveRunKey = newID("ARCHIVE-RUN-START");
-  ui.runStarting = true;
-  notify();
-  try {
-    const result = await mutation("/api/v1/archive-intake/runs", {
-      archive_run_id: ui.archiveRunID, idempotency_key: ui.archiveRunKey, session_id: drive.session_id || ui.intakeSessionID,
-      source_volume_id: drive.source_volume_id, expected_candidate_revision: drive.candidate_revision || drive.input_revision,
-      archive_storage_id: ui.archiveID, input_revision: drive.folder_discovery_revision || drive.input_revision, folder_ids: [...ui.folders].sort(),
-    });
-    ui.status = `${result.folder_count} 폴더 · ${result.archive_run_id}`;
-    ui.prepDriveID = "";
-    await refresh();
-  } catch (error) {
-    ui.status = error.message;
-    ui.runStarting = false;
-    notify();
-  }
-}
-
-function resetArchiveRunIntent() {
-  ui.archiveRunID = newID("ARCHIVE-RUN");
-  ui.archiveRunKey = newID("ARCHIVE-RUN-START");
-  ui.runStarting = false;
-}
-
-function archiveOption(storage) {
-  return el("button", {
-    type: "button", class: "option", "aria-pressed": String(storage.storage_id === ui.archiveID), disabled: !storage.accessible,
-    dataset: { storageId: storage.storage_id, accessKind: storage.access_kind || "" },
-    onclick: () => { ui.archiveID = ui.archiveID === storage.storage_id ? "" : storage.storage_id; resetArchiveRunIntent(); notify(); },
-  },
-  el("span", { class: "option-main" }, el("b", {}, storage.label || storage.storage_id)),
-  el("span", { class: "option-meta" }, `${label("storageRole", storage.role)} · ${label("storageAccess", storage.access_kind)}`,
-    el("small", {}, storage.accessible ? `여유 ${formatBytes(storage.free_bytes)} / ${formatBytes(storage.capacity_bytes)}` : "연결 필요")));
-}
-
-function prepPanel(drive) {
-  syncPreparation(drive);
-  const folders = discoveredFolders(drive);
-  const ready = folderDiscoveryReady(drive);
-  const all = el("input", { type: "checkbox", id: "select-all", "aria-label": "전체 선택", disabled: !ready });
-  const selected = folders.filter((folder) => ui.folders.has(folder.folder));
-  all.checked = ready && folders.length > 0 && selected.length === folders.length;
-  all.indeterminate = selected.length > 0 && selected.length < folders.length;
-  all.addEventListener("change", () => { ui.folders = new Set(all.checked ? folders.map((folder) => folder.folder) : []); resetArchiveRunIntent(); notify(); });
-  const picks = folders.map((folder) => {
-    const check = el("input", { type: "checkbox", "aria-label": `${folder.folder} 선택`, disabled: !ready });
-    check.checked = ui.folders.has(folder.folder);
-    check.addEventListener("change", () => { check.checked ? ui.folders.add(folder.folder) : ui.folders.delete(folder.folder); resetArchiveRunIntent(); notify(); });
-    return el("label", { class: "folder-pick", dataset: { folderId: folder.folder } }, check,
-      el("span", { class: "folder-pick-name" }, folder.folder),
-      el("small", { class: "num" }, `${formatCount(folder.video_count)} 영상 · ${formatBytes(folder.estimated_output_bytes)}`));
-  });
-  const candidates = archiveCandidates(drive);
-  const videos = selected.reduce((sum, folder) => sum + (folder.video_count || 0), 0);
-  const bytes = selected.reduce((sum, folder) => sum + (folder.estimated_output_bytes || 0), 0);
-  const blocker = startBlocker(drive, selected);
-  const folderHeading = ready ? `탐색 r${drive.folder_discovery_revision} · ${folders.length}` : folderDiscoveryText(drive);
-  return el("section", { class: "section", id: "drive-prep", "aria-label": "아카이브 실행 준비" },
-    el("h2", { class: "section-title" }, "아카이브 실행 준비"),
-    el("div", { class: "chooser" },
-      el("div", { class: "chooser-col", id: "prep-archives", "aria-label": "아카이브 저장소" },
-        el("div", { class: "chooser-head" }, el("b", {}, "아카이브 저장소"), el("span", { class: "chooser-value" }, ui.archiveID || "선택 없음")),
-        ...(candidates.length ? candidates.map(archiveOption) : [emptyState("후보 없음")])),
-      el("div", { class: "chooser-col", id: "prep-folders", "aria-label": "폴더" },
-        el("div", { class: "chooser-head" }, el("b", {}, "폴더"), el("span", { class: "chooser-value num" }, folderHeading)),
-        el("label", { class: "folder-pick folder-all" }, all, el("span", {}, "전체")),
-        ...(picks.length ? picks : [emptyState(drive.folder_discovery_state === "SCANNING" ? "검색 중" : drive.folder_discovery_state === "FAILED" ? "검색 실패" : "폴더 없음")]))),
-    el("div", { class: "panel start-bar" },
-      el("span", { id: "selection-summary", class: "num" }, `${selected.length} 폴더 · ${formatCount(videos)} 영상 · ${formatBytes(bytes)}`),
-      el("span", { id: "start-reason", class: "start-reason" }, blocker),
-      el("button", { type: "button", class: "btn primary", id: "start-archive-run", dataset: { action: "start" }, disabled: Boolean(blocker) || ui.runStarting, onclick: () => startArchiveRun(drive) }, ui.runStarting ? "시작 중" : "아카이브 실행 시작")));
-}
-
 export function mount(root, route) {
   jobDetails = new Map();
   ui.openFolder = route.query.get("folder") || "";
@@ -398,21 +333,14 @@ export function mount(root, route) {
       title.textContent = driveName(drive);
       title.title = `${drive.worker_id} ${label("worker", worker?.state)} · → ${drive.archive_storage_id || "아카이브 미정"} · ${drive.archive_run_id || "실행 없음"} · r${drive.input_revision} · ${formatCount(drive.folder_count)} 폴더 · ${formatCount(drive.file_count)} 영상`;
 
-      // The STT gate of a run and the preparation of a new one sit beside the title.
+      // Existing work may be continued here, but new ArchiveRuns are created
+      // only from Job Management.
       const buttons = [];
       if (drive.archive_run_state === "TRANSCRIPTION_READY" && drive.archive_run_revision) buttons.push(sttButton(drive));
-		if (!isRunning(drive) && !preparing(drive)) {
-			const connected = drive.connection_state === "CONNECTED";
-			const connectionText = drive.connection_state === "DISCONNECTED" ? "드라이브 연결 해제됨" : "드라이브 연결 확인 불가";
-			buttons.push(el("button", { type: "button", class: `btn${drive.archive_run_id ? "" : " primary"}`, id: "prepare-run", dataset: { action: "prepare" },
-				disabled: !connected, title: connected ? undefined : connectionText, onclick: () => prepareDrive(drive) },
-				connected ? (drive.archive_run_id ? "새 아카이브 실행 준비" : "아카이브 실행 준비") : connectionText));
-      }
       actions.replaceChildren(...buttons);
 
       const sections = [overview(drive)];
       if (ui.status) sections.push(el("p", { class: "status-line", role: "status", id: "command-status" }, ui.status));
-      if (preparing(drive)) sections.push(prepPanel(drive));
       if (problems.length) {
         sections.push(el("section", { class: "section", id: "drive-problems", "aria-label": "확인 필요" },
           el("h2", { class: "section-title" }, "확인 필요 ", el("span", { class: "num" }, String(problems.length))),
@@ -420,12 +348,8 @@ export function mount(root, route) {
       }
       const completed = completedWorkSection(drive);
       if (completed) sections.push(completed);
-      if (folders.length && drive.archive_run_id) sections.push(folderSection(drive));
-      const previousFolderChoices = body.querySelector("#prep-folders");
-      if (previousFolderChoices) ui.prepFolderScroll = previousFolderChoices.scrollTop;
+      if (discoveredFolders(drive).length || folders.length) sections.push(folderSection(drive));
       body.replaceChildren(...sections);
-      const currentFolderChoices = body.querySelector("#prep-folders");
-      if (currentFolderChoices && ui.prepFolderScroll > 0) currentFolderChoices.scrollTop = ui.prepFolderScroll;
     },
   };
 }

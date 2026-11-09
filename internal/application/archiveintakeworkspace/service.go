@@ -523,14 +523,6 @@ func (service *Service) mergeInventory(ctx context.Context, drives map[string]*p
 			return err
 		}
 	}
-	latestSessionByDrive := make(map[string]archiveintake.Session)
-	for _, session := range sessions {
-		current, found := latestSessionByDrive[session.WorkspaceDriveID]
-		if !found || session.SelectedAt.After(current.SelectedAt) ||
-			(session.SelectedAt.Equal(current.SelectedAt) && session.ID > current.ID) {
-			latestSessionByDrive[session.WorkspaceDriveID] = session
-		}
-	}
 	statusByWorker := make(map[string]worker.Status, len(statuses))
 	candidateByVolume := make(map[string]archiveintake.Candidate, len(candidates))
 	observations := make(map[string]worker.StorageObservation)
@@ -556,10 +548,24 @@ func (service *Service) mergeInventory(ctx context.Context, drives map[string]*p
 			drives[candidate.VolumeID] = state
 		}
 		state.view.CandidateRevision = candidate.Revision
-		if session, selected := latestSessionByDrive[candidate.VolumeID]; selected &&
-			session.VolumeID == candidate.VolumeID && session.StorageID == candidate.StorageID &&
-			session.CandidateRevision == candidate.Revision {
-			state.view.SessionID = session.ID
+		var selectionSession archiveintake.Session
+		for _, session := range sessions {
+			if session.WorkspaceDriveID != candidate.VolumeID || session.VolumeID != candidate.VolumeID ||
+				session.StorageID != candidate.StorageID || session.WorkerID != candidate.WorkerID ||
+				session.CandidateRevision != candidate.Revision {
+				continue
+			}
+			if selectionSession.ID == "" || session.SelectedAt.After(selectionSession.SelectedAt) ||
+				(session.SelectedAt.Equal(selectionSession.SelectedAt) && session.ID > selectionSession.ID) {
+				selectionSession = session
+			}
+		}
+		if selectionSession.ID != "" {
+			session := selectionSession
+			state.view.SelectionSessionID = session.ID
+			if state.view.ArchiveRunID == "" {
+				state.view.SessionID = session.ID
+			}
 		}
 		if state.view.SourceVolumeID == "" {
 			state.view.SourceVolumeID = candidate.VolumeID
@@ -575,14 +581,22 @@ func (service *Service) mergeInventory(ctx context.Context, drives map[string]*p
 		state.view.FolderDiscoveryRevision = observation.DiscoveryRevision
 		state.view.DiscoveredFileCount = 0
 		for _, folder := range observation.Folders {
+			videos := make([]SourceVideoView, 0, len(folder.Videos))
+			for _, video := range folder.Videos {
+				videos = append(videos, SourceVideoView{
+					RelativePath: video.RelativePath, FileName: video.FileName,
+					SizeBytes: video.SizeBytes, ModifiedAt: video.ModifiedAt,
+				})
+			}
 			view := FolderView{
 				Folder: folder.Folder, InputRevision: observation.DiscoveryRevision,
-				VideoCount: folder.VideoCount, EstimatedOutputBytes: folder.InputBytes,
+				VideoCount: folder.VideoCount, EstimatedOutputBytes: folder.InputBytes, Videos: videos,
 			}
 			state.discoveredFolders[folder.Folder] = view
 			if scoped, exists := state.folders[folder.Folder]; exists && state.view.ArchiveRunID != "" {
 				scoped.VideoCount = folder.VideoCount
 				scoped.EstimatedOutputBytes = folder.InputBytes
+				scoped.Videos = videos
 				state.folders[folder.Folder] = scoped
 			}
 			state.view.DiscoveredFileCount += folder.VideoCount

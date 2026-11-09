@@ -236,7 +236,7 @@ func TestArchiveWorkspaceKeepsLayoutAcrossViewportWidths(t *testing.T) {
 }
 
 // Requirement: DSH-010
-func TestDrivePreparationSelectsArchiveAndFolderScopeAndLocksRunningScope(t *testing.T) {
+func TestJobManagementSelectsArchiveDriveAndFolderScopeAndDriveDetailDoesNotCreateWork(t *testing.T) {
 	for _, scene := range []archiveWorkspaceScene{scenePreRun, sceneStageOne} {
 		t.Run(string(scene), func(t *testing.T) {
 			testControlHTTPScene(t, scene, func(t *testing.T, handler http.Handler) {
@@ -244,6 +244,13 @@ func TestDrivePreparationSelectsArchiveAndFolderScopeAndLocksRunningScope(t *tes
 			})
 		})
 	}
+}
+
+// Requirement: DSH-033
+func TestDriveDetailShowsFolderStructureAndVideoRecordsWithoutWorkCreation(t *testing.T) {
+	testControlHTTPScene(t, scenePreRun, func(t *testing.T, handler http.Handler) {
+		assertArchiveWorkspaceScript(t, handler, "check_archive_workspace_drive_contents.py")
+	})
 }
 
 // Requirement: DSH-011
@@ -1057,7 +1064,7 @@ func (workspace *archiveIntakeWorkspaceFixture) Projection(context.Context) ([]a
 		ConnectionObservedAt: now, ConnectionWorkerID: "WORKER-1",
 		ArchiveRunID: "ARCHIVE-RUN-1", ArchiveRunRevision: 1,
 		CandidateRevision: 7, FolderDiscoveryRevision: 7,
-		SessionID: "INTAKE-1", WorkerID: "WORKER-1", SourceVolumeID: "VOLUME-1", SourceStorageID: "source-main",
+		SessionID: "INTAKE-1", SelectionSessionID: "INTAKE-1", WorkerID: "WORKER-1", SourceVolumeID: "VOLUME-1", SourceStorageID: "source-main",
 		ArchiveStorageID: "archive-main", State: "HAS_HOLD", InputRevision: 7, FolderDiscoveryState: vocabulary.FolderDiscoveryReady, FileCount: 795, FolderCount: len(folders),
 		HoldCount: 1, CatalogRowCount: 795,
 		StorageCandidates: []archiveintakeworkspace.StorageView{
@@ -1137,6 +1144,12 @@ func (workspace *archiveIntakeWorkspaceFixture) Projection(context.Context) ([]a
 			ArchiveState: archive.PackageStored, CompletedAt: now.Add(-21 * time.Hour),
 		})
 	}
+	for index := range folders {
+		folders[index].Videos = []archiveintakeworkspace.SourceVideoView{
+			{RelativePath: folders[index].Folder + "/C0001.MP4", FileName: "C0001.MP4", SizeBytes: 3 << 30, ModifiedAt: now.Add(-2 * time.Hour)},
+			{RelativePath: folders[index].Folder + "/C0002.MOV", FileName: "C0002.MOV", SizeBytes: 2 << 30, ModifiedAt: now.Add(-time.Hour)},
+		}
+	}
 	drive.Folders = folders
 	drive.DiscoveredFolders = append([]archiveintakeworkspace.FolderView(nil), folders...)
 	drive.DiscoveredFolderCount = len(folders)
@@ -1152,7 +1165,7 @@ func (workspace *archiveIntakeWorkspaceFixture) Projection(context.Context) ([]a
 		ConnectionObservedAt: now.Add(-50 * time.Minute), ConnectionWorkerID: "WORKER-2",
 		ArchiveRunID: "ARCHIVE-RUN-2", ArchiveRunRevision: 1,
 		CandidateRevision: 3, FolderDiscoveryRevision: 3,
-		SessionID: "INTAKE-2", WorkerID: "WORKER-2", SourceVolumeID: "VOLUME-2", SourceStorageID: "source-review",
+		SessionID: "INTAKE-2", SelectionSessionID: "INTAKE-2", WorkerID: "WORKER-2", SourceVolumeID: "VOLUME-2", SourceStorageID: "source-review",
 		ArchiveStorageID: "archive-nas", State: "COMPLETED", ArchiveRunState: "COMPLETED", FolderDiscoveryState: vocabulary.FolderDiscoveryReady,
 		InputRevision: 3, FileCount: 386, FolderCount: 2, EligibleTranscriptionCount: 1,
 		CatalogRowCount: 386, CatalogUpdatedAt: now.Add(-20 * time.Hour), Folders: []archiveintakeworkspace.FolderView{reviewA, reviewB},

@@ -30,7 +30,8 @@ func (handler *Handler) archiveIntakeProjection(writer http.ResponseWriter, requ
 			ArchiveRunID: value.ArchiveRunID, ArchiveRunRevision: value.ArchiveRunRevision,
 			CandidateRevision: value.CandidateRevision, FolderDiscoveryRevision: value.FolderDiscoveryRevision,
 			FolderDiscoveryState: string(value.FolderDiscoveryState),
-			SessionID:            value.SessionID, WorkerID: value.WorkerID, SourceVolumeID: value.SourceVolumeID,
+			SessionID: value.SessionID, SelectionSessionID: value.SelectionSessionID,
+			WorkerID: value.WorkerID, SourceVolumeID: value.SourceVolumeID,
 			SourceStorageID:  value.SourceStorageID,
 			ArchiveStorageID: value.ArchiveStorageID, State: value.State, ArchiveRunState: value.ArchiveRunState,
 			InputRevision: value.InputRevision, FileCount: value.FileCount, FolderCount: value.FolderCount,
@@ -100,10 +101,17 @@ func projectDriveFolder(folder archiveintakeworkspace.FolderView) driveFolderVie
 			Disposition: string(option.Disposition), TargetVideoBitRateKbps: option.TargetVideoBitRateKbps,
 		})
 	}
+	videos := make([]driveSourceVideoView, 0, len(folder.Videos))
+	for _, video := range folder.Videos {
+		videos = append(videos, driveSourceVideoView{
+			RelativePath: video.RelativePath, FileName: video.FileName,
+			SizeBytes: video.SizeBytes, ModifiedAt: video.ModifiedAt,
+		})
+	}
 	return driveFolderView{
 		Folder: folder.Folder, DecisionID: folder.DecisionID, InputRevision: folder.InputRevision,
 		DecisionSequence: folder.DecisionSequence, Disposition: string(folder.Disposition),
-		ProfileReference: folder.ProfileReference, HoldReasons: holdReasons, WorkOptions: workOptions, VideoCount: folder.VideoCount,
+		ProfileReference: folder.ProfileReference, HoldReasons: holdReasons, WorkOptions: workOptions, Videos: videos, VideoCount: folder.VideoCount,
 		EstimatedOutputBytes: folder.EstimatedOutputBytes, JobID: folder.JobID,
 		TranscriptionJobID: folder.TranscriptionJobID, CurrentStepID: folder.CurrentStepID,
 		StepState: string(folder.StepState), Stages: stages, ArchivePackageID: folder.ArchivePackageID,

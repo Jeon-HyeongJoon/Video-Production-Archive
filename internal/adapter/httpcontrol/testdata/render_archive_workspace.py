@@ -10,7 +10,7 @@ from playwright.sync_api import expect, sync_playwright
 MENUS = ["작업 관리", "연결 관리"]
 DRIVE = "#/drives/VOLUME-1"
 SCENES: dict[str, dict[str, Any]] = {
-    "pre-run": {"route": DRIVE, "problems": ("3", "fault"), "phase": "intake", "prepare": "아카이브 실행 준비", "stages": ["todo", "todo", "todo"]},
+    "pre-run": {"route": DRIVE, "problems": ("3", "fault"), "phase": "intake", "stages": ["todo", "todo", "todo"]},
     "stage-one": {
         "route": DRIVE, "problems": ("6", "fault"), "phase": "stage1", "stages": ["now", "todo", "part"],
         "stage_problems": [("fault", "렌더 1"), ("decide", "분류 1"), ("decide", "보관 1")],
@@ -117,12 +117,13 @@ def check_drive(page, scene) -> None:
     # archive wait on the title's hover.
     expect(page.locator('#drive-overview [data-fact="problems"]')).to_have_count(0)
     expect(page.locator('#drive-overview [data-fact="worker"]')).to_have_count(0)
-    expect(page.locator('#drive-overview [data-fact="archive"]')).to_have_count(1 if "prepare" in scene else 0)
+    expect(page.locator('#drive-overview [data-fact="archive"]')).to_have_count(1 if scene["phase"] == "intake" else 0)
     check_stage_summary(page, scene)
-    if "prepare" in scene:
-        expect(page.locator("#prepare-run")).to_have_text(scene["prepare"])
+    if scene["phase"] == "intake":
+        expect(page.locator("#prepare-run, #drive-prep, #start-archive-run")).to_have_count(0)
         expect(page.locator("#drive-progress")).to_have_count(0)
-        expect(page.locator("#drive-folders")).to_have_count(0)
+        expect(page.locator("#drive-folders .folder-row")).to_have_count(4)
+        expect(page.locator("#drive-contents .section-title")).to_contain_text("폴더 구조")
         return
     pct, counts, folders = scene["progress"]
     expect(page.locator("#drive-progress .progress-pct")).to_have_text(pct)

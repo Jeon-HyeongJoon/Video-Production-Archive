@@ -61,5 +61,5 @@ with sync_playwright() as playwright:
     expect(page).to_have_url(sys.argv[1] + "/#/drives/VOLUME-2")
     expect(page.locator('#menu [data-menu="connections"]')).to_have_attribute("aria-current", "page")
     expect(page.locator('#drive-overview [data-fact="connection"]')).to_contain_text("연결 해제됨")
-    expect(page.locator('#prepare-run')).to_be_disabled()
+    expect(page.locator('#prepare-run, #drive-prep, #start-archive-run')).to_have_count(0)
     browser.close()

@@ -134,13 +134,13 @@ export async function prepareDrive(drive) {
   ui.archiveID = "";
   ui.folders = new Set();
   ui.prepFolderScroll = 0;
-  ui.intakeSessionID = drive.session_id || newID("INTAKE");
+  ui.intakeSessionID = drive.selection_session_id || newID("INTAKE");
   ui.archiveRunID = newID("ARCHIVE-RUN");
   ui.archiveRunKey = newID("ARCHIVE-RUN-START");
   ui.runStarting = false;
   ui.status = "";
   notify();
-  if (drive.session_id || !drive.source_volume_id || !drive.candidate_revision) return;
+  if (drive.selection_session_id || !drive.source_volume_id || !drive.candidate_revision) return;
   try {
     const result = await mutation("/api/v1/archive-intake-sessions", {
       session_id: ui.intakeSessionID, volume_id: drive.source_volume_id, expected_candidate_revision: drive.candidate_revision,

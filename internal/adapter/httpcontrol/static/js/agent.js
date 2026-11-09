@@ -293,7 +293,7 @@ export function mountAgent(container) {
         if (focused !== ui.focusCard) { target.scrollIntoView({ block: "nearest" }); focused = ui.focusCard; }
       } else if (stuck) thread.scrollTop = thread.scrollHeight;
 
-      const screenDrive = route.name === "drive" ? findDrive(route.driveID) : null;
+      const screenDrive = route.name === "drive" ? findDrive(route.driveID) : route.name === "jobs" ? findDrive(ui.prepDriveID) : null;
       currentSelection = driveSelection(screenDrive);
       const selected = selectionRefs(currentSelection);
       chips.replaceChildren(...selected.map((value) => el("span", { class: "selection-chip" }, value)));

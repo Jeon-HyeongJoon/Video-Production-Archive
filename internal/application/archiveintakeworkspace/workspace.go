@@ -26,6 +26,7 @@ type FolderView struct {
 	HoldReasons          []vocabulary.OrganizationHoldReason
 	WorkOptions          []WorkOptionView
 	ClassificationAssets []ClassificationAssetView
+	Videos               []SourceVideoView
 	VideoCount           int
 	EstimatedOutputBytes uint64
 	JobID                string
@@ -40,6 +41,13 @@ type FolderView struct {
 	ArchiveState         archive.PackageState
 	CanAddTranscription  bool
 	TranscriptQualities  []TranscriptQualityView
+}
+
+type SourceVideoView struct {
+	RelativePath string
+	FileName     string
+	SizeBytes    uint64
+	ModifiedAt   time.Time
 }
 
 type WorkOptionView struct {
@@ -122,6 +130,7 @@ type DriveView struct {
 	FolderDiscoveryRevision    uint64
 	FolderDiscoveryState       vocabulary.FolderDiscoveryState
 	SessionID                  string
+	SelectionSessionID         string
 	WorkerID                   string
 	SourceVolumeID             string
 	SourceStorageID            string

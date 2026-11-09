@@ -47,14 +47,20 @@ func TestWorkerInventoryProjectsUnclassifiedFoldersAndRoleCapacityStorageCandida
 			}},
 			StorageObservations: []worker.StorageObservation{
 				{StorageID: "source-main", Connected: true, AccessKind: vocabulary.StorageAccessAttachedVolume, DiscoveryState: vocabulary.FolderDiscoveryReady, CapacityBytes: 1_000, FreeBytes: 300, DiscoveryRevision: 41,
-					Folders: []worker.MediaFolderObservation{{Folder: "event-a", VideoCount: 12, InputBytes: 600}, {Folder: "event-b", VideoCount: 4, InputBytes: 200}}},
+					Folders: []worker.MediaFolderObservation{{Folder: "event-a", VideoCount: 12, InputBytes: 600, Videos: []worker.MediaFileObservation{{RelativePath: "event-a/C0001.MP4", FileName: "C0001.MP4", SizeBytes: 400, ModifiedAt: now.Add(-time.Hour)}}}, {Folder: "event-b", VideoCount: 4, InputBytes: 200}}},
 				{StorageID: "archive-local", Connected: true, AccessKind: vocabulary.StorageAccessLocal, DiscoveryState: vocabulary.FolderDiscoveryReady, CapacityBytes: 2_000, FreeBytes: 1_400, DiscoveryRevision: 1},
 				{StorageID: "archive-nas", Connected: false, AccessKind: vocabulary.StorageAccessMountedNetwork, DiscoveryState: vocabulary.FolderDiscoveryFailed, CapacityBytes: 8_000, FreeBytes: 7_000},
 				{StorageID: "system-scratch", Connected: true, AccessKind: vocabulary.StorageAccessLocal, DiscoveryState: vocabulary.FolderDiscoveryReady, CapacityBytes: 500, FreeBytes: 100, DiscoveryRevision: 1},
 			},
 		},
 	}}
-	service, err := archiveintakeworkspace.New(workstationStore{}, workstationJobs{}, archiveintakeworkspace.WithInventory(candidates, storages, statuses, func() time.Time { return now }))
+	sessions := sessionInventory{
+		{ID: "INTAKE-CURRENT", Revision: 1, CandidateRevision: 3, VolumeID: "SOURCE-VOLUME", WorkspaceDriveID: "SOURCE-VOLUME", PhysicalDeviceID: "SOURCE-PHYSICAL", WorkerID: "WORKER-WINDOWS", StorageID: "source-main", SelectedBy: "operator", SelectedAt: now.Add(-time.Minute)},
+		{ID: "INTAKE-STALE-NEWER", Revision: 1, CandidateRevision: 2, VolumeID: "SOURCE-VOLUME", WorkspaceDriveID: "SOURCE-VOLUME", PhysicalDeviceID: "SOURCE-PHYSICAL", WorkerID: "WORKER-WINDOWS", StorageID: "source-main", SelectedBy: "operator", SelectedAt: now},
+	}
+	service, err := archiveintakeworkspace.New(workstationStore{}, workstationJobs{},
+		archiveintakeworkspace.WithIntakeSessions(sessions),
+		archiveintakeworkspace.WithInventory(candidates, storages, statuses, func() time.Time { return now }))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,6 +73,7 @@ func TestWorkerInventoryProjectsUnclassifiedFoldersAndRoleCapacityStorageCandida
 	}
 	view := views[0]
 	if view.State != "UNCLASSIFIED" || view.ArchiveRunID != "" || view.WorkspaceDriveID != "SOURCE-VOLUME" ||
+		view.SessionID != "INTAKE-CURRENT" || view.SelectionSessionID != "INTAKE-CURRENT" ||
 		view.WorkerID != "WORKER-WINDOWS" || view.CandidateRevision != 3 || view.FolderDiscoveryRevision != 41 ||
 		view.ConnectionState != vocabulary.VolumeConnected || view.ConnectionWorkerID != "WORKER-WINDOWS" || !view.ConnectionObservedAt.Equal(now) ||
 		view.FolderDiscoveryState != vocabulary.FolderDiscoveryReady ||
@@ -74,6 +81,8 @@ func TestWorkerInventoryProjectsUnclassifiedFoldersAndRoleCapacityStorageCandida
 		t.Fatalf("pre-run source inventory was not projected: %+v", view)
 	}
 	if view.Folders[0].Folder != "event-a" || view.Folders[0].VideoCount != 12 || view.Folders[0].EstimatedOutputBytes != 600 ||
+		len(view.Folders[0].Videos) != 1 || view.Folders[0].Videos[0].RelativePath != "event-a/C0001.MP4" ||
+		view.Folders[0].Videos[0].FileName != "C0001.MP4" || view.Folders[0].Videos[0].SizeBytes != 400 ||
 		view.Folders[1].Folder != "event-b" || view.Folders[1].VideoCount != 4 {
 		t.Fatalf("pre-run folder inventory mismatch: %+v", view.Folders)
 	}
@@ -111,6 +120,10 @@ func TestWorkerInventoryProjectsUnclassifiedFoldersAndRoleCapacityStorageCandida
 		ID: "DECISION-EVENT-A", Sequence: 1, WorkspaceDriveID: "SOURCE-VOLUME", Folder: "event-a", InputRevision: 41,
 		Disposition: vocabulary.OrganizationHold, HoldReasons: []vocabulary.OrganizationHoldReason{vocabulary.OrganizationHoldAmbiguousMultipleVideos},
 	}
+	sessions = append(sessions, archiveintake.Session{
+		ID: "INTAKE-1", Revision: 1, CandidateRevision: 1, VolumeID: "SOURCE-VOLUME", WorkspaceDriveID: "SOURCE-VOLUME",
+		PhysicalDeviceID: "SOURCE-PHYSICAL", WorkerID: "WORKER-WINDOWS", StorageID: "source-main", SelectedBy: "operator", SelectedAt: now.Add(-2 * time.Hour),
+	})
 	service, err = archiveintakeworkspace.New(workstationStore{
 		receipts: []organization.ArchiveOrganizationReceipt{{
 			ID: "ARCHIVE-RUN-1", SessionID: "INTAKE-1", InputRevision: 41, WorkspaceDriveID: "SOURCE-VOLUME", WorkerID: "WORKER-WINDOWS",
@@ -123,7 +136,7 @@ func TestWorkerInventoryProjectsUnclassifiedFoldersAndRoleCapacityStorageCandida
 		FolderDiscoveryRevision: 41, FolderIDs: []string{"event-a"},
 		SelectedBy:      command.Actor{Type: vocabulary.ActorHuman, ID: "operator-1"},
 		StageOwnerships: []archiverun.StageOwnership{{Kind: archiverun.OrganizationStage}, {Kind: archiverun.TranscriptionStage}}, CreatedAt: now,
-	})}, archiveintakeworkspace.WithInventory(candidates, storages, statuses, func() time.Time { return now }))
+	})}, archiveintakeworkspace.WithIntakeSessions(sessions), archiveintakeworkspace.WithInventory(candidates, storages, statuses, func() time.Time { return now }))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +145,8 @@ func TestWorkerInventoryProjectsUnclassifiedFoldersAndRoleCapacityStorageCandida
 		t.Fatal(err)
 	}
 	view = views[0]
-	if view.FolderCount != 1 || view.FileCount != 1 || len(view.Folders) != 1 || view.Folders[0].Folder != "event-a" ||
+	if view.SessionID != "INTAKE-1" || view.SelectionSessionID != "INTAKE-CURRENT" ||
+		view.FolderCount != 1 || view.FileCount != 1 || len(view.Folders) != 1 || view.Folders[0].Folder != "event-a" ||
 		view.DiscoveredFolderCount != 2 || view.DiscoveredFileCount != 16 || len(view.DiscoveredFolders) != 2 ||
 		view.DiscoveredFolders[1].Folder != "event-b" {
 		t.Fatalf("fixed ArchiveRun scope replaced the reusable drive inventory: %+v", view)
@@ -166,4 +180,19 @@ type statusInventory []worker.Status
 
 func (inventory statusInventory) Statuses(time.Time) []worker.Status {
 	return append([]worker.Status(nil), inventory...)
+}
+
+type sessionInventory []archiveintake.Session
+
+func (inventory sessionInventory) Session(_ context.Context, id string) (archiveintake.Session, error) {
+	for _, session := range inventory {
+		if session.ID == id {
+			return session, nil
+		}
+	}
+	return archiveintake.Session{}, archiveintake.ErrInvalidSession
+}
+
+func (inventory sessionInventory) ListSessions(context.Context) ([]archiveintake.Session, error) {
+	return append([]archiveintake.Session(nil), inventory...), nil
 }

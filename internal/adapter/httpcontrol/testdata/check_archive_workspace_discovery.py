@@ -31,9 +31,9 @@ with sync_playwright() as playwright:
         route.fulfill(status=response.status, headers={"content-type": "application/json"}, body=json.dumps(payload))
 
     page.route("**/api/v1/archive-intake", archive_intake)
-    page.goto(sys.argv[1] + "/#/drives/VOLUME-1", wait_until="networkidle")
-    page.locator("#prepare-run").click()
-    expect(page.locator('#drive-overview [data-fact="found"]')).to_contain_text("검색 중 · 1 폴더 · 1 영상")
+    page.goto(sys.argv[1] + "/#/jobs", wait_until="networkidle")
+    page.locator("#new-job-open").click()
+    page.locator('#prep-drives [data-drive-id="VOLUME-1"]').click()
     expect(page.locator("#prep-folders .chooser-head")).to_contain_text("검색 중 · 1 폴더 · 1 영상")
     expect(page.locator("#select-all")).to_be_disabled()
     expect(page.locator("#prep-folders input[type=checkbox]:not(#select-all)")).to_be_disabled()
@@ -42,8 +42,8 @@ with sync_playwright() as playwright:
 
     state["ready"] = True
     page.reload(wait_until="networkidle")
-    page.locator("#prepare-run").click()
-    expect(page.locator('#drive-overview [data-fact="found"]')).to_contain_text("40 폴더 · 820 영상")
+    page.locator("#new-job-open").click()
+    page.locator('#prep-drives [data-drive-id="VOLUME-1"]').click()
     expect(page.locator("#prep-folders .chooser-head")).to_contain_text("탐색 r77 · 40")
     expect(page.locator("#select-all")).to_be_enabled()
     expect(page.locator("#prep-folders input[type=checkbox]:not(#select-all)")).to_have_count(40)

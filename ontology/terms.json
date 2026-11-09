@@ -262,7 +262,8 @@
         "ArchiveRun을 참조하는 검사·Folder·STT Job은 그 ArchiveRun의 하위 작업이며 상위 목록에 독립 작업으로 중복 표시하지 않는다.",
         "ArchiveRun을 참조하지 않는 Job만 독립 관리 작업으로 표시한다.",
         "완료 관리 작업은 왼쪽 워크스페이스에서 제거하고 작업 관리의 완료 목록과 영속 상세에서만 다시 확인한다.",
-        "관리 작업 ID는 기존 archive_run_id 또는 job_id이며 별도 identity를 만들지 않는다."
+        "관리 작업 ID는 기존 archive_run_id 또는 job_id이며 별도 identity를 만들지 않는다.",
+        "새 ArchiveRun 관리 작업의 원본·아카이브 저장소·폴더 범위 선택과 생성은 작업 관리에서 수행한다."
       ],
       "forbidden": {
         "words": [],
@@ -1199,6 +1200,7 @@
         "Archive Workspace는 조회 전용 화면이 아니라 대화와 직접 명령을 함께 제공하는 Archive의 주 사용자 표면이다.",
         "상태 시각화만 가리키는 별도 제품 표면 이름을 만들지 않는다.",
         "왼쪽 메뉴는 작업 관리·연결 관리 순서이며 작업 관리가 기본 화면이다.",
+        "작업 관리의 새 작업 생성은 아카이브 작업과 독립 Template 작업을 구분하며 ArchiveRun의 원본 드라이브·아카이브 저장소·폴더 범위 선택은 이 표면에서만 수행한다.",
         "왼쪽 워크스페이스는 새 영속 개체가 아니라 미완료 ArchiveRun 또는 독립 Job마다 work ID·드라이브·Worker를 묶어 해당 영속 상세로 이동하는 스크롤 가능한 탐색 카드이며 완료 작업은 작업 관리의 완료 목록에만 남긴다.",
         "설정과 테마 전환은 전역 제어로서 왼쪽 워크스페이스 목록이 아니라 상단 알림 옆에 둔다.",
         "현재 드라이브 projection에 archive_run_id가 남은 기존 실행은 ArchiveRun snapshot이 없어도 같은 관리 작업 카드와 상세로 복원한다.",
@@ -1251,6 +1253,7 @@
       "rules": [
         "연결 관리는 Worker PC·드라이브·Agent를 새 개체로 합치지 않고 각 identity와 상세 경계를 유지한다.",
         "드라이브를 선택하면 같은 workspace_drive_id의 드라이브 상세로 이동한다.",
+        "드라이브 상세는 폴더 구조·영상 기록물·연결 상태·처리 이력을 보여 주며 새 ArchiveRun을 만들거나 범위를 고르지 않는다.",
         "Provider·Worker·Archivist Host·Storage 등록과 credential 변경은 로컬 설정 권한에 남고 연결 관리 화면은 runtime API로 이를 바꾸지 않는다."
       ],
       "forbidden": {
@@ -2835,9 +2838,11 @@
         "en": "Drive Workstation"
       },
       "code_name": "DriveWorkstation",
-      "definition": "아카이브 작업 공간에서 원본 논리 드라이브(Volume) 하나를 작업 단위로 삼아 실행 준비 범위, 아카이브 실행 단계와 진행, 확인 필요 해결과 폴더별 상태를 한 화면에서 조작하고 확인하는 Archive Workspace 표면.",
+      "definition": "아카이브 작업 공간에서 원본 논리 드라이브(Volume) 하나의 현재 폴더 구조·영상 기록물·연결 상태·과거 처리 결과와 기존 실행의 확인 필요 항목을 확인하는 Archive Workspace 표면.",
       "rules": [
         "드라이브 워크스테이션은 Worker PC나 Archivist Host를 뜻하지 않으며 선택한 원본 드라이브를 기준으로 한다.",
+        "새 아카이브 작업의 원본·아카이브 저장소·폴더 범위 선택과 시작은 작업 관리에서만 하며 드라이브 워크스테이션에는 생성 조작을 두지 않는다.",
+        "폴더 구조는 ArchiveRun 유무와 무관하게 현재 READY inventory를 표시하고 영상 기록물은 폴더를 펼쳤을 때만 root-relative 사실로 표시한다.",
         "아카이브 실행은 단계 줄과 보관된 영상 수 기준 진행 한 줄로 조용히 표시한다. 폴더 행은 한 단어 상태·단계 점·보관됨/확정됨만 두고 단계 이름·진행 수·대기 이유는 폴더 세부를 펼칠 때만 보인다. 날짜 이름 폴더는 연간 달력으로도 볼 수 있다.",
         "정상 진행 중인 폴더 상태는 드라이브 상세 밖에 드러내지 않는다. 실패와 사람 대기는 알림 목록에 폴더 하나씩 보이고 드라이브 상세의 확인 필요 칸에서 해결한다.",
         "폴더와 파일 수가 많아도 정상 진행과 자원 대기는 조용히 두며 절대경로와 credential을 표시하지 않는다."
@@ -3097,7 +3102,8 @@
       "rules": [
         "SCANNING의 부분 집계는 heartbeat와 화면에 보이지만 ArchiveRun의 폴더 범위로 선택할 수 없다.",
         "READY만 0이 아닌 folder discovery revision을 가진다.",
-        "FAILED는 빈 폴더 목록과 같지 않으며 화면에서 검색 실패로 구분한다."
+        "FAILED는 빈 폴더 목록과 같지 않으며 화면에서 검색 실패로 구분한다.",
+        "READY inventory는 폴더별 영상의 root-relative 경로·파일명·크기·filesystem 수정 시각을 포함하고 mount path와 StorageRoot는 포함하지 않는다."
       ],
       "forbidden": {
         "words": [],
@@ -4723,6 +4729,7 @@
       "definition": "사람이 연결된 논리 Volume 하나를 선택해 특정 Worker에 고정한 읽기 전용 영상 입고 작업 공간.",
       "rules": [
         "장치 연결 관찰만으로 만들지 않고 사람의 명시적 선택을 요구한다.",
+        "불변 이력이며 새 ArchiveRun 준비에는 현재 candidate revision·Worker·SOURCE_MEDIA Storage가 모두 일치하는 세션만 선택 세션으로 사용한다.",
         "workspace_drive_id로 stable volume identity를 소유하고 PhysicalDevice identity는 I/O 충돌 방지 보조 키로 따로 보존한다.",
         "Control에는 stable identity만 저장하고 원격 mount root는 선택된 Worker process 안에서 ReadOnlyStorageRoot로 연다.",
         "SOURCE_MEDIA 원본을 이동하거나 이름을 바꾸지 않는다."
@@ -4829,6 +4836,41 @@
         "docs/design/13-archive-intake.md §3"
       ],
       "decided": "2026-10-30"
+    },
+    {
+      "id": "source-video-record",
+      "layer": "product",
+      "kind": "value",
+      "name": {
+        "ko": "원본 영상 기록",
+        "en": "Source Video Record"
+      },
+      "code_name": "SourceVideoView",
+      "definition": "Worker의 SOURCE_MEDIA folder inventory가 발견한 영상 하나를 드라이브 상세에서 식별하기 위한 root-relative 읽기 모델 값.",
+      "rules": [
+        "파일명·정규화한 상대경로·크기·filesystem 수정 시각을 가지며 절대 root·mount path·credential을 포함하지 않는다.",
+        "원본 생성일이나 촬영일로 추론하지 않고 filesystem이 제공한 값은 수정 시각으로만 표시한다.",
+        "드라이브 상세에서는 소속 MediaFolder를 펼쳤을 때만 영상 행을 만든다."
+      ],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "part-of",
+          "target": "media-folder"
+        },
+        {
+          "type": "refers-to",
+          "target": "storage"
+        }
+      ],
+      "sources": [
+        "사용자 결정 2026-11-09: 연결 관리의 드라이브는 포함된 영상 기록물과 폴더 구조를 표현",
+        "requirements DEV-011, DSH-033"
+      ],
+      "decided": "2026-11-09"
     },
     {
       "id": "organization-disposition",

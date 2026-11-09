@@ -15,6 +15,7 @@ with sync_playwright() as playwright:
     expect(page.locator("#new-job-form")).to_have_count(0)
     page.locator("#new-job-open").click()
     expect(page.locator("#new-job-open")).to_have_attribute("aria-expanded", "true")
+    page.locator('#new-work-kind [data-kind="TEMPLATE"]').click()
     expect(page.locator("#new-job-template option")).to_have_count(4)
     page.locator("#new-job-title").fill("2026 가을 행사 기록")
     page.locator("#new-job-template").select_option("occasion-recording")

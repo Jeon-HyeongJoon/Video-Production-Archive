@@ -19,17 +19,17 @@
 
 ## 2. 선택과 탐색
 
-담당자가 고르는 순서는 Worker, 원본 드라이브, 아카이브 저장소, 폴더 범위다. 상단 Worker 선택은 목록 필터일 뿐 업무 Event를 만들지 않는다. `DEV-010`, `DSH-010`
+담당자는 작업 관리의 `새 작업 생성 > 아카이브`에서 원본 드라이브, 아카이브 저장소, 폴더 범위를 차례로 고른다. Worker는 선택한 원본 드라이브의 현재 연결 Worker로 정해지며 별도로 선택하지 않는다. 연결 관리의 드라이브 상세는 이 선택을 만들지 않는다. `DEV-010`, `DSH-010`
 
 Windows에서 외부 data bus Volume이 연결되면 Worker는 파일을 읽지 않고 PhysicalDevice·volume identity, 역할이 다른 source·archive Storage identity, label·filesystem·capacity만 후보로 보고한다. USB bridge가 volume을 `DRIVE_FIXED`로 노출해도 외부 bus면 후보이며 내부 시스템 volume과 작은 보조 partition은 제외한다. drive letter와 mount root는 Worker 밖으로 보내지 않는다. `DEV-007`, `DEV-010`
 
 과거 실행이 있는 드라이브도 목록에서 삭제하지 않되 현재 연결과 이력을 분리한다. 유효한 Worker heartbeat에 원본 identity가 있으면 연결됨, online Worker의 attached volume 목록에서 사라졌으면 연결 해제됨, Worker가 offline이라 관측할 수 없으면 확인 불가다. 연결 해제·확인 불가는 완료 결과와 Catalog를 계속 읽을 수 있지만 새 ArchiveRun 준비·시작은 할 수 없다. 화면의 목록·상세·알림·실행 gate는 5초 polling마다 이 한 projection 값을 함께 바꾼다. `DEV-010`, `DSH-010`, `DSH-026`
 
-원본은 사람이 현재 candidate revision을 고른 뒤에만 해당 Worker에서 `SOURCE_MEDIA` ReadOnlyStorageRoot로 개방한다. Control은 root 없이 ArchiveIntakeSession의 stable identity를 기록하고 선택 storage ID만 heartbeat 응답으로 Worker에 돌려준다. 아카이브 저장소는 같은 Worker가 접근할 수 있는 `ARCHIVE_PRIMARY`이며 원본과 다른 논리 Volume이어야 한다. 새 외장 Volume은 원본용 Storage ID와 별도의 archive Storage ID로 후보에 나타나므로 역할이 섞이지 않는다. Worker projection은 로컬 root, 연결된 네트워크 공유, 원본과 다른 새 외장 Volume, 검증된 FTP·SFTP를 `StorageAccessKind`로 구분한다. 담당자가 고르기 전에는 새 외장 Volume에 쓰지 않는다. 접근 불가 원격 서비스와 예상 결과 크기보다 여유 용량이 부족한 후보는 시작을 막는다. 유효한 시작은 아카이브 Storage 단위 쓰기 예약을 획득한다. Archivist나 정책은 두 Storage 중 하나를 대신 고르지 않는다. `DEV-008`, `DEV-010`, `ARC-010`, `APP-006`, `CFG-012~013`
+원본은 사람이 현재 candidate revision을 고른 뒤에만 해당 Worker에서 `SOURCE_MEDIA` ReadOnlyStorageRoot로 개방한다. Control은 root 없이 ArchiveIntakeSession의 stable identity를 기록하고 선택 storage ID만 heartbeat 응답으로 Worker에 돌려준다. ArchiveIntakeSession은 불변 이력이므로 새 작업 생성 projection은 current candidate revision·Worker·source Storage와 모두 일치하는 세션을 별도 선택 세션 ID로 제공한다. 완료된 과거 ArchiveRun의 접수 세션 ID는 실행 추적에 남지만 새 ArchiveRun 준비에는 쓰지 않으며, 일치하는 선택 세션이 없으면 담당자의 현재 선택으로 새 세션을 만든다. 아카이브 저장소는 같은 Worker가 접근할 수 있는 `ARCHIVE_PRIMARY`이며 원본과 다른 논리 Volume이어야 한다. 새 외장 Volume은 원본용 Storage ID와 별도의 archive Storage ID로 후보에 나타나므로 역할이 섞이지 않는다. Worker projection은 로컬 root, 연결된 네트워크 공유, 원본과 다른 새 외장 Volume, 검증된 FTP·SFTP를 `StorageAccessKind`로 구분한다. 담당자가 고르기 전에는 새 외장 Volume에 쓰지 않는다. 접근 불가 원격 서비스와 예상 결과 크기보다 여유 용량이 부족한 후보는 시작을 막는다. 유효한 시작은 아카이브 Storage 단위 쓰기 예약을 획득한다. Archivist나 정책은 두 Storage 중 하나를 대신 고르지 않는다. `DEV-008`, `DEV-010`, `ARC-010`, `APP-006`, `CFG-012~013`
 
 Worker는 현재 연결된 외장 Volume의 두 역할 ID를 로컬 `StorageRoot` capability로만 해석하고 root 경로를 Control에 보내지 않는다. capability를 여는 것만으로 파일을 읽거나 쓰지 않으며, 담당자가 선택한 뒤 생성된 fenced 실행 명세만 archive ID에 게시할 수 있다. 분리 시 실행 중 handle을 닫지 않고 유휴 조정에서 동적 capability를 제거한다. `DEV-013`
 
-폴더 탐색과 FFprobe 검사는 원본에 접근하는 Worker에서 실행한다. 선택 직후 folder inventory는 background에서 실행해 대용량 탐색 중에도 heartbeat와 자원 수용 판정을 멈추지 않는다. 지원 regular file만 즉시 상위 정규화 상대 폴더로 묶고, 보호·숨김 항목, symlink, junction·reparse 후보, irregular entry와 root 밖 대상은 따라가지 않는다. 실행 전 bounded heartbeat는 `FolderDiscoveryState`와 revision 집계만 보내고, 크기가 늘어나는 폴더 ID·영상 수·입력 byte 목록은 같은 snapshot ID의 별도 inventory 요청으로 보낸다. `SCANNING` 부분 집계는 화면에 점진적으로 표시하지만 선택 범위로 고정하지 않으며 `READY`만 0이 아닌 전체 탐색 revision을 갖고 `FAILED`는 빈 결과와 구분한다. 아카이브 실행 검사는 각 영상의 정규화한 기술정보를 추가한다. Control에는 Worker의 절대경로와 executable 경로를 보내지 않는다. `DEV-010~011`, `WRK-006`, `DSH-022`, `ORG-001`, `CFG-011`, `ORG-010`
+폴더 탐색과 FFprobe 검사는 원본에 접근하는 Worker에서 실행한다. 선택 직후 folder inventory는 background에서 실행해 대용량 탐색 중에도 heartbeat와 자원 수용 판정을 멈추지 않는다. 지원 regular file만 즉시 상위 정규화 상대 폴더로 묶고, 보호·숨김 항목, symlink, junction·reparse 후보, irregular entry와 root 밖 대상은 따라가지 않는다. 실행 전 bounded heartbeat는 `FolderDiscoveryState`와 revision 집계만 보내고, 크기가 늘어나는 폴더·영상 inventory는 같은 snapshot ID의 별도 요청으로 보낸다. `SCANNING` 부분 집계는 작업 생성 화면에 점진적으로 표시하지만 선택 범위로 고정하지 않는다. `READY` 결과는 0이 아닌 전체 탐색 revision과 영상별 root-relative 경로·파일명·크기·filesystem 수정 시각을 포함하며 드라이브 상세의 폴더 구조에서 펼쳐 본다. `FAILED`는 빈 결과와 구분한다. 아카이브 실행 검사는 각 영상의 정규화한 기술정보를 추가한다. Control에는 Worker의 절대경로와 executable 경로를 보내지 않는다. `DEV-010~011`, `WRK-006`, `DSH-022`, `DSH-033`, `ORG-001`, `CFG-011`, `ORG-010`
 
 탐색 결과는 단조 revision을 가진다. 일부 선택과 전체 선택 모두 시작 시점 revision의 폴더 ID 집합으로 고정한다. 이후 파일 추가·삭제가 감지되면 오래된 시작·override를 거부하고 원본 드라이브 상태를 “내용 바뀜”으로 투영한다. `ORG-011`, `APP-002`
 
@@ -150,12 +150,12 @@ Archivist용 MCP는 드라이브·폴더 조회, 1단계 시작, 상태 조회, 
 
 ## 9. 아카이브 작업 공간
 
-아카이브 작업 공간의 화면 계약은 [09. 아카이브 작업 공간](09-archive-workspace.md) §7을 따른다. Archive Intake가 쓰는 자리는 다음과 같다. 왼쪽 사이드바 메뉴는 작업 관리·드라이브·Worker 순서이고 작업 관리가 첫 메뉴이자 기본 화면이며, Archivist 대화 칸은 모든 화면의 오른쪽에 늘 있고 화면에는 Agent로 표기한다. `DSH-004`, `DSH-007`, `DSH-009`, `DSH-019`, `DSH-025`
+아카이브 작업 공간의 화면 계약은 [09. 아카이브 작업 공간](09-archive-workspace.md) §7을 따른다. 왼쪽 사이드바 메뉴는 작업 관리·연결 관리 순서이고 작업 관리가 기본 화면이며, Archivist 대화 칸은 모든 화면의 오른쪽에 늘 있고 화면에는 Agent로 표기한다. `DSH-004`, `DSH-007`, `DSH-009`, `DSH-019`, `DSH-025`
 
 - 상태: 모든 드라이브·Worker의 실패와 사람 대기를 묶지 않고 문제 하나마다 카드로 보이고, 카드를 누르면 그 문제를 펼친 드라이브 상세로 이동한다. 지금 하는 일은 처리 중인 드라이브의 단계 상태 행렬이다.
 - 드라이브 목록: 원본 드라이브를 실행 전·처리 중·완료로 묶고 Worker·아카이브 저장소·단계·보관 영상 진행·실패와 확인 필요 수를 한 줄로 보인다.
-- 드라이브 상세: 단계·보관 진행·Worker·아카이브·확인 필요 다섯 사실과 연결선 없는 단계 상태 행렬을 담은 개요 카드, 제목 옆 STT 버튼과 실행 준비 버튼, 실행 준비(아카이브 후보의 역할·접근 방식·용량, 폴더 범위, 예상 용량, 시작 불가 이유), ArchiveRun을 넘어 유지하는 완료 내역, 확인 필요 칸, 최신 실행의 폴더 표를 둔다. 완료 내역은 실제 보관된 결과 영상명·처리 방식·원본 수·완료 시각·아카이브 Storage·보관 상태를 최신 순서로 보이고, 행을 누르면 해당 `job_id`의 작업 상세로 이동한다. 접근 불가 후보는 비활성이고 SMTP는 표시하지 않는다.
-- 작업 관리: 최상단에 실행·자원 대기·대기열 관리 작업을 모두 보이고, 그 아래 실패·사람 입력 대기 관리 작업의 확인 필요 목록과 끝난 관리 작업의 완료 목록을 각각 접고 펼칠 수 있게 둔다. 완료 작업은 왼쪽 워크스페이스에서 제거하고 이 완료 목록에 유지한다. ArchiveRun 상세는 하위 Job과 ArchivePackage 완료 결과를 함께 보며 완료 Job 상세의 `아카이브 결과`는 같은 실행의 정확한 Package 결과와 root 기준 상대경로로 이동한다.
+- 드라이브 상세: 연결 상태, 현재 폴더 구조와 폴더를 펼쳤을 때의 영상 기록, ArchiveRun을 넘어 유지하는 완료 내역, 기존 실행의 확인 필요와 단계 상태를 둔다. 새 아카이브 작업의 저장소·범위 선택과 시작은 두지 않는다. 완료 내역은 실제 보관된 결과 영상명·처리 방식·원본 수·완료 시각·아카이브 Storage·보관 상태를 최신 순서로 보이고 행을 누르면 해당 ArchiveRun 상세로 이동한다.
+- 작업 관리: `새 작업 생성`에서 아카이브와 독립 Template 작업을 구분한다. 아카이브 작업은 연결 원본, 그 Worker가 접근하는 아카이브 후보, READY 폴더 범위와 예상 용량·시작 불가 이유를 확인한 뒤 ArchiveRun 하나를 만들고 그 상세로 이동한다. 이어서 실행·자원 대기·대기열 관리 작업, 실패·사람 입력 대기의 확인 필요 목록과 끝난 관리 작업의 완료 목록을 둔다. ArchiveRun 상세는 하위 Job과 ArchivePackage 완료 결과를 함께 본다.
 - Worker: 처리 중인 드라이브, 드라이브에 속하지 않은 Job, 아카이브 저장소 접근과 자원을 보인다.
 
 STT 버튼은 1단계 남은 실행 작업이 있으면 그 수와 함께 비활성, 게이트 통과 시 활성, 시작 뒤 진행 중으로 표시한다. 드라이브 단계는 `실행 전 → 1단계 정리 중 → STT 시작 가능 → 2단계 전사 중 → 완료` 순서이고, 폴더 단계 순서 `분류·소스 타임라인·렌더·QC·보관 | 오디오 추출·STT·자막과 전사 텍스트·패키지 추가`는 폴더 행의 단계 점과 펼친 세부에서만 보인다. 단계 점과 폴더 행은 영속 StepState와 저장된 WaitReason만 사용한다. `INPUT`·`APPROVAL`·`DEVICE`는 확인 필요 칸과 폴더 행 글자, `MEMORY`·`SCRATCH`·`SLOT`·`DISK`·`IDLE`·`PRIORITY`는 진행 중과 세부의 이유 label로 표시한다. `DSH-006`, `DSH-008`

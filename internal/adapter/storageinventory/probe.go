@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io/fs"
 	"os"
+	"path"
 	"sort"
 	"strings"
 	"sync"
@@ -242,6 +243,7 @@ func observeRoot(ctx context.Context, observation worker.StorageObservation, roo
 			return observation, err
 		}
 		var inputBytes uint64
+		videos := make([]worker.MediaFileObservation, 0, len(folder.VideoPaths))
 		for _, relativePath := range folder.VideoPaths {
 			file, openErr := root.Open(relativePath)
 			if openErr != nil {
@@ -253,6 +255,10 @@ func observeRoot(ctx context.Context, observation worker.StorageObservation, roo
 				return observation, ErrObservationFailed
 			}
 			inputBytes += uint64(info.Size())
+			videos = append(videos, worker.MediaFileObservation{
+				RelativePath: relativePath, FileName: path.Base(relativePath),
+				SizeBytes: uint64(info.Size()), ModifiedAt: info.ModTime().UTC(),
+			})
 			digest.Write([]byte(relativePath))
 			digest.Write([]byte{0})
 			var size [8]byte
@@ -260,7 +266,7 @@ func observeRoot(ctx context.Context, observation worker.StorageObservation, roo
 			digest.Write(size[:])
 		}
 		observation.Folders = append(observation.Folders, worker.MediaFolderObservation{
-			Folder: folder.RelativePath, VideoCount: len(folder.VideoPaths), InputBytes: inputBytes,
+			Folder: folder.RelativePath, VideoCount: len(folder.VideoPaths), InputBytes: inputBytes, Videos: videos,
 		})
 	}
 	sum := digest.Sum(nil)
@@ -274,7 +280,11 @@ func observeRoot(ctx context.Context, observation worker.StorageObservation, roo
 func summarizeFolders(folders []mediafolder.Folder) []worker.MediaFolderObservation {
 	result := make([]worker.MediaFolderObservation, 0, len(folders))
 	for _, folder := range folders {
-		result = append(result, worker.MediaFolderObservation{Folder: folder.RelativePath, VideoCount: len(folder.VideoPaths)})
+		videos := make([]worker.MediaFileObservation, 0, len(folder.VideoPaths))
+		for _, relativePath := range folder.VideoPaths {
+			videos = append(videos, worker.MediaFileObservation{RelativePath: relativePath, FileName: path.Base(relativePath)})
+		}
+		result = append(result, worker.MediaFolderObservation{Folder: folder.RelativePath, VideoCount: len(folder.VideoPaths), Videos: videos})
 	}
 	return result
 }
