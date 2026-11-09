@@ -11,7 +11,6 @@ import (
 	"videoarchive/internal/core/command"
 )
 
-// Requirement: APP-001
 func TestRegisteredCapabilitiesExecuteDirectlyThroughSharedCommandBus(t *testing.T) {
 	ctx := context.Background()
 	store, err := sqlitecommand.Open(t.TempDir() + "/control.db")

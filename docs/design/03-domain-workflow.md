@@ -40,7 +40,7 @@ QC는 렌더 요청값을 그대로 신뢰하지 않는다. 게시 파일을 ffp
 
 Catalog는 파일을 이동하거나 경로를 검색 키로 사용하지 않는다. 사람 또는 Archivist가 작성한 제목·설명·키워드는 OriginalAsset별 추가 전용 `CatalogRecord` 리비전으로 남긴다. 자산 검색은 최신 CatalogRecord와 최신 MediaInspection을 결합해 text·video codec·길이 조건을 적용하며 OriginalAsset 콘텐츠 정체성을 반환한다. 전사 검색은 별도 segment hit 모델로 최신 Transcript의 timecode를 반환한다. `CAT-001~003`
 
-새 드라이브의 Worker 원격 탐색, 폴더 범위 고정, 6Mbps·20Mbps 렌더, 소스 시퀀스와 CutMarker, ARCHIVE_PRIMARY 보관, 별도 STT 단계와 ArchiveCatalog는 [13. Archive Intake](13-archive-intake.md)가 소유한다. 그 흐름의 영속 일관성 경계는 run 영수증과 분리된 ArchiveRun이며 사람의 선택 참조와 고정 FolderScope 및 두 단계 소유권을 보존한다. 자동 판정은 기술 관찰값과 versioned policy만 사용하며 모호한 입력은 `WaitReason.INPUT`인 보류로 남긴다. 명시적 분류로 HOLD가 해소되면 같은 ArchiveRun 문맥의 후속 Folder Job을 멱등하게 연결한다. `DEV-007~010`, `DEV-012`, `ORG-001~014`, `PIP-007~009`, `APP-002`, `APP-006~007`, `DSH-006~013`
+새 드라이브의 Worker 원격 탐색, 폴더 범위 고정, 6Mbps·20Mbps 렌더, 소스 시퀀스와 CutMarker, ARCHIVE_PRIMARY 보관, 별도 STT 단계와 ArchiveCatalog는 [13. Archive Intake](13-archive-intake.md)가 소유한다. run 영수증과 분리된 ArchiveRun은 사람의 선택 참조, 고정 FolderScope와 두 단계 소유권을 보존하는 영속 업무 identity다. 현재 ArchiveRun은 진행 상태 전이를 직접 저장하지 않으며 최신 OrganizationDecision과 소유 Job의 StepState에서 1·2단계 상태를 투영한다. 자동 판정은 기술 관찰값과 versioned policy만 사용하며 모호한 입력은 `WaitReason.INPUT`인 보류로 남긴다. 명시적 분류로 HOLD가 해소되면 같은 ArchiveRun 문맥의 후속 Folder Job을 멱등하게 연결한다. `DEV-007~010`, `DEV-012`, `ORG-001~014`, `PIP-007~009`, `APP-002`, `APP-006~007`, `DSH-006~013`
 
 ## 2. 공통 Command
 

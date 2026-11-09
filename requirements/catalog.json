@@ -1148,9 +1148,9 @@
       "given": "MCP·HTTP Adapter를 시작하지 않은 상태와 도메인별 등록 Capability input이 있다.",
       "when": "Capability Registry를 통해 각 기능을 직접 실행한다.",
       "then": "짧은 기능은 Command receipt와 결과 ID를, 대용량 기능은 Job·Step handle을 반환하며 protocol 전용 타입이나 규칙을 요구하지 않는다.",
-      "test_file": "internal/application/capability/registry_test.go",
-      "test_name": "TestRegisteredCapabilitiesExecuteDirectlyThroughSharedCommandBus",
-      "status": "implemented",
+      "test_file": "",
+      "test_name": "",
+      "status": "planned",
       "level": "integration"
     },
     {

@@ -361,6 +361,6 @@ CommandRecord는 감사와 멱등성의 영속 기록이지만 업무 Aggregate 
 4. SQLite projection·migration·backup/restore 요구사항을 추가하고 기존 `PER-001` Command Store에 연결한다.
 5. 행사 기록, VJ 통합, 최종 편집본 Template을 실제 FFmpeg·STT Adapter에 연결한다.
 6. HTTP Command API와 아카이브 작업 공간을 기존 `NTF-002` SSE Adapter에 연결한다.
-7. ArchivistSession·ArchivistTurn과 Archivist Host를 연결한 뒤 MCP Adapter가 같은 Capability Registry와 Command Bus를 호출하도록 연결한다.
+7. ArchivistSession·ArchivistTurn과 Archivist Host를 연결한 뒤 MCP Adapter가 사람의 직접 명령과 같은 Application Service·Command Bus를 호출하도록 연결한다. 모든 영속 업무의 공통 Capability Registry 직접 실행은 `APP-001` planned 경계로 유지한다.
 
 각 명령은 정상 흐름 하나와 독립된 거부 이유 하나가 관찰되도록 요구사항을 나눈다. 이벤트 이름만 확인하지 않고 상태, 명령 기록, 이벤트가 같은 transaction으로 보이는지 검증한다.

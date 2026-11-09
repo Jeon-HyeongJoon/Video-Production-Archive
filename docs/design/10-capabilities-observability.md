@@ -2,16 +2,14 @@
 
 ## 1. 독립 실행 단위
 
-영속 업무 상태를 바꾸는 기능은 MCP tool이나 HTTP handler가 아니라 Application Capability로 먼저 구현한다. 파일 변환 자체인 MediaOperation은 Command Bus와 DB가 필요한 업무 Command가 아니므로 별도 MediaOperation Port가 소유한다.
+영속 업무 상태를 바꾸는 HTTP와 MCP 요청은 protocol 전용 타입에서 Application Service의 좁은 인터페이스로 변환한 뒤 같은 Command Bus에 제출한다. 모든 영속 업무를 한 Capability Registry에 등록해 Adapter 없이 직접 실행하는 목표 경계는 프로토타입만 있고 운영 조립에는 연결되지 않았으므로 `APP-001`은 planned다. 파일 변환 자체인 MediaOperation은 Command Bus와 DB가 필요한 업무 Command가 아니므로 별도 MediaOperation Port가 소유한다.
 
 ```text
-CLI / Test / Scheduler / HTTP / MCP
-                 ↓
-        Capability Registry
-                 ↓
-     Application Capability Port
-                 ↓
-       Command Bus + Domain Core
+HTTP ─┐
+MCP ──┼→ Application Service Port → Command Bus + Domain Core
+내부 조정기 ─┘
+
+Capability Registry prototype ── planned ──┘
 ```
 
 파일 처리 경계는 다음과 같다.
@@ -24,16 +22,16 @@ integration test ──┘
 
 `archive-media`는 Control·대시보드·Worker 등록·service credential·SQLite 없이 typed operation 하나를 직접 실행한다. 관리 Runner는 같은 Port에 queue claim, ExecutionLease, 자원 관측과 결과 보고만 덧붙이는 선택형 Adapter다. 두 Adapter는 동시에 사용할 수 있으며 서로 다른 출력은 병렬 실행한다. 같은 Storage 출력은 Port가 StorageRoot의 교차 프로세스 잠금을 먼저 획득한 실행 하나만 Adapter에 진입시킨다. `APP-009~010`
 
-Capability는 versioned input, 필요한 Domain ID, 예상 리비전과 실행 이유를 받고 다음 둘 중 하나를 반환한다.
+목표 Capability는 versioned input, 필요한 Domain ID, 예상 리비전과 실행 이유를 받고 다음 둘 중 하나를 반환한다.
 
 - 짧은 기능: Command receipt와 결과 ID
 - 대용량 파일 기능: 생성된 Job ID, Step ID 또는 async task handle
 
-도메인 모듈은 서로의 Adapter를 호출하지 않는다. 합성은 Template의 Step 의존성과 Command Bus가 담당한다. MCP, HTTP와 CLI Adapter는 protocol 입력을 같은 Capability input으로 바꾸고 결과를 protocol response로 변환할 뿐 업무 규칙을 구현하지 않는다. Archivist Host의 loopback MCP proxy도 ArchivistSession·ArchivistTurn·ArchivistToolCall 상관관계를 추가할 뿐 Capability를 우회하지 않는다. `MCP-001~002`
+목표 의존 방향에서 도메인 모듈은 서로의 Adapter를 호출하지 않고 합성은 Template의 Step 의존성과 Command Bus가 담당한다. 현재 Core는 이 규칙을 지키지만 `workerexecutor`, `workerclient`, `archiveorganization`, `archivisthostclient` Application 패키지는 구체 media·config Adapter를 직접 참조한다. 이 참조는 현재 실행 조립의 구조 부채이며 Core 계약을 바꾸지 않고 `cmd` 또는 Adapter 조립 경계로 이동해야 한다. MCP와 HTTP Adapter는 protocol 입력을 Application Service input으로 바꾸며, Archivist Host의 loopback MCP proxy는 ArchivistSession·ArchivistTurn·ArchivistToolCall 상관관계를 추가한다. `MCP-001~002`
 
 대용량 파일 Job은 생성 시점의 업무 입력을 잃지 않는다. Coordinator는 Domain ID·Storage ID·정규화 상대경로·Profile reference를 Step별 typed `StepExecutionSpec`으로 내리고, 선행 출력이 필요한 Step의 명세는 이전 `StepOutputRecord`가 확정된 transaction에서 구체화한다. Capability receipt의 Job·Step handle과 실제 Worker 실행 입력은 이 두 기록으로 연결하며 protocol DTO나 Worker 로컬 절대경로를 Job 상태에 넣지 않는다. `APP-003~004`, `WRK-010~012`
 
-Archive Control를 띄우지 않은 integration test와 진단 CLI에서도 영속 업무 Capability를 직접 호출할 수 있어야 한다. 파일 처리 CLI는 Command Bus를 우회하는 것이 아니라 Command Bus 바깥의 MediaOperation Port를 직접 호출한다. 요구사항: `APP-001`, `APP-009`
+Archive Control를 띄우지 않은 상태에서 영속 업무 Capability를 공통 Registry로 직접 호출하는 것은 `APP-001` planned 경계다. 현재 직접 실행이 보장되는 제품 기능은 Command Bus 바깥의 MediaOperation이며 `archive-media` CLI와 관리 Runner가 같은 구현을 호출한다. 요구사항: `APP-001`(planned), `APP-009~010`
 
 ## 2. 작업 공간 드라이브
 
@@ -77,7 +75,7 @@ Domain Event는 업무 상태 변경 사실이고, progress·metric·process log
 테스트는 private 구현 호출 횟수가 아니라 공개 Capability 또는 Core 계약의 상태, 오류, CommandRecord, Event와 Artifact를 관찰한다.
 
 - Core unit test: 순수 규칙의 입력·결과를 검증하고 test runner가 결과를 증적으로 기록한다.
-- Capability integration test: 실제 Application Port를 직접 실행하고 Evidence Sink에 성공 또는 실패 기록이 남는지 검증한다.
+- Capability integration test: 공통 Registry가 운영에 연결된 뒤 실제 Application Port를 직접 실행하고 Evidence Sink에 성공 또는 실패 기록이 남는지 검증한다.
 - Adapter integration test: HTTP, MCP, SQLite, filesystem 같은 실제 경계를 사용하되 같은 Capability 결과와 상관 ID를 검증한다.
 - acceptance test: 실제 Windows 장치·GPU·FFmpeg 실행 결과와 장비 식별자를 증적에 포함한다.
 

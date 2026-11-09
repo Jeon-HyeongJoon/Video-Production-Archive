@@ -1207,7 +1207,7 @@
         "ArchiveRun 하위 작업과 Job 상세의 영상 정보는 기본으로 조회하거나 만들지 않고 담당자가 해당 Job의 disclosure를 펼칠 때만 영속 원본 관찰값을 표시한다.",
         "전체 작업 표면은 어두운 회색 계층으로 깊이를 나타내고 Agent 머리줄은 시스템 테마를 따르며 Agent 대화 본문은 밝은 테마에서도 터미널처럼 가장 어두운 검정 표면과 밝은 글자를 유지한다.",
         "Agent 대화 칸은 선택한 ArchivistSession의 CLI ID를 이름과 함께 표시하고 Enter로 전송하며 Shift+Enter만 줄바꿈한다.",
-        "사람의 직접 명령과 Archivist의 도구 호출은 같은 Command Bus와 Capability Registry를 사용한다.",
+        "사람의 직접 명령과 Archivist의 도구 호출은 같은 Application Service 명령 경계와 Command Bus를 사용한다. 모든 영속 업무의 공통 Capability Registry 직접 실행은 planned 경계다.",
         "사람의 웹 직접 명령은 requested_via를 archive_workspace로 기록한다.",
         "채팅 문구는 Archivist에게 주는 지시가 될 수 있지만 Approval 기록을 대신하지 않는다.",
         "GATED와 DESTRUCTIVE 명령은 대화만으로 실행하지 않고 ActionCard와 유효한 사람 Approval을 요구한다."
@@ -3938,11 +3938,11 @@
       "values": [
         {
           "id": "DATE_REVISION_TREE",
-          "description": "layout v1. packages/YYYY/MM/DD/<package ID>/revisions/<revision> 구조를 사용하는 현재 구현 형식."
+          "description": "layout v1. packages/YYYY/MM/DD/<package ID>/revisions/<revision> 구조를 사용하는 읽기·복구 호환 형식."
         },
         {
           "id": "FLAT_RESULT_FOLDER",
-          "description": "layout v2. Storage root 바로 아래 결과 폴더 하나에 결과 영상과 공개 sidecar 및 flat revision 파일을 두는 목표 형식."
+          "description": "layout v2. Storage root 바로 아래 결과 폴더 하나에 결과 영상과 공개 sidecar 및 flat revision 파일을 두는 현재 Production Worker의 기본 게시 형식."
         }
       ],
       "rules": [

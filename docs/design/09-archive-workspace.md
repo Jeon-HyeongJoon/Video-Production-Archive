@@ -26,7 +26,7 @@
 Command·Event·실행 증적 ─> 공통 작업 상세 ─> 사용자 화면 + 다음 ArchivistTurn 문맥
 ```
 
-사람의 직접 경로는 Archivist 가용성이나 ArchivistSession 존재 여부에 의존하지 않는다. 빈 시스템에서도 Template과 대상을 선택해 Job을 만들 수 있다. Archivist 경로도 별도 업무 원장을 만들지 않고 사람과 같은 Command Bus, Capability Registry, 리비전 검사와 멱등 receipt를 사용한다.
+사람의 직접 경로는 Archivist 가용성이나 ArchivistSession 존재 여부에 의존하지 않는다. 빈 시스템에서도 Template과 대상을 선택해 Job을 만들 수 있다. Archivist 경로도 별도 업무 원장을 만들지 않고 사람과 같은 Application Service 명령 경계, Command Bus, 리비전 검사와 멱등 receipt를 사용한다. 모든 영속 업무의 공통 Capability Registry 직접 실행은 `APP-001` planned 경계다.
 
 채팅은 Archivist에게 내리는 지시다. “이 파일을 분석해”, “빈 행사 기록 작업을 시작해” 같은 지시는 ArchivistTurn으로 전달되고 Archivist가 허용된 도구를 호출할 수 있다. 다만 “승인”, “삭제해”, “포맷해” 같은 문장이 Approval이나 Confirmation 기록을 대신하지는 않는다.
 

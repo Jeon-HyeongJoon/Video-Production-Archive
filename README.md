@@ -2,17 +2,17 @@
 
 촬영 원본의 입고부터 파생 영상, 전사, 메타데이터, 아카이브와 검색 기록까지 관리하는 사무실용 영상 기록 시스템이다.
 
-이 리포지토리는 `idea.md`의 방향을 탑다운 설계와 실행 가능한 도메인 계약으로 구체화한다. 현재 기준선은 외부 프로그램과 DB를 붙이기 전에 반드시 안정되어야 하는 핵심 규칙을 구현한다.
+이 리포지토리는 `idea.md`의 방향을 탑다운 설계와 실행 가능한 도메인 계약으로 구체화한다. 현재 기능·경계·영속 객체와 남은 작업은 [현재 구현 기준선](docs/design/15-current-baseline.md)에 정리한다.
 
 ## 현재 구현 범위
 
 - 공통 Command envelope, 권한 선판정, optimistic concurrency, 의미 기반 idempotency와 명령·Event journal 계약
 - 영속 워크플로에 사용할 상태 전이, Approval 리비전, ExecutionLease fencing, 게시 결과 복구와 실패 분류
 - 32GB 단일 PC용 유휴·메모리·scratch·heavy slot·물리 장치 예약 정책
-- 행사 기록, VJ, 최종 편집본, 대용량 파일 입고 Template의 무순환·자원·처리 기능 선언
+- 행사 기록, VJ, 최종 편집본, 대용량 파일 입고 Template의 무순환·자원·처리 기능 선언. 일반 Template의 실제 Worker 실행 명세 조립은 아직 연결되지 않음
 - 원본 불변성, 파생본 provenance, 결정적 manifest, 아카이브 확정 조건과 DB 없는 메타데이터 round-trip
-- 외장 볼륨 lock과 포맷 사전조건
-- Provider 계정 분리 저장, cooldown 복구·overload 격리, 안전한 Tool Call, 중복 없는 폴백과 허용 목록 로그
+- Windows 외장 논리 Volume 관찰과 역할별 Storage capability. 포맷·안전 해제 lock은 planned
+- 단일 ChatGPT Profile과 loopback 자체 LLM Adapter. 다계정 Provider routing·cooldown·fallback은 planned
 - shell을 쓰지 않는 subprocess 인수 계약과 검증 전 임시 출력 비공개
 - 저장 Domain Event와 일시적 진행률·자원 알림을 분리한 재연결 feed
 - 사람·Archivist 권한 정책
@@ -26,7 +26,9 @@
 - 세션 제어 모드, 구조화된 드라이브 선택 참조, MCP 업무 도구, ActionCard와 단계 완료 SYSTEM 재호출을 잇는 Archivist 협업 흐름
 - macOS Keychain에 보호된 ChatGPT Profile·stateless streaming Responses Adapter, loopback 자체 LLM Chat Completions Adapter와 Archive 업무 도구만 사용하는 bounded `archive-archivist` 루프
 
-현재는 SQLite Command Unit of Work, Storage→논리 Volume 작업 공간 해석과 별도 PhysicalDevice I/O 충돌 키, 아카이브 sidecar export/import, 게시 장애 조정, Notification SSE 재연결, 독립 Capability 실행·증적·Archive Workspace 상태 투영과 CI 테스트 증적의 integration 계약까지 구현되어 있다. 등록 Storage 입고 카탈로그와 ffprobe·FFmpeg·whisper.cpp subprocess Adapter도 격리 fixture로 검증하며 FFmpeg speech audio 추출에서 timestamp Transcript 게시·최신 segment 검색, 검증된 SRT 자막, Archivist·사람 작성 리비전 요약 게시와 SQLite 내용 검수 복원까지 연결된다. `archive-control`은 boot 설정으로 같은 SQLite DB와 Storage topology를 열고 내부망 아카이브 작업 공간, 자산·전사·요약·검수·Job·Worker·Archivist Runtime 조회 API와 CSRF 보호 Job·Session·Turn 명령을 제공한다. `archive-media`는 같은 MediaOperation Adapter를 단독 CLI와 선택형 관리 Runner에서 함께 사용한다. 단독 실행은 Control·대시보드·SQLite·서비스 credential을 열지 않으며, `runner` 모드만 heartbeat, Step claim·결과와 실행 중 취소 stop·정리 결과를 전송한다. `archivist-host`는 허용된 로컬 CLI와 workspace만 실행하고 Control에 outbound heartbeat·Turn claim·event를 보내며 loopback MCP proxy를 제공한다. Control MCP Adapter는 versioned 업무 Capability만 같은 Command Bus에 연결한다. `archive-archivist`는 ChatGPT 계정 model 또는 같은 Host의 자체 LLM과 그 MCP proxy를 잇는 단일 Turn 루프다. Archivist Host native resume, Windows Device Adapter, VJ 편집 기능과 다계정 Provider Router는 아직 남아 있다. 로컬 CLI 경로는 전체 Orca 앱 대신 최소 Embedded Core를 기본으로 하고 Orca CLI는 선택형 backend로 둔다. 실제 Windows Credential Manager·장치·CLI와 운영 ffprobe·FFmpeg·whisper.cpp 실행은 장비 acceptance로 검증한다.
+현재는 SQLite Command Unit of Work, 공유 연결 수명주기, Storage→논리 Volume 작업 공간 해석과 별도 PhysicalDevice I/O 충돌 키, Notification SSE 재연결, Archive Workspace 읽기 모델과 CI 테스트 증적 계약이 구현되어 있다. 패키지만으로 빈 DB를 복원하는 import, 게시 뒤 결과 보고 전 중단 조정과 모든 업무를 감싸는 공통 Capability Evidence Sink는 planned다. 등록 Storage 입고 카탈로그와 ffprobe·FFmpeg·whisper.cpp subprocess Adapter는 격리 fixture로 검증하며 FFmpeg speech audio 추출에서 timestamp Transcript·SRT·전사 텍스트·ArchivePackage 리비전까지 연결한다. 실제 한국어 모델 품질과 네트워크·원격 파일 Storage는 각각의 acceptance 전까지 planned다.
+
+`archive-control`은 boot 설정으로 같은 SQLite DB와 Storage topology를 열고 내부망 아카이브 작업 공간, 검색·Job·Worker·Archivist 조회 API와 CSRF 보호 명령을 제공한다. `archive-media`는 같은 MediaOperation을 단독 CLI와 선택형 관리 Runner에서 함께 사용한다. 단독 실행은 Control·아카이브 작업 공간·SQLite·서비스 credential을 열지 않으며, `runner` 모드만 heartbeat, Step claim·lease 갱신·결과와 실행 중 취소 정리를 전송한다. `archivist-host`는 허용된 로컬 CLI와 workspace만 실행하고 Control에 outbound heartbeat·Turn claim·event를 보내며 loopback MCP proxy를 제공한다. Control MCP Adapter는 허용 업무 도구를 Application Service와 같은 Command Bus에 연결한다. 모든 영속 업무를 공통 Capability Registry로 직접 실행하는 `APP-001`은 아직 운영 조립에 연결되지 않았다.
 
 영속 Dispatch Queue의 aging·Job 공정성, 전체 자원 snapshot heartbeat와 ResourceReservation·ExecutionLease·fencing token의 SQLite 원자 확정이 구현되어 있다. Control은 heartbeat 직후 ready Step을 평가해 Worker 자원을 예약한다. Worker는 lease를 claim해 실행하고 결과를 정산하며, 실행 중 취소는 lease를 먼저 fence한 뒤 process 종료와 임시 출력 정리를 확인해야 예약을 해제한다.
 
@@ -47,8 +49,9 @@
 13. [취소와 보상 설계 제안](docs/design/12-cancellation-compensation-proposal.md)
 14. [Archive Intake](docs/design/13-archive-intake.md)
 15. [아카이브 작업 공간 UX·UI 설계 기준](docs/design/14-archive-workspace-ux.md)
-16. [요구사항 운영 규칙](requirements/README.md)
-17. [기계 판독 요구사항 카탈로그](requirements/catalog.json)
+16. [현재 구현 기준선·기능·경계](docs/design/15-current-baseline.md)
+17. [요구사항 운영 규칙](requirements/README.md)
+18. [기계 판독 요구사항 카탈로그](requirements/catalog.json)
 
 초기 설정 예시는 [config.example.yaml](config.example.yaml)에 있다. 실제 credential은 이 파일에 쓰지 않고 Windows Credential Manager·DPAPI 또는 macOS Keychain reference만 기록한다.
 

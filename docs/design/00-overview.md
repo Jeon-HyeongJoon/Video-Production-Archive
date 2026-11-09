@@ -87,7 +87,8 @@ Worker가 다른 PC로 이동해도 Domain 계약과 Control API는 바뀌지 �
 | Worker Fleet | 사전 등록, service 인증, 자원 snapshot heartbeat, 배정·실행 정산 | WRK-001~009 |
 | Cancellation | 미시작 취소, 실행 중 lease fence, Worker stop·정리 확인, 완료 경합과 PARTIAL·UNCERTAIN 조정 | CAN-001~005 |
 | Archive Workspace | 사람 직접 실행과 Archivist 도구 호출의 공통 업무 문맥, ActionCard, Archive Workspace 상태 투영 | COL-001~002, DSH-001~004 |
-| Application Capabilities | Adapter와 무관한 도메인 기능 직접 실행 | APP-001 |
+| MediaOperation 직접 실행 | Control 없이 단일 미디어 기능 실행, 관리 Runner와 같은 실행 경계 공유 | APP-009~010 |
+| Application Capabilities (planned) | 모든 영속 업무 기능의 공통 Registry와 직접 실행 Port | APP-001 |
 | Observability | 테스트의 구조화 증적. 모든 운영 Capability의 공통 Sink는 planned | TST-001, OBS-001(planned) |
 
 도메인 명령과 이벤트의 시간 순서, 일관성 경계 후보와 아직 결정되지 않은 핫스팟은 [이벤트 스토밍](08-event-storming.md)에 정리한다. 핫스팟을 결정한 뒤 요구사항 카탈로그로 내린다.
@@ -108,19 +109,17 @@ Archivist Host의 세션·재시작·도구 경계와 Orca 최소 활용 결정�
 - `go test ./...` 성공
 - 외부 실행기나 DB가 없어도 Core 테스트가 결정적으로 실행됨
 
-## 6. 다음 수직 슬라이스
+## 6. 현재 수직 기준선과 다음 순서
 
-다음 구현 순서는 Phase 이름보다 담당자가 끝까지 사용할 수 있는 작은 흐름을 우선한다.
+현재 실제 제품 경로는 `논리 Volume 관찰 → 사람 선택 → ArchiveRun → Worker 검사·분류 → 렌더·QC → layout v2 보관·ArchiveCatalog → 별도 STT → 패키지 리비전`까지 조립되어 있다. 단일 미디어 기능은 `archive-media` CLI로 Control 없이 실행하며 관리 Runner와 같은 MediaOperation을 사용한다. 사람·Archivist 협업은 Session·Turn·Tool Call·ActionCard·SYSTEM 재호출을 Control 원장에 보존한다.
 
-1. `입고 등록 → ffprobe → proxy → QC → 검색` 수직 슬라이스
-2. SQLite repository, migration, backup/restore
-3. 영속 Dispatch Queue, Worker 자원 snapshot과 Step lease/result loop 및 subprocess 복구
-4. ArchivistSession·ArchivistTurn Core와 Archivist Host의 fake CLI 수직 흐름
-5. loopback proxy·Control MCP Adapter와 ActionCard 승인
-6. 아카이브 작업 공간의 직접 명령·Session·Turn·ActionCard와 Archive Workspace 상태 영역의 Chromium golden
-7. 실제 Windows Host의 로컬 CLI 재시작 acceptance
-8. Windows 장치/포맷 Adapter와 VJ 편집
+현재 기능·경계·영속 객체·후속 작업은 [15. 현재 구현 기준선](15-current-baseline.md)에서 한 번에 확인한다. 다음 구현 순서는 다음과 같다.
 
-모든 수직 슬라이스는 Storage를 논리 Volume 작업 공간으로 해석하고 PhysicalDevice는 별도 I/O 충돌 키로 보존하며 Application Capability를 직접 실행한다. 테스트 증적은 `TST-001`이 구현했고, 모든 운영 Capability를 공통 Evidence Sink로 감싸는 `OBS-001`은 planned다. `DEV-006`, `APP-001`, `TST-001`
+1. 일반 Template Job의 실제 StepExecutionSpec 조립 또는 v1 화면 노출 범위 재결정
+2. STT 게이트와 ArchiveRun 진행 읽기 모델 단일화
+3. ArchiveRun 기간의 아카이브 Storage 쓰기 예약 `ARC-010`
+4. 패키지 복원·아카이브 확정 `ARC-007`, `ARC-012`
+5. Application에서 구체 Adapter를 직접 참조하는 Worker 조립 경계 이동
+6. 실제 네트워크 Storage·한국어 STT·로컬 CLI 계정 acceptance
 
-각 슬라이스도 요구사항과 테스트를 먼저 추가하며, 외부 프로그램이 필요한 검증은 fixture 기반 integration test와 실제 장비 acceptance test를 구분한다.
+모든 후속 슬라이스는 Storage를 논리 Volume 작업 공간으로 해석하고 PhysicalDevice를 별도 I/O 충돌 키로 보존한다. 미디어 직접 실행은 `APP-009~010`으로 구현됐으며, 모든 영속 업무를 공통 Capability Registry로 실행하는 `APP-001`과 공통 운영 Evidence Sink `OBS-001`은 planned다. 테스트 증적 자체는 `TST-001`이 소유한다.

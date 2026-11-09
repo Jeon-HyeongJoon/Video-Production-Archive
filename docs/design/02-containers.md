@@ -36,13 +36,15 @@ Archive Control만 운영 DB에 직접 쓴다.
 | Archive Workspace Service | 사람 직접 Command, ArchivistSession·ArchivistTurn, 공통 작업 문맥과 ActionCard 조립 |
 | Archivist Session Service | ArchivistSession·ArchivistTurn·lease·fencing·ActionCard 원장 |
 | Repository Adapter | SQLite transaction과 projection |
-| Sidecar Service | archive export/import |
+| Sidecar Service (planned) | ArchivePackage만으로 export/import와 빈 DB 복원 |
 
-각 도메인 기능은 protocol과 무관한 Application Capability Port로 먼저 제공한다. CLI, test, Scheduler, HTTP와 MCP는 같은 Capability Registry를 호출하므로 서버 Adapter가 없어도 기능 자체를 직접 실행할 수 있다. 장시간 기능은 동기 HTTP 응답을 붙잡지 않고 Job/Step ID를 반환한다. 세부 계약은 [10. 도메인 기능 실행과 검증 증적](10-capabilities-observability.md)을 따른다. `APP-001`
+현재 HTTP와 MCP는 protocol DTO를 Application Service의 좁은 인터페이스로 바꾸고 영속 상태 변경을 같은 Command Bus에 제출한다. 모든 영속 업무를 공통 Capability Registry에 등록해 서버 Adapter 없이 직접 실행하는 경계는 프로토타입만 있고 운영 조립에는 연결되지 않았으므로 `APP-001`은 planned다. Control 없는 직접 실행은 미디어 처리 기능에 한정하며 `archive-media` CLI와 관리 Runner가 같은 MediaOperation을 사용한다. 세부 계약은 [10. 도메인 기능 실행과 검증 증적](10-capabilities-observability.md)을 따른다. `APP-009~010`
 
 HTTP와 MCP는 Domain 함수를 직접 호출하지 않고 같은 Command Bus를 사용한다. Handler는 저장 상태를 직접 바꾸지 않고 새 상태와 Event를 반환하며 Store가 상태·CommandRecord·Event·receipt를 한 번에 확정한다. Core 경계는 `CMD-001~010`, 실제 SQLite transaction은 `PER-001` integration test로 검증한다.
 
 v1 Archive Control는 strict boot YAML에서 DB·listen·CIDR·Origin·Worker·Storage topology를 읽어 시작하며 `archive-control` 실행 파일이 `internal/adapter/controlruntime` 조립 Adapter를 열어 SQLite Command Store·카탈로그, 아카이브 작업 공간 projection과 Notification SSE를 하나의 HTTP Handler에 조립한다. Application 패키지는 이 구체 Adapter 조립을 import하지 않는다. Worker와 Archivist Host credential reference는 Windows의 `wincred://`·절대 `dpapi://`와 macOS의 `keychain://`를 허용하되 raw secret·상대 DPAPI 경로는 거부한다. 정적 아카이브 작업 공간과 health, 자산·전사·요약·검수·Job 조회·명령 API는 실제 peer CIDR 검사를 공통으로 통과하고 protocol DTO에서 Storage 경로를 제외한다. 같은 boot topology의 재시작은 멱등하지만 기존 Storage ID의 물리 identity나 root 변경은 시작 오류다. 사용자는 Archivist 없이도 Job을 직접 만들 수 있고, 사람 직접 Command와 Archivist Tool Call은 같은 Command Bus를 통과한다. 상태·명령·Event·receipt가 SQLite transaction으로 확정된 다음 공통 읽기 투영을 갱신한다. `CFG-006`, `CTL-001~004`, `COL-001`
+
+의존 방향의 현재 예외는 Worker 실행 조립이다. `workerexecutor`, `workerclient`, `archiveorganization`, `archivisthostclient` Application 패키지가 media·config Adapter를 직접 참조한다. Core의 외부 기술 독립성은 유지되지만 Application Port와 구체 Adapter의 조립 위치는 목표 계층과 다르며, 현재 기준선에서는 후속 구조 정리 항목으로 남긴다. 일반 Template Job은 영속 계획과 화면 생성까지 제공하지만 Archive Intake 밖 Template의 실제 Worker 실행 명세 조립은 아직 제품 경로에 연결되지 않았다.
 
 ArchivistSession·ArchivistTurn은 Control이 먼저 SQLite에 확정하고 Archivist Host가 outbound 연결로 claim한다. Host는 로컬 CLI process/PTY와 resume token만 감독하며 업무 상태나 승인 정책을 소유하지 않는다. 전체 Orca 앱은 배포 구성요소가 아니고, 최소 Embedded Core가 기본 runtime backend이며 Orca CLI 연동은 같은 Port의 선택형 Adapter다. Embedded Core는 Codex·Claude 외에도 `archive-archivist` 한 process를 실행해 ChatGPT account model 또는 같은 Host의 자체 LLM과 loopback MCP 사이의 제한된 단일 Turn 루프를 제공한다. 자세한 계약은 [11. 로컬 CLI Archivist Host 설계](11-archivist-host.md)를 따른다. `LRH-001~008`, `LRH-016~017`, `AGT-016~021`, `CTL-005~006`
 

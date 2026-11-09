@@ -25,7 +25,7 @@ Windows에서 외부 data bus Volume이 연결되면 Worker는 파일을 읽지 
 
 과거 실행이 있는 드라이브도 목록에서 삭제하지 않되 현재 연결과 이력을 분리한다. 유효한 Worker heartbeat에 원본 identity가 있으면 연결됨, online Worker의 attached volume 목록에서 사라졌으면 연결 해제됨, Worker가 offline이라 관측할 수 없으면 확인 불가다. 연결 해제·확인 불가는 완료 결과와 Catalog를 계속 읽을 수 있지만 새 ArchiveRun 준비·시작은 할 수 없다. 화면의 목록·상세·알림·실행 gate는 5초 polling마다 이 한 projection 값을 함께 바꾼다. `DEV-010`, `DSH-010`, `DSH-026`
 
-원본은 사람이 현재 candidate revision을 고른 뒤에만 해당 Worker에서 `SOURCE_MEDIA` ReadOnlyStorageRoot로 개방한다. Control은 root 없이 ArchiveIntakeSession의 stable identity를 기록하고 선택 storage ID만 heartbeat 응답으로 Worker에 돌려준다. ArchiveIntakeSession은 불변 이력이므로 새 작업 생성 projection은 current candidate revision·Worker·source Storage와 모두 일치하는 세션을 별도 선택 세션 ID로 제공한다. 완료된 과거 ArchiveRun의 접수 세션 ID는 실행 추적에 남지만 새 ArchiveRun 준비에는 쓰지 않으며, 일치하는 선택 세션이 없으면 담당자의 현재 선택으로 새 세션을 만든다. 아카이브 저장소는 같은 Worker가 접근할 수 있는 `ARCHIVE_PRIMARY`이며 원본과 다른 논리 Volume이어야 한다. 새 외장 Volume은 원본용 Storage ID와 별도의 archive Storage ID로 후보에 나타나므로 역할이 섞이지 않는다. Worker projection은 로컬 root, 연결된 네트워크 공유, 원본과 다른 새 외장 Volume, 검증된 FTP·SFTP를 `StorageAccessKind`로 구분한다. 담당자가 고르기 전에는 새 외장 Volume에 쓰지 않는다. 접근 불가 원격 서비스는 시작을 막는다. 용량 admission은 선택 범위 예상 출력에 5%와 64 MiB 중 큰 안전 여유를 더하고, 현재 여유가 필요 용량보다 작으면 Storage ID와 byte 수를 가진 구조화 오류로 실행 생성을 막는다. 유효한 시작은 아카이브 Storage 단위 쓰기 예약을 획득한다. Archivist나 정책은 두 Storage 중 하나를 대신 고르지 않는다. `DEV-008`, `DEV-010`, `ARC-010`, `ARC-019`, `APP-006`, `CFG-012~013`
+원본은 사람이 현재 candidate revision을 고른 뒤에만 해당 Worker에서 `SOURCE_MEDIA` ReadOnlyStorageRoot로 개방한다. Control은 root 없이 ArchiveIntakeSession의 stable identity를 기록하고 선택 storage ID만 heartbeat 응답으로 Worker에 돌려준다. ArchiveIntakeSession은 불변 이력이므로 새 작업 생성 projection은 current candidate revision·Worker·source Storage와 모두 일치하는 세션을 별도 선택 세션 ID로 제공한다. 완료된 과거 ArchiveRun의 접수 세션 ID는 실행 추적에 남지만 새 ArchiveRun 준비에는 쓰지 않으며, 일치하는 선택 세션이 없으면 담당자의 현재 선택으로 새 세션을 만든다. 아카이브 저장소는 같은 Worker가 접근할 수 있는 `ARCHIVE_PRIMARY`이며 원본과 다른 논리 Volume이어야 한다. 새 외장 Volume은 원본용 Storage ID와 별도의 archive Storage ID로 후보에 나타나므로 역할이 섞이지 않는다. Worker projection은 로컬 root, 연결된 네트워크 공유, 원본과 다른 새 외장 Volume, 검증된 FTP·SFTP를 `StorageAccessKind`로 구분한다. 담당자가 고르기 전에는 새 외장 Volume에 쓰지 않는다. 접근 불가 원격 서비스는 시작을 막는다. 구현된 용량 admission은 선택 범위 예상 출력에 5%와 64 MiB 중 큰 안전 여유를 더하고, 현재 여유가 필요 용량보다 작으면 Storage ID와 byte 수를 가진 구조화 오류로 실행 생성을 막는다. 패키지와 ArchiveCatalog 게시 잠금은 파일 교체를 직렬화하지만 ArchiveRun 전체 기간의 Storage 용량·쓰기 예약은 아니다. Storage 단위 실행 예약은 `ARC-010` planned이며 구현 전에는 동시에 시작한 실행 둘이 같은 여유 공간을 각각 admission할 수 있다. Archivist나 정책은 두 Storage 중 하나를 대신 고르지 않는다. `DEV-008`, `DEV-010`, `ARC-010`, `ARC-019`, `APP-006`, `CFG-012~013`
 
 Worker는 현재 연결된 외장 Volume의 두 역할 ID를 로컬 `StorageRoot` capability로만 해석하고 root 경로를 Control에 보내지 않는다. capability를 여는 것만으로 파일을 읽거나 쓰지 않으며, 담당자가 선택한 뒤 생성된 fenced 실행 명세만 archive ID에 게시할 수 있다. 분리 시 실행 중 handle을 닫지 않고 유휴 조정에서 동적 capability를 제거한다. `DEV-013`
 
@@ -46,7 +46,7 @@ Worker는 현재 연결된 외장 Volume의 두 역할 ID를 로컬 `StorageRoot
 | `COMPILE_SOURCE_SEQUENCE` | 짧은 여러 Clip의 소스 폴더 | 입력 순서·CutMarker를 고정해 1080p 20Mbps 통합 |
 | `HOLD` | 하나의 결정으로 수렴하지 않음 | `WAITING/INPUT`, 외부 실행 없음 |
 
-HOLD도 OriginalAsset별 ArchiveCatalog 행과 보류 사유를 만든다. 사람 또는 Archivist의 명시적 분류는 대상 ArchiveRun ID와 최신 탐색 revision을 요구하며 기존 OrganizationDecision을 수정하지 않고 같은 ArchiveRun에 ActorType·행위자 ID·사유·근거가 있는 새 sequence를 추가한다. 저장 transaction 안에서 이전 decision ID가 해당 ArchiveRun·폴더의 최신인지 비교·교체하므로 동시 분류 둘이 같은 sequence로 확정되지 않는다. 자동 분류는 계속 결정적으로 유지하고 Archivist 추론을 입력으로 섞지 않는다. 구조화된 근거로도 판정할 수 없으면 새 결정을 만들지 않고 HOLD를 유지한다. 비HOLD 결정이 추가되면 같은 ArchiveRun의 고정 Worker·Storage·PhysicalDevice·입력 revision으로 후속 1단계 Folder Job을 멱등하게 연결한다. Folder Job ID와 STT 게이트는 실행 ID가 같은 최신 결정만 읽으며, 같은 드라이브·폴더의 다른 ArchiveRun 판정을 섞지 않는다. timeout 재전송은 결정과 Job 효과를 중복하지 않는다. 다른 폴더는 HOLD와 독립적으로 계속 실행한다. `ORG-003`, `ORG-014`
+HOLD는 Control 원장과 아카이브 작업 공간에 보류 사유·원본 기술정보와 함께 남지만 layout v2 루트 ArchiveCatalog에는 행을 만들지 않는다. layout v2의 행 identity는 게시된 ArchivePackage이므로 HOLD가 명시적으로 분류되고 패키지가 보관된 뒤에만 루트 CSV 행이 생긴다. 사람 또는 Archivist의 명시적 분류는 대상 ArchiveRun ID와 최신 탐색 revision을 요구하며 기존 OrganizationDecision을 수정하지 않고 같은 ArchiveRun에 ActorType·행위자 ID·사유·근거가 있는 새 sequence를 추가한다. 저장 transaction 안에서 이전 decision ID가 해당 ArchiveRun·폴더의 최신인지 비교·교체하므로 동시 분류 둘이 같은 sequence로 확정되지 않는다. 자동 분류는 계속 결정적으로 유지하고 Archivist 추론을 입력으로 섞지 않는다. 구조화된 근거로도 판정할 수 없으면 새 결정을 만들지 않고 HOLD를 유지한다. 비HOLD 결정이 추가되면 같은 ArchiveRun의 고정 Worker·Storage·PhysicalDevice·입력 revision으로 후속 1단계 Folder Job을 멱등하게 연결한다. Folder Job ID와 STT 게이트는 실행 ID가 같은 최신 결정만 읽으며, 같은 드라이브·폴더의 다른 ArchiveRun 판정을 섞지 않는다. timeout 재전송은 결정과 Job 효과를 중복하지 않는다. 다른 폴더는 HOLD와 독립적으로 계속 실행한다. `ORG-003`, `ORG-014`, `ORG-015`
 
 Archivist의 정리 검토 단위는 현재 HOLD인 MediaFolder 하나다. 목록에는 선택 범위 안의 HOLD만 두고, 단일 상세에는 최신 decision ID·입력 revision·보류 사유와 원본별 정규화 상대경로·checksum·duration·codec·해상도·bitrate를 제공한다. Storage root, credential, 임의 path 읽기 도구는 제공하지 않는다. 파일명과 미디어에서 파생된 내용은 분류 근거일 수 있지만 지시나 Approval로 해석하지 않는다. `MCP-004`
 
@@ -55,7 +55,7 @@ Archivist의 정리 검토 단위는 현재 HOLD인 MediaFolder 하나다. 목�
 1단계 Folder Job은 STT를 포함하지 않는다. 폴더별 Step은 다음 순서다. `PIP-007`
 
 ```text
-분류 → 마커 → 렌더 → QC → 보관
+분류 → [마커] → [렌더] → QC → 보관 → ArchiveCatalog
 ```
 
 - 그대로 사용은 분류 뒤 QC·보관으로 간다.
@@ -64,6 +64,8 @@ Archivist의 정리 검토 단위는 현재 HOLD인 MediaFolder 하나다. 목�
 - 원본에 오디오가 없는 렌더 결과는 오디오 스트림을 만들지 않으며, QC는 AAC 대신 오디오 부재를 검증한다.
 - 자동 소스 시퀀스는 동일한 frame rate까지 요구한다. 보류에서 사람이 `소스 시퀀스` 작업을 명시적으로 고를 때는 모든 입력을 다시 인코딩하므로 화면 크기와 audio 형태가 같으면 frame rate 차이를 허용한다. 화면과 MCP에는 서버가 현재 기술 근거로 검증한 작업만 제시한다.
 - HOLD는 `WaitReason.INPUT`만 기록하고 외부 Step을 만들지 않는다.
+
+대괄호 단계는 판정에 따라 생략한다. 실제 Folder Job의 마지막 `archive_catalog` Step이 성공해야 해당 ArchiveRun의 1단계 기록 시각과 STT 게이트 입력이 완성된다.
 
 Worker는 외부 subprocess에 executable과 argument 배열만 넘기고 StorageRoot 안 임시 출력에 쓴다. QC와 checksum 검증 뒤에만 선택한 ARCHIVE_PRIMARY에 게시한다. 한 벌이 검증되면 `ArchivePackageState.STORED`, 화면의 “보관됨”이다. 아직 Transcript·Subtitle을 새 패키지 리비전으로 더할 수 있다. `ORG-008`, `ARC-011`
 
@@ -87,7 +89,7 @@ Transcript 게시가 성공하면 Worker는 versioned 결정 규칙으로 구간
 
 ## 6. ArchivePackage와 ArchiveCatalog
 
-아카이브 저장소의 현재 layout v1 구조는 다음과 같다. 결과 영상 하나가 ArchivePackage 하나를 소유하며 SOURCE_MEDIA 원본 파일은 넣지 않는다. 대신 원본 드라이브 ID, 원래 이름, 상대경로, checksum과 길이를 metadata에 기록한다.
+이전 layout v1 구조는 다음과 같다. 결과 영상 하나가 ArchivePackage 하나를 소유하며 SOURCE_MEDIA 원본 파일은 넣지 않는다. 대신 원본 드라이브 ID, 원래 이름, 상대경로, checksum과 길이를 metadata에 기록한다. layout v1은 읽기·복구 호환 대상으로 유지하지만 현재 Production Worker의 새 게시 기본값은 아래 layout v2다.
 
 ```text
 <아카이브 저장소>/
@@ -110,7 +112,7 @@ Transcript 게시가 성공하면 Worker는 versioned 결정 규칙으로 구간
 
 layout v1 호환 패키지는 처리 날짜로 나뉜 상대경로를 계속 읽고 게시할 수 있다. 결과 영상 파일명은 단일 입력이면 원래 영상명, 여러 컷 통합이면 MediaFolder의 마지막 이름에서 만들며 Windows에서 안전하도록 정규화한다. 패키지 ID는 이름과 별개인 불변 identity로 유지하고, metadata와 ArchiveCatalog에는 원래 이름과 전체 상대경로도 함께 남긴다. 화면은 처리 날짜·결과 영상명을 주 정보로, 패키지 ID를 추적용 보조 정보로 보여준다. 완료된 Folder Job의 `ORGANIZED_MEDIA` 출력은 원본 드라이브의 완료 내역에 ArchiveRun을 넘어 유지한다. ArchiveRun 상태만으로 완료 내역을 만들지 않으며 실제 ArchivePackage 출력과 출력 기록 시각을 기준으로 한다. 완료 내역은 출력의 Storage root를 제외한 Package 상대경로를 보존해 같은 ArchiveRun 상세의 정확한 결과로 이동한다. `ARC-013`, `DSH-023~025`
 
-새 게시 형식인 layout v2는 저장소 root의 디렉터리 깊이를 결과 폴더 1단계로 고정한다. 각 결과 폴더에는 결과 영상 정확히 하나와 `metadata.json`, `video-info.csv`, 전사·자막, 파일 목록·event·manifest·README를 모두 최상단에 둔다. 공개 하위 디렉터리는 만들지 않는다. 폴더 이름은 처리일과 원본 영상 또는 MediaFolder 이름, package ID suffix로 만들되 identity는 metadata의 package ID다. 기존 layout v1은 읽기 호환을 유지하고 자동 이동하지 않는다. `ARC-015`
+현재 기본 게시 형식인 layout v2는 저장소 root의 디렉터리 깊이를 결과 폴더 1단계로 고정한다. 각 결과 폴더에는 결과 영상 정확히 하나와 `metadata.json`, `video-info.csv`, 전사·자막, 파일 목록·event·manifest·README를 모두 최상단에 둔다. 공개 하위 디렉터리는 만들지 않는다. 폴더 이름은 처리일과 원본 영상 또는 MediaFolder 이름, package ID suffix로 만들되 identity는 metadata의 package ID다. 기존 layout v1은 읽기 호환을 유지하고 자동 이동하지 않는다. `ARC-015`
 
 확정 전 2단계 파일 추가는 같은 결과 폴더에 새 리비전을 게시한다. 현재 파일은 사람이 보는 projection이고, 이전 revision의 metadata·files·events·manifest 및 변경 파일은 `.rNNNNNN.*` 이름의 불변 파일로 같은 최상단에 보존한다. 검증된 current projection을 게시한 뒤 `current.json`을 마지막에 원자 교체한다. `ARC-016`
 
