@@ -51,12 +51,12 @@
 | Step 실행 | `WFL-001~013` | 단일 상태 전이표, 최신 Approval 결정, ExecutionLease 배타성, fencing, 게시 후 복구, 실패 분류 |
 | Dispatch와 자원 | `RES-001~008`, `DSP-001~004` | 영속 ready queue, aging·Job 공정성, Worker 자원 판정, 활성 예약을 반영한 큐 admission·lease |
 | 실행 경계 | `EXE-001~002`, `EXE-003`(planned) | shell 없는 인수 배열, 임시 출력 검증 뒤 게시. 게시 뒤 결과 보고 전 중단 복구는 후속 통합 경계 |
-| 아카이브 | `ARC-001~018` | 원본 불변, provenance, 결정적 manifest, 보관됨·확정됨 분리, DB 없는 복원, 아카이브 Storage 선택·확정, 기존 날짜·revision tree 호환과 planned 1단계 결과 폴더·카탈로그 대조 |
+| 아카이브 | `ARC-001~019` | 원본 불변, provenance, 결정적 manifest, 보관됨·확정됨 분리, DB 없는 복원, 아카이브 Storage 선택·확정, flat 결과 폴더·카탈로그 대조와 안전 여유를 포함한 용량 admission |
 | 내용 검수 | `REV-001` | 대상 리비전의 추가 전용 ContentReview와 최신 결정 투영 |
 | 알림 | `NTF-001~002` | 저장 이벤트 replay와 일시 metric 분리, SSE 재연결 |
 | Archivist | `LRH-001~008`, `LRH-010~013`, `LRH-016`, `LRH-018~020`, `MCP-001~006`, `AGT-016~021`; `LRH-009`, `LRH-014~015`, `LRH-017`, `AGT-001~015`(planned) | 로컬 CLI Archivist 수직 경로, Codex app-server native thread 재개·승인 없는 터미널·파일·Skill·보조 Agent·Archive MCP bridge, Windows 대화형 사용자 Codex 로그인 경계와 macOS의 단일 ChatGPT 인증 Profile·loopback 자체 LLM·제한 도구 루프. 실계정 전체 협업·실제 자체 LLM acceptance와 다계정 Provider Router·폴백·계정 health는 아직 제품 경로에 연결하지 않음 |
 | 장치와 Worker | `DEV-006~013`, `WRK-001~015`, `CFG-008~014`, `CAN-001~005`; `DEV-001~005`(planned) | Worker별 논리 드라이브·Storage, 점진적 폴더 inventory, lease 갱신, durable 완료 조정, typed 오류, 취소 보상, 로컬 media toolchain과 단일 Windows runtime root. 장치 포맷·eject lock은 후속 경계 |
-| Archive Intake | `ORG-001~015`, `MED-005~008`, `RND-004~006`, `QCT-003`, `AUD-004`, `TRN-005~007`, `PIP-007~009`, `APP-002~007`, `ARC-009~018`, `DSH-006~014`, `DSH-016`, `DSH-018~033` | ArchiveRun, 사람의 원본·아카이브·폴더 선택, Worker 검사, HOLD 분류 뒤 동일 실행 재개, 1단계 보관, 별도 2단계 STT, 전사 품질 확인 필요, 날짜·원본 기반 결과명, ArchiveRun 상위 작업과 하위 Job 상세 이동·기존 저장 데이터 복원·Job별 영상 정보 지연 펼침, Worker·드라이브·Agent 연결 관리, 작업 관리의 독립 Job 생성, 보관됨·확정됨, versioned ArchivePackage layout과 ArchiveCatalog 대조 |
+| Archive Intake | `ORG-001~015`, `MED-005~008`, `RND-004~006`, `QCT-003`, `AUD-004`, `TRN-005~007`, `PIP-007~009`, `APP-002~007`, `ARC-009~019`, `DSH-006~014`, `DSH-016`, `DSH-018~033` | ArchiveRun, 사람의 원본·아카이브·폴더 선택, Worker 검사, HOLD 분류 뒤 동일 실행 재개, 1단계 보관, 별도 2단계 STT, 전사 품질 확인 필요, 날짜·원본 기반 결과명, ArchiveRun 상위 작업과 하위 Job 상세 이동·기존 저장 데이터 복원·Job별 영상 정보 지연 펼침, Worker·드라이브·Agent 연결 관리, 작업 관리의 독립 Job 생성, 보관됨·확정됨, versioned ArchivePackage layout과 ArchiveCatalog 대조, 안전 여유 용량 admission |
 | 작업 공간·직접 실행 | `DEV-006`, `APP-001` | Storage를 논리 Volume 작업 공간으로 해석하고 PhysicalDevice를 I/O 충돌 키로 분리, Adapter 없이 Capability 직접 실행 |
 | 아카이브 작업 공간·증적 | `COL-001~003`, `DSH-001~017`, `DSH-019~032`, `CTL-007`, `TST-001`; `OBS-001`(planned) | 사람 직접 실행과 Archivist 도구 호출의 공통 업무 문맥, 구조화된 선택 참조, 예약 차감 Worker 자원 상태, 미완료 작업만 둔 워크스페이스 탐색과 완료 이력을 보존하는 작업 관리, 연결 관리·드라이브 상세와 문제 해결 위치 이동, ArchiveRun과 독립 Job의 진행 중·작업 큐·확인 필요·완료 구분과 새 독립 Job 생성, ArchiveRun 고정 범위·하위 Job projection과 기존 저장 데이터 복원, Job별 영속 영상 기술정보의 지연 펼침, 점진적 폴더 탐색과 범위 잠금, 사람이 읽는 아카이브 결과명·Package 상대경로와 실행을 넘어 유지되는 완료 내역, ArchiveCatalog 기록 시각, 새 문제 알림과 낡은 화면 잠금, 조작 화면과 golden 증적. 모든 Capability의 공통 운영 Evidence Sink 연결은 후속 경계 |
 | Archivist Host | `LRH-001~008`, `LRH-010~013`, `LRH-016`, `LRH-018~020`, `MCP-001~006`, `CTL-005~006`, `AGT-016~021`, `CFG-015`; `LRH-009`, `LRH-014~015`, `LRH-017`(planned) | Host 인증·Turn lease·native CLI thread 재개·승인 없는 native 도구·Tool Call·ActionCard, 단계 완료 SYSTEM 재호출·업무 문맥, 정제된 진행 항목, 선택 범위의 HOLD 검토·단일 분류 MCP 경계와 Windows 대화형 Codex 로그인·macOS ChatGPT·loopback 자체 LLM 로컬 루프 |
@@ -65,14 +65,14 @@
 
 ## 5. 현재 기준선
 
-- 전체 요구사항: 287개
-- 구현됨: 242개, 주석 테스트 242개와 1:1 연결
-- 구현된 integration 테스트: `ARC-006`, `ARC-013`, `PER-001~002`, `NTF-002`, `DSH-001~002`, `DSH-004~007`, `DSH-009~014`, `DSH-016~026`, `DSH-031~032`, `DEV-006~008`, `DEV-010`, `DEV-013`, `APP-001~004`, `APP-006`, `APP-008`, `TST-001`, `MED-002`, `MED-004`, `MED-006~007`, `INT-001`, `INT-003~004`, `RND-002`, `RND-005~006`, `QCT-002`, `CAT-002~003`, `AUD-002`, `AUD-004`, `TRN-002`, `TRN-004`, `TRN-006`, `SUB-002`, `SUM-003`, `REV-002`, `CFG-006~011`, `CTL-001~007`, `WRK-005~006`, `WRK-008~015`, `LRH-001`, `LRH-012~013`, `LRH-016`, `MCP-001`, `MCP-003~005`, `ORG-001`, `ORG-008~009`, `ARC-011`, `COL-001`, `COL-003`, `DSP-003`, `CAN-001~005`, `AGT-016~018`, `AGT-021`
+- 전체 요구사항: 288개
+- 구현됨: 249개, 주석 테스트 249개와 1:1 연결
+- 구현된 integration 테스트: `ARC-006`, `ARC-013`, `ARC-015~019`, `PER-001~002`, `NTF-002`, `DSH-001~002`, `DSH-004~007`, `DSH-009~014`, `DSH-016~026`, `DSH-031~032`, `DEV-006~008`, `DEV-010`, `DEV-013`, `APP-001~004`, `APP-006`, `APP-008`, `TST-001`, `MED-002`, `MED-004`, `MED-006~008`, `INT-001`, `INT-003~004`, `RND-002`, `RND-005~006`, `QCT-002`, `CAT-002~003`, `AUD-002`, `AUD-004`, `TRN-002`, `TRN-004`, `TRN-006`, `SUB-002`, `SUM-003`, `REV-002`, `CFG-006~011`, `CTL-001~007`, `WRK-005~006`, `WRK-008~015`, `LRH-001`, `LRH-012~013`, `LRH-016`, `MCP-001`, `MCP-003~005`, `ORG-001`, `ORG-008~009`, `ORG-015`, `ARC-011`, `COL-001`, `COL-003`, `DSP-003`, `CAN-001~005`, `AGT-016~018`, `AGT-021`
 - 구현된 실장비 acceptance 테스트: `ARC-008`, `ARC-014`, `MED-003`, `RND-003`, `AUD-003`, `LRH-010~011`, `LRH-020`, `APP-005`, `APP-007`, `CFG-014~015`
-- 계획됨: 45개
+- 계획됨: 39개
 - 계획된 unit 테스트: `DEV-001~004`, `AGT-001~015`
 - 계획된 실장비 acceptance 테스트: `DEV-005`, `TRN-003`, `WRK-007`, `LRH-009`, `LRH-014~015`, `LRH-017`, `DEV-009`, `DEV-012`, `TRN-005`, `CFG-012~013`, `ORG-010`
-- 계획된 integration 테스트: `ARC-007`, `ARC-010`, `ARC-012`, `ARC-015~018`, `MED-008`, `ORG-015`, `EXE-003`, `OBS-001`, `SUM-002`, `DSH-015`
+- 계획된 integration 테스트: `ARC-007`, `ARC-010`, `ARC-012`, `EXE-003`, `OBS-001`, `SUM-002`, `DSH-015`
 
 정확한 문구와 테스트 이름은 항상 [`catalog.json`](catalog.json)에서 확인한다. 이 문서에는 변경 시 쉽게 낡는 전체 테스트 목록을 복제하지 않는다.
 

@@ -228,9 +228,9 @@ func operationStorageID(spec execution.StepExecutionSpec) string {
 }
 
 func storageFailure(err error, storageID string) (workerclient.ExecutionResult, bool) {
-	if errors.Is(err, archive.ErrStorageFull) {
+	if errors.Is(err, archive.ErrStorageFull) && storageID != "" {
 		return workerclient.ExecutionResult{
-			FailureClass: workflow.FailureResource, WaitReason: vocabulary.WaitDisk,
+			FailureClass: workflow.FailureResource, WaitReason: vocabulary.WaitDevice, WaitTargetStorageID: storageID,
 			ErrorClass: "STORAGE_FULL", LogReference: "worker://storage-full",
 		}, true
 	}

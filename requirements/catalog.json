@@ -2491,7 +2491,7 @@
       "statement": "운영 Worker는 실행 오류를 영구 입력 오류·재시도 가능한 일시 오류·시도 횟수를 쓰지 않는 Storage 자원 대기로 구분해 보고해야 한다.",
       "given": "checksum이 다른 입력, 일시적인 subprocess 실패, 접근할 수 없어진 Storage 및 용량이 가득 찬 Storage 오류가 있다.",
       "when": "운영 executor가 각 typed StepExecutionSpec을 실행하고 구조화 결과를 만든다.",
-      "then": "checksum 불일치는 INPUT, 일반 실행 실패는 TRANSIENT, 접근 불가는 대상 Storage가 있는 DEVICE, 용량 부족은 DISK 자원 대기로 보고되어 자원 대기는 실행 시도 횟수를 소비하지 않는다.",
+      "then": "checksum 불일치는 INPUT, 일반 실행 실패는 TRANSIENT, 접근 불가와 용량 부족은 대상 Storage가 있는 DEVICE 대기로 보고되어 실행 시도 횟수를 소비하지 않는다.",
       "test_file": "internal/application/workerexecutor/registry_test.go",
       "test_name": "TestProductionExecutorClassifiesInputTransientAndStorageFailures",
       "status": "implemented",
@@ -3442,6 +3442,18 @@
       "then": "정상 실행은 모든 유효 package와 1:1인 검증된 CSV 하나를 게시하고 실패 실행은 기존 CSV를 그대로 유지하며 두 경우 모두 package 폴더와 파일 bytes는 바뀌지 않는다.",
       "test_file": "internal/adapter/archivecatalog/v2_test.go",
       "test_name": "TestArchiveCatalogRebuildAtomicallyReplacesOnlyCatalogAfterPackageVerification",
+      "status": "implemented",
+      "level": "integration"
+    },
+    {
+      "id": "ARC-019",
+      "design": "archive-run-capacity-admission",
+      "statement": "아카이브 실행 시작은 선택 범위의 예상 출력 크기에 5%와 64 MiB 중 큰 안전 여유를 더한 필요 용량을 계산하고 현재 Archive Storage 여유 용량이 부족하면 구조화해 거부해야 한다.",
+      "given": "선택 범위 예상 출력 크기와 현재 Archive Storage 여유 용량이 필요 용량과 같거나 한 byte 부족한 두 경우가 있다.",
+      "when": "ArchiveRun의 용량 admission을 평가한다.",
+      "then": "정확히 필요한 용량이면 통과하고 한 byte라도 부족하면 Storage ID·예상 출력·안전 여유·필요 용량·현재 여유를 보존한 capacity 오류를 반환한다.",
+      "test_file": "internal/application/archiveorganization/capacity_test.go",
+      "test_name": "TestArchiveRunCapacityAdmissionIncludesSafetyReserveAndReturnsTypedShortage",
       "status": "implemented",
       "level": "integration"
     }

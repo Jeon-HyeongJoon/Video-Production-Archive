@@ -25,7 +25,7 @@ Windows에서 외부 data bus Volume이 연결되면 Worker는 파일을 읽지 
 
 과거 실행이 있는 드라이브도 목록에서 삭제하지 않되 현재 연결과 이력을 분리한다. 유효한 Worker heartbeat에 원본 identity가 있으면 연결됨, online Worker의 attached volume 목록에서 사라졌으면 연결 해제됨, Worker가 offline이라 관측할 수 없으면 확인 불가다. 연결 해제·확인 불가는 완료 결과와 Catalog를 계속 읽을 수 있지만 새 ArchiveRun 준비·시작은 할 수 없다. 화면의 목록·상세·알림·실행 gate는 5초 polling마다 이 한 projection 값을 함께 바꾼다. `DEV-010`, `DSH-010`, `DSH-026`
 
-원본은 사람이 현재 candidate revision을 고른 뒤에만 해당 Worker에서 `SOURCE_MEDIA` ReadOnlyStorageRoot로 개방한다. Control은 root 없이 ArchiveIntakeSession의 stable identity를 기록하고 선택 storage ID만 heartbeat 응답으로 Worker에 돌려준다. ArchiveIntakeSession은 불변 이력이므로 새 작업 생성 projection은 current candidate revision·Worker·source Storage와 모두 일치하는 세션을 별도 선택 세션 ID로 제공한다. 완료된 과거 ArchiveRun의 접수 세션 ID는 실행 추적에 남지만 새 ArchiveRun 준비에는 쓰지 않으며, 일치하는 선택 세션이 없으면 담당자의 현재 선택으로 새 세션을 만든다. 아카이브 저장소는 같은 Worker가 접근할 수 있는 `ARCHIVE_PRIMARY`이며 원본과 다른 논리 Volume이어야 한다. 새 외장 Volume은 원본용 Storage ID와 별도의 archive Storage ID로 후보에 나타나므로 역할이 섞이지 않는다. Worker projection은 로컬 root, 연결된 네트워크 공유, 원본과 다른 새 외장 Volume, 검증된 FTP·SFTP를 `StorageAccessKind`로 구분한다. 담당자가 고르기 전에는 새 외장 Volume에 쓰지 않는다. 접근 불가 원격 서비스와 예상 결과 크기보다 여유 용량이 부족한 후보는 시작을 막는다. 유효한 시작은 아카이브 Storage 단위 쓰기 예약을 획득한다. Archivist나 정책은 두 Storage 중 하나를 대신 고르지 않는다. `DEV-008`, `DEV-010`, `ARC-010`, `APP-006`, `CFG-012~013`
+원본은 사람이 현재 candidate revision을 고른 뒤에만 해당 Worker에서 `SOURCE_MEDIA` ReadOnlyStorageRoot로 개방한다. Control은 root 없이 ArchiveIntakeSession의 stable identity를 기록하고 선택 storage ID만 heartbeat 응답으로 Worker에 돌려준다. ArchiveIntakeSession은 불변 이력이므로 새 작업 생성 projection은 current candidate revision·Worker·source Storage와 모두 일치하는 세션을 별도 선택 세션 ID로 제공한다. 완료된 과거 ArchiveRun의 접수 세션 ID는 실행 추적에 남지만 새 ArchiveRun 준비에는 쓰지 않으며, 일치하는 선택 세션이 없으면 담당자의 현재 선택으로 새 세션을 만든다. 아카이브 저장소는 같은 Worker가 접근할 수 있는 `ARCHIVE_PRIMARY`이며 원본과 다른 논리 Volume이어야 한다. 새 외장 Volume은 원본용 Storage ID와 별도의 archive Storage ID로 후보에 나타나므로 역할이 섞이지 않는다. Worker projection은 로컬 root, 연결된 네트워크 공유, 원본과 다른 새 외장 Volume, 검증된 FTP·SFTP를 `StorageAccessKind`로 구분한다. 담당자가 고르기 전에는 새 외장 Volume에 쓰지 않는다. 접근 불가 원격 서비스는 시작을 막는다. 용량 admission은 선택 범위 예상 출력에 5%와 64 MiB 중 큰 안전 여유를 더하고, 현재 여유가 필요 용량보다 작으면 Storage ID와 byte 수를 가진 구조화 오류로 실행 생성을 막는다. 유효한 시작은 아카이브 Storage 단위 쓰기 예약을 획득한다. Archivist나 정책은 두 Storage 중 하나를 대신 고르지 않는다. `DEV-008`, `DEV-010`, `ARC-010`, `ARC-019`, `APP-006`, `CFG-012~013`
 
 Worker는 현재 연결된 외장 Volume의 두 역할 ID를 로컬 `StorageRoot` capability로만 해석하고 root 경로를 Control에 보내지 않는다. capability를 여는 것만으로 파일을 읽거나 쓰지 않으며, 담당자가 선택한 뒤 생성된 fenced 실행 명세만 archive ID에 게시할 수 있다. 분리 시 실행 중 handle을 닫지 않고 유휴 조정에서 동적 capability를 제거한다. `DEV-013`
 
@@ -67,7 +67,7 @@ Archivist의 정리 검토 단위는 현재 HOLD인 MediaFolder 하나다. 목�
 
 Worker는 외부 subprocess에 executable과 argument 배열만 넘기고 StorageRoot 안 임시 출력에 쓴다. QC와 checksum 검증 뒤에만 선택한 ARCHIVE_PRIMARY에 게시한다. 한 벌이 검증되면 `ArchivePackageState.STORED`, 화면의 “보관됨”이다. 아직 Transcript·Subtitle을 새 패키지 리비전으로 더할 수 있다. `ORG-008`, `ARC-011`
 
-손상 입력·지원하지 않는 codec은 해당 영상만 실패로 종결하고 ArchiveCatalog에 실패 상태를 남긴다. 일시 process 오류는 재시도 횟수를 소비한다. 장치·네트워크 Storage 불가와 실행 중 아카이브 저장소 용량 부족은 사람이 복구할 때까지 `WAITING/DEVICE`이고 횟수를 소비하지 않는다. `DEV-012`
+손상 입력·지원하지 않는 codec은 해당 영상만 실패로 종결하고 ArchiveCatalog에 실패 상태를 남긴다. 일시 process 오류는 재시도 횟수를 소비한다. 장치·네트워크 Storage 불가와 실행 중 아카이브 저장소 용량 부족은 대상 Storage ID가 있는 `WAITING/DEVICE`로 보고되어 사람이 복구할 때까지 횟수를 소비하지 않는다. `DEV-012`, `WRK-015`
 
 ## 5. 2단계: STT
 

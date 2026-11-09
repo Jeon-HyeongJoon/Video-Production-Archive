@@ -162,7 +162,7 @@ profile reference와 operation별 typed parameter
 
 결과와 process 종료가 확인된 취소 정산 transaction은 읽기 projection 갱신·후속 Application observer·다음 dispatch 작업을 `worker_completion_outbox`에 함께 맡긴다. HTTP 요청은 이미 확정된 결과를 projection이나 dispatch의 일시 오류 때문에 거부하지 않고, 큰 검사 결과에서 Folder Job 생성을 끝까지 기다리지도 않는다. Worker는 응답을 받지 못한 결과·취소 보고의 동일 payload를 재전송하고 Control은 최초 receipt를 반환한다. Control의 조정 loop가 outbox를 재시작 뒤에도 읽어 세 후속 처리를 멱등 수행하고 전부 성공한 뒤에만 전달됨으로 표시한다. `WRK-014`, `CAN-005`
 
-운영 executor는 checksum·명세 불일치를 영구 `INPUT`, 일반 subprocess·일시 I/O 실패를 `TRANSIENT`, 접근 불가 Storage를 대상 ID가 있는 `DEVICE`, 용량 부족을 `DISK` 자원 대기로 보고한다. 자원 대기는 실행 시도 횟수를 소비하지 않는다. `WRK-015`
+운영 executor는 checksum·명세 불일치를 영구 `INPUT`, 일반 subprocess·일시 I/O 실패를 `TRANSIENT`, 접근 불가 또는 용량 부족 Storage를 대상 ID가 있는 `DEVICE` 대기로 보고한다. `DISK`는 PhysicalDevice I/O 충돌 예약에만 쓴다. Storage 대기는 사람이 복구할 때까지 실행 시도 횟수를 소비하지 않는다. `WRK-015`
 
 권장 상태:
 

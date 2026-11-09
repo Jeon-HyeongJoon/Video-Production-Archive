@@ -30,7 +30,7 @@ func (handler *Handler) archiveIntakeProjection(writer http.ResponseWriter, requ
 			ArchiveRunID: value.ArchiveRunID, ArchiveRunRevision: value.ArchiveRunRevision,
 			CandidateRevision: value.CandidateRevision, FolderDiscoveryRevision: value.FolderDiscoveryRevision,
 			FolderDiscoveryState: string(value.FolderDiscoveryState),
-			SessionID: value.SessionID, SelectionSessionID: value.SelectionSessionID,
+			SessionID:            value.SessionID, SelectionSessionID: value.SelectionSessionID,
 			WorkerID: value.WorkerID, SourceVolumeID: value.SourceVolumeID,
 			SourceStorageID:  value.SourceStorageID,
 			ArchiveStorageID: value.ArchiveStorageID, State: value.State, ArchiveRunState: value.ArchiveRunState,
@@ -239,6 +239,8 @@ func (handler *Handler) startArchiveRun(writer http.ResponseWriter, request *htt
 	})
 	if err != nil {
 		switch {
+		case errors.Is(err, archiveorganization.ErrInsufficientArchiveCapacity):
+			writeError(writer, http.StatusConflict, "ARCHIVE_CAPACITY_INSUFFICIENT")
 		case errors.Is(err, archiveorganization.ErrStartRejected), errors.Is(err, organization.ErrInvalidDecision):
 			writeError(writer, http.StatusBadRequest, "INVALID_ARCHIVE_RUN_START")
 		case errors.Is(err, command.ErrIdempotencyConflict):

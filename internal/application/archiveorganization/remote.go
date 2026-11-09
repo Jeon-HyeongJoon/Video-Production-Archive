@@ -96,8 +96,11 @@ func (service *RemoteStartService) Start(ctx context.Context, request StartReque
 		return Result{}, ErrStartRejected
 	}
 	discovered, selectedBytes, archiveFree, err := service.validateLiveScope(candidate.WorkerID, candidate.StorageID, archiveStorage.StorageID, request.InputRevision, request.FolderIDs)
-	if err != nil || selectedBytes == 0 || archiveFree < selectedBytes {
+	if err != nil || selectedBytes == 0 {
 		return Result{}, errors.Join(ErrStartRejected, err)
+	}
+	if err := ValidateArchiveCapacity(archiveStorage.StorageID, selectedBytes, archiveFree); err != nil {
+		return Result{}, err
 	}
 	folderScope, err := organization.FixFolderScope(organization.FixFolderScopeRequest{
 		DiscoveryRevision: request.InputRevision, DiscoveredFolderIDs: discovered, SelectedFolderIDs: request.FolderIDs,
@@ -215,6 +218,7 @@ func (service *RemoteStartService) validateLiveScope(workerID, sourceStorageID, 
 		}
 		var discovered []string
 		var selectedBytes, archiveFree uint64
+		var archiveConnected bool
 		selectedSet := make(map[string]bool, len(selected))
 		for _, folderID := range selected {
 			selectedSet[strings.TrimSpace(folderID)] = true
@@ -234,10 +238,11 @@ func (service *RemoteStartService) validateLiveScope(workerID, sourceStorageID, 
 			case archiveStorageID:
 				if observation.Connected {
 					archiveFree = observation.FreeBytes
+					archiveConnected = true
 				}
 			}
 		}
-		if len(discovered) > 0 && archiveFree > 0 {
+		if len(discovered) > 0 && archiveConnected {
 			return discovered, selectedBytes, archiveFree, nil
 		}
 	}

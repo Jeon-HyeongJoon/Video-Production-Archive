@@ -5,6 +5,7 @@ import { api, mutation, newID, label, stageSignal, stateSignal, humanWait, activ
 
 // Three missed 5 second refreshes in a row mean the screen is stale.
 const STALE_AFTER = 3;
+const ARCHIVE_CAPACITY_MINIMUM_RESERVE_BYTES = 64 * 1024 * 1024;
 
 export const model = { workers: [], drives: [], hosts: [], sessions: [], jobs: [], work: [], refreshedAt: 0, failures: 0, error: "" };
 
@@ -181,8 +182,10 @@ export function startBlocker(drive, selected) {
   const source = (drive.storage_candidates || []).find((item) => item.storage_id === drive.source_storage_id);
   const archive = archiveCandidates(drive).find((item) => item.storage_id === ui.archiveID);
   const estimated = selected.reduce((sum, folder) => sum + (folder.estimated_output_bytes || 0), 0);
-	if (drive.connection_state === "DISCONNECTED") return "드라이브 연결 해제됨";
-	if (drive.connection_state !== "CONNECTED") return "드라이브 연결 확인 불가";
+  const capacityReserve = Math.max(ARCHIVE_CAPACITY_MINIMUM_RESERVE_BYTES, Math.ceil(estimated / 20));
+  const requiredCapacity = estimated + capacityReserve;
+  if (drive.connection_state === "DISCONNECTED") return "드라이브 연결 해제됨";
+  if (drive.connection_state !== "CONNECTED") return "드라이브 연결 확인 불가";
   if (drive.folder_discovery_state === "SCANNING") return "폴더 검색 중";
   if (drive.folder_discovery_state === "FAILED") return "폴더 검색 실패";
   if (!folderDiscoveryReady(drive)) return "폴더 검색 대기";
@@ -190,7 +193,7 @@ export function startBlocker(drive, selected) {
   if (!ui.archiveID) return "아카이브 선택 없음";
   if (!source?.accessible) return "원본 접근 불가";
   if (!archive?.accessible) return "아카이브 접근 불가";
-  if (archive.free_bytes < estimated) return "아카이브 여유 용량 부족";
+  if (archive.free_bytes < requiredCapacity) return "아카이브 여유 용량 부족";
   if (!worker || worker.state === "OFFLINE" || worker.state === "DISABLED") return "Worker 꺼짐";
   if (!drive.source_volume_id) return "원본 정보 없음";
   return "";

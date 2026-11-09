@@ -505,8 +505,9 @@ func TestProductionExecutorClassifiesInputTransientAndStorageFailures(t *testing
 		t.Fatalf("unavailable Storage did not wait without consuming an attempt: %+v", deviceWait)
 	}
 	diskWait, classified := storageFailure(errors.Join(archive.ErrStorageFull), "archive")
-	if !classified || diskWait.FailureClass != workflow.FailureResource || diskWait.WaitReason != vocabulary.WaitDisk {
-		t.Fatalf("full Storage did not become a disk resource wait: %+v classified=%v", diskWait, classified)
+	if !classified || diskWait.FailureClass != workflow.FailureResource || diskWait.WaitReason != vocabulary.WaitDevice ||
+		diskWait.WaitTargetStorageID != "archive" {
+		t.Fatalf("full Storage did not become a targeted device wait: %+v classified=%v", diskWait, classified)
 	}
 }
 
