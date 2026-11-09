@@ -44,6 +44,8 @@ var operationCommands = map[string]execution.Operation{
 	"transcript-text": execution.OperationWriteTranscriptText,
 	"package-revise":  execution.OperationReviseArchivePackage,
 	"catalog":         execution.OperationWriteArchiveCatalog,
+	"catalog-verify":  execution.OperationVerifyArchiveCatalog,
+	"catalog-rebuild": execution.OperationRebuildArchiveCatalog,
 }
 
 type commandResult struct {
@@ -85,6 +87,16 @@ func run(ctx context.Context, arguments []string, stdin io.Reader, stdout, stder
 	case "execute":
 		return runOperation(ctx, arguments[1:], stdin, stdout, stderr, "")
 	default:
+		if command == "catalog" && len(arguments) > 1 {
+			switch strings.TrimSpace(arguments[1]) {
+			case "verify":
+				return runOperation(ctx, arguments[2:], stdin, stdout, stderr, execution.OperationVerifyArchiveCatalog)
+			case "rebuild":
+				return runOperation(ctx, arguments[2:], stdin, stdout, stderr, execution.OperationRebuildArchiveCatalog)
+			case "publish":
+				return runOperation(ctx, arguments[2:], stdin, stdout, stderr, execution.OperationWriteArchiveCatalog)
+			}
+		}
 		expected, exists := operationCommands[command]
 		if !exists {
 			fmt.Fprintf(stderr, "unknown archive-media command %q\n", command)
@@ -336,5 +348,5 @@ func writeCommandError(writer io.Writer, code string, err error) {
 }
 
 func writeUsage(writer io.Writer) {
-	fmt.Fprintln(writer, "usage: archive-media <operations|check|execute|inspect|render|sequence|qc|package|audio|transcribe|subtitle|transcript-text|package-revise|catalog|runner|version>")
+	fmt.Fprintln(writer, "usage: archive-media <operations|check|execute|inspect|render|sequence|qc|package|audio|transcribe|subtitle|transcript-text|package-revise|catalog [publish|verify|rebuild]|runner|version>")
 }

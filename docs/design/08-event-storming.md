@@ -351,7 +351,7 @@ CommandRecord는 감사와 멱등성의 영속 기록이지만 업무 Aggregate 
 | ES-12 | ArchivePackage import가 과거 Event를 중복 생성할 위험 | import prototype을 제품 복원 명령과 실제 패키지에 연결해야 함 | `ARC-007`(planned) |
 | ES-13 | Volume, Worker, Provider 계정의 생애주기 상태 집합이 없음 | 이벤트 이름을 확정하기 전에 각 상태 집합과 허용 전이를 정의 | 결정 필요 |
 | ES-14 | ready Step이 여러 Job·Worker에 걸쳐 있을 때 순서와 자원 예약 원자성이 없음 | 영속 ready_at·aging·Job dispatch sequence로 후보를 고르고 StepReserved·ResourceReservation·ExecutionLease를 한 Unit of Work로 확정 | `dispatch-policy`, `resource-reservation`, `DSP-001~003`으로 고정 |
-| ES-15 | 사람이 바꿀 수 있는 결과 폴더와 루트 CSV가 어긋날 수 있음 | package metadata·manifest를 원본으로 읽기 전용 대조하고 검증된 전체 CSV만 원자 교체 | `ARC-017~018`(planned) |
+| ES-15 | 사람이 바꿀 수 있는 결과 폴더와 루트 CSV가 어긋날 수 있음 | package metadata·manifest를 원본으로 읽기 전용 대조하고 검증된 전체 CSV만 원자 교체 | `ARC-017~018` |
 
 ## 15. 요구사항으로 내리는 순서
 

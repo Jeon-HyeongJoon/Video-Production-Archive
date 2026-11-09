@@ -108,7 +108,7 @@ Transcript 게시가 성공하면 Worker는 versioned 결정 규칙으로 구간
 
 패키지는 `metadata.json`, `files.csv`, `events.jsonl`, manifest와 README만으로 DB 없이 복원할 수 있는 형식을 유지한다. Storage 절대 root, mount path, credential과 executable 경로를 넣지 않는다. 실제 제품 복원 명령과 실제 패키지 acceptance test는 `ARC-007` planned다.
 
-새 패키지는 처리 날짜로 나뉜 상대경로에 둔다. 결과 영상 파일명은 단일 입력이면 원래 영상명, 여러 컷 통합이면 MediaFolder의 마지막 이름에서 만들며 Windows에서 안전하도록 정규화한다. 패키지 ID는 이름과 별개인 불변 identity로 유지하고, metadata와 ArchiveCatalog에는 원래 이름과 전체 상대경로도 함께 남긴다. 화면은 처리 날짜·결과 영상명을 주 정보로, 패키지 ID를 추적용 보조 정보로 보여준다. 완료된 Folder Job의 `ORGANIZED_MEDIA` 출력은 원본 드라이브의 완료 내역에 ArchiveRun을 넘어 유지한다. ArchiveRun 상태만으로 완료 내역을 만들지 않으며 실제 ArchivePackage 출력과 출력 기록 시각을 기준으로 한다. 완료 내역은 출력의 Storage root를 제외한 Package 상대경로를 보존해 같은 ArchiveRun 상세의 정확한 결과로 이동한다. `ARC-013`, `DSH-023~025`
+layout v1 호환 패키지는 처리 날짜로 나뉜 상대경로를 계속 읽고 게시할 수 있다. 결과 영상 파일명은 단일 입력이면 원래 영상명, 여러 컷 통합이면 MediaFolder의 마지막 이름에서 만들며 Windows에서 안전하도록 정규화한다. 패키지 ID는 이름과 별개인 불변 identity로 유지하고, metadata와 ArchiveCatalog에는 원래 이름과 전체 상대경로도 함께 남긴다. 화면은 처리 날짜·결과 영상명을 주 정보로, 패키지 ID를 추적용 보조 정보로 보여준다. 완료된 Folder Job의 `ORGANIZED_MEDIA` 출력은 원본 드라이브의 완료 내역에 ArchiveRun을 넘어 유지한다. ArchiveRun 상태만으로 완료 내역을 만들지 않으며 실제 ArchivePackage 출력과 출력 기록 시각을 기준으로 한다. 완료 내역은 출력의 Storage root를 제외한 Package 상대경로를 보존해 같은 ArchiveRun 상세의 정확한 결과로 이동한다. `ARC-013`, `DSH-023~025`
 
 새 게시 형식인 layout v2는 저장소 root의 디렉터리 깊이를 결과 폴더 1단계로 고정한다. 각 결과 폴더에는 결과 영상 정확히 하나와 `metadata.json`, `video-info.csv`, 전사·자막, 파일 목록·event·manifest·README를 모두 최상단에 둔다. 공개 하위 디렉터리는 만들지 않는다. 폴더 이름은 처리일과 원본 영상 또는 MediaFolder 이름, package ID suffix로 만들되 identity는 metadata의 package ID다. 기존 layout v1은 읽기 호환을 유지하고 자동 이동하지 않는다. `ARC-015`
 
@@ -214,4 +214,4 @@ Control의 StepExecutionSpec은 Storage ID, 정규화 상대경로, checksum, pr
 | Q14 | 폴더와 CSV의 행 단위 | 루트 ArchiveCatalog는 Package별 1행, 폴더 `video-info.csv`는 OriginalAsset별 N행 |
 | Q15 | 폴더와 ArchiveCatalog 대조 | typed `verify`와 검증 뒤 원자 교체하는 `rebuild`, package는 수정·삭제하지 않음 |
 
-Q1~Q12는 사용자의 “테스트 버전까지 권장안으로 진행” 결정에 따라 2026-10-31에 확정했다. Q13~Q15는 2026-11-09에 확정했으며 layout v2 writer·대조·재생성 integration test가 생길 때까지 해당 요구사항을 `planned`로 둔다. 기존 layout v1 기록은 자동 migration하지 않는다.
+Q1~Q12는 사용자의 “테스트 버전까지 권장안으로 진행” 결정에 따라 2026-10-31에 확정했다. Q13~Q15는 2026-11-09에 확정했고 layout v2 writer·대조·재생성을 typed MediaOperation과 CLI에 연결해 integration test로 검증한다. 기존 layout v1 기록은 자동 migration하지 않는다.

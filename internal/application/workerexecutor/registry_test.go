@@ -58,7 +58,7 @@ func TestProductionExecutorRoutesOneTypedOperationThroughRegisteredStorageRoots(
 		}},
 		Outputs: []execution.OutputTarget{{
 			ID: "VP-20261031-0001", Kind: execution.OutputOrganizedMedia, StorageID: "working",
-			RelativePath: "packages/2026/10/31/VP-20261031-0001/revisions/000001/metadata.json", OriginalAssetID: "ASSET-1",
+			RelativePath: "2026-10-31_clip__0001/metadata.json", OriginalAssetID: "ASSET-1",
 		}},
 		ProfileReference: "archive-1080p-6mbps@v1",
 		Parameters: execution.StepExecutionParameters{
@@ -96,7 +96,7 @@ func TestProductionExecutorRoutesOneTypedOperationThroughRegisteredStorageRoots(
 		len(result.VerificationReferences) != 1 {
 		t.Fatalf("supported operation was not executed exactly once: result=%+v", result)
 	}
-	published, err := roots.MustRoot("working").ReadFile("packages/2026/10/31/VP-20261031-0001/revisions/000001/clip.mp4")
+	published, err := roots.MustRoot("working").ReadFile("2026-10-31_clip__0001/clip.mp4")
 	if err != nil || string(published) != string(sourcePayload) {
 		t.Fatalf("verified output was not published through StorageRoot: %q err=%v", published, err)
 	}

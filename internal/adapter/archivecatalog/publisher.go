@@ -32,7 +32,8 @@ type Request struct {
 }
 
 type Publisher struct {
-	root *archive.StorageRoot
+	root          *archive.StorageRoot
+	beforeReplace func() error
 }
 
 var checksumPattern = regexp.MustCompile(`^[0-9a-fA-F]{64}$`)

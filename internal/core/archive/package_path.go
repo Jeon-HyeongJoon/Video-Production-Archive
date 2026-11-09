@@ -12,6 +12,17 @@ import (
 
 var ErrInvalidPackagePresentation = errors.New("archive package presentation is invalid")
 
+type PackageLayoutVersion uint8
+
+const (
+	PackageLayoutDateRevisionTree PackageLayoutVersion = 1
+	PackageLayoutFlatResultFolder PackageLayoutVersion = 2
+)
+
+func (version PackageLayoutVersion) Valid() bool {
+	return version == PackageLayoutDateRevisionTree || version == PackageLayoutFlatResultFolder
+}
+
 var packageIdentityPattern = regexp.MustCompile(`^VP-([0-9]{4})([0-9]{2})([0-9]{2})-[A-Za-z0-9._-]+$`)
 
 type PackagePresentation struct {
@@ -54,6 +65,33 @@ func PresentPackage(packageID, mediaFolder string, originalNames []string) (Pack
 		DisplayName:   archiveDate + " · " + folder + " · " + label,
 		VideoFileName: stem + ".mp4", PackageDirectory: directory,
 	}, nil
+}
+
+func PresentFlatPackage(packageID, mediaFolder string, originalNames []string) (PackagePresentation, error) {
+	presentation, err := PresentPackage(packageID, mediaFolder, originalNames)
+	if err != nil {
+		return PackagePresentation{}, err
+	}
+	prefix := "VP-" + strings.ReplaceAll(presentation.ArchiveDate, "-", "") + "-"
+	suffix := strings.TrimPrefix(strings.TrimSpace(packageID), prefix)
+	if suffix == "" || suffix == packageID {
+		return PackagePresentation{}, ErrInvalidPackagePresentation
+	}
+	if utf8.RuneCountInString(suffix) > 12 {
+		runes := []rune(suffix)
+		suffix = string(runes[len(runes)-12:])
+	}
+	resultStem := strings.TrimSuffix(presentation.VideoFileName, path.Ext(presentation.VideoFileName))
+	if utf8.RuneCountInString(resultStem) > 48 {
+		runes := []rune(resultStem)
+		resultStem = string(runes[:48])
+	}
+	directoryName := safeWindowsFileStem(presentation.ArchiveDate + "_" + resultStem + "__" + suffix)
+	if directoryName == "" {
+		return PackagePresentation{}, ErrInvalidPackagePresentation
+	}
+	presentation.PackageDirectory = directoryName
+	return presentation, nil
 }
 
 func PackageDirectory(packageID string) (string, error) {

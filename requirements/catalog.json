@@ -3016,9 +3016,9 @@
     {
       "id": "ARC-013",
       "design": "human-readable-archive-package-layout",
-      "statement": "새 ArchivePackage는 처리 날짜로 나눈 결정적 상대경로에 게시하고 결과 영상 파일명은 원본 영상명 또는 여러 컷의 MediaFolder 이름을 Windows 안전 이름으로 사용하되 불변 패키지 ID와 원래 이름·상대경로를 함께 보존해야 한다.",
-      "given": "처리 날짜가 포함된 패키지 ID와 한 영상의 원래 이름, 여러 컷 MediaFolder 및 Windows 금지문자·예약어가 있는 이름이 있다.",
-      "when": "Worker가 1단계 ArchivePackage를 ARCHIVE_PRIMARY에 게시한다.",
+      "statement": "layout v1 ArchivePackage 호환 경로는 처리 날짜로 나눈 결정적 상대경로를 계속 읽고 게시할 수 있으며 결과 영상 파일명은 원본 영상명 또는 여러 컷의 MediaFolder 이름을 Windows 안전 이름으로 사용하되 불변 패키지 ID와 원래 이름·상대경로를 함께 보존해야 한다.",
+      "given": "layout v1 호환 게시 요청에 처리 날짜가 포함된 패키지 ID와 한 영상의 원래 이름, 여러 컷 MediaFolder 및 Windows 금지문자·예약어가 있는 이름이 있다.",
+      "when": "호환 Publisher가 layout v1 ArchivePackage를 ARCHIVE_PRIMARY에 게시한다.",
       "then": "패키지는 packages/YYYY/MM/DD/<패키지 ID>/revisions/<리비전> 아래에 있고 결과 영상은 단일 입력의 원래 이름 또는 다중 입력의 폴더 이름을 안전하게 정규화한 mp4이며 metadata에는 표시명·처리 날짜·MediaFolder·원래 이름·상대경로·패키지 ID가 남는다.",
       "test_file": "internal/adapter/archivebundle/publisher_test.go",
       "test_name": "TestArchivePackageUsesDateFoldersAndSafeSourceNamesWithoutLosingIdentity",
@@ -3380,9 +3380,9 @@
       "given": "처리 날짜·사람이 읽는 결과명·불변 package ID와 결과 영상 및 metadata·video info·전사·자막·manifest sidecar가 있는 새 ArchivePackage가 있다.",
       "when": "Worker가 layout v2 패키지를 ARCHIVE_PRIMARY에 게시한다.",
       "then": "root의 직접 하위 결과 폴더 하나에 결과 영상 정확히 하나와 모든 공개 sidecar가 있고 metadata의 layout version·package ID가 일치하며 결과 폴더 아래에는 디렉터리가 없다.",
-      "test_file": "",
-      "test_name": "",
-      "status": "planned",
+      "test_file": "internal/adapter/archivebundle/publisher_v2_test.go",
+      "test_name": "TestFlatArchivePackagePublishesOneVideoAndSidecarsAtOneRootLevel",
+      "status": "implemented",
       "level": "integration"
     },
     {
@@ -3392,9 +3392,9 @@
       "given": "보관됨인 layout v2 1단계 패키지와 뒤에 생성된 Transcript·TranscriptText·Subtitle이 있다.",
       "when": "Worker가 2단계 산출물을 새 패키지 리비전으로 게시한다.",
       "then": "이전 리비전의 bytes와 manifest는 같은 결과 폴더의 revision-qualified 파일로 바뀌지 않고 남으며 공개 현재 파일과 current.json은 새 manifest 검증 뒤에만 새 리비전을 가리킨다.",
-      "test_file": "",
-      "test_name": "",
-      "status": "planned",
+      "test_file": "internal/adapter/archivebundle/publisher_v2_test.go",
+      "test_name": "TestFlatArchivePackageRevisionPreservesImmutableFilesBeforeCurrentPointerMoves",
+      "status": "implemented",
       "level": "integration"
     },
     {
@@ -3404,9 +3404,9 @@
       "given": "원본 생성 시각이 있거나 없는 단일·다중 OriginalAsset과 각 checksum·상대경로·MediaInspection·OrganizationDecision이 있다.",
       "when": "Worker가 layout v2 ArchivePackage의 영상 정보 CSV를 게시한다.",
       "then": "RFC 4180 파일은 OriginalAsset마다 정확히 한 행을 가지며 원본 생성 시각과 영상명을 인접한 앞 열에 두고 관찰된 기술정보와 추적 ID를 보존하되 날짜를 추정하거나 Storage 절대경로를 포함하지 않는다.",
-      "test_file": "",
-      "test_name": "",
-      "status": "planned",
+      "test_file": "internal/adapter/archivebundle/publisher_v2_test.go",
+      "test_name": "TestFlatArchivePackageVideoInfoHasOneHumanReadableRowPerOriginal",
+      "status": "implemented",
       "level": "integration"
     },
     {
@@ -3416,9 +3416,9 @@
       "given": "같은 ARCHIVE_PRIMARY의 서로 다른 ArchiveRun에서 게시된 단일 원본 패키지와 다중 원본 패키지 및 각 결과 폴더가 있다.",
       "when": "각 package가 보관되거나 새 리비전이 게시되어 layout v2 ArchiveCatalog를 갱신한다.",
       "then": "package ID별 RFC 4180 행이 정확히 하나씩 있고 각 행은 결과 폴더·영상·현재 revision·manifest·상태·원본 수와 sidecar 상대경로에 대응하며 다중 원본도 루트에는 한 행만 남는다.",
-      "test_file": "",
-      "test_name": "",
-      "status": "planned",
+      "test_file": "internal/adapter/archivecatalog/v2_test.go",
+      "test_name": "TestPackageCatalogKeepsExactlyOneRootRowPerSingleOrMultiSourcePackage",
+      "status": "implemented",
       "level": "integration"
     },
     {
@@ -3428,9 +3428,9 @@
       "given": "정상 package와 catalog 행, 행이 없거나 고아인 package, 중복 ID·다른 revision 또는 manifest 및 잘못된 결과 폴더 깊이가 섞인 격리 Archive Storage가 있다.",
       "when": "archive-media catalog verify operation을 실행한다.",
       "then": "모든 결과 폴더와 catalog 행을 CURRENT·CATALOG_MISSING·CATALOG_ORPHAN·CATALOG_MISMATCH·LAYOUT_INVALID 중 정확한 상태로 보고하고 실행 전후 Storage bytes는 같다.",
-      "test_file": "",
-      "test_name": "",
-      "status": "planned",
+      "test_file": "internal/adapter/archivecatalog/v2_test.go",
+      "test_name": "TestArchiveCatalogVerifyReportsBidirectionalStatesWithoutChangingStorage",
+      "status": "implemented",
       "level": "integration"
     },
     {
@@ -3440,9 +3440,9 @@
       "given": "유효한 layout v2 package 폴더들과 누락·고아·오래된 행이 있는 archive-catalog.csv 및 교체 직전 실패를 주입할 수 있는 StorageRoot가 있다.",
       "when": "archive-media catalog rebuild operation을 정상 실행하거나 교체 전에 실패시킨다.",
       "then": "정상 실행은 모든 유효 package와 1:1인 검증된 CSV 하나를 게시하고 실패 실행은 기존 CSV를 그대로 유지하며 두 경우 모두 package 폴더와 파일 bytes는 바뀌지 않는다.",
-      "test_file": "",
-      "test_name": "",
-      "status": "planned",
+      "test_file": "internal/adapter/archivecatalog/v2_test.go",
+      "test_name": "TestArchiveCatalogRebuildAtomicallyReplacesOnlyCatalogAfterPackageVerification",
+      "status": "implemented",
       "level": "integration"
     }
   ]

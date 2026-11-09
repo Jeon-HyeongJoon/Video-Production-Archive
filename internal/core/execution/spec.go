@@ -21,20 +21,22 @@ const StepExecutionSpecVersion uint32 = 1
 type Operation string
 
 const (
-	OperationInspectMedia         Operation = "INSPECT_MEDIA"
-	OperationRenderRecording      Operation = "RENDER_RECORDING"
-	OperationRenderSourceSequence Operation = "RENDER_SOURCE_SEQUENCE"
-	OperationCreateThumbnail      Operation = "CREATE_THUMBNAIL"
-	OperationQCRendition          Operation = "QC_RENDITION"
-	OperationVerifyChecksum       Operation = "VERIFY_CHECKSUM"
-	OperationDeviceIO             Operation = "DEVICE_IO"
-	OperationOrganizeMedia        Operation = "ORGANIZE_MEDIA"
-	OperationExtractSpeechAudio   Operation = "EXTRACT_SPEECH_AUDIO"
-	OperationTranscribeAudio      Operation = "TRANSCRIBE_AUDIO"
-	OperationWriteSubtitle        Operation = "WRITE_SUBTITLE"
-	OperationWriteTranscriptText  Operation = "WRITE_TRANSCRIPT_TEXT"
-	OperationReviseArchivePackage Operation = "REVISE_ARCHIVE_PACKAGE"
-	OperationWriteArchiveCatalog  Operation = "WRITE_ARCHIVE_CATALOG"
+	OperationInspectMedia          Operation = "INSPECT_MEDIA"
+	OperationRenderRecording       Operation = "RENDER_RECORDING"
+	OperationRenderSourceSequence  Operation = "RENDER_SOURCE_SEQUENCE"
+	OperationCreateThumbnail       Operation = "CREATE_THUMBNAIL"
+	OperationQCRendition           Operation = "QC_RENDITION"
+	OperationVerifyChecksum        Operation = "VERIFY_CHECKSUM"
+	OperationDeviceIO              Operation = "DEVICE_IO"
+	OperationOrganizeMedia         Operation = "ORGANIZE_MEDIA"
+	OperationExtractSpeechAudio    Operation = "EXTRACT_SPEECH_AUDIO"
+	OperationTranscribeAudio       Operation = "TRANSCRIBE_AUDIO"
+	OperationWriteSubtitle         Operation = "WRITE_SUBTITLE"
+	OperationWriteTranscriptText   Operation = "WRITE_TRANSCRIPT_TEXT"
+	OperationReviseArchivePackage  Operation = "REVISE_ARCHIVE_PACKAGE"
+	OperationWriteArchiveCatalog   Operation = "WRITE_ARCHIVE_CATALOG"
+	OperationVerifyArchiveCatalog  Operation = "VERIFY_ARCHIVE_CATALOG"
+	OperationRebuildArchiveCatalog Operation = "REBUILD_ARCHIVE_CATALOG"
 )
 
 func (operation Operation) Valid() bool {
@@ -42,7 +44,8 @@ func (operation Operation) Valid() bool {
 	case OperationInspectMedia, OperationRenderRecording, OperationRenderSourceSequence, OperationCreateThumbnail,
 		OperationQCRendition, OperationVerifyChecksum, OperationDeviceIO, OperationOrganizeMedia,
 		OperationExtractSpeechAudio, OperationTranscribeAudio, OperationWriteSubtitle, OperationWriteTranscriptText,
-		OperationReviseArchivePackage, OperationWriteArchiveCatalog:
+		OperationReviseArchivePackage, OperationWriteArchiveCatalog,
+		OperationVerifyArchiveCatalog, OperationRebuildArchiveCatalog:
 		return true
 	default:
 		return false
@@ -52,26 +55,28 @@ func (operation Operation) Valid() bool {
 type OutputKind string
 
 const (
-	OutputMediaInspection OutputKind = "MEDIA_INSPECTION"
-	OutputRendition       OutputKind = "RENDITION"
-	OutputThumbnail       OutputKind = "THUMBNAIL"
-	OutputCutMarkers      OutputKind = "CUT_MARKERS"
-	OutputOrganizedMedia  OutputKind = "ORGANIZED_MEDIA"
-	OutputQCAssessment    OutputKind = "QC_ASSESSMENT"
-	OutputAudio           OutputKind = "AUDIO"
-	OutputTranscript      OutputKind = "TRANSCRIPT"
-	OutputSubtitle        OutputKind = "SUBTITLE"
-	OutputTranscriptText  OutputKind = "TRANSCRIPT_TEXT"
-	OutputArchiveRevision OutputKind = "ARCHIVE_PACKAGE_REVISION"
-	OutputArchiveCatalog  OutputKind = "ARCHIVE_CATALOG"
-	OutputChecksum        OutputKind = "CHECKSUM"
-	OutputDeviceResult    OutputKind = "DEVICE_RESULT"
+	OutputMediaInspection            OutputKind = "MEDIA_INSPECTION"
+	OutputRendition                  OutputKind = "RENDITION"
+	OutputThumbnail                  OutputKind = "THUMBNAIL"
+	OutputCutMarkers                 OutputKind = "CUT_MARKERS"
+	OutputOrganizedMedia             OutputKind = "ORGANIZED_MEDIA"
+	OutputQCAssessment               OutputKind = "QC_ASSESSMENT"
+	OutputAudio                      OutputKind = "AUDIO"
+	OutputTranscript                 OutputKind = "TRANSCRIPT"
+	OutputSubtitle                   OutputKind = "SUBTITLE"
+	OutputTranscriptText             OutputKind = "TRANSCRIPT_TEXT"
+	OutputArchiveRevision            OutputKind = "ARCHIVE_PACKAGE_REVISION"
+	OutputArchiveCatalog             OutputKind = "ARCHIVE_CATALOG"
+	OutputArchiveCatalogVerification OutputKind = "ARCHIVE_CATALOG_VERIFICATION"
+	OutputChecksum                   OutputKind = "CHECKSUM"
+	OutputDeviceResult               OutputKind = "DEVICE_RESULT"
 )
 
 func (kind OutputKind) valid() bool {
 	switch kind {
 	case OutputMediaInspection, OutputRendition, OutputThumbnail, OutputCutMarkers, OutputOrganizedMedia,
 		OutputQCAssessment, OutputAudio, OutputTranscript, OutputSubtitle, OutputTranscriptText, OutputArchiveRevision, OutputArchiveCatalog,
+		OutputArchiveCatalogVerification,
 		OutputChecksum, OutputDeviceResult:
 		return true
 	default:
@@ -250,12 +255,13 @@ func (spec StepExecutionSpec) Validate() error {
 
 func (spec StepExecutionSpec) validWithoutDigest() bool {
 	remoteInspection := spec.Operation == OperationInspectMedia && spec.TemplateName == "archive-intake-inspection"
+	catalogMaintenance := spec.Operation == OperationVerifyArchiveCatalog || spec.Operation == OperationRebuildArchiveCatalog
 	if spec.JobID == "" || spec.StepID == "" || spec.TemplateName == "" || !spec.Operation.Valid() ||
 		len(spec.Outputs) == 0 ||
 		spec.Parameters.WorkspaceDriveID == "" || spec.Parameters.InputRevision == 0 {
 		return false
 	}
-	if !remoteInspection && (len(spec.Inputs) == 0 || spec.Parameters.OrganizationDecisionID == "") {
+	if !remoteInspection && !catalogMaintenance && (len(spec.Inputs) == 0 || spec.Parameters.OrganizationDecisionID == "") {
 		return false
 	}
 	if spec.Parameters.SourceTimeline != nil && spec.Parameters.SourceTimeline.Validate() != nil {
@@ -294,6 +300,14 @@ func (spec StepExecutionSpec) validWithoutDigest() bool {
 		seenOutputs[output.ID] = true
 	}
 	switch spec.Operation {
+	case OperationVerifyArchiveCatalog:
+		return len(spec.Inputs) == 0 && len(spec.Outputs) == 1 &&
+			spec.Outputs[0].Kind == OutputArchiveCatalogVerification && spec.Parameters.ArchiveStorageID != "" &&
+			spec.Parameters.SourceTimeline == nil
+	case OperationRebuildArchiveCatalog:
+		return len(spec.Inputs) == 0 && len(spec.Outputs) == 1 &&
+			spec.Outputs[0].Kind == OutputArchiveCatalog && spec.Outputs[0].StorageID == spec.Parameters.ArchiveStorageID &&
+			spec.Parameters.SourceTimeline == nil
 	case OperationRenderRecording:
 		if len(spec.Inputs) != len(spec.Outputs) || spec.ProfileReference == "" || spec.Parameters.SourceTimeline != nil {
 			return false

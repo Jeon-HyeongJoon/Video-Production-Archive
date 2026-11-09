@@ -39,34 +39,55 @@ type FileSource struct {
 }
 
 type SourceReference struct {
-	OriginalAssetID string `json:"original_asset_id"`
-	OriginalName    string `json:"original_name"`
-	RelativePath    string `json:"relative_path"`
-	Checksum        string `json:"checksum"`
-	DurationMillis  int64  `json:"duration_millis"`
+	OriginalAssetID      string    `json:"original_asset_id"`
+	OriginalName         string    `json:"original_name"`
+	RelativePath         string    `json:"relative_path"`
+	Checksum             string    `json:"checksum"`
+	DurationMillis       int64     `json:"duration_millis"`
+	SourceCreatedAt      time.Time `json:"source_created_at,omitempty"`
+	SizeBytes            int64     `json:"size_bytes,omitempty"`
+	Container            string    `json:"container,omitempty"`
+	BitRateBPS           int64     `json:"bitrate_bps,omitempty"`
+	VideoCodec           string    `json:"video_codec,omitempty"`
+	VideoProfile         string    `json:"video_profile,omitempty"`
+	Width                int       `json:"width,omitempty"`
+	Height               int       `json:"height,omitempty"`
+	FrameRateNumerator   int64     `json:"frame_rate_numerator,omitempty"`
+	FrameRateDenominator int64     `json:"frame_rate_denominator,omitempty"`
+	VideoPixelFormat     string    `json:"video_pixel_format,omitempty"`
+	VideoBitRateBPS      int64     `json:"video_bitrate_bps,omitempty"`
+	AudioCodec           string    `json:"audio_codec,omitempty"`
+	AudioProfile         string    `json:"audio_profile,omitempty"`
+	AudioBitRateBPS      int64     `json:"audio_bitrate_bps,omitempty"`
+	AudioSampleRateHz    int       `json:"audio_sample_rate_hz,omitempty"`
+	AudioChannels        int       `json:"audio_channels,omitempty"`
+	AudioChannelLayout   string    `json:"audio_channel_layout,omitempty"`
 }
 
 type Package struct {
-	PackageID          string               `json:"package_id"`
-	Revision           uint64               `json:"revision"`
-	State              archive.PackageState `json:"state"`
-	ManifestDigest     string               `json:"manifest_digest"`
-	ArchiveDate        string               `json:"archive_date"`
-	MediaFolder        string               `json:"media_folder"`
-	DisplayName        string               `json:"display_name"`
-	VideoFileName      string               `json:"video_file_name"`
-	VideoPath          string               `json:"video_path"`
-	TranscriptPath     string               `json:"transcript_path,omitempty"`
-	TranscriptTextPath string               `json:"transcript_text_path,omitempty"`
-	SubtitlePath       string               `json:"subtitle_path,omitempty"`
-	MetadataPath       string               `json:"metadata_path"`
-	FilesPath          string               `json:"files_path"`
-	EventsPath         string               `json:"events_path"`
-	ManifestPath       string               `json:"manifest_path"`
-	ReadmePath         string               `json:"readme_path"`
+	PackageID          string                       `json:"package_id"`
+	LayoutVersion      archive.PackageLayoutVersion `json:"layout_version"`
+	Revision           uint64                       `json:"revision"`
+	State              archive.PackageState         `json:"state"`
+	ManifestDigest     string                       `json:"manifest_digest"`
+	ArchiveDate        string                       `json:"archive_date"`
+	MediaFolder        string                       `json:"media_folder"`
+	DisplayName        string                       `json:"display_name"`
+	VideoFileName      string                       `json:"video_file_name"`
+	VideoPath          string                       `json:"video_path"`
+	TranscriptPath     string                       `json:"transcript_path,omitempty"`
+	TranscriptTextPath string                       `json:"transcript_text_path,omitempty"`
+	SubtitlePath       string                       `json:"subtitle_path,omitempty"`
+	MetadataPath       string                       `json:"metadata_path"`
+	VideoInfoPath      string                       `json:"video_info_path,omitempty"`
+	FilesPath          string                       `json:"files_path"`
+	EventsPath         string                       `json:"events_path"`
+	ManifestPath       string                       `json:"manifest_path"`
+	ReadmePath         string                       `json:"readme_path"`
 }
 
 type InitialRequest struct {
+	LayoutVersion    archive.PackageLayoutVersion
 	PackageID        string
 	WorkspaceDriveID string
 	DecisionID       string
@@ -87,15 +108,17 @@ type RevisionRequest struct {
 }
 
 type currentDocument struct {
-	PackageID        string               `json:"package_id"`
-	Revision         uint64               `json:"revision"`
-	State            archive.PackageState `json:"state"`
-	ManifestDigest   string               `json:"manifest_digest"`
-	packageDirectory string               `json:"-"`
+	PackageID        string                       `json:"package_id"`
+	LayoutVersion    archive.PackageLayoutVersion `json:"layout_version,omitempty"`
+	Revision         uint64                       `json:"revision"`
+	State            archive.PackageState         `json:"state"`
+	ManifestDigest   string                       `json:"manifest_digest"`
+	packageDirectory string                       `json:"-"`
 }
 
 type Metadata struct {
 	PackageID          string                             `json:"package_id"`
+	LayoutVersion      archive.PackageLayoutVersion       `json:"layout_version,omitempty"`
 	Revision           uint64                             `json:"revision"`
 	WorkspaceDriveID   string                             `json:"workspace_drive_id"`
 	DecisionID         string                             `json:"organization_decision_id"`
@@ -110,6 +133,7 @@ type Metadata struct {
 	TranscriptPath     string                             `json:"transcript_path,omitempty"`
 	TranscriptTextPath string                             `json:"transcript_text_path,omitempty"`
 	SubtitlePath       string                             `json:"subtitle_path,omitempty"`
+	VideoInfoPath      string                             `json:"video_info_path,omitempty"`
 	CreatedAt          time.Time                          `json:"created_at"`
 }
 
@@ -383,22 +407,42 @@ func (publisher *Publisher) readCurrent(packageID string) (currentDocument, erro
 		return currentDocument{}, ErrInvalidRequest
 	}
 	directories := []string{directory, path.Join("packages", packageID)}
+	if entries, readErr := publisher.archive.ReadDir("."); readErr == nil {
+		for _, entry := range entries {
+			if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") || entry.Name() == "packages" || entry.Name() == "catalog" {
+				continue
+			}
+			directories = append(directories, entry.Name())
+		}
+	}
 	var payload []byte
 	var err error
 	selected := ""
 	for _, candidate := range directories {
 		payload, err = publisher.archive.ReadFile(path.Join(candidate, "current.json"))
 		if err == nil {
-			selected = candidate
-			break
+			var observed currentDocument
+			if json.Unmarshal(payload, &observed) == nil && observed.PackageID == packageID {
+				selected = candidate
+				break
+			}
 		}
 	}
 	if selected == "" {
+		if err == nil {
+			err = ErrInvalidRequest
+		}
 		return currentDocument{}, err
 	}
 	var current currentDocument
 	if json.Unmarshal(payload, &current) != nil || current.PackageID != packageID || current.Revision == 0 ||
 		!current.State.Valid() || !checksumPattern.MatchString(current.ManifestDigest) {
+		return currentDocument{}, ErrInvalidRequest
+	}
+	if current.LayoutVersion == 0 {
+		current.LayoutVersion = archive.PackageLayoutDateRevisionTree
+	}
+	if !current.LayoutVersion.Valid() {
 		return currentDocument{}, ErrInvalidRequest
 	}
 	current.packageDirectory = selected
@@ -443,12 +487,24 @@ func (publisher *Publisher) loadPackage(current currentDocument) Package {
 			return Package{}
 		}
 	}
-	directory = path.Join(directory, "revisions", fmt.Sprintf("%06d", current.Revision))
+	metadataPath := path.Join(directory, "metadata.json")
+	filesPath := path.Join(directory, "files.csv")
+	eventsPath := path.Join(directory, "events.jsonl")
+	manifestPath := path.Join(directory, "manifest-sha256.txt")
+	readmePath := path.Join(directory, "README.md")
+	if current.LayoutVersion != archive.PackageLayoutFlatResultFolder {
+		directory = path.Join(directory, "revisions", fmt.Sprintf("%06d", current.Revision))
+		metadataPath = path.Join(directory, "metadata.json")
+		filesPath = path.Join(directory, "files.csv")
+		eventsPath = path.Join(directory, "events.jsonl")
+		manifestPath = path.Join(directory, "manifest-sha256.txt")
+		readmePath = path.Join(directory, "README.md")
+	}
 	result := Package{
-		PackageID: current.PackageID, Revision: current.Revision, State: current.State, ManifestDigest: current.ManifestDigest,
-		MetadataPath: path.Join(directory, "metadata.json"),
-		FilesPath:    path.Join(directory, "files.csv"), EventsPath: path.Join(directory, "events.jsonl"),
-		ManifestPath: path.Join(directory, "manifest-sha256.txt"), ReadmePath: path.Join(directory, "README.md"),
+		PackageID: current.PackageID, LayoutVersion: current.LayoutVersion, Revision: current.Revision, State: current.State, ManifestDigest: current.ManifestDigest,
+		MetadataPath: metadataPath,
+		FilesPath:    filesPath, EventsPath: eventsPath,
+		ManifestPath: manifestPath, ReadmePath: readmePath,
 	}
 	if payload, err := publisher.archive.ReadFile(result.MetadataPath); err == nil {
 		var metadata Metadata
@@ -461,6 +517,7 @@ func (publisher *Publisher) loadPackage(current currentDocument) Package {
 			result.TranscriptPath = metadata.TranscriptPath
 			result.TranscriptTextPath = metadata.TranscriptTextPath
 			result.SubtitlePath = metadata.SubtitlePath
+			result.VideoInfoPath = metadata.VideoInfoPath
 		}
 	}
 	return result
@@ -475,8 +532,21 @@ func normalizeSources(source []SourceReference) ([]SourceReference, error) {
 		item.OriginalName = strings.TrimSpace(item.OriginalName)
 		item.RelativePath = normalizePath(item.RelativePath)
 		item.Checksum = strings.ToLower(strings.TrimSpace(item.Checksum))
+		if !item.SourceCreatedAt.IsZero() {
+			item.SourceCreatedAt = item.SourceCreatedAt.UTC()
+		}
+		item.Container = strings.ToLower(strings.TrimSpace(item.Container))
+		item.VideoCodec = strings.ToLower(strings.TrimSpace(item.VideoCodec))
+		item.VideoProfile = strings.TrimSpace(item.VideoProfile)
+		item.VideoPixelFormat = strings.ToLower(strings.TrimSpace(item.VideoPixelFormat))
+		item.AudioCodec = strings.ToLower(strings.TrimSpace(item.AudioCodec))
+		item.AudioProfile = strings.TrimSpace(item.AudioProfile)
+		item.AudioChannelLayout = strings.ToLower(strings.TrimSpace(item.AudioChannelLayout))
 		if item.OriginalAssetID == "" || item.OriginalName == "" || item.RelativePath == "" ||
-			!checksumPattern.MatchString(item.Checksum) || item.DurationMillis < 0 || seen[item.OriginalAssetID] {
+			!checksumPattern.MatchString(item.Checksum) || item.DurationMillis < 0 || item.SizeBytes < 0 || item.BitRateBPS < 0 ||
+			item.VideoBitRateBPS < 0 || item.AudioBitRateBPS < 0 || item.AudioSampleRateHz < 0 || item.AudioChannels < 0 ||
+			item.FrameRateNumerator < 0 || item.FrameRateDenominator < 0 ||
+			((item.FrameRateNumerator == 0) != (item.FrameRateDenominator == 0)) || seen[item.OriginalAssetID] {
 			return nil, ErrInvalidRequest
 		}
 		seen[item.OriginalAssetID] = true

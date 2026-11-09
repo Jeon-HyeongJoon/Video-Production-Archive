@@ -127,7 +127,7 @@ Transcript payload도 OriginalAsset과 게시 시각을 조회 키로 함께 저
 
 Archive Intake의 ArchivePackage는 결과 영상 하나당 하나다. SOURCE_MEDIA 원본 파일은 복사하지 않고 원본 드라이브 identity·원래 이름·상대경로·checksum·길이를 metadata에 남긴다.
 
-현재 구현된 layout v1은 기존 기록의 읽기 호환과 복원을 위해 유지한다.
+layout v1은 기존 기록의 읽기 호환과 복원을 위해 유지한다.
 
 ```text
 <아카이브 저장소>/
@@ -148,7 +148,7 @@ Archive Intake의 ArchivePackage는 결과 영상 하나당 하나다. SOURCE_ME
 
 패키지 ID는 멱등성과 참조 무결성을 위한 불변 기계 식별자이고 디렉터리는 ID의 처리 날짜로 `YYYY/MM/DD`까지 나눈다. 결과 영상은 단일 입력이면 원래 영상명의 확장자를 `.mp4`로 바꾸고, 여러 컷 통합이면 MediaFolder의 마지막 이름을 사용한다. Windows 금지문자·예약어·후행 점과 공백·과도한 길이는 결정적으로 안전한 이름으로 정규화한다. `metadata.json`은 처리 날짜, MediaFolder, 표시명, 실제 결과 영상 파일명과 함께 원래 이름·전체 상대경로·패키지 ID를 보존하므로 사람이 읽는 이름을 바꾸어도 identity를 잃지 않는다. `ARC-013`
 
-새 게시 형식인 layout v2의 목표 구조는 다음과 같다. 저장소 root 바로 아래 결과 폴더 하나만 두고, 결과 영상 하나와 공개 sidecar를 그 폴더의 최상단에 둔다. `packages/YYYY/MM/DD`, `revisions/<revision>` 같은 공개 하위 디렉터리는 만들지 않는다. 기존 layout v1 패키지를 자동 이동하거나 이름을 바꾸지 않으며 v1 reader를 계속 유지한다. `ARC-015`
+새 게시 형식인 layout v2의 구조는 다음과 같다. 저장소 root 바로 아래 결과 폴더 하나만 두고, 결과 영상 하나와 공개 sidecar를 그 폴더의 최상단에 둔다. `packages/YYYY/MM/DD`, `revisions/<revision>` 같은 공개 하위 디렉터리는 만들지 않는다. 기존 layout v1 패키지를 자동 이동하거나 이름을 바꾸지 않으며 v1 reader를 계속 유지한다. `ARC-015`
 
 ```text
 <아카이브 저장소>/
@@ -207,4 +207,4 @@ Core 메타데이터 round-trip 계약은 `ARC-005`, manifest 계약은 `ARC-003
 
 ## 8. DB 재구축
 
-중앙 DB를 잃은 경우 ArchiveCatalog를 빠른 목록으로 읽되 진실로 간주하지 않는다. layout version별 package metadata → events → manifest를 검증하고 `video-info.csv`의 OriginalAsset 참조를 복원한 뒤 ArchiveCatalog를 대조하거나 다시 만든다. import는 기존 ID와 checksum이 같은 항목은 멱등하게 병합하고 충돌은 자동 덮어쓰기하지 않으며 과거 Event를 중복 생성하지 않는다. 이 복원 흐름은 제품 명령과 실제 패키지에 연결하는 integration test가 생길 때까지 `ARC-007` planned이고, layout v2의 대조와 재생성도 `ARC-017~018` planned다.
+중앙 DB를 잃은 경우 ArchiveCatalog를 빠른 목록으로 읽되 진실로 간주하지 않는다. layout version별 package metadata → events → manifest를 검증하고 `video-info.csv`의 OriginalAsset 참조를 복원한 뒤 ArchiveCatalog를 대조하거나 다시 만든다. layout v2 대조와 재생성은 typed MediaOperation과 CLI에 연결되어 있다. import는 기존 ID와 checksum이 같은 항목은 멱등하게 병합하고 충돌은 자동 덮어쓰기하지 않으며 과거 Event를 중복 생성하지 않는다. 이 import 흐름은 제품 명령과 실제 패키지에 연결하는 integration test가 생길 때까지 `ARC-007` planned다. `ARC-017~018`

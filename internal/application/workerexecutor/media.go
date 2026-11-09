@@ -93,6 +93,8 @@ func NewProduction(configuration workerconfig.Configuration, roots *workerconfig
 		media.handler(execution.OperationWriteTranscriptText, media.writeTranscriptText),
 		media.handler(execution.OperationReviseArchivePackage, media.reviseArchivePackage),
 		media.handler(execution.OperationWriteArchiveCatalog, media.writeArchiveCatalog),
+		media.handler(execution.OperationVerifyArchiveCatalog, media.verifyArchiveCatalog),
+		media.handler(execution.OperationRebuildArchiveCatalog, media.rebuildArchiveCatalog),
 	}
 	if configuration.Tools.WhisperCPP != nil {
 		handlers = append(handlers, media.handler(execution.OperationTranscribeAudio, media.transcribeAudio))
@@ -742,7 +744,7 @@ func (operations *mediaOperations) reviseArchivePackage(_ context.Context, spec 
 	if err != nil {
 		return nil, nil, err
 	}
-	revised, err := publisher.Revise(archivebundle.RevisionRequest{
+	revised, err := publisher.ReviseV2(archivebundle.RevisionRequest{
 		PackageID:      spec.Parameters.ArchivePackageID,
 		Transcript:     archivebundle.FileSource{Root: archivebundle.RootArchive, Path: transcriptInput.RelativePath, Checksum: transcriptInput.Checksum},
 		TranscriptText: archivebundle.FileSource{Root: archivebundle.RootArchive, Path: textInput.RelativePath, Checksum: textInput.Checksum},
@@ -793,7 +795,8 @@ func (operations *mediaOperations) organizeMedia(_ context.Context, spec executi
 			videoRoot = archivebundle.RootSource
 		}
 		request := archivebundle.InitialRequest{
-			PackageID: target.ID, WorkspaceDriveID: spec.Parameters.WorkspaceDriveID,
+			LayoutVersion: archive.PackageLayoutFlatResultFolder,
+			PackageID:     target.ID, WorkspaceDriveID: spec.Parameters.WorkspaceDriveID,
 			DecisionID: spec.Parameters.OrganizationDecisionID, MediaFolder: spec.Parameters.MediaFolder,
 			Disposition:      spec.Parameters.Disposition,
 			ProfileReference: spec.Parameters.SelectedProfileReference, CreatedAt: operations.now(),
@@ -803,9 +806,18 @@ func (operations *mediaOperations) organizeMedia(_ context.Context, spec executi
 			request.Sources = append(request.Sources, archivebundle.SourceReference{
 				OriginalAssetID: source.OriginalAssetID, OriginalName: source.OriginalName,
 				RelativePath: source.RelativePath, Checksum: source.Checksum, DurationMillis: source.DurationMillis,
+				SourceCreatedAt: source.SourceCreatedAt, SizeBytes: source.SourceSizeBytes,
+				Container: source.SourceContainer, BitRateBPS: source.SourceBitRateBPS,
+				VideoCodec: source.VideoCodec, VideoProfile: source.VideoProfile,
+				Width: source.Width, Height: source.Height,
+				FrameRateNumerator: source.FrameRateNumerator, FrameRateDenominator: source.FrameRateDenominator,
+				VideoPixelFormat: source.VideoPixelFormat, VideoBitRateBPS: source.VideoBitRateBPS,
+				AudioCodec: source.AudioCodec, AudioProfile: source.AudioProfile,
+				AudioBitRateBPS: source.AudioBitRateBPS, AudioSampleRateHz: source.AudioSampleRateHz,
+				AudioChannels: source.AudioChannels, AudioChannelLayout: source.AudioChannelLayout,
 			})
 		}
-		bundle, err := publisher.PublishInitial(request)
+		bundle, err := publisher.PublishInitialV2(request)
 		if err != nil || bundle.MetadataPath != target.RelativePath {
 			return nil, nil, errors.Join(ErrProductionExecution, err)
 		}
@@ -836,6 +848,28 @@ func (operations *mediaOperations) writeArchiveCatalog(ctx context.Context, spec
 			return nil, nil, ErrProductionExecution
 		}
 		packages = append(packages, archiveStoredPackage{metadata: metadata, path: input.RelativePath})
+	}
+	packageRows := make([]archivecatalog.PackageRow, 0, len(packages))
+	allV2 := len(packages) > 0
+	for _, stored := range packages {
+		if stored.metadata.LayoutVersion != archive.PackageLayoutFlatResultFolder {
+			allV2 = false
+			break
+		}
+		root := roots.MustRoot(spec.Outputs[0].StorageID)
+		bundlePublisher, publisherErr := archivebundle.NewPublisher(root, root)
+		if publisherErr != nil {
+			return nil, nil, publisherErr
+		}
+		current, currentErr := bundlePublisher.Current(stored.metadata.PackageID)
+		if currentErr != nil {
+			return nil, nil, currentErr
+		}
+		row, rowErr := archivecatalog.PackageRowFrom(stored.metadata, current)
+		if rowErr != nil {
+			return nil, nil, rowErr
+		}
+		packageRows = append(packageRows, row)
 	}
 	rows := make([]organization.ArchiveCatalogRow, 0, len(spec.Parameters.SourceInputs))
 	for _, source := range spec.Parameters.SourceInputs {
@@ -874,15 +908,65 @@ func (operations *mediaOperations) writeArchiveCatalog(ctx context.Context, spec
 	if err != nil {
 		return nil, nil, err
 	}
-	result, err := publisher.PublishMerged(archivecatalog.Request{
-		WorkspaceDriveID: spec.Parameters.WorkspaceDriveID, Rows: rows,
-		TemporaryPath: temporaryOutputPath(ctx, target.RelativePath), PublishedPath: target.RelativePath,
-	})
+	var result organization.ArchiveCatalog
+	if allV2 {
+		result, err = publisher.PublishPackageRowsMerged(packageRows, temporaryOutputPath(ctx, target.RelativePath), target.RelativePath)
+	} else {
+		result, err = publisher.PublishMerged(archivecatalog.Request{
+			WorkspaceDriveID: spec.Parameters.WorkspaceDriveID, Rows: rows,
+			TemporaryPath: temporaryOutputPath(ctx, target.RelativePath), PublishedPath: target.RelativePath,
+		})
+	}
 	if err != nil {
 		return nil, nil, err
 	}
 	output := stepOutput(target, result.Checksum)
 	return []execution.StepOutput{output}, verificationReferences(spec.Operation, []execution.StepOutput{output}), nil
+}
+
+func (operations *mediaOperations) verifyArchiveCatalog(ctx context.Context, spec execution.StepExecutionSpec, roots *workerconfig.StorageRoots) ([]execution.StepOutput, []string, error) {
+	if len(spec.Inputs) != 0 || len(spec.Outputs) != 1 || spec.Outputs[0].Kind != execution.OutputArchiveCatalogVerification ||
+		strings.TrimSpace(spec.Parameters.ArchiveStorageID) == "" {
+		return nil, nil, ErrProductionExecution
+	}
+	archiveRoot := roots.MustRoot(spec.Parameters.ArchiveStorageID)
+	reconciler, err := archivecatalog.NewReconciler(archiveRoot)
+	if err != nil {
+		return nil, nil, err
+	}
+	verification, err := reconciler.Verify()
+	if err != nil {
+		return nil, nil, err
+	}
+	payload, err := json.MarshalIndent(verification, "", "  ")
+	if err != nil {
+		return nil, nil, err
+	}
+	payload = append(payload, '\n')
+	target := spec.Outputs[0]
+	checksum, err := publishPayload(ctx, roots.MustRoot(target.StorageID), target.RelativePath, payload)
+	if err != nil {
+		return nil, nil, err
+	}
+	output := stepOutput(target, checksum)
+	return []execution.StepOutput{output}, []string{fmt.Sprintf("archive-catalog://verify/current=%t/entries=%d", verification.Current(), len(verification.Entries))}, nil
+}
+
+func (operations *mediaOperations) rebuildArchiveCatalog(_ context.Context, spec execution.StepExecutionSpec, roots *workerconfig.StorageRoots) ([]execution.StepOutput, []string, error) {
+	if len(spec.Inputs) != 0 || len(spec.Outputs) != 1 || spec.Outputs[0].Kind != execution.OutputArchiveCatalog ||
+		spec.Outputs[0].StorageID != spec.Parameters.ArchiveStorageID || spec.Outputs[0].RelativePath != "archive-catalog.csv" {
+		return nil, nil, ErrProductionExecution
+	}
+	reconciler, err := archivecatalog.NewReconciler(roots.MustRoot(spec.Parameters.ArchiveStorageID))
+	if err != nil {
+		return nil, nil, err
+	}
+	result, err := reconciler.Rebuild()
+	if err != nil {
+		return nil, nil, err
+	}
+	output := stepOutput(spec.Outputs[0], result.Checksum)
+	return []execution.StepOutput{output}, []string{fmt.Sprintf("archive-catalog://rebuild/rows=%d", result.RowCount)}, nil
 }
 
 func packageForOriginal(packages []archiveStoredPackage, originalAssetID string) (archiveStoredPackage, bool) {

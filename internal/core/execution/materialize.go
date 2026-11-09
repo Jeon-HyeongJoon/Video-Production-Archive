@@ -91,7 +91,7 @@ func MaterializeDependentStepExecutionSpec(request MaterializeRequest) (StepExec
 		}
 		if parameters.SourceTimeline != nil {
 			packageID := stableArchivePackageID(parameters.ArchiveDate, parameters.OrganizationDecisionID, parameters.SourceTimeline.ID)
-			directory, err := archive.PackageRevisionDirectory(packageID, 1)
+			directory, err := flatPackageDirectory(packageID, parameters.MediaFolder, originalInputs)
 			if err != nil {
 				return StepExecutionSpec{}, ErrCannotMaterializeStepExecutionSpec
 			}
@@ -99,7 +99,7 @@ func MaterializeDependentStepExecutionSpec(request MaterializeRequest) (StepExec
 		} else {
 			for _, original := range originalInputs {
 				packageID := stableArchivePackageID(parameters.ArchiveDate, parameters.OrganizationDecisionID, original.OriginalAssetID)
-				directory, err := archive.PackageRevisionDirectory(packageID, 1)
+				directory, err := flatPackageDirectory(packageID, parameters.MediaFolder, []InputReference{original})
 				if err != nil {
 					return StepExecutionSpec{}, ErrCannotMaterializeStepExecutionSpec
 				}
@@ -147,8 +147,7 @@ func MaterializeDependentStepExecutionSpec(request MaterializeRequest) (StepExec
 		inputs = append(inputs, inputsFromOutputs(allOutputs, outputOriginals, OutputTranscriptText)...)
 		inputs = append(inputs, inputsFromOutputs(allOutputs, outputOriginals, OutputSubtitle)...)
 		if parameters.ArchivePackageID != "" && parameters.ArchivePackageRevision > 0 && len(inputs) == 3 {
-			nextRevision := parameters.ArchivePackageRevision + 1
-			directory, err := archive.PackageRevisionDirectory(parameters.ArchivePackageID, nextRevision)
+			directory, err := flatPackageDirectory(parameters.ArchivePackageID, parameters.MediaFolder, originalInputs)
 			if err != nil {
 				return StepExecutionSpec{}, ErrCannotMaterializeStepExecutionSpec
 			}
@@ -174,6 +173,21 @@ func MaterializeDependentStepExecutionSpec(request MaterializeRequest) (StepExec
 		JobID: request.JobID, StepID: request.StepID, TemplateName: request.TemplateName, Operation: operation,
 		Inputs: inputs, Outputs: outputs, ProfileReference: profileReference, Parameters: parameters,
 	})
+}
+
+func flatPackageDirectory(packageID, mediaFolder string, inputs []InputReference) (string, error) {
+	names := make([]string, 0, len(inputs))
+	for _, input := range inputs {
+		if strings.TrimSpace(input.OriginalName) == "" {
+			return "", ErrCannotMaterializeStepExecutionSpec
+		}
+		names = append(names, input.OriginalName)
+	}
+	presentation, err := archive.PresentFlatPackage(packageID, mediaFolder, names)
+	if err != nil {
+		return "", ErrCannotMaterializeStepExecutionSpec
+	}
+	return presentation.PackageDirectory, nil
 }
 
 func inputsFromOutputs(outputs []StepOutput, originalAssetIDs map[string]string, kinds ...OutputKind) []InputReference {

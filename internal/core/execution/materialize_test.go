@@ -24,7 +24,7 @@ func TestMaterializeArchiveTranscriptionUsesVerifiedOutputsAndArchivePackageRevi
 		JobID: "STT-JOB-1", StepID: "audio", TemplateName: "archive-transcription", Operation: OperationExtractSpeechAudio,
 		Inputs: []InputReference{{
 			OriginalAssetID: "ASSET-1", ArtifactID: "VIDEO-1", StorageID: "ARCHIVE-1",
-			RelativePath: "packages/2026/10/31/VP-20261031-0001/revisions/000001/master.mp4", Checksum: strings.Repeat("b", 64), Kind: OutputRendition,
+			RelativePath: "2026-10-31_master__0001/master.mp4", Checksum: strings.Repeat("b", 64), Kind: OutputRendition,
 		}},
 		Outputs: []OutputTarget{{
 			ID: "AUDIO-1", Kind: OutputAudio, StorageID: "ARCHIVE-1", RelativePath: "staging/STT-JOB-1/audio/AUDIO-1.wav", OriginalAssetID: "ASSET-1",
@@ -48,7 +48,7 @@ func TestMaterializeArchiveTranscriptionUsesVerifiedOutputsAndArchivePackageRevi
 	if revision.Operation != OperationReviseArchivePackage || len(revision.Inputs) != 3 ||
 		len(revision.Outputs) != 1 || revision.Outputs[0].Kind != OutputArchiveRevision ||
 		revision.Outputs[0].StorageID != "ARCHIVE-1" ||
-		revision.Outputs[0].RelativePath != "packages/2026/10/31/VP-20261031-0001/revisions/000002/metadata.json" {
+		revision.Outputs[0].RelativePath != "2026-10-31_master__0001/metadata.json" {
 		t.Fatalf("archive package revision spec is invalid: %+v", revision)
 	}
 	completed = append(completed, completeSpec(t, revision, "1"))

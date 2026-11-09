@@ -62,7 +62,7 @@ media:
 		Inputs: []execution.InputReference{input},
 		Outputs: []execution.OutputTarget{{
 			ID: "VP-20261106-CLI", Kind: execution.OutputOrganizedMedia, StorageID: "archive",
-			RelativePath: "packages/2026/11/06/VP-20261106-CLI/revisions/000001/metadata.json", OriginalAssetID: input.OriginalAssetID,
+			RelativePath: "2026-11-06_event__CLI/metadata.json", OriginalAssetID: input.OriginalAssetID,
 		}},
 		Parameters: execution.StepExecutionParameters{
 			OrganizationDecisionID: "DECISION-CLI-1", WorkspaceDriveID: "VOLUME-CLI-1", ArchiveStorageID: "archive",
