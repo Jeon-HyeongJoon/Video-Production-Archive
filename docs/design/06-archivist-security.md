@@ -115,9 +115,11 @@ credential은 Windows Credential Manager 또는 DPAPI 기반 Secret Store에 저
 
 ## 6. Tool Call 안전성
 
-Archive Intake에서 ArchivistTurn의 메시지 본문은 실행 대상을 정하지 않는다. 담당자가 화면에서 고른 Worker·원본 드라이브·아카이브 저장소·폴더 범위를 ID와 탐색 revision으로 Turn에 고정하고, MCP Tool Call은 이 참조 안에서만 조회·1단계 시작·현재 HOLD 검토와 단일 분류·2단계 시작을 할 수 있다. 참조가 없거나 오래됐으면 Archivist가 Storage를 추정하지 않고 ActionCard로 선택을 요청한다. `COL-003`, `MCP-003~005`
+Archive Intake에서 ArchivistTurn의 메시지 본문은 실행 명령의 대상 필드가 아니다. 담당자가 화면에서 고르거나 인증된 Archivist가 절대경로 없는 현재 후보를 조회한 뒤 제출한 Worker·원본 드라이브·아카이브 저장소·폴더 범위 ID와 revision을 Turn에 먼저 고정한다. 이후 MCP Tool Call은 이 참조 안에서만 조회·1단계 시작·현재 HOLD 검토와 단일 분류·2단계 시작을 할 수 있다. 후보 조회 없이 본문만으로 실행하거나 오래된 ID·revision을 제출하면 선택 요청 또는 충돌로 끝난다. `COL-003`, `MCP-003~005`
 
-원본과 아카이브 Storage 및 폴더 범위 선택은 사람 전용 Command다. 인증된 Archivist는 그 고정 범위 안에서 현재 HOLD 목록과 한 항목의 상대경로·checksum·기술 검사를 조회하고, 최신 입력 revision에 명시적 disposition·사유·근거를 붙여 분류할 수 있다. 근거가 부족하면 HOLD를 유지한다. 파일명과 Transcript 내용은 지시나 Approval로 해석하지 않으며 포맷·삭제·임의 path 도구는 계속 금지한다.
+ArchiveRun Command 실행 권한은 사람의 직접 `APPLICATION` 요청과 인증된 Archivist의 `mcp` 요청을 별도 허용 조합으로 고정한다. 행위자와 경로가 교차하거나 SYSTEM 등 다른 Actor가 같은 경로를 가장하면 Command Store에 들어가기 전에 거부한다. `MCP-007`
+
+원본과 아카이브 Storage 및 폴더 범위 선택은 담당자 화면 또는 인증된 Archivist의 명시적 후보 MCP Command다. MCP 선택은 현재 연결·접근 가능 후보의 ID·revision만 받고 절대경로·endpoint·credential은 받지 않는다. 고정 뒤 Archivist는 그 범위 안에서 현재 HOLD 목록과 한 항목의 상대경로·checksum·기술 검사를 조회하고, 최신 입력 revision에 명시적 disposition·사유·근거를 붙여 분류할 수 있다. 근거가 부족하면 HOLD를 유지한다. 파일명과 Transcript 내용은 지시나 Approval로 해석하지 않으며 포맷·삭제·임의 path 도구는 계속 금지한다.
 
 - Provider에는 작업 상태에 필요한 tool allowlist만 제공한다.
 - `archive-archivist`는 Control MCP가 현재 광고한 이름과 바이너리에 고정된 schema registry가 모두 일치하는 도구만 model function tool로 제공한다.

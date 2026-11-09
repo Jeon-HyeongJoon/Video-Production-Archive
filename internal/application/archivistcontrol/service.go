@@ -109,6 +109,12 @@ type ArchiveRunBinding struct {
 	Selection archivistruntime.DriveSelection
 }
 
+type DriveSelectionBinding struct {
+	SessionID string
+	TurnID    string
+	Selection archivistruntime.DriveSelection
+}
+
 type ClaimedTurn struct {
 	Session archivistruntime.Session
 	Turn    archivistruntime.Turn
@@ -137,6 +143,7 @@ type Store interface {
 	PrepareDelivery(context.Context, string, string, uint64, time.Time, string) (TurnRecord, bool, error)
 	ApplyRuntimeEvent(context.Context, string, string, uint64, time.Time, archivistruntime.RuntimeEvent) (TurnRecord, bool, error)
 	RenewTurnLease(context.Context, string, string, uint64, time.Time, time.Duration) (TurnRecord, error)
+	BindDriveSelection(context.Context, DriveSelectionBinding) error
 	BindArchiveRun(context.Context, ArchiveRunBinding) error
 	ArchiveRunBinding(context.Context, string) (ArchiveRunBinding, error)
 }
@@ -327,6 +334,16 @@ func (service *Service) TurnWorkReference(ctx context.Context, sessionID, turnID
 		return archivistruntime.WorkReference{}, ErrInvalidRequest
 	}
 	return archivistruntime.NewWorkReference(*turn.Turn.WorkReference)
+}
+
+func (service *Service) BindDriveSelection(ctx context.Context, sessionID, turnID string, source archivistruntime.DriveSelection) error {
+	selection, err := archivistruntime.NewDriveSelection(source)
+	if err != nil || selection.ArchiveRunID != "" || selection.ArchiveRunRevision != 0 {
+		return ErrInvalidRequest
+	}
+	return service.store.BindDriveSelection(ctx, DriveSelectionBinding{
+		SessionID: strings.TrimSpace(sessionID), TurnID: strings.TrimSpace(turnID), Selection: selection,
+	})
 }
 
 func (service *Service) BindArchiveRun(ctx context.Context, sessionID, turnID, archiveRunID string, revision uint64) error {

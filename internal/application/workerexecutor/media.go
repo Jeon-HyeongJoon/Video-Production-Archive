@@ -383,15 +383,19 @@ func (operations *mediaOperations) qcRendition(ctx context.Context, spec executi
 	if len(spec.Inputs) != len(spec.Outputs) || len(spec.Inputs) == 0 {
 		return nil, nil, ErrProductionExecution
 	}
-	profile, err := organizationProfile(spec.ProfileReference)
-	if err != nil {
-		return nil, nil, err
-	}
 	outputs := make([]execution.StepOutput, 0, len(spec.Outputs))
 	for index, input := range spec.Inputs {
 		target := spec.Outputs[index]
 		if (input.Kind != execution.OutputRendition && input.Kind != "") || target.Kind != execution.OutputQCAssessment {
 			return nil, nil, ErrProductionExecution
+		}
+		profileReference := spec.ProfileReference
+		if input.ProfileReference != "" {
+			profileReference = input.ProfileReference
+		}
+		profile, err := organizationProfile(profileReference)
+		if err != nil {
+			return nil, nil, err
 		}
 		inputRoot := roots.MustRoot(input.StorageID)
 		size, checksum, err := inputRoot.FileSHA256(input.RelativePath)
@@ -794,12 +798,16 @@ func (operations *mediaOperations) organizeMedia(_ context.Context, spec executi
 		if video.Kind == "" {
 			videoRoot = archivebundle.RootSource
 		}
+		profileReference := spec.Parameters.SelectedProfileReference
+		if spec.Parameters.Disposition == vocabulary.OrganizationAsIs && len(sourceInputs) == 1 && sourceInputs[0].ProfileReference != "" {
+			profileReference = sourceInputs[0].ProfileReference
+		}
 		request := archivebundle.InitialRequest{
 			LayoutVersion: archive.PackageLayoutFlatResultFolder,
 			PackageID:     target.ID, WorkspaceDriveID: spec.Parameters.WorkspaceDriveID,
 			DecisionID: spec.Parameters.OrganizationDecisionID, MediaFolder: spec.Parameters.MediaFolder,
 			Disposition:      spec.Parameters.Disposition,
-			ProfileReference: spec.Parameters.SelectedProfileReference, CreatedAt: operations.now(),
+			ProfileReference: profileReference, CreatedAt: operations.now(),
 			Video: archivebundle.FileSource{Root: videoRoot, Path: video.RelativePath, Checksum: video.Checksum},
 		}
 		for _, source := range sourceInputs {

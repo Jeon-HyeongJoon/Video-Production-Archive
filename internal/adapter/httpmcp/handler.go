@@ -1,16 +1,19 @@
 package httpmcp
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 
+	appintake "videoarchive/internal/application/archiveintake"
 	"videoarchive/internal/application/archiveintakeworkspace"
 	"videoarchive/internal/application/archiveorganization"
 	"videoarchive/internal/application/archivetranscription"
@@ -29,6 +32,9 @@ const (
 	ToolWorkReferenceGet          = "archive.work.reference.get.v1"
 	ToolAssetsSearch              = "archive.assets.search.v1"
 	ToolJobsCreate                = "archive.jobs.create.v1"
+	ToolIntakeCandidatesSearch    = "archive.intake.candidates.search.v1"
+	ToolIntakeSourceSelect        = "archive.intake.source.select.v1"
+	ToolIntakeSelectionPin        = "archive.intake.selection.pin.v1"
 	ToolDriveSelectionGet         = "archive.intake.selection.get.v1"
 	ToolArchiveRunStatus          = "archive.run.status.v1"
 	ToolArchiveRunStart           = "archive.run.start.v1"
@@ -45,6 +51,7 @@ type ArchivistRuntime interface {
 	RecordActionCard(context.Context, string, archivistcontrol.ActionCardProjection) error
 	TurnDriveSelection(context.Context, string, string) (archivistruntime.DriveSelection, error)
 	TurnWorkReference(context.Context, string, string) (archivistruntime.WorkReference, error)
+	BindDriveSelection(context.Context, string, string, archivistruntime.DriveSelection) error
 	BindArchiveRun(context.Context, string, string, string, uint64) error
 }
 
@@ -65,6 +72,10 @@ type ArchiveIntakeWorkspace interface {
 	Override(context.Context, archiveintakeworkspace.OverrideCommand) (organization.OrganizationDecision, error)
 }
 
+type ArchiveIntakeSelector interface {
+	Select(context.Context, appintake.SelectRequest) (*appintake.SessionAccess, error)
+}
+
 type ArchiveRunStarter interface {
 	Start(context.Context, archiveorganization.StartRequest) (archiveorganization.Result, error)
 }
@@ -79,6 +90,7 @@ type Configuration struct {
 	ArchiveWorkspace      ArchiveWorkspaceReader
 	Commands              JobCommander
 	Drives                ArchiveIntakeWorkspace
+	IntakeSelector        ArchiveIntakeSelector
 	ArchiveRuns           ArchiveRunStarter
 	ArchiveTranscriptions ArchiveTranscriptionStarter
 }
@@ -89,6 +101,7 @@ type Handler struct {
 	archiveWorkspace      ArchiveWorkspaceReader
 	commands              JobCommander
 	drives                ArchiveIntakeWorkspace
+	intakeSelector        ArchiveIntakeSelector
 	archiveRuns           ArchiveRunStarter
 	archiveTranscriptions ArchiveTranscriptionStarter
 	router                http.Handler
@@ -96,19 +109,20 @@ type Handler struct {
 
 func New(configuration Configuration) (*Handler, error) {
 	driveCount := 0
-	for _, configured := range []bool{configuration.Drives != nil, configuration.ArchiveRuns != nil, configuration.ArchiveTranscriptions != nil} {
+	for _, configured := range []bool{configuration.Drives != nil, configuration.IntakeSelector != nil, configuration.ArchiveRuns != nil, configuration.ArchiveTranscriptions != nil} {
 		if configured {
 			driveCount++
 		}
 	}
 	if configuration.Archivists == nil || configuration.Catalog == nil || configuration.ArchiveWorkspace == nil || configuration.Commands == nil ||
-		(driveCount != 0 && driveCount != 3) {
+		(driveCount != 0 && driveCount != 4) {
 		return nil, errors.New("MCP adapter configuration is incomplete")
 	}
 	handler := &Handler{
 		archivists: configuration.Archivists, catalog: configuration.Catalog,
 		archiveWorkspace: configuration.ArchiveWorkspace, commands: configuration.Commands,
-		drives: configuration.Drives, archiveRuns: configuration.ArchiveRuns, archiveTranscriptions: configuration.ArchiveTranscriptions,
+		drives: configuration.Drives, intakeSelector: configuration.IntakeSelector,
+		archiveRuns: configuration.ArchiveRuns, archiveTranscriptions: configuration.ArchiveTranscriptions,
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /mcp/v1/tools", handler.tools)
@@ -138,6 +152,9 @@ func (handler *Handler) tools(writer http.ResponseWriter, _ *http.Request) {
 	}
 	if handler.drives != nil && handler.archiveRuns != nil && handler.archiveTranscriptions != nil {
 		result = append(result,
+			map[string]string{"name": ToolIntakeCandidatesSearch, "action_class": string(vocabulary.ActionRead)},
+			map[string]string{"name": ToolIntakeSourceSelect, "action_class": string(vocabulary.ActionProcess)},
+			map[string]string{"name": ToolIntakeSelectionPin, "action_class": string(vocabulary.ActionProcess)},
 			map[string]string{"name": ToolDriveSelectionGet, "action_class": string(vocabulary.ActionRead)},
 			map[string]string{"name": ToolArchiveRunStatus, "action_class": string(vocabulary.ActionRead)},
 			map[string]string{"name": ToolOrganizationHoldsList, "action_class": string(vocabulary.ActionRead)},
@@ -173,6 +190,7 @@ func (handler *Handler) call(writer http.ResponseWriter, request *http.Request) 
 		return
 	}
 	if payload.Tool != ToolJobsGet && payload.Tool != ToolWorkReferenceGet && payload.Tool != ToolAssetsSearch && payload.Tool != ToolJobsCreate &&
+		payload.Tool != ToolIntakeCandidatesSearch && payload.Tool != ToolIntakeSourceSelect && payload.Tool != ToolIntakeSelectionPin &&
 		payload.Tool != ToolDriveSelectionGet && payload.Tool != ToolArchiveRunStatus &&
 		payload.Tool != ToolOrganizationHoldsList && payload.Tool != ToolOrganizationHoldGet &&
 		payload.Tool != ToolOrganizationHoldClassify && payload.Tool != ToolArchiveRunStart && payload.Tool != ToolArchiveTranscriptionStart {
@@ -192,6 +210,12 @@ func (handler *Handler) call(writer http.ResponseWriter, request *http.Request) 
 		handler.searchAssets(writer, request, payload)
 	case ToolJobsCreate:
 		handler.createJob(writer, request, hostID, payload)
+	case ToolIntakeCandidatesSearch:
+		handler.searchArchiveIntakeCandidates(writer, request, payload)
+	case ToolIntakeSourceSelect:
+		handler.selectArchiveIntakeSource(writer, request, payload)
+	case ToolIntakeSelectionPin:
+		handler.pinArchiveIntakeSelection(writer, request, payload)
 	case ToolDriveSelectionGet:
 		handler.getArchiveIntakeSelection(writer, request, payload)
 	case ToolArchiveRunStatus:
@@ -223,6 +247,234 @@ func (handler *Handler) getWorkReference(writer http.ResponseWriter, request *ht
 	}
 	_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, reference.WorkID, "COMPLETED")
 	writeJSON(writer, http.StatusOK, map[string]any{"data": reference})
+}
+
+func (handler *Handler) searchArchiveIntakeCandidates(writer http.ResponseWriter, request *http.Request, call callRequest) {
+	var input struct {
+		Query string `json:"query"`
+		Limit int    `json:"limit"`
+	}
+	if !decodeToolInput(call.Input, &input) {
+		handler.failIntakeTool(writer, request, call, http.StatusBadRequest, "MCP_INPUT_INVALID", "")
+		return
+	}
+	input.Query = strings.TrimSpace(input.Query)
+	if len(input.Query) > 256 || input.Limit < 0 || input.Limit > 50 {
+		handler.failIntakeTool(writer, request, call, http.StatusBadRequest, "MCP_INPUT_INVALID", "")
+		return
+	}
+	if input.Limit == 0 {
+		input.Limit = 20
+	}
+	drives, err := handler.drives.Projection(request.Context())
+	if err != nil {
+		handler.failIntakeTool(writer, request, call, http.StatusInternalServerError, "MCP_INTAKE_CANDIDATES_FAILED", "")
+		return
+	}
+	tokens := strings.Fields(strings.ToLower(input.Query))
+	result := make([]map[string]any, 0, len(drives))
+	for _, drive := range drives {
+		if drive.ConnectionState != vocabulary.VolumeConnected {
+			continue
+		}
+		folders := make([]map[string]any, 0)
+		for _, folder := range drive.DiscoveredFolders {
+			if !matchesAllTokens(folder.Folder, tokens) {
+				continue
+			}
+			folders = append(folders, map[string]any{
+				"folder_id": folder.Folder, "video_count": folder.VideoCount,
+				"estimated_output_bytes": folder.EstimatedOutputBytes,
+			})
+			if len(folders) == input.Limit {
+				break
+			}
+		}
+		archives := make([]map[string]any, 0)
+		for _, storage := range drive.StorageCandidates {
+			if storage.Role != vocabulary.StorageArchivePrimary || !storage.Accessible || storage.StorageID == drive.SourceStorageID {
+				continue
+			}
+			archives = append(archives, map[string]any{
+				"storage_id": storage.StorageID, "access_kind": storage.AccessKind,
+				"label": storage.Label, "file_system": storage.FileSystem,
+				"capacity_bytes": storage.CapacityBytes, "free_bytes": storage.FreeBytes,
+			})
+		}
+		workerID := drive.ConnectionWorkerID
+		if workerID == "" {
+			workerID = drive.WorkerID
+		}
+		result = append(result, map[string]any{
+			"workspace_drive_id": drive.WorkspaceDriveID, "worker_id": workerID,
+			"source_storage_id": drive.SourceStorageID, "candidate_revision": drive.CandidateRevision,
+			"selection_session_id":      drive.SelectionSessionID,
+			"folder_discovery_revision": drive.FolderDiscoveryRevision,
+			"folder_discovery_state":    drive.FolderDiscoveryState,
+			"matched_folders":           folders, "archive_storage_candidates": archives,
+		})
+	}
+	_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, "", "COMPLETED")
+	writeJSON(writer, http.StatusOK, map[string]any{"data": map[string]any{"drives": result}})
+}
+
+func (handler *Handler) selectArchiveIntakeSource(writer http.ResponseWriter, request *http.Request, call callRequest) {
+	var input struct {
+		WorkspaceDriveID          string `json:"workspace_drive_id"`
+		ExpectedCandidateRevision uint64 `json:"expected_candidate_revision"`
+	}
+	if !decodeToolInput(call.Input, &input) || strings.TrimSpace(input.WorkspaceDriveID) == "" || input.ExpectedCandidateRevision == 0 {
+		handler.failIntakeTool(writer, request, call, http.StatusBadRequest, "MCP_INPUT_INVALID", "")
+		return
+	}
+	input.WorkspaceDriveID = strings.TrimSpace(input.WorkspaceDriveID)
+	drive, found, err := handler.currentCandidateDrive(request.Context(), input.WorkspaceDriveID)
+	if err != nil {
+		handler.failIntakeTool(writer, request, call, http.StatusInternalServerError, "MCP_INTAKE_CANDIDATES_FAILED", input.WorkspaceDriveID)
+		return
+	}
+	if !found || drive.CandidateRevision != input.ExpectedCandidateRevision {
+		handler.failIntakeTool(writer, request, call, http.StatusConflict, "MCP_INTAKE_CANDIDATE_STALE", input.WorkspaceDriveID)
+		return
+	}
+	sessionID := stableToolTarget("INTAKE-MCP", call.SessionID, call.TurnID, input.WorkspaceDriveID)
+	if drive.SelectionSessionID != sessionID {
+		access, selectErr := handler.intakeSelector.Select(request.Context(), appintake.SelectRequest{
+			SessionID: sessionID, VolumeID: input.WorkspaceDriveID, ExpectedCandidateRevision: input.ExpectedCandidateRevision,
+			Actor: command.Actor{Type: vocabulary.ActorArchivist, ID: "archivist:" + call.SessionID}, SelectedAt: time.Now().UTC(),
+		})
+		if selectErr != nil {
+			handler.failIntakeTool(writer, request, call, http.StatusConflict, "MCP_INTAKE_SOURCE_SELECTION_REJECTED", input.WorkspaceDriveID)
+			return
+		}
+		if access.Root != nil {
+			_ = access.Root.Close()
+		}
+	}
+	_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, sessionID, "COMPLETED")
+	writeJSON(writer, http.StatusOK, map[string]any{"data": map[string]any{
+		"intake_session_id": sessionID, "workspace_drive_id": input.WorkspaceDriveID,
+		"candidate_revision": input.ExpectedCandidateRevision,
+	}})
+}
+
+func (handler *Handler) pinArchiveIntakeSelection(writer http.ResponseWriter, request *http.Request, call callRequest) {
+	var input struct {
+		WorkspaceDriveID        string   `json:"workspace_drive_id"`
+		WorkerID                string   `json:"worker_id"`
+		IntakeSessionID         string   `json:"intake_session_id"`
+		SourceStorageID         string   `json:"source_storage_id"`
+		ArchiveStorageID        string   `json:"archive_storage_id"`
+		CandidateRevision       uint64   `json:"candidate_revision"`
+		FolderDiscoveryRevision uint64   `json:"folder_discovery_revision"`
+		FolderIDs               []string `json:"folder_ids"`
+	}
+	if !decodeToolInput(call.Input, &input) {
+		handler.failIntakeTool(writer, request, call, http.StatusBadRequest, "MCP_INPUT_INVALID", "")
+		return
+	}
+	drive, found, err := handler.currentCandidateDrive(request.Context(), strings.TrimSpace(input.WorkspaceDriveID))
+	if err != nil {
+		handler.failIntakeTool(writer, request, call, http.StatusInternalServerError, "MCP_INTAKE_CANDIDATES_FAILED", "")
+		return
+	}
+	workerID := drive.ConnectionWorkerID
+	if workerID == "" {
+		workerID = drive.WorkerID
+	}
+	if !found || drive.CandidateRevision != input.CandidateRevision || drive.FolderDiscoveryRevision != input.FolderDiscoveryRevision ||
+		drive.FolderDiscoveryState != vocabulary.FolderDiscoveryReady || workerID != strings.TrimSpace(input.WorkerID) ||
+		drive.SourceStorageID != strings.TrimSpace(input.SourceStorageID) || drive.SelectionSessionID != strings.TrimSpace(input.IntakeSessionID) ||
+		len(input.FolderIDs) == 0 {
+		handler.failIntakeTool(writer, request, call, http.StatusConflict, "MCP_INTAKE_SELECTION_STALE", input.WorkspaceDriveID)
+		return
+	}
+	availableFolders := make(map[string]archiveintakeworkspace.FolderView, len(drive.DiscoveredFolders))
+	for _, folder := range drive.DiscoveredFolders {
+		availableFolders[folder.Folder] = folder
+	}
+	var selectedBytes uint64
+	seenFolders := make(map[string]bool, len(input.FolderIDs))
+	for _, folderID := range input.FolderIDs {
+		folderID = strings.TrimSpace(strings.ReplaceAll(folderID, "\\", "/"))
+		folder, ok := availableFolders[folderID]
+		if !ok || seenFolders[folderID] {
+			handler.failIntakeTool(writer, request, call, http.StatusConflict, "MCP_INTAKE_SELECTION_OUTSIDE_CANDIDATES", folderID)
+			return
+		}
+		seenFolders[folderID] = true
+		selectedBytes += folder.EstimatedOutputBytes
+	}
+	archiveFound := false
+	for _, storage := range drive.StorageCandidates {
+		if storage.StorageID != strings.TrimSpace(input.ArchiveStorageID) {
+			continue
+		}
+		archiveFound = storage.Role == vocabulary.StorageArchivePrimary && storage.Accessible && storage.StorageID != drive.SourceStorageID &&
+			archiveorganization.ValidateArchiveCapacity(storage.StorageID, selectedBytes, storage.FreeBytes) == nil
+		break
+	}
+	if !archiveFound {
+		handler.failIntakeTool(writer, request, call, http.StatusConflict, "MCP_ARCHIVE_STORAGE_INELIGIBLE", input.ArchiveStorageID)
+		return
+	}
+	selection, err := archivistruntime.NewDriveSelection(archivistruntime.DriveSelection{
+		WorkerID: workerID, WorkspaceDriveID: drive.WorkspaceDriveID, IntakeSessionID: input.IntakeSessionID,
+		SourceVolumeID: drive.WorkspaceDriveID, SourceStorageID: drive.SourceStorageID, ArchiveStorageID: input.ArchiveStorageID,
+		CandidateRevision: drive.CandidateRevision, FolderDiscoveryRevision: drive.FolderDiscoveryRevision,
+		FolderIDs: input.FolderIDs, SelectedByType: vocabulary.ActorArchivist, SelectedBy: "archivist:" + call.SessionID,
+	})
+	if err != nil || handler.archivists.BindDriveSelection(request.Context(), call.SessionID, call.TurnID, selection) != nil {
+		handler.failIntakeTool(writer, request, call, http.StatusConflict, "MCP_INTAKE_SELECTION_CONFLICT", input.WorkspaceDriveID)
+		return
+	}
+	runID := stableToolTarget("ARCHIVE-RUN", call.SessionID, call.TurnID, strings.Join(selection.FolderIDs, "\x00"))
+	_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, drive.WorkspaceDriveID, "COMPLETED")
+	writeJSON(writer, http.StatusOK, map[string]any{"data": map[string]any{
+		"selection": selection, "archive_run_id": runID, "estimated_output_bytes": selectedBytes,
+	}})
+}
+
+func (handler *Handler) currentCandidateDrive(ctx context.Context, workspaceDriveID string) (archiveintakeworkspace.DriveView, bool, error) {
+	drives, err := handler.drives.Projection(ctx)
+	if err != nil {
+		return archiveintakeworkspace.DriveView{}, false, err
+	}
+	for _, drive := range drives {
+		if drive.WorkspaceDriveID == workspaceDriveID && drive.ConnectionState == vocabulary.VolumeConnected {
+			return drive, true, nil
+		}
+	}
+	return archiveintakeworkspace.DriveView{}, false, nil
+}
+
+func matchesAllTokens(value string, tokens []string) bool {
+	value = strings.ToLower(value)
+	for _, token := range tokens {
+		if !strings.Contains(value, token) {
+			return false
+		}
+	}
+	return true
+}
+
+func stableToolTarget(prefix string, parts ...string) string {
+	digest := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
+	return prefix + "-" + hex.EncodeToString(digest[:12])
+}
+
+func decodeToolInput(raw json.RawMessage, target any) bool {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if decoder.Decode(target) != nil {
+		return false
+	}
+	return decoder.Decode(&struct{}{}) == io.EOF
+}
+
+func (handler *Handler) failIntakeTool(writer http.ResponseWriter, request *http.Request, call callRequest, status int, code, targetID string) {
+	_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, strings.TrimSpace(targetID), "FAILED")
+	writeError(writer, status, code)
 }
 
 func (handler *Handler) archiveIntakeSelection(ctx context.Context, call callRequest) (archivistruntime.DriveSelection, error) {
@@ -505,10 +757,12 @@ func (handler *Handler) startArchiveRun(writer http.ResponseWriter, request *htt
 		ExpectedWorkerID: selection.WorkerID, ExpectedSourceStorageID: selection.SourceStorageID,
 		ExpectedWorkspaceDriveID: selection.WorkspaceDriveID,
 		Actor:                    command.Actor{Type: vocabulary.ActorArchivist, ID: "archivist:" + call.SessionID},
-		SelectedBy:               command.Actor{Type: vocabulary.ActorHuman, ID: selection.SelectedBy}, StartedAt: time.Now().UTC(),
+		SelectedBy:               command.Actor{Type: selection.SelectedByType, ID: selection.SelectedBy}, StartedAt: time.Now().UTC(),
 	})
 	if err != nil {
-		handler.archiveIntakeSelectionActionCard(writer, request, call)
+		slog.Warn("MCP archive run start rejected", "session_id", call.SessionID, "turn_id", call.TurnID, "error", err)
+		_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, input.ArchiveRunID, "FAILED")
+		writeError(writer, http.StatusConflict, "MCP_ARCHIVE_RUN_START_REJECTED")
 		return
 	}
 	if err := handler.archivists.BindArchiveRun(request.Context(), call.SessionID, call.TurnID, result.Receipt.ID, 1); err != nil {

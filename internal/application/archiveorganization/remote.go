@@ -111,13 +111,10 @@ func (service *RemoteStartService) Start(ctx context.Context, request StartReque
 	storedSession, sessionErr := service.intakeRepository.Session(ctx, request.SessionID)
 	if sessionErr == nil {
 		if storedSession.VolumeID != candidate.VolumeID || storedSession.CandidateRevision != candidate.Revision ||
-			storedSession.StorageID != candidate.StorageID || storedSession.WorkerID != candidate.WorkerID || storedSession.SelectedBy != request.SelectedBy.ID {
+			storedSession.StorageID != candidate.StorageID || storedSession.WorkerID != candidate.WorkerID {
 			return Result{}, ErrStartRejected
 		}
 	} else {
-		if request.Actor.Type != vocabulary.ActorHuman {
-			return Result{}, ErrStartRejected
-		}
 		access, selectErr := service.intake.Select(ctx, appintake.SelectRequest{
 			SessionID: request.SessionID, VolumeID: request.SourceVolumeID,
 			ExpectedCandidateRevision: request.ExpectedCandidateRevision, Actor: request.SelectedBy, SelectedAt: request.StartedAt,
@@ -139,7 +136,7 @@ func (service *RemoteStartService) Start(ctx context.Context, request StartReque
 		replayed = true
 	} else if _, executeErr := service.archiveRuns.Execute(command.Envelope{
 		CommandID: request.ArchiveRunID + ":create", CommandType: archiverun.CreateCommand,
-		Actor: request.SelectedBy, RequestedVia: "APPLICATION", TargetID: request.ArchiveRunID, ExpectedRevision: 0,
+		Actor: request.SelectedBy, RequestedVia: selectionRequestedVia(request.SelectedBy), TargetID: request.ArchiveRunID, ExpectedRevision: 0,
 		IdempotencyKey: request.IdempotencyKey + ":archive-run",
 		Parameters: map[string]any{
 			"start_idempotency_key": request.IdempotencyKey,
@@ -147,7 +144,7 @@ func (service *RemoteStartService) Start(ctx context.Context, request StartReque
 			"source_volume_id": candidate.VolumeID, "source_physical_device_id": candidate.PhysicalDeviceID,
 			"archive_storage_id": archiveStorage.StorageID, "folder_discovery_revision": request.InputRevision,
 			"folder_ids": folderScope.FolderIDs(), "selected_by": request.SelectedBy,
-		}, Reason: "human selected archive run",
+		}, Reason: "explicitly selected archive run",
 	}); executeErr != nil {
 		return Result{}, errors.Join(ErrStartRejected, executeErr)
 	}
@@ -270,10 +267,21 @@ func validateStartRequest(request StartRequest) error {
 	if request.ArchiveRunID == "" || request.IdempotencyKey == "" || request.SessionID == "" || request.SourceVolumeID == "" ||
 		request.ExpectedCandidateRevision == 0 || request.ArchiveStorageID == "" || request.InputRevision == 0 || len(request.FolderIDs) == 0 ||
 		(request.Actor.Type != vocabulary.ActorHuman && request.Actor.Type != vocabulary.ActorArchivist) || request.Actor.ID == "" ||
-		request.SelectedBy.Type != vocabulary.ActorHuman || request.SelectedBy.ID == "" || request.StartedAt.IsZero() {
+		!validSelectionActor(request.SelectedBy) || request.StartedAt.IsZero() {
 		return ErrStartRejected
 	}
 	return nil
+}
+
+func validSelectionActor(actor command.Actor) bool {
+	return (actor.Type == vocabulary.ActorHuman || actor.Type == vocabulary.ActorArchivist) && strings.TrimSpace(actor.ID) != ""
+}
+
+func selectionRequestedVia(actor command.Actor) string {
+	if actor.Type == vocabulary.ActorArchivist {
+		return "mcp"
+	}
+	return "APPLICATION"
 }
 
 func sameRunSelection(run archiverun.State, startIdempotencyKey, workerID, sourceStorageID, volumeID, physicalDeviceID, archiveStorageID string, scope organization.FolderScope, selectedBy command.Actor) bool {
@@ -348,7 +356,7 @@ func (coordinator *InspectionCompletionCoordinator) ObserveCompletion(ctx contex
 		ID: spec.Parameters.ArchiveIntakeSessionID, Revision: 1, CandidateRevision: 1,
 		VolumeID: run.SourceVolumeID, WorkspaceDriveID: run.SourceVolumeID,
 		PhysicalDeviceID: run.SourcePhysicalDeviceID, WorkerID: run.WorkerID, StorageID: run.SourceStorageID,
-		SelectedBy: run.SelectedBy.ID, SelectedAt: spec.Parameters.RequestedAt.UTC(),
+		SelectedByType: run.SelectedBy.Type, SelectedBy: run.SelectedBy.ID, SelectedAt: spec.Parameters.RequestedAt.UTC(),
 	}
 	_, err = coordinator.coordinator.ExecuteInspected(ctx, Request{
 		ArchiveRunID: run.ID, IdempotencyKey: spec.Parameters.StartIdempotencyKey,

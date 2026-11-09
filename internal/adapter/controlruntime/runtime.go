@@ -201,10 +201,7 @@ func OpenWithDependencies(ctx context.Context, configuration bootconfig.Configur
 		return fail(batchErr)
 	}
 	batchCommands := command.NewAuthorizedCreatingExecutor(commandStore, func(envelope command.Envelope) error {
-		if envelope.Actor.Type != vocabulary.ActorHuman || envelope.RequestedVia != "APPLICATION" {
-			return errors.New("archive run command is not authorized")
-		}
-		return nil
+		return authorizeArchiveRunEnvelope(envelope, configuration.Access.Mode)
 	}, batchHandler.Handle)
 	for _, topology := range configuration.Storages {
 		if topology.Role != vocabulary.StorageSourceMedia {
@@ -301,16 +298,19 @@ func OpenWithDependencies(ctx context.Context, configuration bootconfig.Configur
 		return fail(err)
 	}
 	var mcpArchiveIntake httpmcp.ArchiveIntakeWorkspace
+	var mcpArchiveIntakeSelector httpmcp.ArchiveIntakeSelector
 	var mcpArchiveRuns httpmcp.ArchiveRunStarter
 	var mcpArchiveTranscriptions httpmcp.ArchiveTranscriptionStarter
 	if archiveRuns != nil && archiveTranscriptions != nil {
 		mcpArchiveIntake = archiveIntakeWorkspace
+		mcpArchiveIntakeSelector = archiveIntakeSelection
 		mcpArchiveRuns = archiveRuns
 		mcpArchiveTranscriptions = archiveTranscriptions
 	}
 	mcpHandler, err := httpmcp.New(httpmcp.Configuration{
 		Archivists: archivists, Catalog: catalogStore, ArchiveWorkspace: queries, Commands: jobCommands,
-		Drives: mcpArchiveIntake, ArchiveRuns: mcpArchiveRuns, ArchiveTranscriptions: mcpArchiveTranscriptions,
+		Drives: mcpArchiveIntake, IntakeSelector: mcpArchiveIntakeSelector,
+		ArchiveRuns: mcpArchiveRuns, ArchiveTranscriptions: mcpArchiveTranscriptions,
 	})
 	if err != nil {
 		return fail(err)
@@ -337,6 +337,20 @@ func OpenWithDependencies(ctx context.Context, configuration bootconfig.Configur
 		runtime.monitorWorkerCompletions(backgroundContext)
 	}()
 	return runtime, nil
+}
+
+func authorizeArchiveRunEnvelope(envelope command.Envelope, authMode security.AuthMode) error {
+	if envelope.Actor.Type == vocabulary.ActorHuman && envelope.RequestedVia != "APPLICATION" {
+		return errors.New("archive run command is not authorized")
+	}
+	if !security.Authorize(security.Request{
+		ActorType: envelope.Actor.Type, Role: security.Operator, Action: security.Process,
+		AuthMode:           authMode,
+		ArchivistMCPDirect: envelope.Actor.Type == vocabulary.ActorArchivist && envelope.RequestedVia == "mcp",
+	}) {
+		return errors.New("archive run command is not authorized")
+	}
+	return nil
 }
 
 func (runtime *Runtime) Handler() http.Handler { return runtime.handler }

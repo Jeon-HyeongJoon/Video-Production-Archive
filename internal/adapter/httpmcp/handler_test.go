@@ -11,12 +11,14 @@ import (
 	"testing"
 	"time"
 
+	"videoarchive/internal/application/archiveintake"
 	"videoarchive/internal/application/archiveintakeworkspace"
 	"videoarchive/internal/application/archiveorganization"
 	"videoarchive/internal/application/archivetranscription"
 	"videoarchive/internal/application/archiveworkspace"
 	"videoarchive/internal/application/archivistcontrol"
 	"videoarchive/internal/application/archivistloop"
+	coreintake "videoarchive/internal/core/archiveintake"
 	"videoarchive/internal/core/archivistruntime"
 	"videoarchive/internal/core/catalog"
 	"videoarchive/internal/core/command"
@@ -31,6 +33,7 @@ func TestAuthenticatedMCPListsAndRoutesVersionedDriveBusinessCapabilities(t *tes
 	tools := mcpTestRequest(handler, http.MethodGet, "/mcp/v1/tools", "", "secret")
 	body := tools.Body.String()
 	for _, tool := range []string{
+		ToolIntakeCandidatesSearch, ToolIntakeSourceSelect, ToolIntakeSelectionPin,
 		ToolDriveSelectionGet, ToolArchiveRunStatus, ToolOrganizationHoldsList, ToolOrganizationHoldGet,
 		ToolOrganizationHoldClassify, ToolArchiveRunStart, ToolArchiveTranscriptionStart,
 	} {
@@ -63,14 +66,62 @@ func TestAuthenticatedMCPListsAndRoutesVersionedDriveBusinessCapabilities(t *tes
 }
 
 // Requirement: MCP-003
-func TestDriveMCPKeepsSelectionAndDestructiveAuthorityOutsideArchivist(t *testing.T) {
-	handler, fixture := driveMCPFixture(t)
+func TestDriveMCPPinsOnlyCurrentStructuredCandidatesAndRejectsPathsAndDestructiveAuthority(t *testing.T) {
+	var pinned archivistruntime.DriveSelection
+	state := &holdReviewState{view: archiveintakeworkspace.DriveView{
+		WorkspaceDriveID: "VOLUME-1", ConnectionState: vocabulary.VolumeConnected, ConnectionWorkerID: "WORKER-1",
+		CandidateRevision: 4, FolderDiscoveryRevision: 7, FolderDiscoveryState: vocabulary.FolderDiscoveryReady,
+		SelectionSessionID: "INTAKE-1", WorkerID: "WORKER-1", SourceVolumeID: "VOLUME-1", SourceStorageID: "SOURCE-1",
+		DiscoveredFolders: []archiveintakeworkspace.FolderView{
+			{Folder: "43년/430125-총회장님 남양주 내방/말씀", VideoCount: 5, EstimatedOutputBytes: 16_859_287_071},
+			{Folder: "unrelated", VideoCount: 1, EstimatedOutputBytes: 1_000},
+		},
+		StorageCandidates: []archiveintakeworkspace.StorageView{
+			{StorageID: "SOURCE-1", Role: vocabulary.StorageSourceMedia, Accessible: true},
+			{StorageID: "ARCHIVE-1", Role: vocabulary.StorageArchivePrimary, Accessible: true, FreeBytes: 30_000_000_000},
+		},
+	}}
+	handler, err := New(Configuration{
+		Archivists: fixtureArchivistRuntime{selectionErr: true, selectionTarget: &pinned},
+		Catalog:    fixtureCatalog{}, ArchiveWorkspace: fixtureArchiveWorkspace{}, Commands: fixtureCommands{},
+		Drives: fixtureDrives{state: state}, IntakeSelector: fixtureIntakeSelector{},
+		ArchiveRuns: &fixtureArchiveRuns{}, ArchiveTranscriptions: &fixtureArchiveTranscriptions{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	tools := mcpTestRequest(handler, http.MethodGet, "/mcp/v1/tools", "", "secret")
 	body := strings.ToLower(tools.Body.String())
-	if !strings.Contains(body, ToolOrganizationHoldClassify) {
-		t.Fatalf("selected HOLD classification capability is missing: %s", body)
+	for _, required := range []string{ToolIntakeCandidatesSearch, ToolIntakeSourceSelect, ToolIntakeSelectionPin, ToolOrganizationHoldClassify} {
+		if !strings.Contains(body, required) {
+			t.Fatalf("structured drive capability %s is missing: %s", required, body)
+		}
 	}
-	for _, forbidden := range []string{"storage.select", "hold.override", "format", "delete", "path.open"} {
+	search := mcpTestRequest(handler, http.MethodPost, "/mcp/v1/call", archiveToolCall("CALL-SEARCH", ToolIntakeCandidatesSearch,
+		`{"query":"남양주 총회장님 말씀","limit":10}`), "secret")
+	searchBody := search.Body.String()
+	if search.Code != http.StatusOK || !strings.Contains(searchBody, `"folder_id":"43년/430125-총회장님 남양주 내방/말씀"`) ||
+		strings.Contains(searchBody, `"folder_id":"unrelated"`) || strings.Contains(searchBody, `C:\\`) || strings.Contains(searchBody, `storage_root`) {
+		t.Fatalf("candidate search leaked a path or returned the wrong folders: %d %s", search.Code, searchBody)
+	}
+	stale := mcpTestRequest(handler, http.MethodPost, "/mcp/v1/call", archiveToolCall("CALL-PIN-STALE", ToolIntakeSelectionPin,
+		`{"workspace_drive_id":"VOLUME-1","worker_id":"WORKER-1","intake_session_id":"INTAKE-1","source_storage_id":"SOURCE-1","archive_storage_id":"ARCHIVE-1","candidate_revision":3,"folder_discovery_revision":7,"folder_ids":["43년/430125-총회장님 남양주 내방/말씀"]}`), "secret")
+	if stale.Code != http.StatusConflict || pinned.WorkspaceDriveID != "" {
+		t.Fatalf("stale candidate was pinned: %d %s pinned=%+v", stale.Code, stale.Body.String(), pinned)
+	}
+	pathInput := mcpTestRequest(handler, http.MethodPost, "/mcp/v1/call", archiveToolCall("CALL-PIN-PATH", ToolIntakeSelectionPin,
+		`{"workspace_drive_id":"VOLUME-1","worker_id":"WORKER-1","intake_session_id":"INTAKE-1","source_storage_id":"SOURCE-1","archive_storage_id":"ARCHIVE-1","candidate_revision":4,"folder_discovery_revision":7,"folder_ids":["43년/430125-총회장님 남양주 내방/말씀"],"path":"E:\\\\43년"}`), "secret")
+	if pathInput.Code != http.StatusBadRequest || pinned.WorkspaceDriveID != "" {
+		t.Fatalf("arbitrary path input reached selection: %d %s pinned=%+v", pathInput.Code, pathInput.Body.String(), pinned)
+	}
+	valid := mcpTestRequest(handler, http.MethodPost, "/mcp/v1/call", archiveToolCall("CALL-PIN", ToolIntakeSelectionPin,
+		`{"workspace_drive_id":"VOLUME-1","worker_id":"WORKER-1","intake_session_id":"INTAKE-1","source_storage_id":"SOURCE-1","archive_storage_id":"ARCHIVE-1","candidate_revision":4,"folder_discovery_revision":7,"folder_ids":["43년/430125-총회장님 남양주 내방/말씀"]}`), "secret")
+	if valid.Code != http.StatusOK || pinned.SelectedByType != vocabulary.ActorArchivist || pinned.SelectedBy != "archivist:SESSION-1" ||
+		len(pinned.FolderIDs) != 1 || pinned.FolderIDs[0] != "43년/430125-총회장님 남양주 내방/말씀" ||
+		!strings.Contains(valid.Body.String(), `"archive_run_id":"ARCHIVE-RUN-`) {
+		t.Fatalf("current structured selection was not pinned: %d %s pinned=%+v", valid.Code, valid.Body.String(), pinned)
+	}
+	for _, forbidden := range []string{"hold.override", "format", "delete", "path.open"} {
 		if strings.Contains(body, forbidden) {
 			t.Fatalf("selection or destructive drive tool was listed: %s", body)
 		}
@@ -79,9 +130,6 @@ func TestDriveMCPKeepsSelectionAndDestructiveAuthorityOutsideArchivist(t *testin
 		if response.Code != http.StatusNotFound || !strings.Contains(response.Body.String(), "MCP_CAPABILITY_NOT_FOUND") {
 			t.Fatalf("forbidden tool %s reached a call path: %d %s", forbidden, response.Code, response.Body.String())
 		}
-	}
-	if fixture.runs.calls != 0 || fixture.transcriptions.calls != 0 {
-		t.Fatalf("forbidden tools changed drive state: %+v", fixture)
 	}
 }
 
@@ -159,7 +207,7 @@ func TestDriveToolUsesTurnSelectionIDsAndRevisionInsteadOfConflictingMessageInpu
 	var cards []archivistcontrol.ActionCardProjection
 	missing, err := New(Configuration{
 		Archivists: fixtureArchivistRuntime{selectionErr: true, cards: &cards}, Catalog: fixtureCatalog{}, ArchiveWorkspace: fixtureArchiveWorkspace{}, Commands: fixtureCommands{},
-		Drives: fixtureDrives{}, ArchiveRuns: &fixtureArchiveRuns{}, ArchiveTranscriptions: &fixtureArchiveTranscriptions{},
+		Drives: fixtureDrives{}, IntakeSelector: fixtureIntakeSelector{}, ArchiveRuns: &fixtureArchiveRuns{}, ArchiveTranscriptions: &fixtureArchiveTranscriptions{},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -207,7 +255,7 @@ func driveMCPFixture(t *testing.T) (*Handler, driveMCPState) {
 	transcriptions := &fixtureArchiveTranscriptions{}
 	handler, err := New(Configuration{
 		Archivists: fixtureArchivistRuntime{selection: selection}, Catalog: fixtureCatalog{}, ArchiveWorkspace: fixtureArchiveWorkspace{}, Commands: fixtureCommands{},
-		Drives: fixtureDrives{}, ArchiveRuns: runs, ArchiveTranscriptions: transcriptions,
+		Drives: fixtureDrives{}, IntakeSelector: fixtureIntakeSelector{}, ArchiveRuns: runs, ArchiveTranscriptions: transcriptions,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -221,7 +269,7 @@ func archiveIntakeSelectionFixture(t *testing.T) archivistruntime.DriveSelection
 		ArchiveRunID: "ARCHIVE-RUN-1", ArchiveRunRevision: 1, WorkerID: "WORKER-1", WorkspaceDriveID: "VOLUME-1",
 		IntakeSessionID: "INTAKE-1", SourceVolumeID: "VOLUME-1", SourceStorageID: "SOURCE-1",
 		ArchiveStorageID: "ARCHIVE-1", CandidateRevision: 4, FolderDiscoveryRevision: 7,
-		FolderIDs: []string{"recordings"}, SelectedBy: "operator-1",
+		FolderIDs: []string{"recordings"}, SelectedByType: vocabulary.ActorHuman, SelectedBy: "operator-1",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -230,10 +278,11 @@ func archiveIntakeSelectionFixture(t *testing.T) archivistruntime.DriveSelection
 }
 
 type fixtureArchivistRuntime struct {
-	selection    archivistruntime.DriveSelection
-	selectionErr bool
-	cards        *[]archivistcontrol.ActionCardProjection
-	work         *archivistruntime.WorkReference
+	selection       archivistruntime.DriveSelection
+	selectionErr    bool
+	cards           *[]archivistcontrol.ActionCardProjection
+	work            *archivistruntime.WorkReference
+	selectionTarget *archivistruntime.DriveSelection
 }
 
 func (fixtureArchivistRuntime) Authenticate(hostID, credential string) error {
@@ -272,7 +321,25 @@ func (fixture fixtureArchivistRuntime) BindArchiveRun(context.Context, string, s
 	return nil
 }
 
+func (fixture fixtureArchivistRuntime) BindDriveSelection(_ context.Context, _, _ string, selection archivistruntime.DriveSelection) error {
+	if fixture.selectionTarget != nil {
+		*fixture.selectionTarget = selection
+	}
+	return nil
+}
+
 type fixtureCatalog struct{}
+
+type fixtureIntakeSelector struct{}
+
+func (fixtureIntakeSelector) Select(_ context.Context, request archiveintake.SelectRequest) (*archiveintake.SessionAccess, error) {
+	return &archiveintake.SessionAccess{Session: coreintake.Session{
+		ID: request.SessionID, Revision: 1, CandidateRevision: request.ExpectedCandidateRevision,
+		VolumeID: request.VolumeID, WorkspaceDriveID: request.VolumeID, PhysicalDeviceID: "PHYSICAL-1",
+		WorkerID: "WORKER-1", StorageID: "SOURCE-1", SelectedByType: request.Actor.Type,
+		SelectedBy: request.Actor.ID, SelectedAt: request.SelectedAt,
+	}}, nil
+}
 
 func (fixtureCatalog) Search(context.Context, catalog.SearchQuery) ([]catalog.SearchResult, error) {
 	return nil, nil
@@ -350,7 +417,7 @@ func holdReviewMCPHandler(t *testing.T, state *holdReviewState) *Handler {
 	handler, err := New(Configuration{
 		Archivists: fixtureArchivistRuntime{selection: archiveIntakeSelectionFixture(t)},
 		Catalog:    fixtureCatalog{}, ArchiveWorkspace: fixtureArchiveWorkspace{}, Commands: fixtureCommands{},
-		Drives: fixtureDrives{state: state}, ArchiveRuns: &fixtureArchiveRuns{}, ArchiveTranscriptions: &fixtureArchiveTranscriptions{},
+		Drives: fixtureDrives{state: state}, IntakeSelector: fixtureIntakeSelector{}, ArchiveRuns: &fixtureArchiveRuns{}, ArchiveTranscriptions: &fixtureArchiveTranscriptions{},
 	})
 	if err != nil {
 		t.Fatal(err)

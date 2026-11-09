@@ -49,7 +49,7 @@ func (service *ResolvedFolderService) StartResolvedFolder(
 			ID: intakeSessionID, Revision: 1, VolumeID: archiveRun.SourceVolumeID, WorkspaceDriveID: archiveRun.SourceVolumeID,
 			PhysicalDeviceID: archiveRun.SourcePhysicalDeviceID, StorageID: archiveRun.SourceStorageID,
 			WorkerID: archiveRun.WorkerID, CandidateRevision: archiveRun.FolderDiscoveryRevision,
-			SelectedBy: archiveRun.SelectedBy.ID, SelectedAt: archiveRun.CreatedAt,
+			SelectedByType: archiveRun.SelectedBy.Type, SelectedBy: archiveRun.SelectedBy.ID, SelectedAt: archiveRun.CreatedAt,
 		}},
 		StartedAt: occurredAt.UTC(), ExecutionPriority: resource.Immediate,
 	}, decision)

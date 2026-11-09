@@ -182,7 +182,9 @@ Action Card: 제안 Command, 대상, expected revision, 사유, 근거, 승인 �
 
 채팅 입력은 ArchivistTurn을 만들고 Control에 확정된 뒤 Host로 전달한다. 채팅 텍스트의 “진행”은 Archivist에게 후속 Tool Call을 요청할 수 있지만 Approval은 아니다. 승인 필요한 명령은 ActionCard의 명시적 조작만 Approval 또는 Command 후보를 만들며 제출 시 현재 리비전을 다시 검사한다.
 
-Archive Intake Turn은 담당자가 화면에서 고른 Worker·원본·아카이브 Storage·폴더 범위를 구조화된 ID와 revision으로 고정한다. 이미 진행 중인 Job 또는 ArchiveRun 상세에서 지시하면 별도의 `WorkReference`가 같은 Turn에 고정된다. Archivist는 본문에서 대상 드라이브나 작업을 추론하지 않고, 고정 참조 안에서 드라이브·폴더 조회, 작업 상태 조회, 1·2단계 시작, 현재 HOLD 목록·단일 구조화 근거 조회와 명시적 분류 Capability만 호출한다. Storage와 범위 선택은 사람 전용이며 선택 밖 분류는 거부한다. `COL-003~004`, `MCP-003~005`
+Archive Intake Turn은 담당자가 화면에서 고른 참조 또는 인증된 Archivist가 현재 후보 MCP로 제출한 Worker·원본·아카이브 Storage·폴더 범위를 구조화된 ID와 revision으로 고정한다. 이미 진행 중인 Job 또는 ArchiveRun 상세에서 지시하면 별도의 `WorkReference`가 같은 Turn에 고정된다. Archivist는 본문을 실행 대상 필드로 직접 쓰지 않고 후보 조회 결과에서 선택을 먼저 고정한 뒤, 그 참조 안에서 드라이브·폴더 조회, 작업 상태 조회, 1·2단계 시작, 현재 HOLD 목록·단일 구조화 근거 조회와 명시적 분류 Capability만 호출한다. 오래되거나 후보 밖인 선택과 선택 밖 분류는 거부한다. `COL-003~004`, `MCP-003~005`
+
+고정 선택으로 시작하는 ArchiveRun은 인증된 Archivist의 `mcp` Command 경로로만 Control Runtime에 들어가며 사람의 직접 `APPLICATION` 경로와 교차 사용할 수 없다. `MCP-007`
 
 긴 작업은 한 Turn 안에서 기다리지 않는다. Archivist가 1단계를 시작한 Turn을 완료한 뒤 Control은 같은 Session에 1단계 완료·전체 완료·새 HOLD 계기별 SYSTEM 재호출 Turn을 정확히 한 번 제출한다. ArchiveRun을 연결할 때 최초 Turn에 `work_id=archive_run_id`, `origin_turn_id`, `ARCHIVE_RUN_STARTED` 계기를 저장하고 각 SYSTEM Turn은 같은 ID와 명시적 재호출 계기를 저장한다. 화면은 prompt 문장을 해석하지 않고 이 `ArchiveRunWorkContext`로만 Turn을 묶는다. Host가 offline이면 Turn은 QUEUED로 남고 Worker의 아카이브 실행은 계속된다. 재호출 전달은 기존 ArchivistTurnLease·fencing·cursor 규칙을 그대로 사용한다. `LRH-012`
 

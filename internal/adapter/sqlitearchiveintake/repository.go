@@ -11,6 +11,7 @@ import (
 
 	"videoarchive/internal/adapter/sqlitebase"
 	"videoarchive/internal/core/archiveintake"
+	"videoarchive/internal/core/vocabulary"
 )
 
 var (
@@ -132,7 +133,8 @@ func (repository *Repository) ListCandidates(ctx context.Context) ([]archiveinta
 func (repository *Repository) SaveSession(ctx context.Context, session archiveintake.Session) error {
 	if session.ID == "" || session.Revision == 0 || session.VolumeID == "" || session.WorkspaceDriveID != session.VolumeID ||
 		session.PhysicalDeviceID == "" || session.WorkerID == "" ||
-		session.StorageID == "" || session.SelectedBy == "" || session.SelectedAt.IsZero() {
+		session.StorageID == "" || (session.SelectedByType != vocabulary.ActorHuman && session.SelectedByType != vocabulary.ActorArchivist) ||
+		session.SelectedBy == "" || session.SelectedAt.IsZero() {
 		return archiveintake.ErrInvalidSession
 	}
 	payload, err := json.Marshal(session)
@@ -217,6 +219,14 @@ func (repository *Repository) normalizeSession(ctx context.Context, session *arc
 	if session == nil || session.ID == "" || session.Revision == 0 || session.CandidateRevision == 0 ||
 		session.VolumeID == "" || session.WorkerID == "" || session.StorageID == "" ||
 		session.SelectedBy == "" || session.SelectedAt.IsZero() {
+		return ErrRecordConflict
+	}
+	if session.SelectedByType == "" {
+		// Before actor provenance was persisted, ArchiveIntakeSession selection
+		// was human-only. Keep those immutable records readable.
+		session.SelectedByType = vocabulary.ActorHuman
+	}
+	if session.SelectedByType != vocabulary.ActorHuman && session.SelectedByType != vocabulary.ActorArchivist {
 		return ErrRecordConflict
 	}
 	if session.WorkspaceDriveID == session.VolumeID && session.PhysicalDeviceID != "" {

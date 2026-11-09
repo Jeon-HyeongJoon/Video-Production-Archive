@@ -112,7 +112,7 @@ func (service *StartService) Start(ctx context.Context, request StartRequest) (R
 	if request.ArchiveRunID == "" || request.IdempotencyKey == "" || request.SessionID == "" || request.SourceVolumeID == "" ||
 		request.ExpectedCandidateRevision == 0 || request.ArchiveStorageID == "" || request.InputRevision == 0 || len(request.FolderIDs) == 0 ||
 		(request.Actor.Type != vocabulary.ActorHuman && request.Actor.Type != vocabulary.ActorArchivist) || request.Actor.ID == "" ||
-		request.SelectedBy.Type != vocabulary.ActorHuman || request.SelectedBy.ID == "" || request.StartedAt.IsZero() {
+		!validSelectionActor(request.SelectedBy) || request.StartedAt.IsZero() {
 		return Result{}, ErrStartRejected
 	}
 	candidate, err := service.intakeRepository.Candidate(ctx, request.SourceVolumeID)
@@ -141,7 +141,7 @@ func (service *StartService) Start(ctx context.Context, request StartRequest) (R
 	stored, sessionErr := service.intakeRepository.Session(ctx, request.SessionID)
 	if sessionErr == nil {
 		if stored.VolumeID != candidate.VolumeID || stored.CandidateRevision != candidate.Revision || stored.StorageID != candidate.StorageID ||
-			stored.WorkerID != candidate.WorkerID || stored.SelectedBy != request.SelectedBy.ID {
+			stored.WorkerID != candidate.WorkerID {
 			return Result{}, ErrStartRejected
 		}
 		root, err := archive.OpenReadOnlyStorageRoot(candidate.Root)
@@ -150,9 +150,6 @@ func (service *StartService) Start(ctx context.Context, request StartRequest) (R
 		}
 		sessionAccess = &appintake.SessionAccess{Session: stored, Root: root}
 	} else {
-		if request.Actor.Type != vocabulary.ActorHuman {
-			return Result{}, ErrStartRejected
-		}
 		sessionAccess, err = service.intake.Select(ctx, appintake.SelectRequest{
 			SessionID: request.SessionID, VolumeID: request.SourceVolumeID,
 			ExpectedCandidateRevision: request.ExpectedCandidateRevision, Actor: request.SelectedBy, SelectedAt: request.StartedAt,
@@ -178,7 +175,7 @@ func (service *StartService) Start(ctx context.Context, request StartRequest) (R
 	}
 	if _, err := service.archiveRuns.Execute(command.Envelope{
 		CommandID: request.ArchiveRunID + ":create", CommandType: archiverun.CreateCommand,
-		Actor: request.SelectedBy, RequestedVia: "APPLICATION", TargetID: request.ArchiveRunID, ExpectedRevision: 0,
+		Actor: request.SelectedBy, RequestedVia: selectionRequestedVia(request.SelectedBy), TargetID: request.ArchiveRunID, ExpectedRevision: 0,
 		IdempotencyKey: request.IdempotencyKey + ":archive-run",
 		Parameters: map[string]any{
 			"start_idempotency_key": request.IdempotencyKey,
@@ -187,7 +184,7 @@ func (service *StartService) Start(ctx context.Context, request StartRequest) (R
 			"archive_storage_id": archiveStorage.StorageID, "folder_discovery_revision": request.InputRevision,
 			"folder_ids": folderScope.FolderIDs(), "selected_by": request.SelectedBy,
 		},
-		Reason: "human selected archive run",
+		Reason: "explicitly selected archive run",
 	}); err != nil {
 		return Result{}, errors.Join(ErrStartRejected, err)
 	}

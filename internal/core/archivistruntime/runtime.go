@@ -166,18 +166,19 @@ func AttachArchiveRunWorkContext(turn Turn, work ArchiveRunWorkContext) (Turn, e
 }
 
 type DriveSelection struct {
-	ArchiveRunID            string   `json:"archive_run_id,omitempty"`
-	ArchiveRunRevision      uint64   `json:"archive_run_revision,omitempty"`
-	WorkerID                string   `json:"worker_id"`
-	WorkspaceDriveID        string   `json:"workspace_drive_id"`
-	IntakeSessionID         string   `json:"intake_session_id"`
-	SourceVolumeID          string   `json:"source_volume_id"`
-	SourceStorageID         string   `json:"source_storage_id"`
-	ArchiveStorageID        string   `json:"archive_storage_id"`
-	CandidateRevision       uint64   `json:"candidate_revision"`
-	FolderDiscoveryRevision uint64   `json:"folder_discovery_revision"`
-	FolderIDs               []string `json:"folder_ids"`
-	SelectedBy              string   `json:"selected_by"`
+	ArchiveRunID            string               `json:"archive_run_id,omitempty"`
+	ArchiveRunRevision      uint64               `json:"archive_run_revision,omitempty"`
+	WorkerID                string               `json:"worker_id"`
+	WorkspaceDriveID        string               `json:"workspace_drive_id"`
+	IntakeSessionID         string               `json:"intake_session_id"`
+	SourceVolumeID          string               `json:"source_volume_id"`
+	SourceStorageID         string               `json:"source_storage_id"`
+	ArchiveStorageID        string               `json:"archive_storage_id"`
+	CandidateRevision       uint64               `json:"candidate_revision"`
+	FolderDiscoveryRevision uint64               `json:"folder_discovery_revision"`
+	FolderIDs               []string             `json:"folder_ids"`
+	SelectedByType          vocabulary.ActorType `json:"selected_by_type,omitempty"`
+	SelectedBy              string               `json:"selected_by"`
 }
 
 func NewDriveSelection(source DriveSelection) (DriveSelection, error) {
@@ -190,6 +191,11 @@ func NewDriveSelection(source DriveSelection) (DriveSelection, error) {
 	selection.SourceStorageID = strings.TrimSpace(source.SourceStorageID)
 	selection.ArchiveStorageID = strings.TrimSpace(source.ArchiveStorageID)
 	selection.SelectedBy = strings.TrimSpace(source.SelectedBy)
+	if selection.SelectedByType == "" {
+		// Existing durable Turn payloads predate explicit selection actor type
+		// and were created only by a human operator.
+		selection.SelectedByType = vocabulary.ActorHuman
+	}
 	selection.FolderIDs = append([]string(nil), source.FolderIDs...)
 	seen := make(map[string]bool, len(selection.FolderIDs))
 	for index, raw := range selection.FolderIDs {
@@ -206,7 +212,8 @@ func NewDriveSelection(source DriveSelection) (DriveSelection, error) {
 	if selection.WorkerID == "" || selection.WorkspaceDriveID == "" || selection.IntakeSessionID == "" || selection.SourceVolumeID == "" ||
 		selection.SourceStorageID == "" || selection.ArchiveStorageID == "" ||
 		selection.SourceStorageID == selection.ArchiveStorageID || selection.CandidateRevision == 0 ||
-		selection.FolderDiscoveryRevision == 0 || len(selection.FolderIDs) == 0 || selection.SelectedBy == "" {
+		selection.FolderDiscoveryRevision == 0 || len(selection.FolderIDs) == 0 ||
+		(selection.SelectedByType != vocabulary.ActorHuman && selection.SelectedByType != vocabulary.ActorArchivist) || selection.SelectedBy == "" {
 		return DriveSelection{}, ErrInvalidTurn
 	}
 	if (selection.ArchiveRunID == "") != (selection.ArchiveRunRevision == 0) {

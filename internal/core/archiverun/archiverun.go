@@ -102,7 +102,7 @@ func (handler *Handler) Handle(envelope command.Envelope, snapshot command.Snaps
 	parameters.SelectedBy.ID = strings.TrimSpace(parameters.SelectedBy.ID)
 	if parameters.WorkerID == "" || parameters.SourceStorageID == "" || parameters.SourceVolumeID == "" ||
 		parameters.SourcePhysicalDeviceID == "" || parameters.ArchiveStorageID == "" || parameters.StartIdempotencyKey == "" ||
-		parameters.SelectedBy.Type != command.HumanActor || parameters.SelectedBy.ID == "" {
+		!validSelectionActor(parameters.SelectedBy) {
 		return command.Change{}, command.DeterministicFailure("INVALID_ARCHIVE_RUN", ErrInvalidArchiveRun)
 	}
 
@@ -142,14 +142,18 @@ func Decode(snapshot command.Snapshot) (State, error) {
 		json.Unmarshal(snapshot.State, &state) != nil || state.ID != snapshot.TargetID || state.Revision != snapshot.Revision ||
 		strings.TrimSpace(state.WorkerID) == "" || strings.TrimSpace(state.SourceStorageID) == "" ||
 		strings.TrimSpace(state.SourceVolumeID) == "" || strings.TrimSpace(state.SourcePhysicalDeviceID) == "" ||
-		strings.TrimSpace(state.ArchiveStorageID) == "" || strings.TrimSpace(state.StartIdempotencyKey) == "" || state.SelectedBy.Type != command.HumanActor ||
-		strings.TrimSpace(state.SelectedBy.ID) == "" || state.CreatedAt.IsZero() || !validStageOwnerships(state.StageOwnerships) {
+		strings.TrimSpace(state.ArchiveStorageID) == "" || strings.TrimSpace(state.StartIdempotencyKey) == "" || !validSelectionActor(state.SelectedBy) ||
+		state.CreatedAt.IsZero() || !validStageOwnerships(state.StageOwnerships) {
 		return State{}, ErrInvalidArchiveRun
 	}
 	if _, err := state.FolderScope(); err != nil {
 		return State{}, ErrInvalidArchiveRun
 	}
 	return state, nil
+}
+
+func validSelectionActor(actor command.Actor) bool {
+	return (actor.Type == command.HumanActor || actor.Type == command.ArchivistActor) && strings.TrimSpace(actor.ID) != ""
 }
 
 func (state State) FolderScope() (organization.FolderScope, error) {

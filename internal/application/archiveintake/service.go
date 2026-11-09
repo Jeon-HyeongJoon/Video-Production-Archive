@@ -55,14 +55,14 @@ func NewService(repository Repository) (*Service, error) {
 }
 
 func (service *Service) Select(ctx context.Context, request SelectRequest) (*SessionAccess, error) {
-	if request.Actor.Type != vocabulary.ActorHuman || request.Actor.ID == "" {
-		return nil, coreintake.ErrHumanSelectionRequired
+	if (request.Actor.Type != vocabulary.ActorHuman && request.Actor.Type != vocabulary.ActorArchivist) || request.Actor.ID == "" {
+		return nil, coreintake.ErrSelectionActorRequired
 	}
 	candidate, err := service.repository.Candidate(ctx, request.VolumeID)
 	if err != nil {
 		return nil, err
 	}
-	session, err := coreintake.NewSession(request.SessionID, candidate, request.ExpectedCandidateRevision, request.Actor.ID, request.SelectedAt)
+	session, err := coreintake.NewSession(request.SessionID, candidate, request.ExpectedCandidateRevision, request.Actor, request.SelectedAt)
 	if err != nil {
 		return nil, err
 	}

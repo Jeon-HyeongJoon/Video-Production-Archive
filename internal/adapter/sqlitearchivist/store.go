@@ -520,6 +520,50 @@ func (store *Store) Turn(ctx context.Context, turnID string) (archivistcontrol.T
 	return decodeTurn(payload)
 }
 
+func (store *Store) BindDriveSelection(ctx context.Context, binding archivistcontrol.DriveSelectionBinding) error {
+	normalized, err := archivistruntime.NewDriveSelection(binding.Selection)
+	if err != nil || binding.SessionID == "" || binding.TurnID == "" || normalized.ArchiveRunID != "" || normalized.ArchiveRunRevision != 0 {
+		return archivistcontrol.ErrInvalidRequest
+	}
+	tx, err := store.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var turnPayload []byte
+	if err := tx.QueryRowContext(ctx, `SELECT payload FROM archivist_turns WHERE turn_id = ? AND session_id = ?`, binding.TurnID, binding.SessionID).Scan(&turnPayload); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return archivistcontrol.ErrTurnNotFound
+		}
+		return err
+	}
+	turn, err := decodeTurn(turnPayload)
+	if err != nil {
+		return err
+	}
+	if turn.Turn.DriveSelection != nil {
+		existing, normalizeErr := archivistruntime.NewDriveSelection(*turn.Turn.DriveSelection)
+		if normalizeErr != nil {
+			return archivistcontrol.ErrInvalidRequest
+		}
+		existingPayload, _ := json.Marshal(existing)
+		normalizedPayload, _ := json.Marshal(normalized)
+		if !bytes.Equal(existingPayload, normalizedPayload) {
+			return command.ErrIdempotencyConflict
+		}
+		return tx.Commit()
+	}
+	turn.Turn.DriveSelection = &normalized
+	updatedTurn, err := json.Marshal(turn)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE archivist_turns SET payload = ? WHERE turn_id = ?`, updatedTurn, binding.TurnID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func (store *Store) BindArchiveRun(ctx context.Context, binding archivistcontrol.ArchiveRunBinding) error {
 	normalized, err := archivistruntime.NewDriveSelection(binding.Selection)
 	if err != nil || binding.SessionID == "" || binding.TurnID == "" || normalized.ArchiveRunID == "" || normalized.ArchiveRunRevision == 0 {

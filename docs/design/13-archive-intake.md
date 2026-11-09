@@ -19,13 +19,13 @@
 
 ## 2. 선택과 탐색
 
-담당자는 작업 관리의 `새 작업 생성 > 아카이브`에서 원본 드라이브, 아카이브 저장소, 폴더 범위를 차례로 고른다. Worker는 선택한 원본 드라이브의 현재 연결 Worker로 정해지며 별도로 선택하지 않는다. 연결 관리의 드라이브 상세는 이 선택을 만들지 않는다. `DEV-010`, `DSH-010`
+담당자는 작업 관리의 `새 작업 생성 > 아카이브`에서 원본 드라이브, 아카이브 저장소, 폴더 범위를 차례로 고를 수 있다. 선택 참조가 없는 ArchivistTurn에서는 인증된 Archivist가 MCP로 현재 후보를 조회하고 후보 ID·revision을 명시적으로 제출해 같은 선택을 고정할 수 있다. Worker는 선택한 원본 드라이브의 현재 연결 Worker로 정해지며 별도로 선택하지 않는다. 연결 관리의 드라이브 상세는 이 선택을 만들지 않는다. `DEV-010`, `DSH-010`, `MCP-003`, `COL-003`
 
 Windows에서 외부 data bus Volume이 연결되면 Worker는 파일을 읽지 않고 PhysicalDevice·volume identity, 역할이 다른 source·archive Storage identity, label·filesystem·capacity만 후보로 보고한다. USB bridge가 volume을 `DRIVE_FIXED`로 노출해도 외부 bus면 후보이며 내부 시스템 volume과 작은 보조 partition은 제외한다. drive letter와 mount root는 Worker 밖으로 보내지 않는다. `DEV-007`, `DEV-010`
 
 과거 실행이 있는 드라이브도 목록에서 삭제하지 않되 현재 연결과 이력을 분리한다. 유효한 Worker heartbeat에 원본 identity가 있으면 연결됨, online Worker의 attached volume 목록에서 사라졌으면 연결 해제됨, Worker가 offline이라 관측할 수 없으면 확인 불가다. 연결 해제·확인 불가는 완료 결과와 Catalog를 계속 읽을 수 있지만 새 ArchiveRun 준비·시작은 할 수 없다. 화면의 목록·상세·알림·실행 gate는 5초 polling마다 이 한 projection 값을 함께 바꾼다. `DEV-010`, `DSH-010`, `DSH-026`
 
-원본은 사람이 현재 candidate revision을 고른 뒤에만 해당 Worker에서 `SOURCE_MEDIA` ReadOnlyStorageRoot로 개방한다. Control은 root 없이 ArchiveIntakeSession의 stable identity를 기록하고 선택 storage ID만 heartbeat 응답으로 Worker에 돌려준다. ArchiveIntakeSession은 불변 이력이므로 새 작업 생성 projection은 current candidate revision·Worker·source Storage와 모두 일치하는 세션을 별도 선택 세션 ID로 제공한다. 완료된 과거 ArchiveRun의 접수 세션 ID는 실행 추적에 남지만 새 ArchiveRun 준비에는 쓰지 않으며, 일치하는 선택 세션이 없으면 담당자의 현재 선택으로 새 세션을 만든다. 아카이브 저장소는 같은 Worker가 접근할 수 있는 `ARCHIVE_PRIMARY`이며 원본과 다른 논리 Volume이어야 한다. 새 외장 Volume은 원본용 Storage ID와 별도의 archive Storage ID로 후보에 나타나므로 역할이 섞이지 않는다. Worker projection은 로컬 root, 연결된 네트워크 공유, 원본과 다른 새 외장 Volume, 검증된 FTP·SFTP를 `StorageAccessKind`로 구분한다. 담당자가 고르기 전에는 새 외장 Volume에 쓰지 않는다. 접근 불가 원격 서비스는 시작을 막는다. 구현된 용량 admission은 선택 범위 예상 출력에 5%와 64 MiB 중 큰 안전 여유를 더하고, 현재 여유가 필요 용량보다 작으면 Storage ID와 byte 수를 가진 구조화 오류로 실행 생성을 막는다. 패키지와 ArchiveCatalog 게시 잠금은 파일 교체를 직렬화하지만 ArchiveRun 전체 기간의 Storage 용량·쓰기 예약은 아니다. Storage 단위 실행 예약은 `ARC-010` planned이며 구현 전에는 동시에 시작한 실행 둘이 같은 여유 공간을 각각 admission할 수 있다. Archivist나 정책은 두 Storage 중 하나를 대신 고르지 않는다. `DEV-008`, `DEV-010`, `ARC-010`, `ARC-019`, `APP-006`, `CFG-012~013`
+원본은 담당자 또는 인증된 Archivist가 현재 candidate ID·revision을 명시적으로 고른 뒤에만 해당 Worker에서 `SOURCE_MEDIA` ReadOnlyStorageRoot로 개방한다. Control은 root 없이 ArchiveIntakeSession의 stable identity와 선택 Actor를 기록하고 선택 storage ID만 heartbeat 응답으로 Worker에 돌려준다. ArchiveIntakeSession은 불변 이력이므로 새 작업 생성 projection은 current candidate revision·Worker·source Storage와 모두 일치하는 세션을 별도 선택 세션 ID로 제공한다. 완료된 과거 ArchiveRun의 접수 세션 ID는 실행 추적에 남지만 새 ArchiveRun 준비에는 쓰지 않는다. 아카이브 저장소는 같은 Worker가 접근할 수 있는 `ARCHIVE_PRIMARY`이며 원본과 다른 논리 Volume이어야 한다. 새 외장 Volume은 원본용 Storage ID와 별도의 archive Storage ID로 후보에 나타나므로 역할이 섞이지 않는다. Worker projection은 로컬 root, 연결된 네트워크 공유, 원본과 다른 새 외장 Volume, 검증된 FTP·SFTP를 `StorageAccessKind`로 구분한다. 선택 전에는 새 외장 Volume에 쓰지 않는다. MCP 후보 응답에는 절대경로·endpoint·credential을 포함하지 않고 현재 접근 가능한 ID·revision·표시명·용량만 포함한다. 접근 불가 원격 서비스는 시작을 막는다. 구현된 용량 admission은 선택 범위 예상 출력에 5%와 64 MiB 중 큰 안전 여유를 더하고, 현재 여유가 필요 용량보다 작으면 Storage ID와 byte 수를 가진 구조화 오류로 실행 생성을 막는다. 패키지와 ArchiveCatalog 게시 잠금은 파일 교체를 직렬화하지만 ArchiveRun 전체 기간의 Storage 용량·쓰기 예약은 아니다. Storage 단위 실행 예약은 `ARC-010` planned이며 구현 전에는 동시에 시작한 실행 둘이 같은 여유 공간을 각각 admission할 수 있다. 정책의 무인 선택과 임의 경로 선택은 허용하지 않는다. `DEV-008`, `DEV-010`, `ARC-010`, `ARC-019`, `APP-006`, `CFG-012~013`, `MCP-003`
 
 Worker는 현재 연결된 외장 Volume의 두 역할 ID를 로컬 `StorageRoot` capability로만 해석하고 root 경로를 Control에 보내지 않는다. capability를 여는 것만으로 파일을 읽거나 쓰지 않으며, 담당자가 선택한 뒤 생성된 fenced 실행 명세만 archive ID에 게시할 수 있다. 분리 시 실행 중 handle을 닫지 않고 유휴 조정에서 동적 capability를 제거한다. `DEV-013`
 
@@ -59,6 +59,7 @@ Archivist의 정리 검토 단위는 현재 HOLD인 MediaFolder 하나다. 목�
 ```
 
 - 그대로 사용은 분류 뒤 QC·보관으로 간다.
+- 한 폴더의 그대로 사용할 영상이 여러 개이면 QC는 폴더 공통 Profile을 추정하지 않고 검사 때 각 원본에 고정한 6Mbps 또는 20Mbps Profile로 각각 검증하며, 보관 패키지 metadata에도 같은 파일별 Profile을 기록한다. `QCT-004`, `ARC-020`
 - 개별 렌더는 6Mbps 또는 20Mbps 렌더 뒤 QC·보관으로 간다.
 - 소스 시퀀스는 정렬된 Clip과 CutMarker를 고정하고 20Mbps 통합 렌더 뒤 QC·보관으로 간다.
 - 원본에 오디오가 없는 렌더 결과는 오디오 스트림을 만들지 않으며, QC는 AAC 대신 오디오 부재를 검증한다.

@@ -631,6 +631,201 @@ func TestProductionInputInspectionHashesRegisteredStorageFileReadOnly(t *testing
 	TestWorkerArchiveIntakeInspectionUsesLocalFFprobeAndReturnsOnlyNormalizedPaths(t)
 }
 
+// Requirement: QCT-004
+func TestQCRenditionUsesEachReadyInputProfileForMultiFileAsIsFolder(t *testing.T) {
+	ffmpegPath, ffmpegErr := osexec.LookPath("ffmpeg")
+	ffprobePath, ffprobeErr := osexec.LookPath("ffprobe")
+	if ffmpegErr != nil || ffprobeErr != nil {
+		t.Skip("actual FFmpeg toolchain is not installed")
+	}
+	directory := t.TempDir()
+	sourcePath := filepath.Join(directory, "source")
+	archivePath := filepath.Join(directory, "archive")
+	for _, root := range []string{sourcePath, archivePath} {
+		if err := os.Mkdir(root, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	type readyInput struct {
+		assetID string
+		name    string
+		profile string
+		bitrate int64
+	}
+	ready := []readyInput{
+		{assetID: "ASSET-6", name: "ready-6.mp4", profile: "archive-1080p-6mbps@v1", bitrate: 6_000_000},
+		{assetID: "ASSET-20", name: "ready-20.mp4", profile: "archive-1080p-20mbps@v1", bitrate: 20_000_000},
+	}
+	for index, input := range ready {
+		command := osexec.Command(
+			ffmpegPath, "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
+			"-f", "lavfi", "-i", fmt.Sprintf("color=c=black:size=320x180:rate=%d", 24+index*6),
+			"-t", "1", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-an", filepath.Join(sourcePath, input.name),
+		)
+		if output, err := command.CombinedOutput(); err != nil {
+			t.Fatalf("create ready input %s: %v: %s", input.name, err, output)
+		}
+	}
+	configuration := workerconfig.Configuration{
+		ID: "worker-multi-qc", StorageRoots: []workerconfig.StorageRootConfiguration{
+			{StorageID: "source", Root: sourcePath}, {StorageID: "archive", Root: archivePath},
+		},
+		AccessibleStorageIDs: []string{"source", "archive"},
+		Tools: workerconfig.MediaTools{
+			FFmpeg:  workerconfig.LocalTool{Executable: ffmpegPath, Version: "ffmpeg-actual"},
+			FFprobe: workerconfig.LocalTool{Executable: ffprobePath, Version: "ffprobe-actual"},
+		},
+	}
+	roots, err := workerconfig.OpenStorageRoots(configuration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer roots.Close()
+	inputs := make([]execution.InputReference, 0, len(ready))
+	outputs := make([]execution.OutputTarget, 0, len(ready))
+	for _, item := range ready {
+		_, checksum, err := roots.MustRoot("source").FileSHA256(item.name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		inputs = append(inputs, execution.InputReference{
+			OriginalAssetID: item.assetID, OriginalName: item.name, InspectionID: "INSPECTION-" + item.assetID,
+			StorageID: "source", RelativePath: item.name, Checksum: checksum, DurationMillis: 1_000,
+			VideoCodec: "h264", Width: 320, Height: 180, VideoBitRateBPS: item.bitrate, ProfileReference: item.profile,
+		})
+		outputs = append(outputs, execution.OutputTarget{
+			ID: "QC-" + item.assetID, Kind: execution.OutputQCAssessment, StorageID: "archive",
+			RelativePath: "staging/JOB-MULTI-QC/qc/" + item.assetID + ".json", OriginalAssetID: item.assetID,
+		})
+	}
+	spec, err := execution.NewStepExecutionSpec(execution.StepExecutionSpec{
+		JobID: "JOB-MULTI-QC", StepID: "qc", TemplateName: "archive-intake-as-is",
+		Operation: execution.OperationQCRendition, Inputs: inputs, Outputs: outputs,
+		Parameters: execution.StepExecutionParameters{
+			OrganizationDecisionID: "DECISION-MULTI-QC", WorkspaceDriveID: "DRIVE-1", MediaFolder: "ready",
+			ArchiveStorageID: "archive", InputRevision: 1, Disposition: vocabulary.OrganizationAsIs,
+			SourceInputs: inputs,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry, err := NewProduction(configuration, roots)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := registry.Execute(context.Background(), workerclient.Assignment{
+		JobID: spec.JobID, StepID: spec.StepID, FencingToken: 1,
+		LeaseExpiresAt: time.Now().Add(time.Minute), ExecutionSpec: spec,
+	})
+	if !result.Success || len(result.Outputs) != len(ready) {
+		t.Fatalf("multi-file as-is QC did not use the persisted per-input profiles: %+v", result)
+	}
+	for _, item := range ready {
+		payload, err := roots.MustRoot("archive").ReadFile("staging/JOB-MULTI-QC/qc/" + item.assetID + ".json")
+		if err != nil || !strings.Contains(string(payload), `"profile_reference":"`+item.profile+`"`) ||
+			!strings.Contains(string(payload), `"outcome":"PASSED"`) {
+			t.Fatalf("QC evidence for %s does not preserve its ready profile: %s err=%v", item.assetID, payload, err)
+		}
+	}
+}
+
+// Requirement: ARC-020
+func TestMultiFileAsIsPackagesPreserveEachReadyInputProfile(t *testing.T) {
+	directory := t.TempDir()
+	sourcePath := filepath.Join(directory, "source")
+	archivePath := filepath.Join(directory, "archive")
+	for _, root := range []string{sourcePath, archivePath} {
+		if err := os.Mkdir(root, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	type readyInput struct {
+		assetID   string
+		name      string
+		packageID string
+		profile   string
+	}
+	ready := []readyInput{
+		{assetID: "ASSET-6", name: "ready-6.mp4", packageID: "VP-20261110-0001", profile: "archive-1080p-6mbps@v1"},
+		{assetID: "ASSET-20", name: "ready-20.mp4", packageID: "VP-20261110-0002", profile: "archive-1080p-20mbps@v1"},
+	}
+	configuration := workerconfig.Configuration{
+		ID: "worker-multi-package", StorageRoots: []workerconfig.StorageRootConfiguration{
+			{StorageID: "source", Root: sourcePath}, {StorageID: "archive", Root: archivePath},
+		},
+		AccessibleStorageIDs: []string{"source", "archive"},
+		Tools: workerconfig.MediaTools{
+			FFmpeg:  workerconfig.LocalTool{Executable: os.Args[0], Version: "unused"},
+			FFprobe: workerconfig.LocalTool{Executable: os.Args[0], Version: "unused"},
+		},
+	}
+	roots, err := workerconfig.OpenStorageRoots(configuration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer roots.Close()
+	inputs := make([]execution.InputReference, 0, len(ready))
+	outputs := make([]execution.OutputTarget, 0, len(ready))
+	for _, item := range ready {
+		payload := []byte("fixture-" + item.assetID)
+		if err := os.WriteFile(filepath.Join(sourcePath, item.name), payload, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		_, checksum, err := roots.MustRoot("source").FileSHA256(item.name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		input := execution.InputReference{
+			OriginalAssetID: item.assetID, OriginalName: item.name, InspectionID: "INSPECTION-" + item.assetID,
+			StorageID: "source", RelativePath: item.name, Checksum: checksum, DurationMillis: 1_000,
+			SourceSizeBytes: int64(len(payload)), SourceContainer: "mp4", VideoCodec: "h264",
+			Width: 1920, Height: 1080, VideoBitRateBPS: 6_000_000, ProfileReference: item.profile,
+		}
+		inputs = append(inputs, input)
+		presentation, err := archive.PresentFlatPackage(item.packageID, "ready", []string{item.name})
+		if err != nil {
+			t.Fatal(err)
+		}
+		outputs = append(outputs, execution.OutputTarget{
+			ID: item.packageID, Kind: execution.OutputOrganizedMedia, StorageID: "archive",
+			RelativePath: filepath.ToSlash(filepath.Join(presentation.PackageDirectory, "metadata.json")), OriginalAssetID: item.assetID,
+		})
+	}
+	spec, err := execution.NewStepExecutionSpec(execution.StepExecutionSpec{
+		JobID: "JOB-MULTI-PACKAGE", StepID: "organize", TemplateName: "archive-intake-as-is",
+		Operation: execution.OperationOrganizeMedia, Inputs: inputs, Outputs: outputs,
+		Parameters: execution.StepExecutionParameters{
+			OrganizationDecisionID: "DECISION-MULTI-PACKAGE", WorkspaceDriveID: "DRIVE-1", MediaFolder: "ready",
+			ArchiveStorageID: "archive", InputRevision: 1, Disposition: vocabulary.OrganizationAsIs,
+			SourceInputs: inputs,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry, err := NewProduction(configuration, roots)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := registry.Execute(context.Background(), workerclient.Assignment{
+		JobID: spec.JobID, StepID: spec.StepID, FencingToken: 1,
+		LeaseExpiresAt: time.Now().Add(time.Minute), ExecutionSpec: spec,
+	})
+	if !result.Success || len(result.Outputs) != len(ready) {
+		t.Fatalf("multi-file as-is packaging failed: %+v", result)
+	}
+	for index, item := range ready {
+		payload, err := roots.MustRoot("archive").ReadFile(outputs[index].RelativePath)
+		var metadata struct {
+			ProfileReference string `json:"profile_reference"`
+		}
+		if err != nil || json.Unmarshal(payload, &metadata) != nil || metadata.ProfileReference != item.profile {
+			t.Fatalf("package %s lost its input profile: metadata=%+v err=%v", item.packageID, metadata, err)
+		}
+	}
+}
+
 func testActualSourceSequence(t *testing.T) {
 	ffmpegPath, ffmpegErr := osexec.LookPath("ffmpeg")
 	ffprobePath, ffprobeErr := osexec.LookPath("ffprobe")

@@ -15,7 +15,7 @@ import (
 )
 
 // Requirement: DEV-008
-func TestHumanSelectionOpensOnlyCurrentCandidateAsReadOnlySessionPinnedToLogicalVolume(t *testing.T) {
+func TestAuthorizedSelectionOpensOnlyCurrentCandidateAsReadOnlySessionPinnedToLogicalVolume(t *testing.T) {
 	ctx := context.Background()
 	directory := t.TempDir()
 	selectedRoot := filepath.Join(directory, "selected")
@@ -84,12 +84,14 @@ func TestHumanSelectionOpensOnlyCurrentCandidateAsReadOnlySessionPinnedToLogical
 	}); !errors.Is(err, coreintake.ErrStaleCandidate) {
 		t.Fatalf("stale selection was accepted: %v", err)
 	}
-	if _, err := service.Select(ctx, SelectRequest{
+	archivistAccess, err := service.Select(ctx, SelectRequest{
 		SessionID: "INTAKE-ARCHIVIST", VolumeID: "VOLUME-2", ExpectedCandidateRevision: 2,
 		Actor: command.Actor{Type: vocabulary.ActorArchivist, ID: "archivist-1"}, SelectedAt: now.Add(3 * time.Minute),
-	}); !errors.Is(err, coreintake.ErrHumanSelectionRequired) {
-		t.Fatalf("non-human selection was accepted: %v", err)
+	})
+	if err != nil || archivistAccess.Session.SelectedByType != vocabulary.ActorArchivist || archivistAccess.Session.SelectedBy != "archivist-1" {
+		t.Fatalf("authenticated Archivist selection provenance was not stored: access=%+v err=%v", archivistAccess, err)
 	}
+	defer archivistAccess.Close()
 	remote, err := service.Select(ctx, SelectRequest{
 		SessionID: "INTAKE-REMOTE", VolumeID: "VOLUME-REMOTE", ExpectedCandidateRevision: 1,
 		Actor: command.Actor{Type: vocabulary.ActorHuman, ID: "operator-1"}, SelectedAt: now.Add(4 * time.Minute),
@@ -102,7 +104,7 @@ func TestHumanSelectionOpensOnlyCurrentCandidateAsReadOnlySessionPinnedToLogical
 		t.Fatal(err)
 	}
 	selectedStorageIDs, err := inventory.SelectedStorageIDs(ctx, "WORKER-1")
-	if err != nil || len(selectedStorageIDs) != 2 || selectedStorageIDs[0] != "SOURCE-1" || selectedStorageIDs[1] != "SOURCE-REMOTE" {
+	if err != nil || len(selectedStorageIDs) != 3 || selectedStorageIDs[0] != "SOURCE-1" || selectedStorageIDs[1] != "SOURCE-2" || selectedStorageIDs[2] != "SOURCE-REMOTE" {
 		t.Fatalf("Worker did not receive only the current connected selections: ids=%v err=%v", selectedStorageIDs, err)
 	}
 }

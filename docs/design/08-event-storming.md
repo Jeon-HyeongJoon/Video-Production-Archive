@@ -99,13 +99,13 @@ flowchart LR
 
 ### 5.1 Archive Intake
 
-아카이브 실행의 영속 개체는 기존 run 명령 영수증과 분리된 `ArchiveRun`다. ArchiveRun는 담당자가 고른 Worker·원본 Storage·아카이브 Storage·FolderScope와 1·2단계 소유권을 고정한다. `ORG-012`
+아카이브 실행의 영속 개체는 기존 run 명령 영수증과 분리된 `ArchiveRun`다. ArchiveRun는 담당자 또는 인증된 Archivist가 현재 후보에서 명시적으로 고른 Worker·원본 Storage·아카이브 Storage·FolderScope, 선택 Actor와 1·2단계 소유권을 고정한다. `ORG-012`
 
 | 순서 | 실행자·계기 | 명령 | 결과 이벤트 후보 | 다음 동작 |
 |---:|---|---|---|---|
-| 1 | 담당자 | `SelectWorkerView` | 없음 | 해당 Worker의 드라이브·Storage만 투영 |
-| 2 | 담당자 | `SelectSourceAndArchiveStorage` | `DriveSelectionPinned` | 사람 선택 ID와 탐색 revision 고정 |
-| 3 | 담당자 | `FixFolderScope` | `FolderScopeFixed` | 일부·전체를 폴더 ID 집합으로 저장 |
+| 1 | 담당자 또는 인증된 Archivist | `ListArchiveIntakeCandidates` | 없음 | 절대경로 없는 현재 Worker·드라이브·Storage·폴더 후보 투영 |
+| 2 | 담당자 또는 인증된 Archivist | `SelectSourceAndArchiveStorage` | `DriveSelectionPinned` | 현재 후보 ID·candidate revision과 선택 Actor 고정 |
+| 3 | 담당자 또는 인증된 Archivist | `FixFolderScope` | `FolderScopeFixed` | 현재 탐색 revision의 일부·전체를 폴더 ID 집합으로 저장 |
 | 4 | 담당자 또는 허용된 Archivist | `StartOrganizationStage` | `ArchiveRunStarted` 후보 | Archive Storage 쓰기 예약, Worker 탐색·검사 시작 |
 | 5 | Control 결정 정책 | `RecordOrganizationDecision` | `OrganizationDecisionRecorded` | Worker 검사 관찰값을 고정하고 HOLD는 INPUT, 나머지는 1단계 Folder Job |
 | 6 | Worker | `PublishArchivePackage` | `ArchivePackageStored` | 한 벌 검증, package-level ArchiveCatalog 갱신 |
@@ -116,7 +116,7 @@ flowchart LR
 | 11 | 담당자 또는 허용된 Archivist | `VerifyArchiveCatalog` | `ArchiveCatalogVerified` 후보 | 결과 폴더·package·결과 영상·루트 CSV의 1:1과 폴더별 원본 행을 읽기 전용 대조 |
 | 12 | 담당자 또는 허용된 Archivist | `RebuildArchiveCatalog` | `ArchiveCatalogRebuilt` 후보 | 유효한 metadata·manifest에서 전체 projection을 검증 후 원자 교체 |
 
-Storage와 폴더 범위 선택은 담당자만 실행한다. Archivist는 고정 참조 안에서 1·2단계 시작과 현재 HOLD 목록·단일 근거 조회를 수행하고 최신 HOLD 하나에 명시적 분류를 추가할 수 있다. 선택 밖 분류와 파괴적 작업은 거부한다. Archivist Host가 offline이어도 Worker 실행은 계속되고 재호출 Turn만 기다린다. `ARC-010~011`, `COL-003`, `LRH-012`, `MCP-003~005`
+Storage와 폴더 범위 선택은 담당자 화면 또는 인증된 Archivist의 후보 MCP 경로에서만 실행한다. Archivist는 현재 구조화 후보의 ID·revision을 Turn에 먼저 고정하고 그 참조 안에서 1·2단계 시작과 현재 HOLD 목록·단일 근거 조회를 수행하며 최신 HOLD 하나에 명시적 분류를 추가할 수 있다. 오래되거나 후보 밖인 선택·임의 경로·파괴적 작업은 거부한다. Archivist Host가 offline이어도 Worker 실행은 계속되고 재호출 Turn만 기다린다. `ARC-010~011`, `COL-003`, `LRH-012`, `MCP-003~005`
 
 예외는 항목별로 격리한다. 손상 입력·지원하지 않는 codec은 해당 영상 실패, 일시 process 오류는 재시도, 원본 또는 네트워크 Storage 단절과 실행 중 용량 부족은 시도 횟수를 소비하지 않는 `WAITING/DEVICE`다. 실행 가능한 작업이 없으면 ArchiveRun을 완료로 보고하되 HOLD는 별도 확인 필요 상태로 유지한다.
 

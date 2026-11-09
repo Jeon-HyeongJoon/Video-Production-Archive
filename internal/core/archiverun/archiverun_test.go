@@ -36,8 +36,8 @@ func TestArchiveRunPersistsSelectionsFolderScopeAndStageOwnershipSeparatelyFromR
 			"folder_discovery_revision": 17,
 			"folder_ids":                []string{"FOLDER-C", "FOLDER-A", "FOLDER-B"},
 			"selected_by": map[string]any{
-				"type": command.HumanActor,
-				"id":   "OPERATOR-1",
+				"type": command.ArchivistActor,
+				"id":   "ARCHIVIST-1",
 			},
 		},
 		Reason: "start the selected archive run",
@@ -82,7 +82,7 @@ func TestArchiveRunPersistsSelectionsFolderScopeAndStageOwnershipSeparatelyFromR
 		state.SourceStorageID != "SOURCE-STORAGE-1" || state.ArchiveStorageID != "ARCHIVE-STORAGE-1" || state.StartIdempotencyKey != "ARCHIVE-RUN-1:create:v1" ||
 		state.SourceVolumeID != "VOLUME-WINDOWS-1" || state.SourcePhysicalDeviceID != "PHYSICAL-WINDOWS-1" ||
 		state.FolderDiscoveryRevision != 17 || !reflect.DeepEqual(state.FolderIDs, wantFolders) ||
-		state.SelectedBy != (command.Actor{Type: command.HumanActor, ID: "OPERATOR-1"}) ||
+		state.SelectedBy != (command.Actor{Type: command.ArchivistActor, ID: "ARCHIVIST-1"}) ||
 		!reflect.DeepEqual(state.StageOwnerships, wantStages) || !state.CreatedAt.Equal(createdAt.UTC()) {
 		t.Fatalf("persisted ArchiveRun lost fixed ownership data: %+v", state)
 	}
