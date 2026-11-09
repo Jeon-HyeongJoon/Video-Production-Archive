@@ -15,6 +15,7 @@ $turnId = "TURN-WINDOWS-$suffix"
 $requestId = "REQUEST-WINDOWS-$suffix"
 $archivistSession = @{
     session_id = $sessionId
+    name = "Windows acceptance $suffix"
     archivist_host_id = 'archivist-windows'
     cli_id = 'fixture-archivist'
 } | ConvertTo-Json -Compress
