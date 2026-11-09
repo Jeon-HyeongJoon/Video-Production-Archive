@@ -16,9 +16,7 @@ $requestId = "REQUEST-WINDOWS-$suffix"
 $archivistSession = @{
     session_id = $sessionId
     archivist_host_id = 'archivist-windows'
-    backend = 'EMBEDDED_CORE'
     cli_id = 'fixture-archivist'
-    workspace_root_id = 'video-project'
 } | ConvertTo-Json -Compress
 Invoke-RestMethod -Method Post -Uri "$control/api/v1/archivist-sessions" -WebSession $web -Headers $headers -ContentType 'application/json' -Body $archivistSession | Out-Null
 $turn = @{
