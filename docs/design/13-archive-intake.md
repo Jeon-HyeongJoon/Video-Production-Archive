@@ -87,7 +87,7 @@ Transcript 게시가 성공하면 Worker는 versioned 결정 규칙으로 구간
 
 ## 6. ArchivePackage와 ArchiveCatalog
 
-아카이브 저장소의 논리 구조는 다음과 같다. 결과 영상 하나가 ArchivePackage 하나를 소유하며 SOURCE_MEDIA 원본 파일은 넣지 않는다. 대신 원본 드라이브 ID, 원래 이름, 상대경로, checksum과 길이를 metadata에 기록한다.
+아카이브 저장소의 현재 layout v1 구조는 다음과 같다. 결과 영상 하나가 ArchivePackage 하나를 소유하며 SOURCE_MEDIA 원본 파일은 넣지 않는다. 대신 원본 드라이브 ID, 원래 이름, 상대경로, checksum과 길이를 metadata에 기록한다.
 
 ```text
 <아카이브 저장소>/
@@ -110,9 +110,19 @@ Transcript 게시가 성공하면 Worker는 versioned 결정 규칙으로 구간
 
 새 패키지는 처리 날짜로 나뉜 상대경로에 둔다. 결과 영상 파일명은 단일 입력이면 원래 영상명, 여러 컷 통합이면 MediaFolder의 마지막 이름에서 만들며 Windows에서 안전하도록 정규화한다. 패키지 ID는 이름과 별개인 불변 identity로 유지하고, metadata와 ArchiveCatalog에는 원래 이름과 전체 상대경로도 함께 남긴다. 화면은 처리 날짜·결과 영상명을 주 정보로, 패키지 ID를 추적용 보조 정보로 보여준다. 완료된 Folder Job의 `ORGANIZED_MEDIA` 출력은 원본 드라이브의 완료 내역에 ArchiveRun을 넘어 유지한다. ArchiveRun 상태만으로 완료 내역을 만들지 않으며 실제 ArchivePackage 출력과 출력 기록 시각을 기준으로 한다. 완료 내역은 출력의 Storage root를 제외한 Package 상대경로를 보존해 같은 ArchiveRun 상세의 정확한 결과로 이동한다. `ARC-013`, `DSH-023~025`
 
-ArchiveCatalog는 아카이브 저장소 최상단의 `archive-catalog.csv` 하나이며 원본 영상 하나당 한 행이다. 다른 ArchiveRun이나 원본 드라이브라도 같은 `ARCHIVE_PRIMARY`를 대상으로 하면 이 파일에 이어서 기록한다. 행 identity는 원본 드라이브 ID와 OriginalAsset ID의 조합이다. 앞 열은 사람이 읽는 `원본 생성 시각 | 원본 영상명`과 `아카이브 처리일 | 결과 영상명` 쌍이고, 두 날짜를 합치거나 서로 대체하지 않는다. 뒤에는 원본 상대경로·상태·판정, 길이·크기·컨테이너·전체 bitrate, video/audio stream 규격, 결과 Profile과 영상·Transcript·TranscriptText·Subtitle 상대경로를 두며 추적용 드라이브·자산·판정·패키지 ID와 checksum은 마지막에 둔다. 값이 관찰되지 않은 메타데이터는 추정하지 않고 빈 칸으로 남긴다.
+새 게시 형식인 layout v2는 저장소 root의 디렉터리 깊이를 결과 폴더 1단계로 고정한다. 각 결과 폴더에는 결과 영상 정확히 하나와 `metadata.json`, `video-info.csv`, 전사·자막, 파일 목록·event·manifest·README를 모두 최상단에 둔다. 공개 하위 디렉터리는 만들지 않는다. 폴더 이름은 처리일과 원본 영상 또는 MediaFolder 이름, package ID suffix로 만들되 identity는 metadata의 package ID다. 기존 layout v1은 읽기 호환을 유지하고 자동 이동하지 않는다. `ARC-015`
 
-상태 후보는 분류됨·보류·처리 중·보관됨·STT 완료·확정됨·실패다. 판정 추가와 결과 보관 때 StorageRoot의 배타 잠금을 잡고 기존 행과 새 행을 병합한 전체 현재 투영을 `archive-catalog.csv.partial`에 쓰고 파일 동기화·검증한 뒤 root-relative rename으로 원자 교체한다. process와 Worker가 달라도 같은 아카이브 Storage를 대상으로 한 두 게시가 서로의 행을 덮어쓰지 않는다. 기존 드라이브별 CSV는 최상단 파일의 첫 게시에서 병합하되 복구 근거로 남긴다. `ORG-009`, `MED-007`
+확정 전 2단계 파일 추가는 같은 결과 폴더에 새 리비전을 게시한다. 현재 파일은 사람이 보는 projection이고, 이전 revision의 metadata·files·events·manifest 및 변경 파일은 `.rNNNNNN.*` 이름의 불변 파일로 같은 최상단에 보존한다. 검증된 current projection을 게시한 뒤 `current.json`을 마지막에 원자 교체한다. `ARC-016`
+
+layout v1 ArchiveCatalog는 아카이브 저장소 최상단의 `archive-catalog.csv` 하나이며 원본 영상 하나당 한 행이다. 기존 파일은 읽기·복구 호환을 위해 유지한다.
+
+layout v2 ArchiveCatalog는 결과 폴더·ArchivePackage 하나당 한 행이다. 다른 ArchiveRun이나 원본 드라이브라도 같은 `ARCHIVE_PRIMARY`를 대상으로 하면 이 파일에 이어서 기록한다. 행 identity는 package ID이고 `archive_date | result_title`을 인접한 앞 열에 두며 날짜를 제목과 합친 값으로 저장하지 않는다. 뒤에는 layout version, 결과 폴더·영상 상대경로, package revision·manifest digest·상태·판정·Profile·원본 수·Transcript·TranscriptText·Subtitle 상대경로와 완료 시각을 두고 추적용 ID와 checksum은 마지막에 둔다. 값이 관찰되지 않은 메타데이터는 추정하지 않고 빈 칸으로 남긴다. `ORG-015`
+
+각 결과 폴더의 `video-info.csv`는 OriginalAsset 하나당 한 행이다. `원본 생성 시각 | 원본 영상명`을 인접한 앞 열에 두고 원본 상대경로·checksum·길이·크기·컨테이너·전체 bitrate·video/audio stream 규격·판정 ID를 기록한다. 다중 소스 결과는 이 파일에 N행을 쓰되 루트 ArchiveCatalog에는 패키지 행 하나만 쓴다. `metadata.json`은 package identity·layout version·현재 revision·provenance와 복구 계약을 소유하고 검색 projection을 중복 소유하지 않는다. `MED-008`
+
+layout v1의 상태 후보는 분류됨·보류·처리 중·보관됨·STT 완료·확정됨·실패다. layout v2의 루트 행은 ArchivePackage가 보관된 뒤 처음 생기므로 보관됨·STT 완료·확정됨만 투영하고, package가 생기기 전의 HOLD·처리 중·실패는 Control 원장과 작업 공간에 남긴다. package 보관과 새 리비전 게시 때 StorageRoot의 배타 잠금을 잡고 기존 행과 새 행을 병합한 전체 현재 투영을 `archive-catalog.csv.partial`에 쓰고 파일 동기화·검증한 뒤 root-relative rename으로 원자 교체한다. process와 Worker가 달라도 같은 아카이브 Storage를 대상으로 한 두 게시가 서로의 행을 덮어쓰지 않는다. 기존 드라이브별 CSV와 layout v1 카탈로그는 migration 입력으로 보존하고 layout v2 행과 암묵적으로 섞지 않는다. `ORG-009`, `MED-007`, `ORG-015`
+
+폴더와 CSV는 전용 대조 operation으로 검증한다. `VERIFY_ARCHIVE_CATALOG`는 root의 1단계 결과 폴더를 읽어 `결과 폴더 1 = package ID 1 = 결과 영상 1 = 루트 CSV 행 1`과 `video-info.csv`의 원본 수를 양방향으로 확인하고 누락·고아·중복·값 불일치·깊이 위반을 구조화해 보고한다. `REBUILD_ARCHIVE_CATALOG`는 유효한 metadata와 manifest에서 전체 CSV를 임시 생성하고 같은 검증을 통과한 뒤 동기화·원자 교체하며 package 파일을 고치거나 삭제하지 않는다. 사람은 `archive-media catalog verify|rebuild`로 직접 실행할 수 있고 Archivist는 임의 shell 대신 MCP Capability로 Control에 요청한다. `ARC-017~018`
 
 아카이브 작업 공간의 ArchiveCatalog 마지막 기록 시각은 해당 ArchiveRun에서 성공 완료된 1·2단계 `archive_catalog` Step 중 가장 최근의 영속 완료 시각이다. 실행 중이거나 실패한 게시 시도는 성공 기록 시각을 앞당기지 않는다. `DSH-027`
 
@@ -178,6 +188,8 @@ TRANSCRIBE_AUDIO
 CREATE_SUBTITLE
 REVISE_ARCHIVE_PACKAGE
 PUBLISH_ARCHIVE_CATALOG
+VERIFY_ARCHIVE_CATALOG
+REBUILD_ARCHIVE_CATALOG
 ```
 
 Control의 StepExecutionSpec은 Storage ID, 정규화 상대경로, checksum, profile reference와 예상 출력 ID만 보낸다. Worker는 실행 파일·로컬/UNC root·원격 endpoint·credential reference를 로컬 strict 설정에서 해석한다. FTP·SFTP Adapter는 임시 업로드와 다시 읽기, 목록, manifest checksum 및 원자 게시 또는 동등한 안전 게시를 검증해야 접근 가능으로 보고한다. 실제 Windows 외장 volume 관찰·사람 선택·비동기 folder inventory와 별도 1·2단계 렌더·QC·STT·패키지 실행은 실장비 수직 검증을 통과했다. 영상별 Worker FFprobe 원격 검사, 네트워크 공유와 FTP·SFTP Storage는 각 acceptance가 통과하기 전까지 `planned`다. `CFG-011~013`, `ORG-010`, `APP-007`
@@ -198,5 +210,8 @@ Control의 StepExecutionSpec은 Storage ID, 정규화 상대경로, checksum, pr
 | Q10 | HOLD가 남은 아카이브 실행의 완료 의미 | 실행 가능 작업이 없으면 완료 보고, HOLD 별도 표시 |
 | Q11 | 네트워크 Storage identity·접근 | UNC root·Secret Store reference·루트 식별 파일 |
 | Q12 | DEVICE 대기의 화면 분류 | 사람 조치 대기로 통일 |
+| Q13 | 새 ArchivePackage 디렉터리 깊이 | layout v2부터 Storage root 바로 아래 결과 폴더 1단계, 공개 sidecar는 폴더 최상단 |
+| Q14 | 폴더와 CSV의 행 단위 | 루트 ArchiveCatalog는 Package별 1행, 폴더 `video-info.csv`는 OriginalAsset별 N행 |
+| Q15 | 폴더와 ArchiveCatalog 대조 | typed `verify`와 검증 뒤 원자 교체하는 `rebuild`, package는 수정·삭제하지 않음 |
 
-Q1~Q12는 사용자의 “테스트 버전까지 권장안으로 진행” 결정에 따라 2026-10-31에 모두 확정했다. 실제 Windows 장치·CLI와 NAS가 필요한 acceptance만 장비 증적 전까지 `planned`로 둔다.
+Q1~Q12는 사용자의 “테스트 버전까지 권장안으로 진행” 결정에 따라 2026-10-31에 확정했다. Q13~Q15는 2026-11-09에 확정했으며 layout v2 writer·대조·재생성 integration test가 생길 때까지 해당 요구사항을 `planned`로 둔다. 기존 layout v1 기록은 자동 migration하지 않는다.

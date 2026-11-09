@@ -3372,6 +3372,78 @@
       "test_name": "TestCodexMCPBridgeExposesOnlyArchiveToolsAndPreservesTurnIdentity",
       "status": "implemented",
       "level": "integration"
+    },
+    {
+      "id": "ARC-015",
+      "design": "flat-archive-package-layout-v2",
+      "statement": "layout v2 ArchivePackage는 ARCHIVE_PRIMARY root 바로 아래 결과 폴더 한 단계에 결과 영상 정확히 하나와 모든 공개 sidecar를 두고 공개 하위 디렉터리를 만들지 않아야 한다.",
+      "given": "처리 날짜·사람이 읽는 결과명·불변 package ID와 결과 영상 및 metadata·video info·전사·자막·manifest sidecar가 있는 새 ArchivePackage가 있다.",
+      "when": "Worker가 layout v2 패키지를 ARCHIVE_PRIMARY에 게시한다.",
+      "then": "root의 직접 하위 결과 폴더 하나에 결과 영상 정확히 하나와 모든 공개 sidecar가 있고 metadata의 layout version·package ID가 일치하며 결과 폴더 아래에는 디렉터리가 없다.",
+      "test_file": "",
+      "test_name": "",
+      "status": "planned",
+      "level": "integration"
+    },
+    {
+      "id": "ARC-016",
+      "design": "flat-archive-package-revisions-v2",
+      "statement": "layout v2 ArchivePackage의 확정 전 파일 추가는 같은 결과 폴더의 revision-qualified 불변 파일을 보존하고 검증된 현재 projection 뒤 current pointer를 마지막에 원자 교체해야 한다.",
+      "given": "보관됨인 layout v2 1단계 패키지와 뒤에 생성된 Transcript·TranscriptText·Subtitle이 있다.",
+      "when": "Worker가 2단계 산출물을 새 패키지 리비전으로 게시한다.",
+      "then": "이전 리비전의 bytes와 manifest는 같은 결과 폴더의 revision-qualified 파일로 바뀌지 않고 남으며 공개 현재 파일과 current.json은 새 manifest 검증 뒤에만 새 리비전을 가리킨다.",
+      "test_file": "",
+      "test_name": "",
+      "status": "planned",
+      "level": "integration"
+    },
+    {
+      "id": "MED-008",
+      "design": "archive-package-video-info-csv",
+      "statement": "layout v2 ArchivePackage는 결과 폴더 최상단 video-info.csv에 그 결과를 만든 OriginalAsset별 사람이 읽는 기술정보를 한 행씩 기록해야 한다.",
+      "given": "원본 생성 시각이 있거나 없는 단일·다중 OriginalAsset과 각 checksum·상대경로·MediaInspection·OrganizationDecision이 있다.",
+      "when": "Worker가 layout v2 ArchivePackage의 영상 정보 CSV를 게시한다.",
+      "then": "RFC 4180 파일은 OriginalAsset마다 정확히 한 행을 가지며 원본 생성 시각과 영상명을 인접한 앞 열에 두고 관찰된 기술정보와 추적 ID를 보존하되 날짜를 추정하거나 Storage 절대경로를 포함하지 않는다.",
+      "test_file": "",
+      "test_name": "",
+      "status": "planned",
+      "level": "integration"
+    },
+    {
+      "id": "ORG-015",
+      "design": "package-level-archive-catalog-v2",
+      "statement": "layout v2 ArchiveCatalog는 같은 ARCHIVE_PRIMARY의 결과 폴더·ArchivePackage마다 루트 archive-catalog.csv 행 하나를 유지하고 OriginalAsset 상세 행은 PackageVideoInfo에만 두어야 한다.",
+      "given": "같은 ARCHIVE_PRIMARY의 서로 다른 ArchiveRun에서 게시된 단일 원본 패키지와 다중 원본 패키지 및 각 결과 폴더가 있다.",
+      "when": "각 package가 보관되거나 새 리비전이 게시되어 layout v2 ArchiveCatalog를 갱신한다.",
+      "then": "package ID별 RFC 4180 행이 정확히 하나씩 있고 각 행은 결과 폴더·영상·현재 revision·manifest·상태·원본 수와 sidecar 상대경로에 대응하며 다중 원본도 루트에는 한 행만 남는다.",
+      "test_file": "",
+      "test_name": "",
+      "status": "planned",
+      "level": "integration"
+    },
+    {
+      "id": "ARC-017",
+      "design": "archive-catalog-read-only-reconciliation",
+      "statement": "ArchiveCatalog 검증은 Archive Storage의 package 폴더와 루트 CSV를 package ID로 양방향 대조하고 어떤 파일도 변경하지 않은 채 일치 상태를 구조화해 보고해야 한다.",
+      "given": "정상 package와 catalog 행, 행이 없거나 고아인 package, 중복 ID·다른 revision 또는 manifest 및 잘못된 결과 폴더 깊이가 섞인 격리 Archive Storage가 있다.",
+      "when": "archive-media catalog verify operation을 실행한다.",
+      "then": "모든 결과 폴더와 catalog 행을 CURRENT·CATALOG_MISSING·CATALOG_ORPHAN·CATALOG_MISMATCH·LAYOUT_INVALID 중 정확한 상태로 보고하고 실행 전후 Storage bytes는 같다.",
+      "test_file": "",
+      "test_name": "",
+      "status": "planned",
+      "level": "integration"
+    },
+    {
+      "id": "ARC-018",
+      "design": "archive-catalog-verified-rebuild",
+      "statement": "ArchiveCatalog 재생성은 유효한 package metadata·manifest에서 package별 전체 CSV를 임시 작성·대조한 뒤 root 파일만 동기화·원자 교체하고 package 내용은 바꾸지 않아야 한다.",
+      "given": "유효한 layout v2 package 폴더들과 누락·고아·오래된 행이 있는 archive-catalog.csv 및 교체 직전 실패를 주입할 수 있는 StorageRoot가 있다.",
+      "when": "archive-media catalog rebuild operation을 정상 실행하거나 교체 전에 실패시킨다.",
+      "then": "정상 실행은 모든 유효 package와 1:1인 검증된 CSV 하나를 게시하고 실패 실행은 기존 CSV를 그대로 유지하며 두 경우 모두 package 폴더와 파일 bytes는 바뀌지 않는다.",
+      "test_file": "",
+      "test_name": "",
+      "status": "planned",
+      "level": "integration"
     }
   ]
 }

@@ -3924,6 +3924,48 @@
       "decided": "2026-10-20"
     },
     {
+      "id": "archive-package-layout",
+      "layer": "product",
+      "kind": "enum",
+      "name": {
+        "ko": "아카이브 패키지 배치 형식",
+        "en": "Archive Package Layout"
+      },
+      "code_name": "ArchivePackageLayout",
+      "definition": "Archive Storage에서 ArchivePackage의 결과 폴더와 리비전 파일을 배치하는 versioned 형식.",
+      "values": [
+        {
+          "id": "DATE_REVISION_TREE",
+          "description": "layout v1. packages/YYYY/MM/DD/<package ID>/revisions/<revision> 구조를 사용하는 현재 구현 형식."
+        },
+        {
+          "id": "FLAT_RESULT_FOLDER",
+          "description": "layout v2. Storage root 바로 아래 결과 폴더 하나에 결과 영상과 공개 sidecar 및 flat revision 파일을 두는 목표 형식."
+        }
+      ],
+      "rules": [
+        "metadata.json의 layout_version으로 해석하며 경로 모양만 보고 version을 추측하지 않는다.",
+        "DATE_REVISION_TREE 패키지는 읽기 호환을 유지하고 FLAT_RESULT_FOLDER로 자동 이동하거나 이름을 바꾸지 않는다.",
+        "FLAT_RESULT_FOLDER는 결과 폴더 아래 공개 하위 디렉터리를 만들지 않는다."
+      ],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "archive-package"
+        }
+      ],
+      "sources": [
+        "사용자 결정 2026-11-09: 새 기록은 Storage root 바로 아래 결과 폴더 1단계로 배치",
+        "docs/design/04-data-archive.md §6",
+        "requirements ARC-015~016"
+      ],
+      "decided": "2026-11-09"
+    },
+    {
       "id": "archive-package",
       "layer": "product",
       "kind": "entity",
@@ -3932,13 +3974,16 @@
         "en": "Archive Package"
       },
       "code_name": "ArchivePackage",
-      "definition": "중앙 DB 없이도 metadata·파일 목록·event·manifest로 복원할 수 있는 기록물 보관 단위. 불변 식별자는 VP-YYYYMMDD-NNNN 형식이고 사람이 읽는 표시명과 결과 파일명은 원본 정보에서 별도로 만든다.",
+      "definition": "결과 영상 하나와 그 provenance·기술정보·전사·자막·manifest를 중앙 DB 없이 복원할 수 있게 묶은 기록물 보관 단위. 불변 식별자는 VP-YYYYMMDD-NNNN 형식이고 사람이 읽는 결과 폴더명과 영상 파일명은 원본 정보에서 별도로 만든다.",
       "rules": [
         "ARCHIVE_PRIMARY의 한 벌이 검증되면 보관됨이며 확정 전 파일 추가는 manifest가 다른 새 리비전으로 남긴다.",
         "아카이브 확정 후에는 고치지 않는다. 고쳐야 하면 새 패키지가 이전 패키지를 대체한다.",
         "Archive Intake에서는 결과 영상 하나당 패키지 하나를 만들고 SOURCE_MEDIA 원본 파일은 넣지 않으며 원본 추적 metadata만 포함한다.",
-        "패키지 ID를 원본 이름으로 대체하지 않는다. 새 패키지의 상대경로는 ID의 처리 날짜로 나누고 결과 영상 파일명은 단일 입력의 원래 이름 또는 다중 입력 MediaFolder 이름을 Windows 안전 이름으로 정규화한다.",
-        "원래 이름과 전체 상대경로는 표시용 이름과 별개로 metadata와 ArchiveCatalog에 보존한다."
+        "패키지 ID를 원본 이름이나 폴더 이름으로 대체하지 않는다. 결과 영상 파일명은 단일 입력의 원래 이름 또는 다중 입력 MediaFolder 이름을 Windows 안전 이름으로 정규화한다.",
+        "layout v1의 날짜·revision tree는 읽기 호환을 유지한다. layout v2의 새 패키지는 Storage root 바로 아래 결과 폴더 한 단계에 결과 영상 정확히 하나와 모든 공개 sidecar를 둔다.",
+        "layout v2의 공개 파일은 현재 리비전 projection이고 이전 리비전 bytes와 manifest는 같은 폴더의 revision-qualified 파일로 변경 없이 보존한다.",
+        "metadata는 package identity·layout version·현재 revision·원본 참조·provenance·복구 계약을 소유하며 검색 인덱스를 중복 소유하지 않는다.",
+        "원래 이름과 전체 상대경로는 표시용 이름과 별개로 metadata와 PackageVideoInfo에 보존한다."
       ],
       "forbidden": {
         "words": [
@@ -3959,9 +4004,11 @@
       "sources": [
         "사용자 결정 D5~D6: 한 벌 보관과 확정을 분리하고 DB 독립 패키지 사용",
         "docs/design/04-data-archive.md §6",
-        "사용자 결정 2026-11-04: 날짜와 원본 폴더·영상 이름으로 결과를 사람이 분류"
+        "사용자 결정 2026-11-04: 날짜와 원본 폴더·영상 이름으로 결과를 사람이 분류",
+        "사용자 결정 2026-11-09: 결과 폴더 1단계와 폴더 최상단 sidecar",
+        "requirements ARC-015~016"
       ],
-      "decided": "2026-10-31"
+      "decided": "2026-11-09"
     },
     {
       "id": "archive-completion-entry",
@@ -5205,6 +5252,48 @@
       "decided": "2026-10-30"
     },
     {
+      "id": "archive-package-video-info",
+      "layer": "product",
+      "kind": "record",
+      "name": {
+        "ko": "패키지 영상 정보",
+        "en": "Archive Package Video Info"
+      },
+      "code_name": "PackageVideoInfo",
+      "definition": "ArchivePackage 결과 폴더의 video-info.csv에 원본 영상 하나당 한 행으로 내보내는 상세 기술정보 기록.",
+      "rules": [
+        "원본 생성 시각과 원본 영상명을 인접한 앞 열에 두고 두 값을 합치지 않는다.",
+        "OriginalAsset ID·원본 상대경로·checksum·길이·크기·컨테이너·video/audio stream 규격과 판정 ID를 기록한다.",
+        "다중 소스 결과는 OriginalAsset 수만큼 행을 가지지만 ArchiveCatalog에는 ArchivePackage 행 하나만 대응한다.",
+        "관찰되지 않은 기술정보를 다른 날짜나 stream 값에서 추정하지 않는다.",
+        "Storage 절대 root와 mount path를 포함하지 않는다."
+      ],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "part-of",
+          "target": "archive-package"
+        },
+        {
+          "type": "refers-to",
+          "target": "original-asset"
+        },
+        {
+          "type": "refers-to",
+          "target": "media-inspection"
+        }
+      ],
+      "sources": [
+        "사용자 결정 2026-11-09: 검색 CSV와 폴더별 원본 기술정보를 분리",
+        "docs/design/13-archive-intake.md §6",
+        "requirements MED-008"
+      ],
+      "decided": "2026-11-09"
+    },
+    {
       "id": "archive-catalog",
       "layer": "product",
       "kind": "record",
@@ -5213,17 +5302,19 @@
         "en": "Archive Catalog"
       },
       "code_name": "ArchiveCatalog",
-      "definition": "같은 아카이브 저장소를 대상으로 한 모든 작업과 원본 드라이브의 OriginalAsset 기술정보·추가 전용 판정·ArchivePackage ID·결과 상대경로·상태를 원본 영상 한 개당 한 행으로 최상단 단일 CSV에 내보낸 기록.",
+      "definition": "같은 아카이브 저장소의 ArchivePackage identity·결과 폴더·현재 리비전·상태와 검색 필드를 패키지 하나당 한 행으로 최상단 단일 CSV에 내보낸 재생성 가능한 검색 projection.",
       "rules": [
-        "보류 입력과 소스 시퀀스 Clip도 누락하지 않는다.",
         "Storage 절대 root와 mount path를 포함하지 않는다.",
-        "ArchivePackage files.csv와 다른 범위를 가진다.",
+        "ArchivePackage files.csv와 PackageVideoInfo의 범위와 다르다.",
         "같은 ARCHIVE_PRIMARY의 다른 ArchiveRun과 원본 드라이브도 archive-catalog.csv 하나에 누적한다.",
-        "원본 생성 시각과 원본 영상명, 아카이브 처리일과 결과 영상명을 각각 인접한 앞 열에 두고 날짜를 합치거나 대체하지 않는다.",
+        "layout v2의 행 identity는 package ID이며 결과 폴더 하나·결과 영상 하나·ArchiveCatalog 행 하나가 양방향으로 대응한다.",
+        "아카이브 처리일과 결과 영상명을 인접한 앞 열에 두고 날짜와 이름을 합치거나 대체하지 않는다.",
         "추적용 ID와 checksum은 사람 중심 열 뒤에 둔다.",
-        "판정이 추가되거나 1·2단계 결과가 보관될 때 기존 행과 병합한 현재 전체 투영을 임시 파일로 검증한 뒤 원자 교체한다.",
+        "package가 보관되거나 새 리비전이 게시될 때 기존 행과 병합한 현재 전체 투영을 임시 파일로 검증한 뒤 원자 교체한다.",
         "동일한 ARCHIVE_PRIMARY의 동시 게시자는 StorageRoot 배타 잠금 아래 현재 파일을 다시 읽고 병합해 행 유실을 막는다.",
-        "작업 공간의 마지막 기록 시각은 성공 완료된 가장 최근 archive_catalog Step의 영속 완료 시각이다."
+        "작업 공간의 마지막 기록 시각은 성공 완료된 가장 최근 archive_catalog Step의 영속 완료 시각이다.",
+        "layout v1의 OriginalAsset별 행은 legacy schema로 읽기 호환을 유지하고 layout v2 행과 암묵적으로 섞지 않는다.",
+        "검색 속도를 위한 projection이며 package metadata·manifest보다 우선하는 복구 원본이 아니다."
       ],
       "forbidden": {
         "words": [],
@@ -5252,9 +5343,108 @@
       "sources": [
         "사용자 플로우: 메타데이터 포함 영상 정보를 사람이 읽는 CSV로 생성",
         "사용자 결정 2026-11-06: 같은 아카이브 대상 경로 최상단의 단일 archive-catalog.csv",
+        "사용자 결정 2026-11-09: ArchivePackage와 루트 CSV 행을 1:1로 매핑",
         "docs/design/13-archive-intake.md"
       ],
-      "decided": "2026-10-31"
+      "decided": "2026-11-09"
+    },
+    {
+      "id": "archive-catalog-consistency-state",
+      "layer": "product",
+      "kind": "enum",
+      "name": {
+        "ko": "아카이브 카탈로그 일치 상태",
+        "en": "Archive Catalog Consistency State"
+      },
+      "code_name": "ArchiveCatalogConsistencyState",
+      "definition": "ArchivePackage 결과 폴더와 루트 ArchiveCatalog 행의 대조 결과.",
+      "values": [
+        {
+          "id": "CURRENT",
+          "description": "폴더·package·결과 영상·catalog 행의 identity와 digest가 일치한다."
+        },
+        {
+          "id": "CATALOG_PENDING",
+          "description": "package 게시가 검증됐지만 catalog 원자 교체가 아직 완료되지 않았다."
+        },
+        {
+          "id": "CATALOG_MISSING",
+          "description": "유효한 package 폴더에 대응하는 catalog 행이 없다."
+        },
+        {
+          "id": "CATALOG_ORPHAN",
+          "description": "catalog 행이 가리키는 유효한 package 폴더가 없다."
+        },
+        {
+          "id": "CATALOG_MISMATCH",
+          "description": "같은 identity의 revision·manifest·결과 상대경로 또는 원본 수가 다르다."
+        },
+        {
+          "id": "LAYOUT_INVALID",
+          "description": "결과 폴더 깊이, 필수 sidecar 또는 결과 영상 개수가 layout 계약을 어긴다."
+        }
+      ],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "archive-catalog"
+        },
+        {
+          "type": "refers-to",
+          "target": "archive-package"
+        }
+      ],
+      "sources": [
+        "docs/design/04-data-archive.md §6",
+        "requirements ARC-017"
+      ],
+      "decided": "2026-11-09"
+    },
+    {
+      "id": "archive-catalog-reconciliation",
+      "layer": "product",
+      "kind": "activity",
+      "name": {
+        "ko": "아카이브 카탈로그 대조",
+        "en": "Archive Catalog Reconciliation"
+      },
+      "code_name": "ArchiveCatalogReconciliation",
+      "definition": "Archive Storage의 결과 폴더와 루트 ArchiveCatalog를 package ID로 양방향 검증하고 필요하면 package 원본에서 catalog projection만 다시 만드는 활동.",
+      "rules": [
+        "verify는 읽기 전용이며 누락·고아·중복·값 불일치·layout 위반을 구조화해 보고한다.",
+        "rebuild는 유효한 metadata·manifest만 읽어 전체 CSV를 임시 작성하고 schema·행 유일성·1:1 대응을 검증한 뒤 동기화·원자 교체한다.",
+        "package 폴더와 package 파일을 수정·이동·삭제하지 않는다.",
+        "임의 shell script가 아니라 MediaOperation Port의 typed operation으로 제공한다.",
+        "Archivist는 Storage 경로를 직접 탐색하지 않고 MCP Capability로 요청하며 Storage에 접근 가능한 Worker가 실행한다."
+      ],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "archive-catalog"
+        },
+        {
+          "type": "refers-to",
+          "target": "archive-package"
+        },
+        {
+          "type": "refers-to",
+          "target": "media-operation"
+        }
+      ],
+      "sources": [
+        "사용자 결정 2026-11-09: 각 폴더와 CSV 기록을 1:1로 매핑하는 실행 기능",
+        "docs/design/13-archive-intake.md §6",
+        "requirements ARC-017~018"
+      ],
+      "decided": "2026-11-09"
     },
     {
       "id": "step-execution-spec",

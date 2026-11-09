@@ -47,7 +47,7 @@ flowchart LR
 
 행사 기록, VJ 통합, 최종 편집본은 원본 자산 이후 서로 다른 템플릿으로 작업을 만들지만, 단계 실행과 아카이브 확정은 같은 공통 흐름을 사용한다.
 
-Archive Intake에서는 담당자가 Worker·원본 드라이브·아카이브 저장소·탐색 revision의 폴더 범위를 고른 뒤 1단계를 시작한다. Worker가 탐색·검사하고 `OrganizationDecisionRecorded`를 남긴다. `HOLD`는 `WaitReason.INPUT`으로 사람 또는 허용된 Archivist의 명시적 분류를 기다리며 다른 폴더를 막지 않는다. 비보류 Folder Job은 렌더·QC·ARCHIVE_PRIMARY 보관까지만 수행하고 STT는 별도 2단계 Command로 시작한다. `DEV-010`, `ORG-001~011`, `PIP-007~009`, `APP-002`, `APP-006`
+Archive Intake에서는 담당자가 Worker·원본 드라이브·아카이브 저장소·탐색 revision의 폴더 범위를 고른 뒤 1단계를 시작한다. Worker는 탐색·검사 관찰값을 보고하고 Control의 결정 정책이 `OrganizationDecisionRecorded`를 남긴다. `HOLD`는 `WaitReason.INPUT`으로 사람 또는 허용된 Archivist의 명시적 분류를 기다리며 다른 폴더를 막지 않는다. 비보류 Folder Job은 렌더·QC·ARCHIVE_PRIMARY 보관까지만 수행하고 STT는 별도 2단계 Command로 시작한다. `DEV-010`, `ORG-001~011`, `PIP-007~009`, `APP-002`, `APP-006`
 
 완료된 같은 원본 범위를 다시 시작하면 새 ArchiveRun이 독립된 검사·판정·Folder Job을 소유한다. 동일한 Observation과 OriginalAsset identity는 중복 등록하지 않고 재사용하며, 같은 ArchiveRun의 멱등 재전송과 새 ArchiveRun 시작을 구분한다. `APP-002`
 
@@ -107,16 +107,20 @@ flowchart LR
 | 2 | 담당자 | `SelectSourceAndArchiveStorage` | `DriveSelectionPinned` | 사람 선택 ID와 탐색 revision 고정 |
 | 3 | 담당자 | `FixFolderScope` | `FolderScopeFixed` | 일부·전체를 폴더 ID 집합으로 저장 |
 | 4 | 담당자 또는 허용된 Archivist | `StartOrganizationStage` | `ArchiveRunStarted` 후보 | Archive Storage 쓰기 예약, Worker 탐색·검사 시작 |
-| 5 | Worker | `RecordOrganizationDecision` | `OrganizationDecisionRecorded` | HOLD는 INPUT, 나머지는 1단계 Folder Job |
-| 6 | Worker | `PublishArchivePackage` | `ArchivePackageStored` | 한 벌 검증, ArchiveCatalog 갱신 |
+| 5 | Control 결정 정책 | `RecordOrganizationDecision` | `OrganizationDecisionRecorded` | Worker 검사 관찰값을 고정하고 HOLD는 INPUT, 나머지는 1단계 Folder Job |
+| 6 | Worker | `PublishArchivePackage` | `ArchivePackageStored` | 한 벌 검증, package-level ArchiveCatalog 갱신 |
 | 7 | 1단계 실행 작업 없음 | `EnableTranscriptionStage` | projection만 갱신 | HOLD는 gate와 대상에서 제외 |
 | 8 | 담당자 또는 허용된 Archivist | `StartTranscriptionStage` | `TranscriptionStageStarted` | 대상 녹화영상에 2단계 작업 생성 |
 | 9 | Worker | `ReviseArchivePackage` | `ArchivePackageRevisionStored` | Transcript·Subtitle 추가, ArchiveCatalog 갱신 |
 | 10 | 단계 완료 또는 새 HOLD | `RecallArchivistSession` | `SystemArchivistTurnQueued` | 같은 Session에 계기별 한 번만 제출 |
+| 11 | 담당자 또는 허용된 Archivist | `VerifyArchiveCatalog` | `ArchiveCatalogVerified` 후보 | 결과 폴더·package·결과 영상·루트 CSV의 1:1과 폴더별 원본 행을 읽기 전용 대조 |
+| 12 | 담당자 또는 허용된 Archivist | `RebuildArchiveCatalog` | `ArchiveCatalogRebuilt` 후보 | 유효한 metadata·manifest에서 전체 projection을 검증 후 원자 교체 |
 
 Storage와 폴더 범위 선택은 담당자만 실행한다. Archivist는 고정 참조 안에서 1·2단계 시작과 현재 HOLD 목록·단일 근거 조회를 수행하고, 허용된 제어 모드에서는 최신 HOLD 하나에 명시적 분류를 추가할 수 있다. 선택 밖 분류와 파괴적 작업은 거부한다. Archivist Host가 offline이어도 Worker 실행은 계속되고 재호출 Turn만 기다린다. `ARC-010~011`, `COL-003`, `LRH-012`, `MCP-003~005`
 
-예외는 항목별로 격리한다. 손상 입력·지원하지 않는 codec은 해당 영상 실패, 일시 process 오류는 재시도, 원본 또는 네트워크 Storage 단절은 시도 횟수를 소비하지 않는 `WAITING/DEVICE`다. 실행 중 용량 부족의 의미는 Q6, HOLD가 남은 완료 의미는 Q10에서 결정한다.
+예외는 항목별로 격리한다. 손상 입력·지원하지 않는 codec은 해당 영상 실패, 일시 process 오류는 재시도, 원본 또는 네트워크 Storage 단절과 실행 중 용량 부족은 시도 횟수를 소비하지 않는 `WAITING/DEVICE`다. 실행 가능한 작업이 없으면 ArchiveRun을 완료로 보고하되 HOLD는 별도 확인 필요 상태로 유지한다.
+
+layout v2는 Archive Storage root 바로 아래 결과 폴더 한 단계만 허용한다. 결과 폴더 하나는 ArchivePackage 하나와 결과 영상 하나를 소유하고 루트 ArchiveCatalog 한 행에 대응한다. 다중 입력의 상세 기술정보는 폴더 최상단 `video-info.csv`의 OriginalAsset별 행으로 분리한다. package metadata와 manifest가 복구 원본이고 ArchiveCatalog는 다시 만들 수 있는 검색 projection이다. 기존 layout v1은 읽기 호환을 유지하며 자동 migration하지 않는다. `ARC-015~018`, `MED-008`, `ORG-015`
 
 ## 6. 작업과 단계 실행
 
@@ -303,6 +307,7 @@ RecordApproval(target=Volume revision)
 | Artifact | provenance 완전성, 검증 후 한 번만 게시 | 임시 출력 |
 | Approval | 승인자, 대상, 대상 리비전, 결정, 사유, 근거의 추가 전용 기록 | 대상 자체의 상태 |
 | ArchivePackage | 구성 manifest, QC·승인·사본 증적, 확정과 대체 불변식 | 각 저장소의 파일 복사 실행 |
+| ArchiveCatalog projection | package ID별 행 유일성, 결과 폴더·결과 영상과 양방향 1:1, 원자 교체 | package 파일 수정·삭제, OriginalAsset별 상세 기술정보 |
 | Volume | mount 상태, lock, eject pending, format 진행 상태 | 업무 메타데이터 해석 |
 | Worker | 연결·heartbeat·수락 상태와 보고한 자원 | Step의 업무 상태 |
 | Provider 계정 | 상태, cooldown, budget, 기능·데이터 정책 | Job과 Step 상태 |
@@ -346,10 +351,11 @@ CommandRecord는 감사와 멱등성의 영속 기록이지만 업무 Aggregate 
 | ES-12 | ArchivePackage import가 과거 Event를 중복 생성할 위험 | import prototype을 제품 복원 명령과 실제 패키지에 연결해야 함 | `ARC-007`(planned) |
 | ES-13 | Volume, Worker, Provider 계정의 생애주기 상태 집합이 없음 | 이벤트 이름을 확정하기 전에 각 상태 집합과 허용 전이를 정의 | 결정 필요 |
 | ES-14 | ready Step이 여러 Job·Worker에 걸쳐 있을 때 순서와 자원 예약 원자성이 없음 | 영속 ready_at·aging·Job dispatch sequence로 후보를 고르고 StepReserved·ResourceReservation·ExecutionLease를 한 Unit of Work로 확정 | `dispatch-policy`, `resource-reservation`, `DSP-001~003`으로 고정 |
+| ES-15 | 사람이 바꿀 수 있는 결과 폴더와 루트 CSV가 어긋날 수 있음 | package metadata·manifest를 원본으로 읽기 전용 대조하고 검증된 전체 CSV만 원자 교체 | `ARC-017~018`(planned) |
 
 ## 15. 요구사항으로 내리는 순서
 
-1. 아직 열린 ES-03, ES-13과 Archive Intake Q2~Q12의 용어·상태·일관성 경계를 결정한다.
+1. 아직 열린 ES-03과 ES-13의 용어·상태·일관성 경계를 결정한다. Archive Intake Q1~Q15는 13번 설계에서 확정했다.
 2. 대용량 파일 입고와 작업 공간 드라이브 해제를 첫 Adapter 수직 슬라이스로 연결한다.
 3. 영속 Dispatch Queue, Worker resource snapshot과 ResourceReservation·ExecutionLease Unit of Work를 연결한다.
 4. SQLite projection·migration·backup/restore 요구사항을 추가하고 기존 `PER-001` Command Store에 연결한다.

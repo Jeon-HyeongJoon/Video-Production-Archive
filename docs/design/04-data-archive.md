@@ -127,6 +127,8 @@ Transcript payload도 OriginalAsset과 게시 시각을 조회 키로 함께 저
 
 Archive Intake의 ArchivePackage는 결과 영상 하나당 하나다. SOURCE_MEDIA 원본 파일은 복사하지 않고 원본 드라이브 identity·원래 이름·상대경로·checksum·길이를 metadata에 남긴다.
 
+현재 구현된 layout v1은 기존 기록의 읽기 호환과 복원을 위해 유지한다.
+
 ```text
 <아카이브 저장소>/
 ├── packages/
@@ -146,13 +148,43 @@ Archive Intake의 ArchivePackage는 결과 영상 하나당 하나다. SOURCE_ME
 
 패키지 ID는 멱등성과 참조 무결성을 위한 불변 기계 식별자이고 디렉터리는 ID의 처리 날짜로 `YYYY/MM/DD`까지 나눈다. 결과 영상은 단일 입력이면 원래 영상명의 확장자를 `.mp4`로 바꾸고, 여러 컷 통합이면 MediaFolder의 마지막 이름을 사용한다. Windows 금지문자·예약어·후행 점과 공백·과도한 길이는 결정적으로 안전한 이름으로 정규화한다. `metadata.json`은 처리 날짜, MediaFolder, 표시명, 실제 결과 영상 파일명과 함께 원래 이름·전체 상대경로·패키지 ID를 보존하므로 사람이 읽는 이름을 바꾸어도 identity를 잃지 않는다. `ARC-013`
 
+새 게시 형식인 layout v2의 목표 구조는 다음과 같다. 저장소 root 바로 아래 결과 폴더 하나만 두고, 결과 영상 하나와 공개 sidecar를 그 폴더의 최상단에 둔다. `packages/YYYY/MM/DD`, `revisions/<revision>` 같은 공개 하위 디렉터리는 만들지 않는다. 기존 layout v1 패키지를 자동 이동하거나 이름을 바꾸지 않으며 v1 reader를 계속 유지한다. `ARC-015`
+
+```text
+<아카이브 저장소>/
+├── archive-catalog.csv
+└── 2026-11-09_행사명__a1b2/
+    ├── 행사명.mp4
+    ├── metadata.json
+    ├── video-info.csv
+    ├── transcript.json
+    ├── transcript.txt
+    ├── subtitle.srt
+    ├── files.csv
+    ├── events.jsonl
+    ├── manifest-sha256.txt
+    ├── README.md
+    ├── .r000001.metadata.json
+    ├── .r000001.files.csv
+    ├── .r000001.events.jsonl
+    ├── .r000001.manifest-sha256.txt
+    └── current.json
+```
+
+layout v2의 결과 폴더 이름은 `처리일_사람이 읽는 결과명__패키지 ID suffix`로 결정적으로 만들고, `metadata.json`의 package ID가 identity다. 폴더 이름은 identity가 아니며 사람이 바꾸거나 충돌 정규화가 일어나도 package ID로 대조한다. 공개 파일은 현재 리비전 projection이다. 불변 리비전 기록과 그 리비전에서 새로 생기거나 바뀐 파일은 `.rNNNNNN.*` 이름으로 같은 폴더 최상단에 남기고, 검증된 공개 projection을 교체한 뒤 `current.json`을 마지막에 원자 교체한다. 따라서 디렉터리 깊이를 늘리지 않으면서 이전 리비전 bytes와 manifest를 보존한다. `ARC-016`
+
 - `metadata.json`: 기계가 읽는 엔티티·관계·provenance
+- `video-info.csv`: 이 결과를 만든 OriginalAsset별 원래 이름·상대경로·checksum·길이·크기·컨테이너·video/audio stream 기술정보와 판정
 - `files.csv`: 스프레드시트로 열 수 있는 파일 목록
 - `events.jsonl`: append-only 처리·보존 이벤트
 - `manifest-sha256.txt`: 정렬된 상대경로와 SHA-256
 - `README.md`: 도구가 없어도 읽을 수 있는 설명
 
 Archive Intake의 1단계 결과는 담당자가 고른 `ARCHIVE_PRIMARY`에 ArchivePackage로 게시한다. 한 벌이 manifest까지 검증되면 `STORED`, 즉 보관됨이다. 2단계 Transcript·TranscriptText·Subtitle은 확정 전 패키지에 manifest가 다른 새 리비전으로 추가한다. ArchiveCatalog는 같은 `ARCHIVE_PRIMARY`를 쓰는 작업과 원본 드라이브를 가리지 않고 최상단 `archive-catalog.csv` 하나에 누적한다. Worker와 process가 달라도 같은 StorageRoot의 잠금 파일을 배타적으로 잡은 뒤 현재 투영을 읽고 병합해 `archive-catalog.csv.partial`에 작성·동기화·검증한 뒤 `os.Root.Rename`으로 원자 교체한다. ArchivePackage의 `files.csv`는 대체하지 않는다. 기존 `catalog/<원본 드라이브 ID>.csv`가 있고 최상단 파일이 없으면 첫 게시에서 행을 병합하고 기존 파일은 복구 근거로 유지한다. `ORG-008~009`, `ARC-011`
+
+layout v2에서는 검색과 상세 provenance의 범위를 분리한다. 루트 `archive-catalog.csv`는 ArchivePackage, 즉 결과 폴더 하나당 한 행인 저장소 전체 검색 projection이다. 패키지 폴더의 `video-info.csv`는 그 결과를 만든 OriginalAsset 하나당 한 행인 상세 기록이며 다중 소스 결과는 여러 행을 가진다. `metadata.json`은 검색 인덱스가 아니라 package identity·layout version·현재 revision·원본 참조·provenance·복구에 필요한 기계 계약이다. 따라서 실제 매핑은 `결과 폴더 1 = ArchivePackage 1 = 결과 영상 1 = 루트 CSV 행 1`이고, 그 안의 `video-info.csv`만 `OriginalAsset N`을 표현한다. `MED-008`, `ORG-015`
+
+`archive-media catalog verify`는 root의 1단계 결과 폴더만 열어 각 package ID, layout version, current revision, manifest digest, 결과 영상 정확히 하나, `video-info.csv` 원본 수와 루트 CSV 행을 양방향으로 대조한다. 누락·고아·중복·값 불일치·잘못된 깊이를 각각 `CATALOG_MISSING`, `CATALOG_ORPHAN`, `CATALOG_MISMATCH`, `LAYOUT_INVALID`로 보고하고 어떤 파일도 바꾸지 않는다. `archive-media catalog rebuild`는 유효한 package metadata와 manifest에서 루트 CSV 전체를 임시 파일로 다시 만든 뒤 schema·행 유일성·모든 폴더의 1:1 대응을 검증하고 파일·상위 디렉터리를 동기화한 다음 원자 교체한다. 패키지 폴더를 수정·삭제하지 않는다. 두 기능은 임의 shell 탐색 스크립트가 아니라 MediaOperation Port를 사용하는 typed operation이며 Archivist는 MCP를 통해 Control에 요청하고 Storage에 접근 가능한 Worker가 실행한다. `ARC-017~018`
 
 Core 메타데이터 round-trip 계약은 `ARC-005`, manifest 계약은 `ARC-003`이다. SQLite와 디렉터리를 사용하는 sidecar package import prototype은 있으나 Control의 복원 명령에 연결되지 않았으므로 `ARC-007`은 planned다.
 
@@ -175,4 +207,4 @@ Core 메타데이터 round-trip 계약은 `ARC-005`, manifest 계약은 `ARC-003
 
 ## 8. DB 재구축
 
-중앙 DB를 잃은 경우 volume catalog → package metadata → events → manifest 순으로 읽는다. import는 기존 ID와 checksum이 같은 항목은 멱등하게 병합하고 충돌은 자동 덮어쓰기하지 않으며 과거 Event를 중복 생성하지 않는다. 이 복원 흐름은 제품 명령과 실제 패키지에 연결하는 integration test가 생길 때까지 `ARC-007` planned다.
+중앙 DB를 잃은 경우 ArchiveCatalog를 빠른 목록으로 읽되 진실로 간주하지 않는다. layout version별 package metadata → events → manifest를 검증하고 `video-info.csv`의 OriginalAsset 참조를 복원한 뒤 ArchiveCatalog를 대조하거나 다시 만든다. import는 기존 ID와 checksum이 같은 항목은 멱등하게 병합하고 충돌은 자동 덮어쓰기하지 않으며 과거 Event를 중복 생성하지 않는다. 이 복원 흐름은 제품 명령과 실제 패키지에 연결하는 integration test가 생길 때까지 `ARC-007` planned이고, layout v2의 대조와 재생성도 `ARC-017~018` planned다.
