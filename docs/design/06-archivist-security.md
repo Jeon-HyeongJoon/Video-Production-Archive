@@ -151,7 +151,7 @@ Archivist가 시작한 긴 아카이브 실행은 같은 Turn에서 반복 조�
 | destructive | 금지 | boot policy+Approval+대상 Confirmation |
 | Provider·Worker·Archivist Host·Storage·보안 설정 | 금지 | surface 없음 |
 
-v1에는 별도 admin Principal과 원격 관리 surface가 없다. 운영 명령은 `internal-operator + boot policy + 명시 확인`으로 판정한다. Provider·Worker·Archivist Host·Storage·보안 정책은 아카이브 작업 공간 권한이 아니라 OS ACL로 보호된 로컬 설정 파일과 서비스 재시작으로만 적용한다. Archivist 추가는 사전 등록된 Archivist Host를 고르는 작업 공간 기능이다. `local` 인증의 operator/admin 구분은 후속 버전의 정책 경계일 뿐 v1에 원격 관리 권한을 만들지 않는다.
+v1에는 별도 admin Principal과 원격 관리 surface가 없다. 운영 명령은 `internal-operator + boot policy + 명시 확인`으로 판정한다. Provider·Worker·Archivist Host·Storage·보안 정책은 아카이브 작업 공간 권한이 아니라 OS ACL로 보호된 로컬 설정 파일과 서비스 재시작으로만 적용한다. Archivist 추가와 제거는 사전 등록된 Archivist Host 정의를 바꾸는 일이 아니라 작업 공간의 활성 Session을 만들거나 이력을 보존한 채 retirement하는 기능이다. `local` 인증의 operator/admin 구분은 후속 버전의 정책 경계일 뿐 v1에 원격 관리 권한을 만들지 않는다.
 
 검증 계약은 `SEC-001~004`, 승인 gate는 `WFL-006`, 포맷 조건은 `DEV-004`다.
 

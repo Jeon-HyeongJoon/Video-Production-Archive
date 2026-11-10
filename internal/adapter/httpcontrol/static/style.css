@@ -493,6 +493,7 @@ a.trow:hover{background:var(--sunken)}
 .drives-table .trow{grid-template-columns:minmax(0,1.4fr) minmax(40px,auto) 84px minmax(110px,1fr) minmax(130px,1.2fr) 96px 128px 14px}
 .storage-table .trow{grid-template-columns:minmax(0,1fr) 120px 90px minmax(0,1fr)}
 .agents-table .trow{grid-template-columns:minmax(0,1.3fr) minmax(0,1fr) 70px minmax(90px,.8fr)}
+.agents-table.has-actions .trow{grid-template-columns:minmax(0,1.3fr) minmax(0,1fr) 70px minmax(90px,.8fr) 64px}
 .hosts-table .trow{grid-template-columns:minmax(0,1.2fr) 90px minmax(0,1fr) 90px}
 .trow[data-focus="true"],.worker-card[data-focus="true"]{box-shadow:inset 2px 0 var(--ink)}
 .worker-list{display:flex;flex-direction:column;gap:10px}

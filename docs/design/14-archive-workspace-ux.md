@@ -59,7 +59,7 @@
 | U8 | 아카이브 확정 (복제본 검증과 승인) | 주기적 | 높음 | 미구현 (`ARC-012`) |
 | U9 | Archivist 지시와 ActionCard 결정 | 선택 | 중간 | 구현 |
 | U10 | 장비 상태 확인 (Worker·Archivist Host·Storage·자원) | 수시 | 중간 | Worker 칩과 자원 줄만 |
-| U11 | 설정 (Archivist 추가) | 드묾 | 낮음 | 대화상자 |
+| U11 | 설정 (Archivist 추가·제거) | 드묾 | 낮음 | 설정 화면 |
 
 가장 큰 위험은 기록물이 완성·검증되지 않은 상태에서 원본을 지우는 것이다. 원본 삭제와 포맷은 boot 정책·Approval·대상 Confirmation을 모두 요구하는 파괴적 동작이다(`CFG-005`, `SEC-001`, `DEV-004`). 현재 시스템에는 원본을 지워도 되는지 한 곳에서 판정해 보여주는 화면이 없어 담당자가 여러 표시를 조합해 판단해야 한다.
 
@@ -211,7 +211,7 @@ Step 단위의 현재 Step·대기 이유·실패 이유는 I 작업 관리로 �
 | F1.2 | 대화 | Archivist 응답·Tool Call 기록 | 조회 | 사람 | 수시 | 화면 | `DSH-011` |
 | F1.3 | 대화 | SYSTEM 재호출 (1단계 완료·전체 완료·새 보류) | 조회 | 시스템 | 수시 | 화면 | `LRH-012` |
 | F2.1 | 제안 결정 | ActionCard 실행·거절 | 판정 | 사람 | 수시 | 화면 | `DSH-005` |
-| F3.1 | Archivist 구성 | Archivist 추가 (이름·Archivist Host·감지된 CLI) | 설정 | 사람 | 드묾 | 화면 | `DSH-012`, `CTL-006` |
+| F3.1 | Archivist 구성 | Archivist 추가·제거 (이름·Archivist Host·감지된 CLI, 이력 보존 retirement) | 설정 | 사람 | 드묾 | 화면 | `DSH-012`, `CTL-006`, `CTL-008` |
 | F3.2 | Archivist 구성 | Archivist 사용 가능 상태 (AI 사용 불가 포함) | 조회 | 시스템 | 수시 | 화면 | `DSH-011`, `AGT-007` |
 | F3.3 | Archivist 구성 | Archivist 목록 (Host·CLI·연결 상태) | 조회 | 시스템 | 드묾 | 일부 | `DSH-002` |
 | F3.5 | Archivist 구성 | Host 재배정 (고정 Host가 꺼졌을 때 사람이 고름) | 설정 | 사람 | 드묾 | 없음 | 없음 (`LRH-002`는 고정 Host만 반환, [11](11-archivist-host.md) 설계에만 있음) |

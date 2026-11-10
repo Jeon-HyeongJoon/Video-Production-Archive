@@ -18,6 +18,8 @@ var (
 	ErrInvalidConfiguration   = errors.New("archivist control configuration is invalid")
 	ErrInvalidRequest         = errors.New("archivist control request is invalid")
 	ErrSessionNotFound        = errors.New("archivist session not found")
+	ErrSessionBusy            = errors.New("archivist session has unfinished work")
+	ErrSessionRemoved         = errors.New("archivist session is removed")
 	ErrTurnNotFound           = errors.New("archivist turn not found")
 	ErrArchiveRunNotBound     = errors.New("archive run is not bound to an archivist turn")
 	ErrDriveSelectionNotBound = errors.New("drive selection is not bound to an archivist turn")
@@ -28,6 +30,7 @@ type SessionRecord struct {
 	Session   archivistruntime.Session
 	JobID     string
 	CreatedAt time.Time
+	RemovedAt time.Time
 }
 
 type TurnRecord struct {
@@ -126,6 +129,7 @@ type ClaimedTurn struct {
 
 type Store interface {
 	CreateSession(context.Context, SessionRecord) error
+	RetireSession(context.Context, string, time.Time) error
 	Session(context.Context, string) (SessionRecord, error)
 	ListSessions(context.Context) ([]SessionRecord, error)
 	CreateTurn(context.Context, TurnRecord) error
@@ -206,6 +210,17 @@ func (service *Service) CreateArchivist(ctx context.Context, sessionID, name, ar
 	return service.CreateSession(ctx, spec, "")
 }
 
+// RemoveSession retires the Agent from active collaboration without deleting
+// its durable Turn, Tool Call, or ActionCard history. An unfinished Turn or
+// unresolved ActionCard keeps the Session addressable until it is settled.
+func (service *Service) RemoveSession(ctx context.Context, sessionID string) error {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return ErrInvalidRequest
+	}
+	return service.store.RetireSession(ctx, sessionID, service.now().UTC())
+}
+
 func (service *Service) SubmitTurn(ctx context.Context, sessionID, turnID, requestID, prompt string) (TurnRecord, error) {
 	return service.SubmitTurnWithDriveSelection(ctx, sessionID, turnID, requestID, prompt, nil)
 }
@@ -219,8 +234,12 @@ func (service *Service) SubmitTurnWithReferences(ctx context.Context, sessionID,
 	if prompt == "" {
 		return TurnRecord{}, ErrInvalidRequest
 	}
-	if _, err := service.store.Session(ctx, strings.TrimSpace(sessionID)); err != nil {
+	session, err := service.store.Session(ctx, strings.TrimSpace(sessionID))
+	if err != nil {
 		return TurnRecord{}, err
+	}
+	if !session.RemovedAt.IsZero() {
+		return TurnRecord{}, ErrSessionRemoved
 	}
 	turn, err := archivistruntime.NewTurnWithReferences(turnID, sessionID, requestID, selection, work)
 	if err != nil {
@@ -244,8 +263,12 @@ func (service *Service) HandleRecallEvent(ctx context.Context, event RecallEvent
 		(event.Trigger != RecallStageOneComplete && event.Trigger != RecallArchiveRunComplete && event.Trigger != RecallNewHold) {
 		return TurnRecord{}, false, ErrInvalidRequest
 	}
-	if _, err := service.store.Session(ctx, event.SessionID); err != nil {
+	session, err := service.store.Session(ctx, event.SessionID)
+	if err != nil {
 		return TurnRecord{}, false, err
+	}
+	if !session.RemovedAt.IsZero() {
+		return TurnRecord{}, true, nil
 	}
 	binding, err := service.store.ArchiveRunBinding(ctx, event.ArchiveRunID)
 	if err != nil || binding.SessionID != event.SessionID {
@@ -409,6 +432,9 @@ func (service *Service) Projection(ctx context.Context) ([]SessionProjection, er
 	}
 	result := make([]SessionProjection, 0, len(sessions))
 	for _, session := range sessions {
+		if !session.RemovedAt.IsZero() {
+			continue
+		}
 		turns, err := service.store.ListTurns(ctx, session.Session.ID)
 		if err != nil {
 			return nil, err

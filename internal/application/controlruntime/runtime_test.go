@@ -714,6 +714,108 @@ func TestArchivistAddAPIAcceptsOnlyNameRegisteredHostAndDetectedCLI(t *testing.T
 	}
 }
 
+// Requirement: CTL-008
+func TestArchivistRemoveAPIRetiresIdleSessionWithoutDeletingHistory(t *testing.T) {
+	configuration := runtimeTestConfiguration(t)
+	now := time.Date(2026, 11, 11, 3, 30, 0, 0, time.UTC)
+	runtime, err := controlruntime.OpenWithDependencies(context.Background(), configuration, "v1-test", controlruntime.Dependencies{
+		Secrets: runtimeSecret("runtime-service-secret"), Now: func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cookie, token := runtimeSession(t, runtime.Handler())
+	origin := "http://127.0.0.1:8080"
+	createSession := func(id string) {
+		t.Helper()
+		payload := fmt.Sprintf(`{"session_id":%q,"name":%q,"archivist_host_id":"archivist-windows","cli_id":"codex"}`, id, id)
+		if response := runtimeRequest(runtime.Handler(), http.MethodPost, "/api/v1/archivist-sessions", payload, cookie, token, origin); response.Code != http.StatusCreated {
+			t.Fatalf("create %s returned %d: %s", id, response.Code, response.Body.String())
+		}
+	}
+	createTurn := func(sessionID, turnID string) {
+		t.Helper()
+		payload := fmt.Sprintf(`{"turn_id":%q,"request_id":%q,"prompt":"상태 확인"}`, turnID, "REQUEST-"+turnID)
+		if response := runtimeRequest(runtime.Handler(), http.MethodPost, "/api/v1/archivist-sessions/"+sessionID+"/turns", payload, cookie, token, origin); response.Code != http.StatusCreated {
+			t.Fatalf("create %s returned %d: %s", turnID, response.Code, response.Body.String())
+		}
+	}
+	createSession("SESSION-REMOVE-1")
+	createTurn("SESSION-REMOVE-1", "TURN-REMOVE-1")
+	if response := archivistHostRequest(runtime.Handler(), http.MethodPost, "/archivist/v1/heartbeat", "", "runtime-service-secret"); response.Code != http.StatusOK {
+		t.Fatalf("heartbeat returned %d: %s", response.Code, response.Body.String())
+	}
+	if response := archivistHostRequest(runtime.Handler(), http.MethodPost, "/archivist/v1/turns/claim", "", "runtime-service-secret"); response.Code != http.StatusOK {
+		t.Fatalf("claim returned %d: %s", response.Code, response.Body.String())
+	}
+	delivery := `{"fencing_token":1,"request_id":"REQUEST-TURN-REMOVE-1"}`
+	if response := archivistHostRequest(runtime.Handler(), http.MethodPost, "/archivist/v1/turns/TURN-REMOVE-1/delivery", delivery, "runtime-service-secret"); response.Code != http.StatusOK {
+		t.Fatalf("delivery returned %d: %s", response.Code, response.Body.String())
+	}
+	for cursor, kind := range []string{"INPUT_ACCEPTED", "TURN_STARTED"} {
+		event := fmt.Sprintf(`{"fencing_token":1,"cursor":%d,"request_id":"REQUEST-TURN-REMOVE-1","kind":%q}`, cursor+1, kind)
+		if response := archivistHostRequest(runtime.Handler(), http.MethodPost, "/archivist/v1/turns/TURN-REMOVE-1/events", event, "runtime-service-secret"); response.Code != http.StatusOK {
+			t.Fatalf("%s returned %d: %s", kind, response.Code, response.Body.String())
+		}
+	}
+	completed := `{"fencing_token":1,"cursor":3,"request_id":"REQUEST-TURN-REMOVE-1","kind":"TURN_COMPLETED","final_response":{"summary":"완료","result_ids":[]}}`
+	if response := archivistHostRequest(runtime.Handler(), http.MethodPost, "/archivist/v1/turns/TURN-REMOVE-1/events", completed, "runtime-service-secret"); response.Code != http.StatusOK {
+		t.Fatalf("completion returned %d: %s", response.Code, response.Body.String())
+	}
+	removePath := "/api/v1/archivist-sessions/SESSION-REMOVE-1/remove"
+	if denied := runtimeRequest(runtime.Handler(), http.MethodPost, removePath, `{}`, nil, "", ""); denied.Code != http.StatusForbidden {
+		t.Fatalf("remove without browser proof returned %d: %s", denied.Code, denied.Body.String())
+	}
+	if removed := runtimeRequest(runtime.Handler(), http.MethodPost, removePath, `{}`, cookie, token, origin); removed.Code != http.StatusOK || !strings.Contains(removed.Body.String(), `"state":"REMOVED"`) {
+		t.Fatalf("remove returned %d: %s", removed.Code, removed.Body.String())
+	}
+	view := runtimeRequest(runtime.Handler(), http.MethodGet, "/api/v1/archivist-sessions", "", nil, "", "")
+	if strings.Contains(view.Body.String(), "SESSION-REMOVE-1") {
+		t.Fatalf("retired Agent remained selectable: %s", view.Body.String())
+	}
+	if response := runtimeRequest(runtime.Handler(), http.MethodPost, "/api/v1/archivist-sessions/SESSION-REMOVE-1/turns",
+		`{"turn_id":"TURN-AFTER-REMOVE","request_id":"REQUEST-AFTER-REMOVE","prompt":"상태 확인"}`, cookie, token, origin); response.Code != http.StatusConflict ||
+		!strings.Contains(response.Body.String(), "ARCHIVIST_SESSION_REMOVED") {
+		t.Fatalf("retired Agent accepted a new Turn: %d %s", response.Code, response.Body.String())
+	}
+	ledger, err := sql.Open("sqlite", configuration.DatabasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for table, identity := range map[string][2]string{
+		"archivist_sessions": {"session_id", "SESSION-REMOVE-1"},
+		"archivist_turns":    {"turn_id", "TURN-REMOVE-1"},
+	} {
+		var count int
+		query := fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE %s = ?", table, identity[0])
+		if err := ledger.QueryRow(query, identity[1]).Scan(&count); err != nil || count != 1 {
+			t.Fatalf("retirement deleted durable history: table=%s count=%d err=%v", table, count, err)
+		}
+	}
+	if err := ledger.Close(); err != nil {
+		t.Fatal(err)
+	}
+	createSession("SESSION-BUSY-1")
+	createTurn("SESSION-BUSY-1", "TURN-BUSY-1")
+	busyPath := "/api/v1/archivist-sessions/SESSION-BUSY-1/remove"
+	if response := runtimeRequest(runtime.Handler(), http.MethodPost, busyPath, `{}`, cookie, token, origin); response.Code != http.StatusConflict ||
+		!strings.Contains(response.Body.String(), "ARCHIVIST_SESSION_BUSY") {
+		t.Fatalf("unfinished Agent was removed: %d %s", response.Code, response.Body.String())
+	}
+	if err := runtime.Close(); err != nil {
+		t.Fatal(err)
+	}
+	restarted, err := controlruntime.Open(context.Background(), configuration, "v1-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restarted.Close()
+	restartedView := runtimeRequest(restarted.Handler(), http.MethodGet, "/api/v1/archivist-sessions", "", nil, "", "")
+	if strings.Contains(restartedView.Body.String(), "SESSION-REMOVE-1") || !strings.Contains(restartedView.Body.String(), "SESSION-BUSY-1") {
+		t.Fatalf("retired projection was not durable: %s", restartedView.Body.String())
+	}
+}
+
 // Requirement: CTL-005
 func TestBrowserPersistsArchivistTurnBeforeRuntimeDeliveryAndReturnsDurableIDs(t *testing.T) {
 	configuration := runtimeTestConfiguration(t)

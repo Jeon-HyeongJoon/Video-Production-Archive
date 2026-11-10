@@ -69,6 +69,7 @@ type ArchiveIntakeSelector interface {
 type ArchivistWorkspace interface {
 	CreateSession(context.Context, archivistruntime.SessionSpec, string) (archivistcontrol.SessionRecord, error)
 	CreateArchivist(context.Context, string, string, string, string) (archivistcontrol.SessionRecord, error)
+	RemoveSession(context.Context, string) error
 	SubmitTurnWithDriveSelection(context.Context, string, string, string, string, *archivistruntime.DriveSelection) (archivistcontrol.TurnRecord, error)
 	SubmitTurnWithReferences(context.Context, string, string, string, string, *archivistruntime.DriveSelection, *archivistruntime.WorkReference) (archivistcontrol.TurnRecord, error)
 	Projection(context.Context) ([]archivistcontrol.SessionProjection, error)
@@ -175,6 +176,7 @@ func New(configuration Configuration) (*Handler, error) {
 		mux.HandleFunc("GET /api/v1/archivist-hosts", handler.archivistHostStatuses)
 		mux.HandleFunc("GET /api/v1/archivist-sessions", handler.archivistSessions)
 		mux.HandleFunc("POST /api/v1/archivist-sessions", handler.createArchivistSession)
+		mux.HandleFunc("POST /api/v1/archivist-sessions/{sessionID}/remove", handler.removeArchivistSession)
 		mux.HandleFunc("POST /api/v1/archivist-sessions/{sessionID}/turns", handler.createArchivistTurn)
 		mux.HandleFunc("POST /api/v1/action-cards/{cardID}/execute", handler.executeActionCard)
 		mux.HandleFunc("POST /api/v1/action-cards/{cardID}/reject", handler.rejectActionCard)

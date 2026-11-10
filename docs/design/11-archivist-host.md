@@ -35,7 +35,7 @@ Archivist Host는 Archivist 역할이 아니다. 특정 PC에서 CLI 프로세�
 
 Control의 `archivist_session_id`와 `archivist_turn_id`만 영속 identity다. Orca terminal ID, PID, PTY handle 같은 `runtime_handle`은 프로세스 수명에 한정하며 DB identity로 저장하지 않는다.
 
-Archivist 추가 화면은 이름·`archivist_host_id`·감지된 `cli_id`만 받는다. `runtime_backend`와 `workspace_root_id`는 사전 등록된 Host 설정에서 결정하고 화면이 임의 값을 받지 않는다. 고정된 Host가 offline이면 ArchivistTurn을 기다리게 하고 다른 PC로 자동 우회하지 않는다. 재배정은 사람이 명시적으로 선택한 별도 Command로만 허용한다. `CTL-006`, `DSH-012`
+Archivist 구성 화면은 이름·`archivist_host_id`·감지된 `cli_id`만 받아 Agent를 추가하고, 활성 Agent별 제거 조작을 둔다. 제거는 끝나지 않은 Turn과 결정 대기 ActionCard가 없을 때만 ArchivistSession을 활성 목록에서 제외하는 retirement이며 Session·Turn·Tool Call 이력을 삭제하지 않는다. 제거된 Session은 새 Turn과 SYSTEM 재호출을 받지 않지만 이미 시작된 ArchiveRun은 사람 조작 경로에서 계속된다. `runtime_backend`와 `workspace_root_id`는 사전 등록된 Host 설정에서 결정하고 화면이 임의 값을 받지 않는다. 고정된 Host가 offline이면 ArchivistTurn을 기다리게 하고 다른 PC로 자동 우회하지 않는다. 재배정은 사람이 명시적으로 선택한 별도 Command로만 허용한다. `CTL-006`, `CTL-008`, `DSH-012`
 
 ## 3. 최소 런타임 코어
 
@@ -179,6 +179,8 @@ Turn: QUEUED | LEASED | SUBMITTED | RUNNING | WAITING | COMPLETED | FAILED | CAN
 Tool Call: 이름, 대상, 상태, 정제된 결과
 Action Card: 제안 Command, 대상, expected revision, 사유, 근거, 승인 필요 여부
 ```
+
+Host의 claim loop와 heartbeat loop는 CLI 실행 대기 때문에 서로 막히지 않는다. Turn을 claim한 뒤 CLI process가 수 분 동안 실행되더라도 Host는 설정된 heartbeat 주기로 Control에 계속 연결 상태를 갱신한다. Turn lease 갱신은 실행 fencing을, Host heartbeat는 연결 표시와 다음 claim 가능성을 각각 소유하며 하나를 다른 것으로 대신하지 않는다. `LRH-021`
 
 Turn, Tool Call, ArchiveRun은 서로 다른 생애주기다. 개별 Tool Call 실패만으로 Turn이나 ArchiveRun 실패를 추론하지 않고, Agent 응답의 완료는 ArchivistTurn의 terminal event, 아카이브 처리의 완료·실패는 ArchiveRun과 하위 Job의 영속 상태로 표시한다. 선택적 문맥의 미고정 조회는 실패 Tool Call 자체를 만들지 않는다.
 

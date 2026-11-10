@@ -1838,6 +1838,18 @@
       "level": "integration"
     },
     {
+      "id": "CTL-008",
+      "design": "control-http-archivist-session-retirement-api",
+      "statement": "설정의 Archivist 제거 API는 Origin·JSON·CSRF 검증 뒤 끝나지 않은 Turn이나 결정 대기 ActionCard가 없는 ArchivistSession만 활성 목록에서 제외하고 기존 Session·Turn 기록은 삭제하지 않아야 한다.",
+      "given": "완료 Turn 이력만 가진 ArchivistSession과 끝나지 않은 Turn을 가진 ArchivistSession 및 CSRF가 없거나 유효한 제거 요청이 있다.",
+      "when": "담당자가 설정에서 각 Archivist를 제거하고 Archive Control을 다시 시작한다.",
+      "then": "검증된 완료 Session만 재시작 뒤에도 활성 목록과 새 Turn 제출 대상에서 제외되고 Session·Turn 영속 행은 유지되며, 검증되지 않은 요청과 끝나지 않은 Session 제거는 거부되어 기존 Agent가 유지된다.",
+      "test_file": "internal/application/controlruntime/runtime_test.go",
+      "test_name": "TestArchivistRemoveAPIRetiresIdleSessionWithoutDeletingHistory",
+      "status": "implemented",
+      "level": "integration"
+    },
+    {
       "id": "DSH-002",
       "design": "archive-workspace-archivist-session-projection",
       "statement": "아카이브 작업 공간의 Archive Workspace 영역은 저장된 Archivist Host·ArchivistSession·ArchivistTurn·Tool Call 상태를 투영하되 credential reference, resume token과 raw terminal output을 반환하지 않아야 한다.",
@@ -2908,10 +2920,10 @@
     {
       "id": "DSH-012",
       "design": "archivist-add-settings-surface",
-      "statement": "설정의 Archivist 추가 화면은 이름·Archivist Host·감지된 CLI만 입력받고 Host 연결 상태와 감지된 CLI를 표시해야 한다.",
-      "given": "등록된 online·offline Archivist Host와 서로 다른 감지 CLI가 있다.",
-      "when": "담당자가 설정에서 Archivist를 추가한다.",
-      "then": "허용 입력만 제출되고 backend·workspace·Job 필드는 없으며 Host 연결 상태가 함께 표시되고 감지된 CLI가 없는 Host는 CLI 선택과 추가가 비활성화되어 미감지 CLI 또는 미등록 Host 조합은 추가되지 않는다.",
+      "statement": "설정의 Archivist 구성 화면은 이름·Archivist Host·감지된 CLI만 입력받아 Agent를 추가하고 활성 Agent별 제거 조작과 Host 연결 상태·감지 CLI를 표시하되 대화 칸 머리글에는 Agent 추가 조작을 중복해서 두지 않아야 한다.",
+      "given": "활성 ArchivistSession, 등록된 online·offline Archivist Host와 서로 다른 감지 CLI가 있다.",
+      "when": "담당자가 대화 칸 머리글과 설정의 Archivist 구성을 조회한다.",
+      "then": "대화 칸 머리글에는 Agent 추가 조작이 없고 설정에는 활성 Agent별 제거 조작과 이름·Host·CLI 추가 입력만 있으며 backend·workspace·Job 필드는 없고, Host 연결 상태가 함께 표시되며 감지된 CLI가 없는 Host는 CLI 선택과 추가가 비활성화되어 미감지 CLI 또는 미등록 Host 조합은 추가되지 않는다.",
       "test_file": "internal/adapter/httpcontrol/handler_test.go",
       "test_name": "TestArchivistAddSettingsShowsOnlyNameHostAndDetectedCLI",
       "status": "implemented",
@@ -3408,6 +3420,18 @@
       "test_name": "TestWindowsCodexHostRunsInAuthenticatedInteractiveTerminalSession",
       "status": "implemented",
       "level": "acceptance"
+    },
+    {
+      "id": "LRH-021",
+      "design": "archivist-host-execution-heartbeat",
+      "statement": "Archivist Host는 로컬 CLI가 ArchivistTurn을 처리하는 동안에도 설정된 주기로 Control heartbeat를 독립 전송해 실행 중인 Agent를 Host offline으로 잘못 투영하지 않아야 한다.",
+      "given": "heartbeat TTL보다 오래 실행되는 로컬 CLI Turn과 유효한 Turn lease가 있다.",
+      "when": "Archivist Host가 Turn을 claim하고 CLI 완료를 기다린다.",
+      "then": "CLI가 끝나기 전에도 heartbeat가 설정 주기로 반복 전송되어 Host 연결 상태가 유지되고 Turn은 CLI 결과가 올 때까지 실행 중으로 남는다.",
+      "test_file": "internal/application/archivisthostclient/client_test.go",
+      "test_name": "TestHostKeepsHeartbeatOnlineWhileCLIProcessesTurn",
+      "status": "implemented",
+      "level": "integration"
     },
     {
       "id": "MCP-006",

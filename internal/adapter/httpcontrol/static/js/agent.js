@@ -376,7 +376,6 @@ export function AgentPane() {
   return html`<aside id="archivist-pane" class="agent-pane" data-open=${ui.agentOpen.value ? "true" : "false"} aria-label="Agent">
     <div class="pane-head">
       <div class="pane-title"><b>Agent</b><small class="pane-availability"><${StatusIcon} kind=${signal} /><span id="archivist-availability" data-signal=${signal}>${text}</span></small></div>
-      <a class="pane-icon" href="#/settings" aria-label="Agent 추가 · 설정" title="Agent 추가 · 설정"><${Glyph} d=${GLYPH.plus} /></a>
       <button type="button" class="pane-icon pane-close" aria-label="Agent 칸 닫기" title="Agent 칸 닫기" onClick=${() => { ui.agentOpen.value = false; }}><${Glyph} d=${GLYPH.close} /></button>
     </div>
     <section id="archivist-panel" class="pane-body" aria-label="Agent 대화">

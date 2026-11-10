@@ -443,6 +443,73 @@ func (store *Store) CreateSession(ctx context.Context, record archivistcontrol.S
 	return err
 }
 
+func (store *Store) RetireSession(ctx context.Context, sessionID string, removedAt time.Time) error {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" || removedAt.IsZero() {
+		return archivistcontrol.ErrInvalidRequest
+	}
+	tx, err := store.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var payload []byte
+	if err := tx.QueryRowContext(ctx, `SELECT payload FROM archivist_sessions WHERE session_id = ?`, sessionID).Scan(&payload); errors.Is(err, sql.ErrNoRows) {
+		return archivistcontrol.ErrSessionNotFound
+	} else if err != nil {
+		return err
+	}
+	record, err := decodeSession(payload)
+	if err != nil {
+		return err
+	}
+	if !record.RemovedAt.IsZero() {
+		return nil
+	}
+	var activeTurns int
+	if err := tx.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM archivist_turns
+		WHERE session_id = ? AND state NOT IN (?, ?, ?)
+	`, sessionID, vocabulary.ArchivistTurnCompleted, vocabulary.ArchivistTurnFailed, vocabulary.ArchivistTurnCancelled).Scan(&activeTurns); err != nil {
+		return err
+	}
+	if activeTurns != 0 {
+		return archivistcontrol.ErrSessionBusy
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT payload FROM archivist_action_cards WHERE session_id = ?`, sessionID)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var cardPayload []byte
+		var card archivistcontrol.ActionCardProjection
+		if err := rows.Scan(&cardPayload); err != nil {
+			rows.Close()
+			return err
+		}
+		if err := json.Unmarshal(cardPayload, &card); err != nil {
+			rows.Close()
+			return err
+		}
+		if card.State == "PENDING" || card.State == "EXECUTING" {
+			rows.Close()
+			return archivistcontrol.ErrSessionBusy
+		}
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	record.RemovedAt = removedAt.UTC()
+	payload, err = json.Marshal(record)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE archivist_sessions SET payload = ? WHERE session_id = ?`, payload, sessionID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func (store *Store) Session(ctx context.Context, sessionID string) (archivistcontrol.SessionRecord, error) {
 	row := store.db.QueryRowContext(ctx, `SELECT payload FROM archivist_sessions WHERE session_id = ?`, sessionID)
 	var payload []byte
@@ -682,6 +749,11 @@ func (store *Store) ClaimTurn(ctx context.Context, archivistHostID string, now t
 		if err != nil {
 			rows.Close()
 			return archivistcontrol.ClaimedTurn{}, err
+		}
+		if !selectedSession.RemovedAt.IsZero() {
+			selectedTurn = archivistcontrol.TurnRecord{}
+			selectedSession = archivistcontrol.SessionRecord{}
+			continue
 		}
 		break
 	}

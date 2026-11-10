@@ -178,6 +178,23 @@ func (handler *Handler) createArchivistTurn(writer http.ResponseWriter, request 
 	}})
 }
 
+func (handler *Handler) removeArchivistSession(writer http.ResponseWriter, request *http.Request) {
+	if !handler.allowMutation(writer, request) {
+		return
+	}
+	var payload struct{}
+	if !decodeJSON(writer, request, &payload) {
+		return
+	}
+	if err := handler.archivists.RemoveSession(request.Context(), request.PathValue("sessionID")); err != nil {
+		writeArchivistError(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"data": map[string]any{
+		"session_id": request.PathValue("sessionID"), "state": "REMOVED",
+	}})
+}
+
 func (handler *Handler) executeActionCard(writer http.ResponseWriter, request *http.Request) {
 	if !handler.allowMutation(writer, request) {
 		return
@@ -371,6 +388,10 @@ func writeArchivistError(writer http.ResponseWriter, err error) {
 		writeError(writer, http.StatusBadRequest, "INVALID_ARCHIVIST_REQUEST")
 	case errors.Is(err, archivistcontrol.ErrSessionNotFound):
 		writeError(writer, http.StatusNotFound, "ARCHIVIST_SESSION_NOT_FOUND")
+	case errors.Is(err, archivistcontrol.ErrSessionBusy):
+		writeError(writer, http.StatusConflict, "ARCHIVIST_SESSION_BUSY")
+	case errors.Is(err, archivistcontrol.ErrSessionRemoved):
+		writeError(writer, http.StatusConflict, "ARCHIVIST_SESSION_REMOVED")
 	default:
 		writeError(writer, http.StatusConflict, "ARCHIVIST_REQUEST_CONFLICT")
 	}

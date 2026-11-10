@@ -126,14 +126,15 @@ export function ConnectionsScreen() {
   ];
 }
 
-export function AgentTable({ sessions, rowClass = "" }) {
-  return html`<div class="table agents-table" role="table">
-    <div class="trow head" role="row"><span role="columnheader">Agent</span><span role="columnheader">Agent Host</span><span role="columnheader">CLI</span><span role="columnheader">상태</span></div>
+export function AgentTable({ sessions, rowClass = "", onRemove = null, removing = "" }) {
+  return html`<div class=${`table agents-table${onRemove ? " has-actions" : ""}`} role="table">
+    <div class="trow head" role="row"><span role="columnheader">Agent</span><span role="columnheader">Agent Host</span><span role="columnheader">CLI</span><span role="columnheader">상태</span>${onRemove ? html`<span role="columnheader"></span>` : null}</div>
     ${sessions.length ? sessions.map((session) => {
       const [text, signal] = availability(session);
       return html`<div class=${`trow ${rowClass}`.trim()} role="row" key=${session.session_id} data-session-id=${session.session_id}>
         <b>${session.name || session.session_id}</b><span class="num">${session.archivist_host_id}</span><span class="num">${session.cli_id}</span>
         ${signal === "online" ? html`<${Fine} text=${text} kind="online" />` : html`<span class="ok" data-signal=${signal}><${StatusIcon} kind=${signal} />${text}</span>`}
+        ${onRemove ? html`<button type="button" class="btn btn-sm" data-action="archivist-remove" disabled=${Boolean(removing)} onClick=${() => onRemove(session)}>${removing === session.session_id ? "제거 중" : "제거"}</button>` : null}
       </div>`;
     }) : html`<${Empty} text="Agent 없음" />`}
   </div>`;

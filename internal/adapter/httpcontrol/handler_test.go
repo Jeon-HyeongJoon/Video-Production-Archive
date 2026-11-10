@@ -1255,6 +1255,10 @@ func (workspace fixedArchivistWorkspace) CreateArchivist(context.Context, string
 	return archivistcontrol.SessionRecord{}, errors.New("fixture is read-only")
 }
 
+func (workspace fixedArchivistWorkspace) RemoveSession(context.Context, string) error {
+	return errors.New("fixture is read-only")
+}
+
 func (workspace fixedArchivistWorkspace) SubmitTurnWithDriveSelection(context.Context, string, string, string, string, *archivistruntime.DriveSelection) (archivistcontrol.TurnRecord, error) {
 	return archivistcontrol.TurnRecord{}, errors.New("fixture is read-only")
 }

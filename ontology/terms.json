@@ -1840,7 +1840,8 @@
       "definition": "한 Archivist 대화를 고정된 Archivist Host·backend·CLI·workspace와 연결하는 Control 소유의 영속 개체.",
       "rules": [
         "runtime handle과 별개의 durable ID를 가진다.",
-        "Host offline만으로 다른 PC에 자동 재배정하지 않는다."
+        "Host offline만으로 다른 PC에 자동 재배정하지 않는다.",
+        "제거는 끝나지 않은 Turn이나 결정 대기 ActionCard가 없을 때만 활성 목록에서 제외하는 retirement이며 Session·Turn·Tool Call 이력을 삭제하지 않는다."
       ],
       "forbidden": {
         "words": [],

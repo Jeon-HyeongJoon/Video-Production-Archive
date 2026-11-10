@@ -13,6 +13,7 @@ export function SettingsScreen() {
   const hosts = store.hosts.value;
   const [form, setForm] = useState({ name: "", host: "", cli: "" });
   const [status, setStatus] = useState("");
+  const [removing, setRemoving] = useState("");
   const hostID = hosts.some((host) => host.archivist_host_id === form.host) ? form.host : hosts.find((host) => host.state !== "DISABLED")?.archivist_host_id || "";
   const clis = hosts.find((host) => host.archivist_host_id === hostID)?.detected_cli_ids || [];
   const cli = clis.includes(form.cli) ? form.cli : clis[0] || "";
@@ -30,10 +31,24 @@ export function SettingsScreen() {
       setStatus(error.message);
     }
   };
+  const remove = async (session) => {
+    if (removing || !globalThis.confirm(`${session.name || session.session_id} Agent를 제거할까요?`)) return;
+    setRemoving(session.session_id);
+    setStatus("");
+    try {
+      await mutation(`/api/v1/archivist-sessions/${encodeURIComponent(session.session_id)}/remove`, {});
+      setStatus("제거됨");
+      await refresh();
+    } catch (error) {
+      setStatus(error.message);
+    } finally {
+      setRemoving("");
+    }
+  };
   return [
     html`<div key="head" class="page-head"><div class="page-title"><h1>설정</h1><small class="sub">등록·정책 변경은 설정 파일 수정 뒤 서비스 재시작</small></div></div>`,
     html`<section key="agents" class="section" id="archivist-list" aria-label="Agent"><h2 class="section-title">Agent${" "}<span class="num">${allSessions.value.length}</span></h2>
-      <${AgentTable} sessions=${allSessions.value} rowClass="archivist-row" /></section>`,
+      <${AgentTable} sessions=${allSessions.value} rowClass="archivist-row" onRemove=${remove} removing=${removing} /></section>`,
     html`<section key="add" class="panel" aria-label="Agent 추가">
       <div class="panel-toolbar"><b>Agent 추가</b></div>
       <form id="archivist-add" class="settings-form" onSubmit=${add}>

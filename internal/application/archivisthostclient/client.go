@@ -74,7 +74,7 @@ func (client *Client) Run(ctx context.Context, onError func(error)) error {
 			if claimed == nil {
 				continue
 			}
-			if err := client.execute(ctx, *claimed); err != nil {
+			if err := client.execute(ctx, *claimed, onError); err != nil {
 				onError(err)
 			}
 		}
@@ -116,7 +116,7 @@ func (client *Client) claim(ctx context.Context) (*claimedTurn, error) {
 	return &response.Data, nil
 }
 
-func (client *Client) execute(ctx context.Context, claimed claimedTurn) error {
+func (client *Client) execute(ctx context.Context, claimed claimedTurn, onError func(error)) error {
 	session, err := archivistruntime.NewSession(archivistruntime.SessionSpec{
 		ID: claimed.SessionID, ArchivistHostID: client.configuration.ID, Backend: claimed.Backend,
 		CLIID: claimed.CLIID, WorkspaceRootID: claimed.WorkspaceRootID,
@@ -163,6 +163,9 @@ func (client *Client) execute(ctx context.Context, claimed claimedTurn) error {
 	}
 	executionContext, cancelExecution := context.WithCancel(ctx)
 	defer cancelExecution()
+	heartbeatStop := make(chan struct{})
+	defer close(heartbeatStop)
+	go client.heartbeatWhileExecuting(executionContext, heartbeatStop, onError)
 	renewalStop := make(chan struct{})
 	renewalError := make(chan error, 1)
 	go client.renewLease(executionContext, claimed, renewalStop, renewalError, cancelExecution)
@@ -194,6 +197,23 @@ func (client *Client) execute(ctx context.Context, claimed claimedTurn) error {
 		return err
 	}
 	return nextEvent(archivistruntime.RuntimeEvent{Kind: archivistruntime.RuntimeTurnCompleted, FinalResponse: &response})
+}
+
+func (client *Client) heartbeatWhileExecuting(ctx context.Context, stop <-chan struct{}, onError func(error)) {
+	ticker := time.NewTicker(client.configuration.HeartbeatInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-stop:
+			return
+		case <-ticker.C:
+			if err := client.heartbeat(ctx); err != nil && onError != nil {
+				onError(err)
+			}
+		}
+	}
 }
 
 func checkpointPrompt(claimed claimedTurn) string {
