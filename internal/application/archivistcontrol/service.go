@@ -15,11 +15,13 @@ import (
 )
 
 var (
-	ErrInvalidConfiguration = errors.New("archivist control configuration is invalid")
-	ErrInvalidRequest       = errors.New("archivist control request is invalid")
-	ErrSessionNotFound      = errors.New("archivist session not found")
-	ErrTurnNotFound         = errors.New("archivist turn not found")
-	ErrArchiveRunNotBound   = errors.New("archive run is not bound to an archivist turn")
+	ErrInvalidConfiguration   = errors.New("archivist control configuration is invalid")
+	ErrInvalidRequest         = errors.New("archivist control request is invalid")
+	ErrSessionNotFound        = errors.New("archivist session not found")
+	ErrTurnNotFound           = errors.New("archivist turn not found")
+	ErrArchiveRunNotBound     = errors.New("archive run is not bound to an archivist turn")
+	ErrDriveSelectionNotBound = errors.New("drive selection is not bound to an archivist turn")
+	ErrWorkReferenceNotBound  = errors.New("work reference is not bound to an archivist turn")
 )
 
 type SessionRecord struct {
@@ -319,8 +321,11 @@ func (service *Service) TurnDriveSelection(ctx context.Context, sessionID, turnI
 	if err != nil {
 		return archivistruntime.DriveSelection{}, err
 	}
-	if turn.Turn.SessionID != strings.TrimSpace(sessionID) || turn.Turn.DriveSelection == nil {
+	if turn.Turn.SessionID != strings.TrimSpace(sessionID) {
 		return archivistruntime.DriveSelection{}, ErrInvalidRequest
+	}
+	if turn.Turn.DriveSelection == nil {
+		return archivistruntime.DriveSelection{}, ErrDriveSelectionNotBound
 	}
 	return archivistruntime.NewDriveSelection(*turn.Turn.DriveSelection)
 }
@@ -330,8 +335,11 @@ func (service *Service) TurnWorkReference(ctx context.Context, sessionID, turnID
 	if err != nil {
 		return archivistruntime.WorkReference{}, err
 	}
-	if turn.Turn.SessionID != strings.TrimSpace(sessionID) || turn.Turn.WorkReference == nil {
+	if turn.Turn.SessionID != strings.TrimSpace(sessionID) {
 		return archivistruntime.WorkReference{}, ErrInvalidRequest
+	}
+	if turn.Turn.WorkReference == nil {
+		return archivistruntime.WorkReference{}, ErrWorkReferenceNotBound
 	}
 	return archivistruntime.NewWorkReference(*turn.Turn.WorkReference)
 }

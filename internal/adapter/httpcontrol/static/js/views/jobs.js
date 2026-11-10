@@ -1,627 +1,298 @@
-// 작업: every persisted Job has one addressable detail route. Other screens
-// link here by job_id; they do not create their own expandable Job detail.
-// Lists show a work's name, state, recent time and — only while it runs — its
-// progress; the Worker and IDs wait on hover.
+// 작업 관리: one row per work a person requested. An archive work names its
+// drive, its first folder and when it was asked for; the work ID stays faint
+// because nobody tells works apart by it. A row opens into its folders, or a
+// Template Job's steps. Running work stays on top, queued work in its own
+// list, work that needs a person below, and finished work folded at the end.
 
+import { html, useEffect, useComputed, batch } from "../lib.js";
+import { label, formatCount, formatBytes, shortTime, dayTime, mutation, newID } from "../core.js";
 import {
-  el, svgIcon, icons, token, statusIcon, label, stateSignal, stageSignal, finishedSteps, formatCount, formatPercent,
-  formatBytes, shortTime, clockTime, meter, api, mutation, newID, emptyState,
-} from "../core.js";
-import {
-  model, ui, notify, refresh, jobLane, driveName, findDrive, folderProblem, workLane, workName,
-  isRunning, prepareDrive, syncPreparation, discoveredFolders, archiveCandidates,
-  folderDiscoveryReady, folderDiscoveryText, startBlocker,
+  ui, store, stale, refresh, allWork, allDrives, workLane, workTitle, workScopeText, workText, workKind, workIssues, workDrive, workDetail,
+  jobDetail, jobOf, driveView, folderKey, folderState, folderProblem, folderProgress, driveName, isRunning, archiveCandidates,
+  folderDiscoveryReady, folderDiscoveryText, startBlocker, openNewWork, prepareDrive, syncDraft, setDraft, resetRunIntent,
 } from "../store.js";
+import { route, go, shared } from "../router.js";
+import { StatusIcon, Glyph, GLYPH, Chevron, Swap, Meter, Fold, IssueTags, Empty, Skeleton, useLinger, cssName } from "../ui.js";
 
-const LANE = {
-  fault: ["실패", "fault"], decide: ["사람 대기", "decide"], work: ["실행 중", "work"],
-  resource: ["자원 대기", "resource"], queue: ["대기열", "idle"], done: ["완료", "done"],
+const LANES = [
+  ["work", "active-jobs", "진행 중", "진행 중인 작업 없음"],
+  ["queue", "queued-jobs", "작업 큐", "대기 중인 작업 없음"],
+  ["attention", "attention-jobs", "확인 필요", "확인할 작업 없음"],
+  ["done", "completed-jobs", "완료", "완료된 작업 없음"],
+];
+const IN_LANE = { work: ["work"], queue: ["queue"], attention: ["fault", "decide"], done: ["done"] };
+const TEMPLATES = [["occasion-recording", "행사 기록"], ["vj-compilation", "VJ 모음"], ["final-edit", "최종 편집"], ["large-file-intake", "대용량 입고"]];
+const CHILDREN_SHOWN = 60;
+
+const time = (value) => new Date(value || 0).getTime();
+const laneItems = (lane) => {
+  const items = allWork.value.filter((work) => IN_LANE[lane].includes(workLane(work)));
+  return lane === "done" ? items.sort((left, right) => time(right.last_event_at) - time(left.last_event_at)) : items.sort((left, right) => time(right.created_at) - time(left.created_at));
 };
 
-function laneOf(job) {
-  return jobLane(job) || "done";
-}
-
-function laneText(job) {
-  const lane = laneOf(job);
-  if (lane === "decide") return job.wait_reason ? `${label("wait", job.wait_reason)} 대기` : "사람 대기";
-  return LANE[lane]?.[0] || label("step", job.step_state);
-}
-
-function completion(jobID) {
-  for (const drive of model.drives) {
-    const item = (drive.completed_work || []).find((entry) => entry.job_id === jobID);
-    if (item) return { item, drive };
-  }
-  return null;
-}
-
-function linkedFolder(jobID) {
-  for (const drive of model.drives) {
-    const folder = (drive.folders || []).find((entry) => entry.job_id === jobID || entry.transcription_job_id === jobID);
-    if (folder) return { folder, drive };
-  }
-  return null;
-}
-
-function table(heads, rows, empty, className = "jobs-table") {
-  return el("div", { class: `data-table ${className}`, role: "table" },
-    el("div", { class: "data-row data-head", role: "row" }, ...heads.map((head) => el("span", { role: "columnheader" }, head))),
-    ...(rows.length ? rows : [emptyState(empty)]));
-}
-
-function workHref(work) {
-  return work.kind === "ARCHIVE_RUN" ? `#/runs/${encodeURIComponent(work.work_id)}` : `#/jobs/${encodeURIComponent(work.work_id)}`;
-}
-
-function workStateText(work) {
-  return { FAILED: "실패", ATTENTION: "확인 필요", ACTIVE: "실행 중", QUEUED: "대기열", COMPLETED: "완료" }[work.state] || work.state;
-}
-
-const WORK_HEADS = ["작업", "상태", "진행", "최근"];
-
-function workRow(work) {
-  const lane = workLane(work);
-  const pct = Math.round((work.progress || 0) * 100);
-  const scope = work.kind === "ARCHIVE_RUN" ? `${formatCount(work.folder_count)} 폴더 · ${formatCount(work.video_count)} 영상` : "";
-  return el("a", {
-    class: "data-row work-row", role: "row", href: workHref(work), dataset: { workId: work.work_id, kind: work.kind, lane },
-    title: [work.work_id, `Worker ${work.worker_id || "배정 없음"}`].join("\n"),
-  },
-  el("span", { class: "cell-main" }, el("b", {}, workName(work)), scope ? el("small", { class: "work-scope num" }, scope) : null),
-  el("span", { class: "cell-state" }, statusIcon(lane === "queue" ? "idle" : lane),
-    el("span", { class: "job-state", dataset: { signal: ["fault", "decide"].includes(lane) ? lane : undefined } }, workStateText(work))),
-  lane === "work" ? el("span", { class: "cell-meter" }, meter(pct, false), el("span", { class: "num job-progress" }, `${pct}%`)) : el("span", {}),
-  el("span", { class: "num muted" }, shortTime(work.last_event_at)));
-}
-
-function workSection(title, work, empty, id = "") {
-  return el("section", { class: "section jobs-section", id: id || undefined },
-    el("h2", { class: "section-title" }, `${title} `, el("span", { class: "num" }, String(work.length))),
-    table(WORK_HEADS, work.map(workRow), empty));
-}
-
-function childRole(role) {
-  return { INSPECTION: "검사", FOLDER: "폴더 처리", TRANSCRIPTION: "STT" }[role] || role;
-}
-
-function childRow(child, media) {
-  const job = child.job;
-  const lane = laneOf(job);
-  const body = el("div", { class: "job-media-body" });
-  let disclosure;
-  disclosure = el("details", {
-    class: "child-work", open: media.isOpen(job.job_id), dataset: { jobId: job.job_id, lane },
-    ontoggle: () => media.toggle(disclosure, body, job.job_id),
-  },
-  el("summary", { class: "data-row job-row", role: "row", title: `${job.job_id}\nWorker ${job.worker_id || "배정 없음"}`, dataset: { jobId: job.job_id, lane } },
-    el("span", { class: "cell-main" },
-      el("a", { href: `#/jobs/${encodeURIComponent(job.job_id)}`, onclick: (event) => event.stopPropagation() }, child.folder || childRole(child.role)),
-      el("small", { class: "media-hint" }, "영상 정보")),
-    el("span", {}, childRole(child.role)),
-    el("span", { class: "cell-state" }, statusIcon(LANE[lane]?.[1] || "idle"), el("span", {}, laneText(job))),
-    el("span", { class: "cell-meter" }, meter(Math.round((job.progress || 0) * 100), lane === "done"), el("span", { class: "num" }, `${Math.round((job.progress || 0) * 100)}%`)),
-    el("span", { class: "num muted child-recent" }, shortTime(job.last_event_at))), body);
-  return disclosure;
-}
-
-function fold(id, title, count, open, onToggle, ...children) {
-  const details = el("details", { class: "job-fold", id, open, ontoggle: () => onToggle(details.open) },
-    el("summary", {}, el("span", {}, title), el("span", { class: "num" }, String(count))),
-    el("div", { class: "job-fold-body" }, ...children));
-  return details;
-}
-
-function fact(labelText, value, className = "") {
-  return el("div", { class: `job-fact ${className}`.trim() }, el("span", {}, labelText), el("b", {}, value || "—"));
-}
-
-function resultPanel(found) {
-  if (!found) return null;
-  const { item, drive } = found;
-  const source = `${formatCount(item.source_video_count)} → 1`;
-  const resultHref = `#/runs/${encodeURIComponent(item.archive_run_id)}?result=${encodeURIComponent(item.archive_package_id)}`;
-  return el("section", { class: "panel job-result", id: "job-result", dataset: { packageId: item.archive_package_id } },
-    el("div", { class: "panel-toolbar" }, el("b", { class: "panel-title" }, "완료 결과"),
-      token(item.archive_state === "COMMITTED" ? "확정됨" : "보관됨", item.archive_state === "COMMITTED" ? "done" : "idle"),
-      el("a", { class: "btn archive-result-link", href: resultHref }, "아카이브 결과")),
-    el("div", { class: "job-result-grid" },
-      fact("결과 영상", item.archive_video_file_name || item.archive_package_id, "wide"),
-      fact("원본 폴더", item.folder),
-      fact("처리 방식", label("disposition", item.disposition)),
-      fact("원본 → 결과", source),
-      fact("완료", shortTime(item.completed_at)),
-      fact("아카이브", item.archive_storage_id),
-      fact("아카이브 위치", item.archive_relative_path || "—", "wide"),
-      fact("Profile", item.profile_reference),
-      fact("패키지", item.archive_package_id),
-      fact("실행", item.archive_run_id),
-      fact("원본 드라이브", driveName(drive))));
-}
-
-function stepRow(step) {
-  const signal = stageSignal({ state: step.state, wait_reason: step.wait_reason });
-  const detail = [
-    step.state === "WAITING" && step.wait_reason ? `WAITING · ${step.wait_reason}` : step.state,
-    formatPercent(Math.round((step.progress || 0) * 100)), step.worker_id, step.error_class,
-    step.log_reference ? `로그 ${step.log_reference}` : "",
-  ].filter(Boolean).join(" · ");
-  return el("div", { class: "stage-row", dataset: { step: step.id, signal } },
-    el("i", { class: "step-dot", dataset: { signal } }), el("b", {}, step.id), el("span", { class: "stage-state" }, detail));
-}
-
-function timelineRow(item) {
-  return el("div", { class: "timeline-row", dataset: { kind: item.kind } },
-    el("time", { class: "num" }, clockTime(item.occurred_at, true)),
-    el("b", {}, item.kind), el("span", {}, item.summary || item.reference || "—"));
-}
-
-function runResultRow(item, selected) {
-  return el("div", { class: "completed-row", dataset: { packageId: item.archive_package_id, jobId: item.job_id, selected: selected ? "true" : undefined } },
-    el("span", { class: "completed-result" }, el("b", {}, item.archive_video_file_name || item.archive_package_id), el("small", {}, item.folder)),
-    el("span", { class: "completed-kind" }, label("disposition", item.disposition), item.profile_reference ? el("small", {}, item.profile_reference) : null),
-    el("span", { class: "completed-source num" }, `${formatCount(item.source_video_count)} → 1`),
-    el("span", { class: "completed-time num" }, shortTime(item.completed_at)),
-    el("span", { class: "completed-place" }, token(item.archive_state === "COMMITTED" ? "확정됨" : "보관됨", item.archive_state === "COMMITTED" ? "done" : "idle"),
-      el("small", {}, item.archive_storage_id), el("small", { class: "archive-relative-path", title: item.archive_relative_path || "" }, item.archive_relative_path || "—")));
-}
-
-function mediaDate(value) {
-  if (!value || String(value).startsWith("0001-01-01")) return "날짜 없음";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "날짜 없음";
-  return new Intl.DateTimeFormat("ko-KR", { year: "numeric", month: "2-digit", day: "2-digit" }).format(date);
-}
-
-function mediaDuration(millis) {
-  if (!millis) return "—";
-  const total = Math.max(0, Math.round(millis / 1000));
-  const hours = Math.floor(total / 3600);
-  const minutes = Math.floor((total % 3600) / 60);
-  const seconds = total % 60;
-  return hours ? `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}` : `${minutes}:${String(seconds).padStart(2, "0")}`;
-}
-
-function mediaBytes(value) {
-  if (!value) return "—";
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  let amount = Number(value);
-  let unit = 0;
-  while (amount >= 1000 && unit < units.length - 1) { amount /= 1000; unit += 1; }
-  return `${amount >= 100 || unit === 0 ? Math.round(amount) : amount.toFixed(1)} ${units[unit]}`;
-}
-
-function mediaRate(value) {
-  if (!value) return "—";
-  return value >= 1_000_000 ? `${(value / 1_000_000).toFixed(value >= 10_000_000 ? 1 : 2)} Mbps` : `${Math.round(value / 1000)} kbps`;
-}
-
-function mediaTable(items) {
-  if (!items.length) return emptyState("연결된 영상 정보 없음");
-  const rows = items.map((item) => {
-    const video = [item.container, item.video_codec, item.width && item.height ? `${item.width}×${item.height}` : "", mediaRate(item.video_bitrate_bps || item.bitrate_bps)].filter(Boolean).join(" · ") || "—";
-    const audio = [item.audio_codec, item.audio_sample_rate_hz ? `${Math.round(item.audio_sample_rate_hz / 1000)} kHz` : "", item.audio_channels ? `${item.audio_channels}ch` : ""].filter(Boolean).join(" · ") || "—";
-    return el("div", { class: "video-row", role: "row", dataset: { assetId: item.original_asset_id } },
-      el("span", { class: "video-source" }, el("b", {}, `${mediaDate(item.source_created_at)} · ${item.original_name || "이름 없음"}`), el("small", { title: item.relative_path || "" }, item.relative_path || "—")),
-      el("span", { class: "num" }, mediaDuration(item.duration_millis), el("small", {}, mediaBytes(item.size_bytes))),
-      el("span", { class: "video-tech" }, el("b", {}, video), el("small", {}, audio)),
-      el("span", { class: "video-profile", title: item.profile_reference || "" }, item.profile_reference || "—"));
-  });
-  return el("div", { class: "video-table", role: "table" },
-    el("div", { class: "video-head", role: "row" }, ...["원본", "길이 · 용량", "기술정보", "Profile"].map((text) => el("span", { role: "columnheader" }, text))),
-    ...rows);
-}
-
-function jobMediaDisclosure(jobID, media) {
-  const body = el("div", { class: "job-media-body" });
-  const toggleLabel = el("span", { class: "muted media-disclosure-label" }, media.isOpen(jobID) ? "접기" : "펼치기");
-  let disclosure;
-  disclosure = el("details", {
-    class: "panel job-media-disclosure", id: "job-media", open: media.isOpen(jobID), dataset: { jobId: jobID },
-    ontoggle: () => { toggleLabel.textContent = disclosure.open ? "접기" : "펼치기"; media.toggle(disclosure, body, jobID); },
-  }, el("summary", { class: "panel-toolbar" }, el("b", { class: "panel-title" }, "영상 정보"), toggleLabel), body);
-  return disclosure;
-}
-
-// runAttention lists the folder problems of this run's fixed scope while the
-// run is still its drive's current one; an older run only reports its holds.
-function runAttention(summary, folderIDs) {
-  const drive = findDrive(summary.source_volume_id);
-  const scope = new Set(folderIDs);
-  const items = drive?.archive_run_id === summary.work_id
-    ? (drive.folders || []).filter((folder) => scope.has(folder.folder)).map((folder) => [folder, folderProblem(folder)]).filter(([, problem]) => problem)
-      .sort(([, left], [, right]) => (left.signal === right.signal ? 0 : left.signal === "fault" ? -1 : 1))
-    : [];
-  const driveHref = (folder = "") => `#/drives/${encodeURIComponent(summary.source_volume_id)}${folder ? `?folder=${encodeURIComponent(folder)}` : ""}`;
-  const rows = items.map(([folder, problem]) => el("a", { class: "attention-link", href: driveHref(folder.folder), dataset: { folderId: folder.folder, kind: problem.kind, signal: problem.signal } },
-    statusIcon(problem.signal), el("b", {}, problem.title), el("span", {}, folder.folder),
-    el("span", { class: "num muted" }, `영상 ${formatCount(folder.video_count)}`), svgIcon(icons.next)));
-  if (!rows.length && summary.hold_count > 0) {
-    rows.push(el("a", { class: "attention-link", href: driveHref(), dataset: { kind: "hold", signal: "decide" } },
-      statusIcon("decide"), el("b", {}, "분류 확인 필요"), el("span", { class: "num" }, `${formatCount(summary.hold_count)} 폴더`), el("span", {}), svgIcon(icons.next)));
-  }
-  if (!rows.length) return null;
-  return el("section", { class: "section jobs-section", id: "run-attention", "aria-label": "확인 필요" },
-    el("h2", { class: "section-title" }, "확인 필요 ", el("span", { class: "num" }, String(rows.length))),
-    el("div", { class: "attention-list" }, ...rows));
-}
-
-function renderRunDetail(root, detail, media, route) {
-  const summary = detail?.summary;
-  if (!summary) {
-    root.replaceChildren(emptyState("아카이브 작업을 찾을 수 없음"));
-    return;
-  }
-  const lane = workLane(summary);
-  const source = summary.source_volume_id || summary.source_storage_id;
-  const facts = [
-    ["원본 → 아카이브", `${source || "—"} → ${summary.archive_storage_id || "—"}`], ["폴더", formatCount(summary.folder_count)], ["영상", formatCount(summary.video_count)],
+export function JobsScreen() {
+  const draft = ui.newWork.value;
+  return [
+    html`<div key="head" class="page-head">
+      <div class="page-title"><h1 id="jobs-title">작업 관리</h1></div>
+      <button type="button" class="btn" id="new-job-open" aria-expanded=${draft ? "true" : "false"} onClick=${() => (draft ? (ui.newWork.value = null) : openNewWork())}>
+        <${Glyph} d=${GLYPH.plus} />새 작업 생성</button>
+    </div>`,
+    html`<${Fold} key="new" open=${!!draft}>${draft ? html`<${NewWork} draft=${draft} />` : null}<//>`,
+    html`<div key="cols" class="job-cols with-chev" aria-hidden="true"><span>작업</span><span>상태</span><span>진행</span><span>요청</span><span></span></div>`,
+    ...LANES.map(([lane, id, title, empty]) => html`<${Lane} key=${lane} lane=${lane} id=${id} title=${title} empty=${empty} />`),
   ];
-  const trace = [
-    `작업 ID ${summary.work_id}`, `Worker ${summary.worker_id || "배정 없음"}`,
-    `하위 작업 ${formatCount(summary.child_job_count)}`, `결과 ${formatCount(summary.result_count)}`,
-  ].join("\n");
-  const folderIDs = detail.folder_ids || [];
-  const folders = folderIDs.map((folder) => el("div", { class: "data-row", role: "row" }, el("b", { class: "cell-main" }, folder)));
-  const children = detail.children || [];
-  const completed = detail.completed_work || [];
-  const selectedPackage = route?.query?.get("result") || "";
-  root.replaceChildren(...[
-    el("div", { class: "page-head" },
-      el("div", { class: "page-title" }, el("h1", { id: "run-title" }, workName(summary)), token(workStateText(summary), LANE[lane]?.[1] || "idle"))),
-    runAttention(summary, folderIDs),
-    el("section", { class: "panel job-summary", id: "run-summary", title: trace },
-      el("div", { class: "job-facts" }, ...facts.map(([name, value]) => fact(name, value)))),
-    el("section", { class: "section jobs-section", id: "run-children" },
-      el("h2", { class: "section-title" }, "하위 작업 ", el("span", { class: "num" }, String(children.length))),
-      table(["대상", "단계", "상태", "진행", "최근"], children.map((child) => childRow(child, media)), "하위 작업 없음", "children-table")),
-    completed.length ? el("section", { class: "section jobs-section", id: "run-results" },
-      el("h2", { class: "section-title" }, "완료 결과 ", el("span", { class: "num" }, String(completed.length))),
-      el("div", { class: "completed-table" },
-        el("div", { class: "completed-head", "aria-hidden": "true" }, ...["결과", "작업", "원본 → 결과", "완료", "아카이브"].map((text) => el("span", {}, text))),
-        ...completed.map((item) => runResultRow(item, item.archive_package_id === selectedPackage)))) : null,
-    fold("run-scope", "고정 폴더 범위", folders.length, ui.runScopeOpen, (open) => { ui.runScopeOpen = open; },
-      el("div", { class: "data-table scope-table", role: "table" }, ...(folders.length ? folders : [emptyState("폴더 없음")]))),
-  ].filter(Boolean));
 }
 
-export function mount(root, route) {
-  let detail = null;
-  let workDetail = null;
-  let loadedKey = "";
-  let loadError = "";
-  let disposed = false;
-  let request = null;
-  let createOpen = false;
-  let createPending = false;
-  let createError = "";
-  const createDraft = { kind: "ARCHIVE", target_title: "", template_name: "occasion-recording" };
-  const mediaCache = new Map();
-  const mediaOpen = new Set();
-  const mediaRequests = new Map();
-  ui.jobCancel = "";
-  ui.status = "";
+function Lane({ lane, id, title, empty }) {
+  const items = laneItems(lane);
+  const foldable = lane === "attention" || lane === "done";
+  const open = foldable ? ui.lanes.value[lane] : true;
+  const toggle = () => { ui.lanes.value = { ...ui.lanes.peek(), [lane]: !open }; };
+  return html`<section class="lane" id=${id} data-open=${open ? "true" : "false"} aria-label=${title}>
+    <div class="lane-head vt" style=${`--vtn:lane-${lane}`}>
+      ${foldable
+        ? html`<button type="button" class="lane-toggle" aria-expanded=${open ? "true" : "false"} onClick=${toggle}><${Chevron} /><span class="lane-title">${title}</span>${" "}<span class="num">${items.length}</span></button>`
+        : html`<h2 class="section-title"><span class="lane-title">${title}</span>${" "}<span class="num">${items.length}</span></h2>`}
+    </div>
+    <${Fold} open=${open}>
+      <div class="lane-rows">
+        ${items.length ? items.map((work) => html`<${WorkBlock} key=${work.work_id} work=${work} meter=${lane === "work"} />`) : html`<${Empty} text=${empty} />`}
+      </div>
+    <//>
+  </section>`;
+}
 
-  const media = {
-    isOpen(jobID) { return mediaOpen.has(jobID); },
-    async toggle(disclosure, body, jobID) {
-      if (!disclosure.open) {
-        mediaOpen.delete(jobID);
-        body.replaceChildren();
-        return;
-      }
-      mediaOpen.add(jobID);
-      if (mediaCache.has(jobID)) {
-        body.replaceChildren(mediaTable(mediaCache.get(jobID)));
-        return;
-      }
-      body.replaceChildren(emptyState("영상 정보 불러오는 중"));
-      let pending = mediaRequests.get(jobID);
-      if (!pending) {
-        const controller = new AbortController();
-        pending = { controller, value: api(`/api/v1/jobs/${encodeURIComponent(jobID)}/media`, { signal: controller.signal }) };
-        mediaRequests.set(jobID, pending);
-      }
-      try {
-        const values = await pending.value;
-        if (disposed) return;
-        mediaCache.set(jobID, values || []);
-        if (disclosure.open) body.replaceChildren(mediaTable(mediaCache.get(jobID)));
-      } catch (error) {
-        if (error.name !== "AbortError" && !disposed && disclosure.open) body.replaceChildren(emptyState("영상 정보 조회 실패"));
-      } finally {
-        mediaRequests.delete(jobID);
-      }
-    },
+function WorkBlock({ work, meter }) {
+  const open = useComputed(() => ui.expanded.value.has(work.work_id)).value;
+  const shown = useLinger(open);
+  const run = work.kind === "ARCHIVE_RUN";
+  const href = run ? `#/runs/${encodeURIComponent(work.work_id)}` : `#/jobs/${encodeURIComponent(work.work_id)}`;
+  const isShared = useComputed(() => shared.value?.key === href && shared.value.src === "row" && route.value.full !== href).value;
+  const job = run ? null : jobOf(work.work_id);
+  const toggle = () => {
+    const next = new Set(ui.expanded.peek());
+    if (!next.delete(work.work_id)) next.add(work.work_id);
+    ui.expanded.value = next;
   };
+  const pct = Math.round((work.progress || 0) * 100);
+  return html`<div class="work-block vt" style=${`--vtn:work-${cssName(work.work_id)}`} data-work-id=${work.work_id}>
+    <button type="button" class="job-row work-row" aria-expanded=${open ? "true" : "false"} data-work-id=${work.work_id} data-kind=${work.kind} data-lane=${workLane(work)}
+      title=${[work.work_id, `Worker ${work.worker_id || "배정 없음"}`].join("\n")} onClick=${toggle}>
+      <span class="job-name">
+        <b class=${isShared ? "shared" : null}>${workTitle(work)}</b>
+        <small class="work-scope">${run ? workScopeText(work) : `Template 작업 · ${label("template", job?.template_name)}`} <i class="faint-id">${work.work_id}</i></small>
+      </span>
+      <span class="state"><${StatusIcon} kind=${workKind(work)} /><${Swap} cls="job-state" text=${workText(work)} />${run ? html`<${IssueTags} ...${workIssues(work)} cls="row-issue" />` : null}</span>
+      <span class="job-progress">${meter ? html`<${Meter} value=${work.progress || 0} label=${`진행 ${pct}%`} />` : null}</span>
+      <span class="job-time" title=${shortTime(work.created_at)}>${dayTime(work.created_at)}</span>
+      <${Chevron} />
+    </button>
+    <${Fold} open=${open}>${shown ? (run ? html`<${WorkFolders} work=${work} href=${href} />` : html`<${TemplateSteps} work=${work} href=${href} />`) : null}<//>
+  </div>`;
+}
 
-  async function cancel(job) {
-    try {
-      await mutation(`/api/v1/jobs/${encodeURIComponent(job.job_id)}/cancel`, {
-        command_id: newID("COMMAND"), idempotency_key: newID("CANCEL"), reason: "담당자 취소", expected_revision: job.revision,
-      });
-      ui.jobCancel = "";
-      ui.status = `${job.job_id} 취소 요청`;
-      loadedKey = "";
-      await refresh();
-    } catch (error) {
-      ui.status = error.message;
-      notify();
-    }
+// An opened archive work shows its first folders; a folder handed over to a
+// newer work of the same drive says where it went.
+function WorkFolders({ work, href }) {
+  const current = workDrive(work);
+  const answer = current ? null : workDetail(work.work_id);
+  const names = current ? current.scope : answer?.value?.folder_ids || null;
+  const children = new Map((answer?.value?.children || []).filter((child) => child.folder).map((child) => [child.folder, child.job]));
+  const latest = driveView(work.source_volume_id);
+  const newer = latest && latest.archive_run_id && latest.archive_run_id !== work.work_id ? new Set(latest.scope) : null;
+  const total = work.folder_count || names?.length || 0;
+  let running = 0;
+  let queued = 0;
+  let done = 0;
+  for (const folder of current?.folders || []) {
+    const state = folderState(folder);
+    if (state.signal === "work") running += 1;
+    else if (state.word === "대기열") queued += 1;
+    else if (state.signal === "done") done += 1;
   }
+  const moved = newer && names ? names.filter((name) => newer.has(name)).length : 0;
+  const counts = current ? `폴더 ${formatCount(total)} · 진행 ${running} · 대기 ${formatCount(queued)} · 끝남 ${formatCount(done)}` : `폴더 ${formatCount(total)} · 영상 ${formatCount(work.video_count)}`;
+  return html`<div class="work-children">
+    <div class="children-head">
+      <span>${counts}${moved ? ` · 새 작업으로 넘김 ${moved}` : ""}</span>
+      <a class="text-btn" href=${href} data-shared="row">작업 화면 열기<${Glyph} d=${GLYPH.next} /></a>
+    </div>
+    <div class="child-list">
+      ${names ? names.slice(0, CHILDREN_SHOWN).map((name) => html`<${ChildFolder} key=${name} work=${work} current=${current} name=${name}
+        job=${children.get(name)} movedTo=${newer?.has(name) ? latest.archive_run_id : ""} />`)
+        : html`<${Skeleton} n=${Math.min(total || 1, 6)} cls="skel-child" />`}
+    </div>
+    ${names && names.length > CHILDREN_SHOWN ? html`<span class="more">외 ${formatCount(names.length - CHILDREN_SHOWN)}개 · 작업 화면에서 모두 보기</span>` : null}
+  </div>`;
+}
 
-  async function createJob(event) {
+function ChildFolder({ work, current, name, job, movedTo }) {
+  if (movedTo) {
+    return html`<a class="child-row" href=${`#/runs/${encodeURIComponent(movedTo)}`} data-folder-id=${name}>
+      <b>${name}</b><span class="state"><${StatusIcon} kind="idle" />새 작업으로 넘김</span><span><i class="faint-id">${movedTo}</i></span><span></span>
+    </a>`;
+  }
+  const folder = current ? store.folders.get(folderKey(current.workspace_drive_id, name))?.value : null;
+  if (folder) {
+    const problem = folderProblem(folder);
+    const state = folderState(folder);
+    const signal = problem?.signal || (folder.archive_state ? "done" : state.signal);
+    const word = problem?.word || (folder.archive_state ? (folder.archive_state === "COMMITTED" ? "확정됨" : "보관됨") : state.word);
+    const href = folder.job_id ? `#/jobs/${encodeURIComponent(folder.job_id)}` : `#/drives/${encodeURIComponent(current.workspace_drive_id)}?folder=${encodeURIComponent(name)}`;
+    return html`<a class="child-row" href=${href} data-shared="child" data-folder-id=${name} data-job-id=${folder.job_id || null}>
+      <b>${name}</b>
+      <span class="state"><${StatusIcon} kind=${signal} /><${Swap} text=${word} /></span>
+      <span>${state.signal === "work" && !problem ? html`<${Meter} value=${folderProgress(folder)} label="진행" />` : null}</span>
+      <span class="job-time">${formatCount(folder.video_count)} 영상</span>
+    </a>`;
+  }
+  const lane = job ? workLane({ state: { COMPLETED: "COMPLETED", FAILED: "FAILED", RUNNING: "ACTIVE" }[job.step_state] || "QUEUED" }) : "";
+  return html`<a class="child-row" href=${job ? `#/jobs/${encodeURIComponent(job.job_id)}` : `#/runs/${encodeURIComponent(work.work_id)}`} data-folder-id=${name} data-job-id=${job?.job_id || null}>
+    <b>${name}</b>
+    <span class="state">${job ? html`<${StatusIcon} kind=${{ done: "done", fault: "fault", work: "work" }[lane] || "idle"} />${label("step", job.step_state)}` : html`<span class="muted">고정 범위</span>`}</span>
+    <span></span>
+    <span class="job-time">${job ? dayTime(job.last_event_at) : ""}</span>
+  </a>`;
+}
+
+function TemplateSteps({ work, href }) {
+  const answer = jobDetail(work.work_id);
+  const steps = answer.value?.steps || null;
+  return html`<div class="work-children">
+    <div class="children-head"><span>단계 ${steps ? steps.length : "—"}</span><a class="text-btn" href=${href} data-shared="row">작업 화면 열기<${Glyph} d=${GLYPH.next} /></a></div>
+    ${steps ? html`<ol class="child-steps">
+      ${steps.map((step) => {
+        const kind = step.state === "COMPLETED" ? "done" : step.state === "FAILED" ? "fault" : step.state === "WAITING" && ["INPUT", "APPROVAL", "DEVICE"].includes(step.wait_reason) ? "decide" : ["RUNNING", "RESERVED", "VERIFYING"].includes(step.state) ? "work" : "idle";
+        return html`<li class="stage-row" key=${step.id}><${StatusIcon} kind=${kind} /><b>${label("stage", step.id)}</b><span class="muted">${step.state === "WAITING" && step.wait_reason ? `${label("wait", step.wait_reason)} 대기` : label("step", step.state)} · ${Math.round((step.progress || 0) * 100)}%</span></li>`;
+      })}
+    </ol>` : html`<${Skeleton} n=${2} cls="skel-child" />`}
+  </div>`;
+}
+
+// ─── New work ───────────────────────────────────────────────────────────────
+
+function NewWork({ draft }) {
+  const head = html`<div class="new-work-head">
+    <b>새 작업</b>
+    <div class="seg plain-seg job-kind" id="new-work-kind" role="group" aria-label="작업 종류">
+      ${[["ARCHIVE", "아카이브"], ["TEMPLATE", "Template 작업"]].map(([kind, text]) => html`<button type="button" key=${kind} data-kind=${kind} aria-pressed=${draft.kind === kind ? "true" : "false"}
+        onClick=${() => setDraft({ kind, error: "" })}>${text}</button>`)}
+    </div>
+  </div>`;
+  return html`<section class="new-work" id="new-job" aria-label="새 작업 생성">${head}${draft.kind === "ARCHIVE" ? html`<${ArchiveScope} draft=${draft} />` : html`<${TemplateForm} draft=${draft} />`}</section>`;
+}
+
+function TemplateForm({ draft }) {
+  const ready = draft.title.trim() && !draft.pending;
+  const submit = async (event) => {
     event.preventDefault();
-    if (createPending) return;
+    if (!ready) return;
     const jobID = newID("JOB");
-    createPending = true;
-    createError = "";
-    renderList();
+    setDraft({ pending: true, error: "" });
     try {
       await mutation("/api/v1/jobs", {
         job_id: jobID, command_id: newID("COMMAND"), idempotency_key: `${jobID}:create`,
-        reason: "작업 관리에서 생성", template_name: createDraft.template_name,
-        target_title: createDraft.target_title.trim(), expected_revision: 0,
+        reason: "작업 관리에서 생성", template_name: draft.template, target_title: draft.title.trim(), expected_revision: 0,
       });
+      ui.newWork.value = null;
       await refresh();
-      if (!disposed) window.location.hash = `#/jobs/${encodeURIComponent(jobID)}`;
+      go(`#/jobs/${encodeURIComponent(jobID)}`);
     } catch (error) {
-      createPending = false;
-      createError = error.message;
-      if (!disposed) renderList();
+      setDraft({ pending: false, error: error.message });
     }
-  }
+  };
+  return html`<form id="new-job-form" onSubmit=${submit}>
+    <div class="form-grid">
+      <label class="field"><span>작업 이름</span><input id="new-job-title" name="target_title" required autocomplete="off" value=${draft.title}
+        onInput=${(event) => setDraft({ title: event.currentTarget.value })} placeholder="예: 11월 행사 하이라이트" /></label>
+      <label class="field"><span>작업 유형</span><select id="new-job-template" name="template_name" value=${draft.template} onChange=${(event) => setDraft({ template: event.currentTarget.value })}>
+        ${TEMPLATES.map(([value, text]) => html`<option key=${value} value=${value}>${text}</option>`)}</select></label>
+    </div>
+    <div class="new-work-foot">
+      ${draft.error ? html`<span class="summary" id="new-job-status" role="status">${draft.error}</span>` : null}
+      <button type="button" class="btn" disabled=${draft.pending} onClick=${() => { ui.newWork.value = null; }}>취소</button>
+      <button type="submit" class="btn primary" id="new-job-submit" data-action="create" disabled=${!ready || stale.value}>${draft.pending ? "요청 보냄…" : "작업 요청"}</button>
+    </div>
+  </form>`;
+}
 
-  function resetArchiveRunIntent() {
-    ui.archiveRunID = newID("ARCHIVE-RUN");
-    ui.archiveRunKey = newID("ARCHIVE-RUN-START");
-    ui.runStarting = false;
+function ArchiveScope({ draft }) {
+  const available = allDrives.value.filter((item) => item.connection_state === "CONNECTED" && !isRunning(item));
+  const current = draft.driveID ? driveView(draft.driveID) : null;
+  useEffect(() => { if (current) syncDraft(current, ui.newWork.peek()); }, [current, draft]);
+  const chooseDrive = (id) => { setDraft({ error: "" }); prepareDrive(id); };
+  const drives = html`<div class="chooser-col" id="prep-drives" aria-label="원본 드라이브">
+    <div class="chooser-head"><span>원본 드라이브</span><span class="chooser-value">${current ? driveName(current) : "선택 없음"}</span></div>
+    ${available.length ? available.map((item) => html`<button type="button" class="option" key=${item.workspace_drive_id} data-drive-id=${item.workspace_drive_id}
+      aria-pressed=${draft.driveID === item.workspace_drive_id ? "true" : "false"} onClick=${() => chooseDrive(item.workspace_drive_id)}>
+      <b>${driveName(item)}</b><small>${item.worker_id} · ${folderDiscoveryText(item)}</small></button>`) : html`<p class="chooser-empty">연결된 드라이브 없음</p>`}
+  </div>`;
+  if (!current) {
+    return html`<div class="chooser archive-create" id="archive-create">${drives}<div class="chooser-col chooser-hint"><p class="chooser-empty">드라이브를 고르세요</p></div></div>
+      ${draft.error ? html`<div class="new-work-foot"><span class="summary" id="new-job-status" role="status">${draft.error}</span></div>` : null}`;
   }
-
-  async function startArchiveRun(drive) {
-    if (ui.runStarting) return;
-    if (!ui.archiveRunID) resetArchiveRunIntent();
-    ui.runStarting = true;
-    createError = "";
-    renderList();
+  const ready = folderDiscoveryReady(current);
+  const folders = current.inventoryFolders.length ? current.inventoryFolders : current.folders;
+  const picked = draft.folders;
+  const selected = folders.filter((folder) => picked.has(folder.folder));
+  const candidates = archiveCandidates(current);
+  const videos = selected.reduce((sum, folder) => sum + (folder.video_count || 0), 0);
+  const bytes = selected.reduce((sum, folder) => sum + (folder.estimated_output_bytes || 0), 0);
+  const blocker = startBlocker(current, draft, selected);
+  const heading = ready ? `탐색 r${current.folder_discovery_revision} · ${folders.length}` : folderDiscoveryText(current);
+  const pick = (names) => batch(() => { setDraft({ folders: new Set(names) }); resetRunIntent(); });
+  const toggle = (name) => {
+    const next = new Set(picked);
+    if (!next.delete(name)) next.add(name);
+    pick(next);
+  };
+  const start = async () => {
+    if (draft.starting || blocker) return;
+    setDraft({ starting: true, error: "" });
     try {
       const result = await mutation("/api/v1/archive-intake/runs", {
-        archive_run_id: ui.archiveRunID, idempotency_key: ui.archiveRunKey,
-        session_id: ui.intakeSessionID,
-        source_volume_id: drive.source_volume_id,
-        expected_candidate_revision: drive.candidate_revision || drive.input_revision,
-        archive_storage_id: ui.archiveID,
-        input_revision: drive.folder_discovery_revision || drive.input_revision,
-        folder_ids: [...ui.folders].sort(),
+        archive_run_id: draft.archiveRunID, idempotency_key: draft.archiveRunKey, session_id: draft.intakeSessionID,
+        source_volume_id: current.source_volume_id, expected_candidate_revision: current.candidate_revision || current.input_revision,
+        archive_storage_id: draft.archiveID, input_revision: current.folder_discovery_revision || current.input_revision,
+        folder_ids: [...picked].sort(),
       });
-      ui.prepDriveID = "";
+      ui.newWork.value = null;
       await refresh();
-      if (!disposed) window.location.hash = `#/runs/${encodeURIComponent(result.archive_run_id)}`;
+      go(`#/runs/${encodeURIComponent(result.archive_run_id)}`);
     } catch (error) {
-      ui.runStarting = false;
-      createError = error.message;
-      if (!disposed) renderList();
+      setDraft({ starting: false, error: error.message });
     }
-  }
-
-  function archiveOption(storage) {
-    return el("button", {
-      type: "button", class: "option", "aria-pressed": String(storage.storage_id === ui.archiveID), disabled: !storage.accessible,
-      dataset: { storageId: storage.storage_id, accessKind: storage.access_kind || "" },
-      onclick: () => { ui.archiveID = ui.archiveID === storage.storage_id ? "" : storage.storage_id; resetArchiveRunIntent(); renderList(); },
-    },
-    el("span", { class: "option-main" }, el("b", {}, storage.label || storage.storage_id)),
-    el("span", { class: "option-meta" }, `${label("storageRole", storage.role)} · ${label("storageAccess", storage.access_kind)}`,
-      el("small", {}, storage.accessible ? `여유 ${formatBytes(storage.free_bytes)} / ${formatBytes(storage.capacity_bytes)}` : "연결 필요")));
-  }
-
-  function archiveCreatePanel() {
-    const available = model.drives.filter((drive) => drive.connection_state === "CONNECTED" && !isRunning(drive));
-    const selectedDrive = findDrive(ui.prepDriveID);
-    const driveOptions = available.map((drive) => el("button", {
-      type: "button", class: "option", "aria-pressed": String(drive.workspace_drive_id === ui.prepDriveID),
-      dataset: { driveId: drive.workspace_drive_id },
-      onclick: async () => { createError = ""; await prepareDrive(drive); },
-    }, el("span", { class: "option-main" }, el("b", {}, driveName(drive))),
-    el("span", { class: "option-meta" }, `${drive.worker_id} · ${folderDiscoveryText(drive)}`)));
-    if (!selectedDrive) {
-      return el("div", { class: "archive-create", id: "archive-create" },
-        el("div", { class: "chooser-col", id: "prep-drives", "aria-label": "원본 드라이브" },
-          el("div", { class: "chooser-head" }, el("b", {}, "원본 드라이브"), el("span", { class: "chooser-value" }, "선택 없음")),
-          ...(driveOptions.length ? driveOptions : [emptyState("연결된 드라이브 없음")])),
-        createError ? el("span", { id: "new-job-status", role: "status" }, createError) : null);
-    }
-
-    syncPreparation(selectedDrive);
-    const folders = discoveredFolders(selectedDrive);
-    const ready = folderDiscoveryReady(selectedDrive);
-    const selected = folders.filter((folder) => ui.folders.has(folder.folder));
-    const all = el("input", { type: "checkbox", id: "select-all", "aria-label": "전체 선택", disabled: !ready });
-    all.checked = ready && folders.length > 0 && selected.length === folders.length;
-    all.indeterminate = selected.length > 0 && selected.length < folders.length;
-    all.addEventListener("change", () => { ui.folders = new Set(all.checked ? folders.map((folder) => folder.folder) : []); resetArchiveRunIntent(); renderList(); });
-    const picks = folders.map((folder) => {
-      const check = el("input", { type: "checkbox", "aria-label": `${folder.folder} 선택`, disabled: !ready });
-      check.checked = ui.folders.has(folder.folder);
-      check.addEventListener("change", () => { check.checked ? ui.folders.add(folder.folder) : ui.folders.delete(folder.folder); resetArchiveRunIntent(); renderList(); });
-      return el("label", { class: "folder-pick", dataset: { folderId: folder.folder } }, check,
-        el("span", { class: "folder-pick-name" }, folder.folder),
-        el("small", { class: "num" }, `${formatCount(folder.video_count)} 영상 · ${formatBytes(folder.estimated_output_bytes)}`));
-    });
-    const candidates = archiveCandidates(selectedDrive);
-    const videos = selected.reduce((sum, folder) => sum + (folder.video_count || 0), 0);
-    const bytes = selected.reduce((sum, folder) => sum + (folder.estimated_output_bytes || 0), 0);
-    const blocker = startBlocker(selectedDrive, selected);
-    const folderHeading = ready ? `탐색 r${selectedDrive.folder_discovery_revision} · ${folders.length}` : folderDiscoveryText(selectedDrive);
-    return el("div", { class: "archive-create", id: "archive-create" },
-      el("div", { class: "chooser-col", id: "prep-drives", "aria-label": "원본 드라이브" },
-        el("div", { class: "chooser-head" }, el("b", {}, "원본 드라이브"), el("span", { class: "chooser-value" }, driveName(selectedDrive))),
-        ...driveOptions),
-      el("div", { class: "chooser", id: "archive-scope" },
-        el("div", { class: "chooser-col", id: "prep-archives", "aria-label": "아카이브 저장소" },
-          el("div", { class: "chooser-head" }, el("b", {}, "아카이브 저장소"), el("span", { class: "chooser-value" }, ui.archiveID || "선택 없음")),
-          ...(candidates.length ? candidates.map(archiveOption) : [emptyState("후보 없음")])),
-        el("div", { class: "chooser-col", id: "prep-folders", "aria-label": "폴더" },
-          el("div", { class: "chooser-head" }, el("b", {}, "폴더"), el("span", { class: "chooser-value num" }, folderHeading)),
-          el("label", { class: "folder-pick folder-all" }, all, el("span", {}, "전체")),
-          ...(picks.length ? picks : [emptyState(selectedDrive.folder_discovery_state === "SCANNING" ? "검색 중" : selectedDrive.folder_discovery_state === "FAILED" ? "검색 실패" : "폴더 없음")]))),
-      el("div", { class: "start-bar" },
-        el("span", { id: "selection-summary", class: "num" }, `${selected.length} 폴더 · ${formatCount(videos)} 영상 · ${formatBytes(bytes)}`),
-        el("span", { id: "start-reason", class: "start-reason" }, createError || blocker),
-        el("button", { type: "button", class: "btn primary", id: "start-archive-run", disabled: Boolean(blocker) || ui.runStarting, onclick: () => startArchiveRun(selectedDrive) }, ui.runStarting ? "생성 중" : "아카이브 작업 생성")));
-  }
-
-  function templateCreatePanel() {
-    const title = el("input", {
-      id: "new-job-title", name: "target_title", required: true, autocomplete: "off", value: createDraft.target_title,
-      oninput: (event) => { createDraft.target_title = event.target.value; },
-    });
-    const template = el("select", {
-      id: "new-job-template", name: "template_name", value: createDraft.template_name,
-      onchange: (event) => { createDraft.template_name = event.target.value; },
-    },
-    ...[
-      ["occasion-recording", "행사 기록"], ["vj-compilation", "VJ 모음"],
-      ["final-edit", "최종 편집"], ["large-file-intake", "대용량 입고"],
-    ].map(([value, text]) => el("option", { value, selected: value === createDraft.template_name }, text)));
-    const submit = el("button", { type: "submit", class: "btn primary", id: "new-job-submit", disabled: createPending }, createPending ? "생성 중" : "생성");
-    const form = el("form", { id: "new-job-form", class: "job-create-form", onsubmit: createJob },
-      el("label", { class: "field" }, el("span", {}, "작업 이름"), title),
-      el("label", { class: "field" }, el("span", {}, "작업 유형"), template),
-      el("div", { class: "form-actions" }, submit,
-        el("button", { type: "button", class: "btn", disabled: createPending, onclick: () => { createOpen = false; createError = ""; renderList(); } }, "취소"),
-        createError ? el("span", { id: "new-job-status", role: "status" }, createError) : null));
-    queueMicrotask(() => { if (!disposed && createOpen && !createDraft.target_title) title.focus(); });
-    return form;
-  }
-
-  function createPanel() {
-    if (!createOpen) return null;
-    const kinds = el("div", { class: "seg job-kind", id: "new-work-kind", role: "group", "aria-label": "작업 종류" },
-      ...[["ARCHIVE", "아카이브"], ["TEMPLATE", "Template 작업"]].map(([value, text]) => el("button", {
-        type: "button", "aria-pressed": String(createDraft.kind === value), dataset: { kind: value },
-        onclick: () => { createDraft.kind = value; createError = ""; renderList(); },
-      }, text)));
-    return el("section", { class: "panel job-create-panel", id: "new-job", "aria-label": "새 작업 생성" },
-      el("div", { class: "panel-toolbar" }, el("b", { class: "panel-title" }, "새 작업 생성"), kinds),
-      createDraft.kind === "ARCHIVE" ? archiveCreatePanel() : templateCreatePanel());
-  }
-
-  function renderList() {
-    const previousFolderChoices = root.querySelector("#prep-folders");
-    if (previousFolderChoices) ui.prepFolderScroll = previousFolderChoices.scrollTop;
-    const work = [...model.work];
-    const active = work.filter((item) => workLane(item) === "work");
-    const queued = work.filter((item) => workLane(item) === "queue");
-    const attention = work.filter((item) => ["fault", "decide"].includes(workLane(item)));
-    const completed = work.filter((item) => workLane(item) === "done");
-    root.replaceChildren(
-      el("div", { class: "page-head" }, el("div", { class: "page-title" }, el("h1", { id: "jobs-title" }, "작업 관리")),
-        el("button", { type: "button", class: "btn primary", id: "new-job-open", "aria-expanded": createOpen ? "true" : "false", onclick: () => { createOpen = !createOpen; createError = ""; renderList(); } },
-          svgIcon(icons.plus), "새 작업 생성")),
-      ...(createOpen ? [createPanel()] : []),
-      el("div", { class: "jobs-sections" },
-        workSection("진행 중", active, "진행 중인 작업 없음", "active-jobs"),
-        workSection("작업 큐", queued, "대기 중인 작업 없음", "queued-jobs"),
-        fold("attention-jobs", "확인 필요", attention.length, ui.jobAttentionOpen, (open) => { ui.jobAttentionOpen = open; },
-          table(WORK_HEADS, attention.map(workRow), "확인 필요한 작업 없음")),
-        fold("completed-jobs", "완료", completed.length, ui.jobCompletedOpen, (open) => { ui.jobCompletedOpen = open; },
-          table(WORK_HEADS, completed.map(workRow), "완료 작업 없음"))));
-    const currentFolderChoices = root.querySelector("#prep-folders");
-    if (currentFolderChoices && ui.prepFolderScroll > 0) currentFolderChoices.scrollTop = ui.prepFolderScroll;
-  }
-
-  function renderDetail(job) {
-    if (!job) {
-      root.replaceChildren(
-        el("div", { class: "page-head" }, el("div", { class: "page-title" }, el("h1", {}, "작업 관리"))),
-        emptyState("작업을 찾을 수 없음"));
-      return;
-    }
-    const summary = detail?.summary?.job_id === job.job_id ? detail.summary : job;
-    const lane = laneOf(summary);
-    const linked = linkedFolder(job.job_id);
-    const facts = [
-      ["작업 ID", summary.job_id], ["Template", summary.template_name],
-      ["리비전", `r${summary.revision}`], ["Worker", summary.worker_id || "배정 없음"],
-      ["현재 단계", summary.current_step_id], ["최근", shortTime(summary.last_event_at)],
-      ["원본 위치", linked ? `${driveName(linked.drive)} / ${linked.folder.folder}` : "—"],
-    ];
-    const steps = detail?.summary?.job_id === job.job_id ? detail.steps || [] : [];
-    const timeline = detail?.summary?.job_id === job.job_id ? detail.timeline || [] : [];
-    const cancellable = !finishedSteps.has(summary.step_state);
-    const confirm = ui.jobCancel === job.job_id;
-    root.replaceChildren(...[
-      el("div", { class: "page-head" },
-        el("div", { class: "page-title" }, el("h1", { id: "job-title" }, summary.target_title || summary.job_id),
-          token(`${laneText(summary)} · ${summary.step_state}`, LANE[lane]?.[1] || stateSignal(summary.step_state))),
-        el("div", { class: "detail-actions" },
-          cancellable && !confirm ? el("button", { type: "button", class: "btn danger", id: "cancel-job", dataset: { action: "cancel" }, onclick: () => { ui.jobCancel = job.job_id; notify(); } }, "작업 취소…") : null)),
-      resultPanel(completion(job.job_id)),
-      el("section", { class: "panel job-summary", id: "job-summary" },
-        el("div", { class: "panel-toolbar" }, el("b", { class: "panel-title" }, "작업 정보")),
-        el("div", { class: "job-facts" }, ...facts.map(([name, value]) => fact(name, value)))),
-      jobMediaDisclosure(summary.job_id, media),
-      confirm ? el("div", { class: "confirm-box", title: "대기 단계 즉시 취소 · 실행 중 단계는 정지·정리 확인 뒤 취소" },
-        el("span", {}, "작업 취소 확인"),
-        el("div", { class: "detail-actions" },
-          el("button", { type: "button", class: "btn danger-solid", id: "cancel-job-confirm", dataset: { action: "cancel-confirm" }, onclick: () => cancel(summary) }, "취소 확정"),
-          el("button", { type: "button", class: "btn", onclick: () => { ui.jobCancel = ""; notify(); } }, "돌아가기"))) : null,
-      el("section", { class: "panel job-steps", id: "job-steps" },
-        el("div", { class: "panel-toolbar" }, el("b", { class: "panel-title" }, "단계"), el("span", { class: "num muted" }, String(steps.length))),
-        el("div", { class: "stage-list" }, ...(steps.length ? steps.map(stepRow) : [emptyState(loadError ? "상세 조회 실패" : "단계 없음")]))),
-      timeline.length ? el("section", { class: "panel job-timeline", id: "job-timeline" },
-        el("div", { class: "panel-toolbar" }, el("b", { class: "panel-title" }, "기록"), el("span", { class: "num muted" }, String(timeline.length))),
-        el("div", { class: "timeline-list" }, ...timeline.map(timelineRow))) : null,
-      ui.status ? el("p", { class: "status-line", role: "status", id: "command-status" }, ui.status) : null,
-    ].filter(Boolean));
-  }
-
-  return {
-    async update(nextRoute) {
-      if (nextRoute.name === "jobs") {
-        renderList();
-        return;
-      }
-      if (nextRoute.name === "run") {
-        const work = model.work.find((item) => item.work_id === nextRoute.workID);
-        const key = work ? `${work.work_id}@${work.last_event_at}@${work.child_job_count}` : nextRoute.workID;
-        if (key !== loadedKey) {
-          loadedKey = key;
-          request?.abort();
-          request = new AbortController();
-          try {
-            workDetail = await api(`/api/v1/work/${encodeURIComponent(nextRoute.workID)}`, { signal: request.signal });
-          } catch (error) {
-            if (error.name === "AbortError" || disposed) return;
-            workDetail = null;
-          }
-        }
-        if (!disposed) renderRunDetail(root, workDetail, media, nextRoute);
-        return;
-      }
-      const job = model.jobs.find((item) => item.job_id === nextRoute.jobID);
-      const key = job ? `${job.job_id}@${job.revision}@${job.last_event_at}` : nextRoute.jobID;
-      if (key !== loadedKey) {
-        loadedKey = key;
-        loadError = "";
-        request?.abort();
-        request = new AbortController();
-        try {
-          detail = await api(`/api/v1/jobs/${encodeURIComponent(nextRoute.jobID)}`, { signal: request.signal });
-        } catch (error) {
-          if (error.name === "AbortError" || disposed) return;
-          detail = null;
-          loadError = error.message;
-        }
-      }
-      if (disposed) return;
-      renderDetail(job || detail?.summary || null);
-    },
-    dispose() {
-      disposed = true;
-      request?.abort();
-      for (const pending of mediaRequests.values()) pending.controller.abort();
-    },
   };
+  return html`<div class="chooser archive-create" id="archive-create">
+      ${drives}
+      <div class="chooser-stack" id="archive-scope">
+        <div class="chooser-col" id="prep-archives" aria-label="아카이브 저장소">
+          <div class="chooser-head"><span>아카이브 저장소</span><span class="chooser-value">${draft.archiveID || "선택 없음"}</span></div>
+          ${candidates.length ? candidates.map((storage) => html`<button type="button" class="option" key=${storage.storage_id} data-storage-id=${storage.storage_id} data-access-kind=${storage.access_kind || ""}
+            aria-pressed=${storage.storage_id === draft.archiveID ? "true" : "false"} disabled=${!storage.accessible}
+            onClick=${() => batch(() => { setDraft({ archiveID: draft.archiveID === storage.storage_id ? "" : storage.storage_id }); resetRunIntent(); })}>
+            <b>${storage.label || storage.storage_id}</b>
+            <small>${label("storageRole", storage.role)} · ${label("storageAccess", storage.access_kind)} · ${storage.accessible ? `여유 ${formatBytes(storage.free_bytes)} / ${formatBytes(storage.capacity_bytes)}` : "연결 필요"}</small>
+          </button>`) : html`<p class="chooser-empty">후보 없음</p>`}
+        </div>
+        <div class="chooser-col folder-picks" id="prep-folders" aria-label="폴더">
+          <div class="chooser-head"><span>폴더</span><span class="chooser-value num">${heading}</span></div>
+          <label class="pick all folder-pick folder-all"><input type="checkbox" id="select-all" aria-label="전체 선택" disabled=${!ready}
+            checked=${ready && folders.length > 0 && selected.length === folders.length} indeterminate=${selected.length > 0 && selected.length < folders.length}
+            onChange=${(event) => pick(event.currentTarget.checked ? folders.map((folder) => folder.folder) : [])} /><span>전체</span><small class="num">${selected.length} / ${folders.length}</small></label>
+          ${folders.length ? folders.map((folder) => html`<label class="pick folder-pick" key=${folder.folder} data-folder-id=${folder.folder}>
+            <input type="checkbox" aria-label=${`${folder.folder} 선택`} disabled=${!ready} checked=${picked.has(folder.folder)} onChange=${() => toggle(folder.folder)} />
+            <span class="folder-pick-name">${folderProblem(folder)?.kind === "fault" ? html`<${StatusIcon} kind="fault" /> ` : null}${folder.folder}</span>
+            <small class="num">${formatCount(folder.video_count)} 영상 · ${formatBytes(folder.estimated_output_bytes)}</small>
+          </label>`) : html`<p class="chooser-empty">${current.folder_discovery_state === "SCANNING" ? "검색 중" : current.folder_discovery_state === "FAILED" ? "검색 실패" : "폴더 없음"}</p>`}
+        </div>
+      </div>
+    </div>
+    <div class="new-work-foot start-bar">
+      <span class="summary num" id="selection-summary">${selected.length} 폴더 · ${formatCount(videos)} 영상 · ${formatBytes(bytes)}</span>
+      <span class="start-reason" id="start-reason">${draft.error || blocker}</span>
+      <button type="button" class="btn" disabled=${draft.starting} onClick=${() => { ui.newWork.value = null; }}>취소</button>
+      <button type="button" class="btn primary" id="start-archive-run" data-action="create" disabled=${Boolean(blocker) || draft.starting || stale.value} onClick=${start}>${draft.starting ? "요청 보냄…" : "작업 요청"}</button>
+    </div>`;
 }

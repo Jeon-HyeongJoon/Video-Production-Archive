@@ -12,12 +12,12 @@ with sync_playwright() as playwright:
 
     page.goto(base_url + "/#/runs/ARCHIVE-RUN-1", wait_until="networkidle")
     disclosure = page.locator('#run-children .child-work[data-job-id="JOB-SOURCE"]')
-    expect(disclosure).not_to_have_attribute("open", "")
+    expect(disclosure).to_have_attribute("data-open", "false")
     expect(disclosure.locator(".video-row")).to_have_count(0)
     assert media_requests == [], f"video information loaded before expansion: {media_requests}"
 
     disclosure.locator(".child-recent").click()
-    expect(disclosure).to_have_attribute("open", "")
+    expect(disclosure).to_have_attribute("data-open", "true")
     expect(disclosure.locator(".video-row")).to_have_count(2)
     first = disclosure.locator('.video-row[data-asset-id="ASSET-C0001"]')
     expect(first).to_contain_text("2026. 10. 30. · C0001.MP4")
@@ -30,7 +30,7 @@ with sync_playwright() as playwright:
     assert len(media_requests) == 1, f"unexpected media request count: {media_requests}"
 
     disclosure.locator(".child-recent").click()
-    expect(disclosure).not_to_have_attribute("open", "")
+    expect(disclosure).to_have_attribute("data-open", "false")
     expect(disclosure.locator(".video-row")).to_have_count(0)
     disclosure.locator(".child-recent").click()
     expect(disclosure.locator(".video-row")).to_have_count(2)
@@ -39,9 +39,9 @@ with sync_playwright() as playwright:
     disclosure.locator('a[href="#/jobs/JOB-SOURCE"]').click()
     expect(page).to_have_url(base_url + "/#/jobs/JOB-SOURCE")
     job_media = page.locator("#job-media")
-    expect(job_media).not_to_have_attribute("open", "")
+    expect(job_media).to_have_attribute("data-open", "false")
     expect(job_media.locator(".video-row")).to_have_count(0)
-    job_media.locator(":scope > summary").click()
+    job_media.locator(".media-toggle").click()
     expect(job_media.locator(".video-row")).to_have_count(2)
     assert len(media_requests) == 2, f"Job detail did not load its own disclosure: {media_requests}"
     browser.close()

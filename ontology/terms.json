@@ -1159,10 +1159,11 @@
         "왼쪽 메뉴는 작업 관리·연결 관리 순서이며 작업 관리가 기본 화면이다.",
         "작업 관리의 새 작업 생성은 아카이브 작업과 독립 Template 작업을 구분하며 ArchiveRun의 원본 드라이브·아카이브 저장소·폴더 범위 선택은 이 표면에서만 수행한다.",
         "왼쪽 워크스페이스는 새 영속 개체가 아니라 미완료 ArchiveRun 또는 독립 Job마다 work ID·드라이브·Worker를 묶어 해당 영속 상세로 이동하는 스크롤 가능한 탐색 카드이며 완료 작업은 작업 관리의 완료 목록에만 남긴다.",
-        "설정과 테마 전환은 전역 제어로서 왼쪽 워크스페이스 목록이 아니라 상단 알림 옆에 둔다.",
+        "검색 칸과 알림은 사이드바 맨 위에, 설정은 사이드바 아래 끝에 전역 제어로 두고 테마 전환은 설정 안에만 둔다. 상단 막대는 두지 않는다.",
         "현재 드라이브 projection에 archive_run_id가 남은 기존 실행은 ArchiveRun snapshot이 없어도 같은 관리 작업 카드와 상세로 복원한다.",
         "ArchiveRun 하위 작업과 Job 상세의 영상 정보는 기본으로 조회하거나 만들지 않고 담당자가 해당 Job의 disclosure를 펼칠 때만 영속 원본 관찰값을 표시한다.",
-        "전체 작업 표면은 어두운 회색 계층으로 깊이를 나타내고 Agent 머리줄은 시스템 테마를 따르며 Agent 대화 본문은 밝은 테마에서도 터미널처럼 가장 어두운 검정 표면과 밝은 글자를 유지한다.",
+    "Archive Workspace는 legacy route나 runtime 전환 설정 없이 component 화면으로 직접 대체하며 정적 shell에 업무 상태를 넣지 않고 모든 화면 업무 조회와 명령을 same-origin /api/v1 JSON API로만 수행한다.",
+        "전체 작업 표면은 어두운 회색 계층으로 깊이를 나타내고 Agent 대화 칸은 고른 테마의 작업 표면 색으로 둥근 모서리를 두고 작업 표면에서 떨어진 대화 칸으로 둔다.",
         "Agent 대화 칸은 선택한 ArchivistSession의 CLI ID를 이름과 함께 표시하고 Enter로 전송하며 Shift+Enter만 줄바꿈한다.",
         "사람의 직접 명령과 Archivist의 도구 호출은 같은 Application Service 명령 경계와 Command Bus를 사용한다. 모든 영속 업무의 공통 Capability Registry 직접 실행은 planned 경계다.",
         "사람의 웹 직접 명령은 requested_via를 archive_workspace로 기록한다.",
@@ -1193,6 +1194,7 @@
       "sources": [
         "사용자 결정: 시스템 목표는 상태 모니터링이 아니라 사용자·Archivist 협업",
         "사용자 결정 2026-11-01: 주 사용자 표면은 Archive Workspace",
+      "사용자 결정 2026-11-11: 기존 화면 직접 대체와 화면 업무의 API 전용 경계",
         "docs/design/09-archive-workspace.md"
       ],
       "decided": "2026-11-01"
@@ -2279,7 +2281,8 @@
       "code_name": "ArchivistToolCall",
       "definition": "Archivist가 허용된 Capability를 호출한 입력 digest, 멱등 key, 상태와 최초 결과 receipt를 남긴 변경 불가능한 기록.",
       "rules": [
-        "완료 receipt가 있으면 재실행하지 않고 최초 결과를 반환한다."
+        "완료 receipt가 있으면 재실행하지 않고 최초 결과를 반환한다.",
+        "현재 Turn의 선택 범위 또는 WorkReference 조회에서 아직 고정된 값이 없다는 사실은 bound=false인 완료 결과이며 실패 상태가 아니다. 값이 필요한 실행 Capability는 별도로 선택 요청 또는 충돌을 반환한다."
       ],
       "forbidden": {
         "words": [],

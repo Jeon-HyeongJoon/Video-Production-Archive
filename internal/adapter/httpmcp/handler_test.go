@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -62,6 +63,43 @@ func TestAuthenticatedMCPListsAndRoutesVersionedDriveBusinessCapabilities(t *tes
 	if fixture.runs.calls != 1 || fixture.transcriptions.calls != 1 || fixture.runs.request.ArchiveRunID != "ARCHIVE-RUN-1" ||
 		fixture.transcriptions.request.ArchiveRunID != "ARCHIVE-RUN-1" {
 		t.Fatalf("drive capabilities did not reach their application boundaries: %+v", fixture)
+	}
+}
+
+// Requirement: MCP-008
+func TestOptionalTurnReferenceReadsCompleteUnboundWithoutFalseFailure(t *testing.T) {
+	var recorded []archivistcontrol.ToolCallProjection
+	handler, err := New(Configuration{
+		Archivists: fixtureArchivistRuntime{selectionErr: true, recordedCalls: &recorded},
+		Catalog:    fixtureCatalog{}, ArchiveWorkspace: fixtureArchiveWorkspace{}, Commands: fixtureCommands{},
+		Drives: fixtureDrives{}, IntakeSelector: fixtureIntakeSelector{},
+		ArchiveRuns: &fixtureArchiveRuns{}, ArchiveTranscriptions: &fixtureArchiveTranscriptions{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		callID string
+		tool   string
+	}{
+		{callID: "CALL-UNBOUND-SELECTION", tool: ToolDriveSelectionGet},
+		{callID: "CALL-UNBOUND-WORK", tool: ToolWorkReferenceGet},
+	} {
+		response := mcpTestRequest(handler, http.MethodPost, "/mcp/v1/call", archiveToolCall(test.callID, test.tool, `{}`), "secret")
+		body := response.Body.String()
+		if response.Code != http.StatusOK || !strings.Contains(body, `"bound":false`) ||
+			strings.Contains(body, `"worker_id"`) || strings.Contains(body, `"work_id"`) {
+			t.Fatalf("unbound optional reference was reported as a failure or leaked an identity: tool=%s response=%d %s", test.tool, response.Code, body)
+		}
+		var states []string
+		for _, call := range recorded {
+			if call.ID == test.callID {
+				states = append(states, call.State)
+			}
+		}
+		if len(states) == 0 || states[len(states)-1] != "COMPLETED" || slices.Contains(states, "FAILED") {
+			t.Fatalf("unbound optional read did not settle as completed: tool=%s states=%v", test.tool, states)
+		}
 	}
 }
 
@@ -283,6 +321,7 @@ type fixtureArchivistRuntime struct {
 	cards           *[]archivistcontrol.ActionCardProjection
 	work            *archivistruntime.WorkReference
 	selectionTarget *archivistruntime.DriveSelection
+	recordedCalls   *[]archivistcontrol.ToolCallProjection
 }
 
 func (fixtureArchivistRuntime) Authenticate(hostID, credential string) error {
@@ -294,7 +333,13 @@ func (fixtureArchivistRuntime) Authenticate(hostID, credential string) error {
 func (fixtureArchivistRuntime) ValidateToolContext(context.Context, string, string, string, uint64) error {
 	return nil
 }
-func (fixtureArchivistRuntime) RecordToolCall(context.Context, string, string, string, string, string, string) error {
+
+func (fixture fixtureArchivistRuntime) RecordToolCall(_ context.Context, _, _ string, callID, tool, target, state string) error {
+	if fixture.recordedCalls != nil {
+		*fixture.recordedCalls = append(*fixture.recordedCalls, archivistcontrol.ToolCallProjection{
+			ID: callID, ToolName: tool, TargetID: target, State: state,
+		})
+	}
 	return nil
 }
 func (fixture fixtureArchivistRuntime) RecordActionCard(_ context.Context, _ string, card archivistcontrol.ActionCardProjection) error {
@@ -305,14 +350,14 @@ func (fixture fixtureArchivistRuntime) RecordActionCard(_ context.Context, _ str
 }
 func (fixture fixtureArchivistRuntime) TurnDriveSelection(context.Context, string, string) (archivistruntime.DriveSelection, error) {
 	if fixture.selectionErr {
-		return archivistruntime.DriveSelection{}, archivistcontrol.ErrInvalidRequest
+		return archivistruntime.DriveSelection{}, archivistcontrol.ErrDriveSelectionNotBound
 	}
 	return fixture.selection, nil
 }
 
 func (fixture fixtureArchivistRuntime) TurnWorkReference(context.Context, string, string) (archivistruntime.WorkReference, error) {
 	if fixture.work == nil {
-		return archivistruntime.WorkReference{}, archivistcontrol.ErrInvalidRequest
+		return archivistruntime.WorkReference{}, archivistcontrol.ErrWorkReferenceNotBound
 	}
 	return archivistruntime.NewWorkReference(*fixture.work)
 }

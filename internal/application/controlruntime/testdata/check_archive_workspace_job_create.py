@@ -25,7 +25,7 @@ with sync_playwright() as playwright:
     expect(page.locator("#job-title")).to_have_text("2026 가을 행사 기록")
     summary = page.locator("#job-summary")
     expect(summary).to_contain_text("occasion-recording")
-    expect(page.locator("#job-steps .stage-row")).not_to_have_count(0)
+    expect(page.locator("#job-steps .step-item")).not_to_have_count(0)
     if len(created) != 1:
         raise AssertionError(f"job create requests={len(created)}")
 

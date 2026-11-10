@@ -240,13 +240,25 @@ func (handler *Handler) getWorkReference(writer http.ResponseWriter, request *ht
 		return
 	}
 	reference, err := handler.archivists.TurnWorkReference(request.Context(), call.SessionID, call.TurnID)
+	if errors.Is(err, archivistcontrol.ErrWorkReferenceNotBound) {
+		_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, "", "COMPLETED")
+		writeJSON(writer, http.StatusOK, map[string]any{"data": map[string]any{"bound": false}})
+		return
+	}
 	if err != nil {
 		_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, "", "FAILED")
-		writeError(writer, http.StatusConflict, "MCP_WORK_REFERENCE_REQUIRED")
+		if errors.Is(err, archivistcontrol.ErrInvalidRequest) || errors.Is(err, archivistcontrol.ErrTurnNotFound) {
+			writeError(writer, http.StatusConflict, "MCP_TURN_CONTEXT_INVALID")
+		} else {
+			writeError(writer, http.StatusInternalServerError, "MCP_WORK_REFERENCE_LOOKUP_FAILED")
+		}
 		return
 	}
 	_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, reference.WorkID, "COMPLETED")
-	writeJSON(writer, http.StatusOK, map[string]any{"data": reference})
+	writeJSON(writer, http.StatusOK, map[string]any{"data": struct {
+		Bound bool `json:"bound"`
+		archivistruntime.WorkReference
+	}{Bound: true, WorkReference: reference}})
 }
 
 func (handler *Handler) searchArchiveIntakeCandidates(writer http.ResponseWriter, request *http.Request, call callRequest) {
@@ -486,13 +498,25 @@ func (handler *Handler) archiveIntakeSelection(ctx context.Context, call callReq
 
 func (handler *Handler) getArchiveIntakeSelection(writer http.ResponseWriter, request *http.Request, call callRequest) {
 	selection, err := handler.archiveIntakeSelection(request.Context(), call)
+	if errors.Is(err, archivistcontrol.ErrDriveSelectionNotBound) {
+		_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, "", "COMPLETED")
+		writeJSON(writer, http.StatusOK, map[string]any{"data": map[string]any{"bound": false}})
+		return
+	}
 	if err != nil {
 		_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, "", "FAILED")
-		writeError(writer, http.StatusConflict, "MCP_DRIVE_SELECTION_REQUIRED")
+		if errors.Is(err, archivistcontrol.ErrInvalidRequest) || errors.Is(err, archivistcontrol.ErrTurnNotFound) {
+			writeError(writer, http.StatusConflict, "MCP_TURN_CONTEXT_INVALID")
+		} else {
+			writeError(writer, http.StatusInternalServerError, "MCP_DRIVE_SELECTION_LOOKUP_FAILED")
+		}
 		return
 	}
 	_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, selection.ArchiveRunID, "COMPLETED")
-	writeJSON(writer, http.StatusOK, map[string]any{"data": selection})
+	writeJSON(writer, http.StatusOK, map[string]any{"data": struct {
+		Bound bool `json:"bound"`
+		archivistruntime.DriveSelection
+	}{Bound: true, DriveSelection: selection}})
 }
 
 func (handler *Handler) getArchiveRunStatus(writer http.ResponseWriter, request *http.Request, call callRequest) {

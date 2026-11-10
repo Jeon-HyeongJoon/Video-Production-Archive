@@ -1,85 +1,66 @@
-// Archivist pane, shown as "Agent": it holds the right side of every screen
-// and scrolls its conversation on its own.
+// Archivist pane, shown as "Agent": a quiet panel on the right of every
+// screen that scrolls its conversation on its own.
 //
-// Fold rule (after Orca's native chat turn fold): a person's instructions, the
-// latest answer and any decision waiting on a person stay visible. While the
-// work runs, only its last progress line shows beside the answer. Recalls,
-// progress, tool calls, earlier answers, settled cards and result IDs fold
-// behind one "작업 내역" row, and references fold behind one "참조 N" row.
+// Fold rule: a person's instructions, the latest answer and any decision
+// waiting on a person stay visible. While the work runs, only its last
+// progress line shows beside the answer. Recalls, progress, tool calls,
+// earlier answers, settled cards and result IDs fold behind one "작업 내역"
+// row, and references fold behind one "참조 N" row.
 
-import { byId, el, svgIcon, icons, statusIcon, setStatusIcon, label, stateSignal, finishedTurns, formatCount, clockTime, mutation, newID, token } from "./core.js";
-import { model, ui, notify, refresh, currentSession, hostFor, activeTurn, driveSelection, selectionRefs, findDrive } from "./store.js";
-import { go } from "./router.js";
+import { html, useEffect, useRef, useState, useComputed, batch } from "./lib.js";
+import { label, finishedTurns, formatCount, clockTime, mutation, newID } from "./core.js";
+import {
+  ui, store, stale, refresh, allDrives, currentSession, allSessions, hostFor, activeTurn, availability, driveView, driveSelection,
+  selectionRefs, jobOf, workDrive, workspaces, workTitle, openNewWork,
+} from "./store.js";
+import { route, go } from "./router.js";
+import { StatusIcon, Glyph, GLYPH, Presence } from "./ui.js";
+import { reducedMotion, settle } from "./motion.js";
+
+export function openAgentCard(sessionID, cardID) {
+  batch(() => {
+    ui.sessionID.value = sessionID;
+    ui.focusCard.value = cardID;
+    ui.agentOpen.value = true;
+  });
+}
 
 function minutesBetween(start, end) {
   const minutes = Math.max(0, Math.round((new Date(end) - new Date(start)) / 60000));
   return minutes < 1 ? "1분 미만" : `${minutes}분`;
 }
 
-function toolRow(call) {
-  return el("div", { class: "tool-row", title: call.tool_name, dataset: { state: call.state } },
-    el("span", {}, label("tool", call.tool_name)), el("code", {}, call.target_id || ""), el("span", { class: "tool-state" }, label("call", call.state)));
-}
+const isSystem = (turn) => turn.submitted_by === "SYSTEM" || turn.turn_id.startsWith("SYSTEM-RECALL-");
 
 function cardScope(card) {
   const scope = card.scope || {};
   if (card.command_type === "archive_run.start") return `${scope.workspace_drive_id || "—"} → ${scope.archive_storage_id || "—"} · ${formatCount(scope.folder_count)} 폴더`;
   if (card.command_type === "archive_run.transcription.start") {
-    const drive = model.drives.find((item) => item.archive_run_id === card.target_id);
-    return `${card.target_id} · 대상 ${formatCount(drive?.eligible_transcription_count)} 폴더`;
+    const current = allDrives.value.find((item) => item.archive_run_id === card.target_id);
+    return `${card.target_id} · 대상 ${formatCount(current?.eligible_transcription_count)} 폴더`;
   }
   if (card.command_type === "archive_intake.selection.required") return "Worker · 원본 · 아카이브 · 폴더";
   return card.target_id || "—";
 }
 
-async function decideCard(cardID, action) {
-  try {
-    await mutation(`/api/v1/action-cards/${encodeURIComponent(cardID)}/${action}`, action === "reject" ? { reason: "담당자 거절" } : {});
-    await refresh();
-  } catch (error) {
-    byId("archivist-disabled-reason").textContent = error.message;
-  }
-}
+// ─── Thread pieces ──────────────────────────────────────────────────────────
 
-function actionCard(card) {
-  const item = el("div", { class: "action-card", dataset: { cardId: card.action_card_id, command: card.command_type, state: card.state } },
-    el("div", { class: "card-line" }, el("b", {}, label("card", card.command_type)), token(label("cardState", card.state), card.state === "PENDING" ? "decide" : stateSignal(card.state))),
-    el("span", { class: "card-scope" }, cardScope(card)));
-  if (card.state !== "PENDING") return item;
-  const actions = el("div", { class: "card-actions" });
-  if (card.command_type === "archive_intake.selection.required") {
-    actions.append(el("button", { type: "button", class: "btn primary", onclick: () => go("#/drives") }, "드라이브 선택"));
-  } else {
-    actions.append(
-      el("button", { type: "button", class: "btn", dataset: { action: "card-reject" }, onclick: () => decideCard(card.action_card_id, "reject") }, "거절"),
-      el("button", { type: "button", class: "btn primary", dataset: { action: "card-execute" }, onclick: () => decideCard(card.action_card_id, "execute") }, card.approval_required ? "승인" : "실행"));
-  }
-  item.append(actions);
-  return item;
-}
+const ToolRow = ({ call }) => html`<li class="tool tool-row" title=${call.tool_name} data-state=${call.state}>
+  <${StatusIcon} kind=${call.state === "FAILED" ? "fault" : call.state === "RUNNING" ? "work" : call.state === "ACTION_CARD" ? "decide" : "done"} />
+  <b>${label("tool", call.tool_name)}</b><span>${call.target_id || ""} · ${label("call", call.state)}</span></li>`;
 
-function focusResult(resultID) {
-  const drive = model.drives.find((item) => item.archive_run_id === resultID);
-  if (drive) go(`#/drives/${encodeURIComponent(drive.workspace_drive_id)}`);
-}
+const EntryRow = ({ entry }) => {
+  const failure = entry.kind === "FAILURE";
+  return html`<li class="tool turn-entry" data-kind=${entry.kind} data-signal=${failure ? "fault" : "work"}>
+    <${StatusIcon} kind=${failure ? "fault" : "done"} /><b class="turn-entry-kind">${failure ? entry.code || "실패" : "진행"}</b><span>${entry.summary} · ${clockTime(entry.created_at)}</span></li>`;
+};
 
-function isSystem(turn) {
-  return turn.submitted_by === "SYSTEM" || turn.turn_id.startsWith("SYSTEM-RECALL-");
-}
-
-function workReference(route, selection) {
-  if (route.name === "job") {
-    const job = model.jobs.find((item) => item.job_id === route.jobID);
-    return job?.revision ? { kind: "JOB", work_id: job.job_id, revision: job.revision } : null;
-  }
-  if (route.name === "run") {
-    const drive = model.drives.find((item) => item.archive_run_id === route.workID);
-    return drive?.archive_run_revision ? { kind: "ARCHIVE_RUN", work_id: route.workID, revision: drive.archive_run_revision } : null;
-  }
-  if (selection?.archive_run_id && selection.archive_run_revision) {
-    return { kind: "ARCHIVE_RUN", work_id: selection.archive_run_id, revision: selection.archive_run_revision };
-  }
-  return null;
+function RefsFold({ refs, cls }) {
+  if (!refs.length) return null;
+  return html`<details class=${`refs-fold ${cls}`}>
+    <summary>참조 <span class="num">${refs.length}</span></summary>
+    <div class="message-refs">${refs.map((value) => html`<span class="ref-chip" key=${value}>${value}</span>`)}</div>
+  </details>`;
 }
 
 function referenceLabels(selection, work) {
@@ -88,79 +69,96 @@ function referenceLabels(selection, work) {
   return values;
 }
 
-// refsFold keeps a selection's references behind one "참조 N" row.
-function refsFold(refs, key, open, className) {
-  const fold = el("details", { class: `refs-fold ${className}` },
-    el("summary", {}, "참조 ", el("span", { class: "num" }, String(refs.length))),
-    el("div", { class: "message-refs" }, ...refs.map((value) => el("span", { class: "ref-chip" }, value))));
-  fold.open = open.has(key);
-  fold.addEventListener("toggle", () => { fold.open ? open.add(key) : open.delete(key); });
-  return fold;
+function UserBubble({ turn }) {
+  return html`<div class="bubble message user" data-turn-id=${turn.turn_id} title=${`담당자 · ${label("turn", turn.state)} · ${clockTime(turn.created_at)}`}>
+    <div class="text message-body">${turn.prompt || turn.request_id}</div>
+    <${RefsFold} refs=${referenceLabels(turn.drive_selection, turn.work_reference)} cls="turn-refs" />
+  </div>`;
 }
 
-function turnSource(turn, open = new Set()) {
-  if (isSystem(turn)) {
-    return el("div", { class: "message system", dataset: { turnId: turn.turn_id } },
-      el("span", {}, `재호출 · ${turn.prompt || turn.request_id}`), el("span", { class: "num" }, clockTime(turn.created_at)),
-      finishedTurns.has(turn.state) ? null : token(label("turn", turn.state), stateSignal(turn.state)));
+const SystemRow = ({ turn }) => html`<div class="message system" data-turn-id=${turn.turn_id}>
+  <span>재호출 · ${turn.prompt || turn.request_id}</span><span class="num">${clockTime(turn.created_at)}</span>
+  ${finishedTurns.has(turn.state) ? null : html`<span class="token">${label("turn", turn.state)}</span>`}
+</div>`;
+
+function focusResult(resultID) {
+  const current = allDrives.value.find((item) => item.archive_run_id === resultID);
+  if (current) go(`#/runs/${encodeURIComponent(resultID)}`);
+}
+
+const Mentions = ({ ids }) => (ids?.length ? html`<div class="mentions message-refs">${ids.map((id) => html`<button type="button" class="mention ref-chip" key=${id} onClick=${() => focusResult(id)}>${id}</button>`)}</div>` : null);
+
+async function decideCard(cardID, action) {
+  try {
+    await mutation(`/api/v1/action-cards/${encodeURIComponent(cardID)}/${action}`, action === "reject" ? { reason: "담당자 거절" } : {});
+    await refresh();
+  } catch (error) {
+    ui.status.value = error.message;
   }
-  const refs = referenceLabels(turn.drive_selection, turn.work_reference);
-  return el("article", { class: "message user", dataset: { turnId: turn.turn_id } },
-    el("div", { class: "message-head" }, el("span", {}, "담당자"), el("span", { class: "num" }, `${label("turn", turn.state)} · ${clockTime(turn.created_at)}`)),
-    el("p", { class: "message-body" }, turn.prompt || turn.request_id),
-    refs.length ? refsFold(refs, `refs:${turn.turn_id}`, open, "turn-refs") : null);
 }
 
-function entryRow(entry) {
-  const failure = entry.kind === "FAILURE";
-  return el("div", { class: "turn-entry", dataset: { kind: entry.kind, signal: failure ? "fault" : "work" } },
-    el("span", { class: "turn-entry-kind" }, failure ? (entry.code || "실패") : "진행"),
-    el("span", {}, entry.summary), el("span", { class: "num" }, clockTime(entry.created_at)));
+// Receipt is a decided card: one line that says what was decided.
+const Receipt = ({ card }) => html`<div class="receipt action-card" data-card-id=${card.action_card_id} data-command=${card.command_type} data-state=${card.state}>
+  <${StatusIcon} kind=${card.state === "REJECTED" ? "idle" : "done"} /><span>${label("cardState", card.state)} · ${label("card", card.command_type)} · ${cardScope(card)}</span>
+</div>`;
+
+// AskCard is a decision the Agent proposed; it stays out of every fold until
+// a person decides it.
+function AskCard({ card }) {
+  const focused = useComputed(() => ui.focusCard.value === card.action_card_id).value;
+  const box = useRef();
+  useEffect(() => {
+    if (!focused) return undefined;
+    box.current?.scrollIntoView({ block: "nearest", behavior: reducedMotion.matches ? "auto" : "smooth" });
+    const timer = setTimeout(() => { if (ui.focusCard.peek() === card.action_card_id) ui.focusCard.value = ""; }, 1600);
+    return () => clearTimeout(timer);
+  }, [focused]);
+  const selection = card.command_type === "archive_intake.selection.required";
+  return html`<div class="ask action-card" ref=${box} data-card-id=${card.action_card_id} data-command=${card.command_type} data-state=${card.state} data-signal="decide" data-focus=${focused ? "true" : null}>
+    <div class="ask-body">
+      <div class="ask-kicker"><${StatusIcon} kind="decide" />${label("cardState", card.state)}</div>
+      <div class="ask-title">${label("card", card.command_type)}</div>
+      <ul class="ask-effects"><li class="card-scope">${cardScope(card)}</li></ul>
+      <div class="ask-actions">
+        ${selection
+          ? html`<button type="button" class="btn btn-sm primary" onClick=${() => { openNewWork(); go("#/jobs"); }}>드라이브 선택</button>`
+          : [html`<button type="button" key="reject" class="btn btn-sm" data-action="card-reject" disabled=${stale.value} onClick=${() => decideCard(card.action_card_id, "reject")}>거절</button>`,
+            html`<button type="button" key="run" class="btn btn-sm primary" data-action="card-execute" disabled=${stale.value} onClick=${() => decideCard(card.action_card_id, "execute")}>${card.approval_required ? "승인" : "실행"}</button>`]}
+      </div>
+    </div>
+  </div>`;
 }
 
-function appendResults(answer, results) {
-  if (results.length) answer.append(el("div", { class: "message-refs" }, ...results.map((resultID) =>
-    el("button", { type: "button", class: "ref-chip", onclick: () => focusResult(resultID) }, resultID))));
-}
-
-// liveLine is the one row a running Turn shows: its running tool call, else
+// LiveLine is the one row a running Turn shows: its running tool call, else
 // its latest progress entry, else its queued state.
-function liveLine(turn) {
+function LiveLine({ turn }) {
   const entries = turn.entries || [];
   const calls = turn.tool_calls || [];
   const running = [...calls].reverse().find((call) => call.state === "RUNNING");
-  const row = running ? toolRow(running)
-    : entries.length ? entryRow(entries[entries.length - 1])
-      : calls.length ? toolRow(calls[calls.length - 1])
-        : el("div", { class: "turn-entry", dataset: { kind: "STATE", signal: "work" } },
-          el("span", { class: "turn-entry-kind" }, isSystem(turn) ? "재호출" : "진행"),
-          el("span", {}, isSystem(turn) ? turn.prompt || turn.request_id : ""), token(label("turn", turn.state), stateSignal(turn.state)));
-  return el("div", { class: "turn-live", dataset: { turnId: turn.turn_id } }, row);
+  const row = running ? html`<${ToolRow} call=${running} />`
+    : entries.length ? html`<${EntryRow} entry=${entries[entries.length - 1]} />`
+      : calls.length ? html`<${ToolRow} call=${calls[calls.length - 1]} />`
+        : html`<li class="tool turn-entry" data-kind="STATE" data-signal="work"><${StatusIcon} kind="work" /><b class="turn-entry-kind">${isSystem(turn) ? "재호출" : "진행"}</b><span>${isSystem(turn) ? turn.prompt || turn.request_id : ""}</span></li>`;
+  return html`<div class="turn-live" data-turn-id=${turn.turn_id}><ul class="tools">${row}</ul><span class="token">${label("turn", turn.state)}</span></div>`;
 }
 
-// traceTurn is one Turn inside the 작업 내역 fold: its recall, its answer,
+// TraceTurn is one Turn inside the 작업 내역 fold: its recall, its answer,
 // progress entries and tool calls, and its settled cards.
-function traceTurn(turn, session, options = {}) {
+function TraceTurn({ turn, session, source, summary, excludeFailure }) {
   const settled = finishedTurns.has(turn.state);
-  const rows = [];
-  if (options.source) rows.push(turnSource(turn));
   const calls = turn.tool_calls || [];
-  const entries = (turn.entries || []).filter((entry) => !(options.excludeFailure && entry.kind === "FAILURE"));
-  const summary = options.summary ? turn.final_response?.summary : "";
-  if (calls.length || entries.length || summary) {
-    const answer = el("article", { class: "message archivist", dataset: { turnId: turn.turn_id, settled: String(settled) } },
-      el("div", { class: "message-head" }, el("span", {}, "Agent"), el("span", { class: "num" }, settled ? `${label("turn", turn.state)} · ${clockTime(turn.updated_at)}` : label("turn", turn.state))));
-    if (summary) {
-      answer.append(el("p", { class: "message-body" }, summary));
-      appendResults(answer, turn.final_response?.result_ids || []);
-    }
-    if (calls.length || entries.length) answer.append(el("div", { class: "turn-trace" }, ...entries.map(entryRow), ...calls.map(toolRow)));
-    rows.push(answer);
-  }
-  for (const card of session.action_cards || []) {
-    if (card.archivist_turn_id === turn.turn_id && card.state !== "PENDING") rows.push(actionCard(card));
-  }
-  return rows;
+  const entries = (turn.entries || []).filter((entry) => !(excludeFailure && entry.kind === "FAILURE"));
+  const text = summary ? turn.final_response?.summary : "";
+  return [
+    source ? html`<${SystemRow} key="source" turn=${turn} />` : null,
+    calls.length || entries.length || text ? html`<div key="answer" class="turn message archivist" data-turn-id=${turn.turn_id} data-settled=${String(settled)}>
+      <div class="turn-head message-head">Agent · ${settled ? `${label("turn", turn.state)} · ${clockTime(turn.updated_at)}` : label("turn", turn.state)}</div>
+      ${text ? html`<div class="text message-body">${text}</div>` : null}
+      ${text ? html`<${Mentions} ids=${turn.final_response?.result_ids} />` : null}
+      ${calls.length || entries.length ? html`<ul class="tools turn-trace">${entries.map((entry, index) => html`<${EntryRow} key=${`e${index}`} entry=${entry} />`)}${calls.map((call) => html`<${ToolRow} key=${call.tool_call_id || call.tool_name} call=${call} />`)}</ul>` : null}
+    </div>` : null,
+    ...(session.action_cards || []).filter((card) => card.archivist_turn_id === turn.turn_id && card.state !== "PENDING").map((card) => html`<${Receipt} key=${card.action_card_id} card=${card} />`),
+  ];
 }
 
 function workUnits(turns) {
@@ -168,18 +166,18 @@ function workUnits(turns) {
   const byID = new Map();
   for (const turn of turns) {
     const workID = turn.work_context?.work_id;
-    if (!workID) { units.push({ turns: [turn] }); continue; }
+    if (!workID) { units.push({ key: turn.turn_id, turns: [turn] }); continue; }
     let unit = byID.get(workID);
-    if (!unit) { unit = { workID, turns: [] }; byID.set(workID, unit); units.push(unit); }
+    if (!unit) { unit = { key: workID, workID, turns: [] }; byID.set(workID, unit); units.push(unit); }
     unit.turns.push(turn);
   }
   return units;
 }
 
-// renderUnit draws one request: a standalone Turn, or every Turn of one
-// ArchiveRun work. Only instructions, the latest answer, a running Turn's last
-// line and pending cards stay outside the fold.
-function renderUnit(unit, session, open) {
+// unitItems draws one request: a standalone Turn, or every Turn of one
+// ArchiveRun work. Only instructions, the latest answer, a running Turn's
+// last line and pending cards stay outside the fold.
+function unitItems(unit, session) {
   const turns = unit.turns;
   const origin = (unit.workID && turns.find((turn) => turn.turn_id === turn.work_context?.origin_turn_id)) || turns[0];
   const active = [...turns].reverse().find((turn) => !finishedTurns.has(turn.state));
@@ -190,143 +188,209 @@ function renderUnit(unit, session, open) {
   const shown = (final?.final_response?.summary ? final : null) || [...turns].reverse().find((turn) => turn.final_response?.summary);
   const failed = settled && !shown ? final : null;
   const failure = failed ? [...(failed.entries || [])].reverse().find((entry) => entry.kind === "FAILURE") : null;
-
-  const rows = [];
-  for (const turn of turns) if (turn === origin || !isSystem(turn)) rows.push(turnSource(turn, open));
-
-  const body = el("div", { class: "work-fold-body" });
-  if (shown) appendResults(body, shown.final_response.result_ids || []);
-  for (const turn of turns) {
-    body.append(...traceTurn(turn, session, { source: turn !== origin && isSystem(turn), summary: turn !== shown, excludeFailure: turn === failed }));
-  }
+  const items = [];
+  for (const turn of turns) if (turn === origin || !isSystem(turn)) items.push({ key: `u:${turn.turn_id}`, kind: "user", turn });
+  const traced = turns.filter((turn) => (turn !== origin && isSystem(turn)) || (turn.tool_calls || []).length || (turn.entries || []).length
+    || (turn !== shown && turn.final_response?.summary) || (session.action_cards || []).some((card) => card.archivist_turn_id === turn.turn_id && card.state !== "PENDING")
+    || (shown && (shown.final_response.result_ids || []).length));
   const calls = turns.reduce((count, turn) => count + (turn.tool_calls || []).length, 0);
   const recalls = turns.filter((turn) => turn !== origin && isSystem(turn)).length;
-  const key = unit.workID || origin.turn_id;
-  let fold = null;
-  if (body.childElementCount) {
-    const end = (final || active || turns[turns.length - 1]).updated_at;
-    fold = el("details", { class: `turn-work${unit.workID ? " work-fold" : ""}`, dataset: { workId: unit.workID, turnId: unit.workID ? undefined : origin.turn_id } },
-      el("summary", {}, `작업 내역 · 도구 ${calls}${recalls ? ` · 재호출 ${recalls}` : ""}${settled ? ` · ${minutesBetween(origin.created_at, end)}` : ""}`), body);
-    fold.open = open.has(key);
-    fold.addEventListener("toggle", () => { fold.open ? open.add(key) : open.delete(key); });
-  }
-
-  if (shown || active || failure || fold) {
-    const head = active ? label("turn", active.state) : shown ? `${label("turn", shown.state)} · ${clockTime(shown.updated_at)}` : `${label("turn", origin.state)} · ${clockTime(origin.updated_at)}`;
-    const answer = el("article", {
-      class: `message archivist${unit.workID && settled ? " work-result" : ""}`,
-      dataset: { turnId: unit.workID ? undefined : origin.turn_id, workId: unit.workID, settled: String(settled) },
-    }, el("div", { class: "message-head" }, el("span", {}, "Agent"), el("span", { class: "num" }, head)));
-    if (shown) answer.append(el("p", { class: "message-body" }, shown.final_response.summary));
-    else if (failure) answer.append(entryRow(failure));
-    if (active) answer.append(liveLine(active));
-    if (fold) answer.append(fold);
-    rows.push(answer);
+  const end = (final || active || turns[turns.length - 1]).updated_at;
+  const foldText = traced.length ? `작업 내역 · 도구 ${calls}${recalls ? ` · 재호출 ${recalls}` : ""}${settled ? ` · ${minutesBetween(origin.created_at, end)}` : ""}` : "";
+  if (shown || active || failure || foldText) {
+    items.push({ key: `a:${unit.key}`, kind: "answer", unit, origin, active, shown, failed, failure, settled, foldText, session });
   }
   for (const turn of turns) {
-    for (const card of session.action_cards || []) {
-      if (card.archivist_turn_id === turn.turn_id && card.state === "PENDING") rows.push(actionCard(card));
-    }
+    for (const card of session.action_cards || []) if (card.archivist_turn_id === turn.turn_id && card.state === "PENDING") items.push({ key: `c:${card.action_card_id}`, kind: "card", card });
   }
-  return rows;
+  return items;
 }
 
-export function mountAgent(container) {
-  const openWork = new Set();
-  let currentSelection = null;
-  let currentWork = null;
-  let focused = "";
-  const select = el("select", { id: "archivist-session-select", "aria-label": "Agent 선택" });
-  const availability = el("span", { id: "archivist-availability" });
-  const availabilityIcon = statusIcon("idle");
-  const thread = el("div", { id: "archivist-thread", class: "pane-thread", "aria-live": "polite" });
-  const chips = el("div", { id: "selection-chips", class: "pane-chips" });
-  const refCount = el("span", { class: "num" });
-  const refs = el("details", { id: "pane-refs", class: "refs-fold pane-refs" }, el("summary", {}, "참조 ", refCount), chips);
-  const message = el("textarea", { id: "archivist-message", name: "prompt", rows: "2", required: true, placeholder: "Agent에게 지시", "aria-label": "메시지" });
-  const send = el("button", { type: "submit", class: "pane-send", "aria-label": "전송", title: "전송", dataset: { action: "send" } }, svgIcon(icons.up));
-  const reason = el("span", { id: "archivist-disabled-reason", class: "pane-reason" });
-  const form = el("form", { id: "archivist-compose", class: "pane-compose" },
-    refs, el("div", { class: "pane-input" }, message, send), reason);
-  // Below the narrowest two-column width the pane slides in from the right
-  // edge over the screen; the handle on that edge opens and closes it.
-  const handle = byId("agent-handle");
-  const toggle = () => { ui.agentOpen = !ui.agentOpen; notify(); if (ui.agentOpen) message.focus(); };
-  handle.addEventListener("click", toggle);
-  container.append(
-    el("div", { class: "pane-head" }, el("b", {}, "Agent"), el("span", { class: "pane-availability" }, availabilityIcon, availability),
-      el("span", { class: "pane-session" }, select),
-      el("a", { class: "pane-icon", href: "#/settings", "aria-label": "Agent 추가 · 설정", title: "Agent 추가 · 설정" }, svgIcon(icons.plus)),
-      el("button", { type: "button", class: "pane-icon pane-close", "aria-label": "Agent 칸 닫기", title: "Agent 칸 닫기", onclick: toggle }, svgIcon(icons.close))),
-    el("section", { id: "archivist-panel", class: "pane-body", "aria-label": "Agent 대화" }, thread, form));
+const head = (item) => (item.active ? label("turn", item.active.state)
+  : item.shown ? `${label("turn", item.shown.state)} · ${clockTime(item.shown.updated_at)}` : `${label("turn", item.origin.state)} · ${clockTime(item.origin.updated_at)}`);
 
-  // The bundled font arrives after the first render and grows every message;
-  // start the conversation at its latest turn once it has.
-  document.fonts?.ready.then(() => { thread.scrollTop = thread.scrollHeight; });
-  select.addEventListener("change", () => { ui.sessionID = select.value; notify(); });
-  message.addEventListener("keydown", (event) => {
-    if (event.key !== "Enter" || event.shiftKey || event.isComposing) return;
-    event.preventDefault();
-    if (!message.disabled && !send.disabled) form.requestSubmit();
-  });
-  form.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const session = currentSession();
-    if (!session || send.disabled) return;
+function Answer({ item }) {
+  const { unit, origin, active, shown, failed, failure, settled, foldText, session } = item;
+  return html`<div class=${`turn message archivist${unit.workID && settled ? " work-result" : ""}`} data-turn-id=${unit.workID ? null : origin.turn_id} data-work-id=${unit.workID || null} data-settled=${String(settled)}>
+    <div class="turn-head message-head">Agent · ${head(item)}</div>
+    ${shown ? html`<div class="text message-body">${shown.final_response.summary}</div>` : failure ? html`<ul class="tools"><${EntryRow} entry=${failure} /></ul>` : null}
+    ${active ? html`<${LiveLine} turn=${active} />` : null}
+    ${foldText ? html`<details class=${`turn-work${unit.workID ? " work-fold" : ""}`} data-work-id=${unit.workID || null} data-turn-id=${unit.workID ? null : origin.turn_id}>
+      <summary class="tools-toggle">${foldText}</summary>
+      <div class="work-fold-body">
+        ${shown ? html`<${Mentions} ids=${shown.final_response.result_ids} />` : null}
+        ${unit.turns.map((turn) => html`<${TraceTurn} key=${turn.turn_id} turn=${turn} session=${session} source=${turn !== origin && isSystem(turn)} summary=${turn !== shown} excludeFailure=${turn === failed} />`)}
+      </div>
+    </details>` : null}
+  </div>`;
+}
+
+function ThreadItem({ item }) {
+  if (item.kind === "user") return html`<${UserBubble} turn=${item.turn} />`;
+  if (item.kind === "card") return html`<${AskCard} card=${item.card} />`;
+  if (item.kind === "orphan") return item.card.state === "PENDING" ? html`<${AskCard} card=${item.card} />` : html`<${Receipt} card=${item.card} />`;
+  return html`<${Answer} item=${item} />`;
+}
+
+// ─── Composer ───────────────────────────────────────────────────────────────
+
+const STARTER = "진행 상황 알려줘";
+
+function workReference(now, selection, picked) {
+  if (picked) return picked;
+  if (now.name === "job") {
+    const job = jobOf(now.jobID);
+    return job?.revision ? { kind: "JOB", work_id: job.job_id, revision: job.revision } : null;
+  }
+  if (now.name === "run") {
+    const current = allDrives.value.find((item) => item.archive_run_id === now.workID);
+    return current?.archive_run_revision ? { kind: "ARCHIVE_RUN", work_id: now.workID, revision: current.archive_run_revision } : null;
+  }
+  if (selection?.archive_run_id && selection.archive_run_revision) return { kind: "ARCHIVE_RUN", work_id: selection.archive_run_id, revision: selection.archive_run_revision };
+  return null;
+}
+
+// referenceOf is a work the person adds to an instruction by hand.
+function referenceOf(work) {
+  if (work.kind === "JOB") {
+    const job = jobOf(work.work_id);
+    return job?.revision ? { kind: "JOB", work_id: job.job_id, revision: job.revision } : null;
+  }
+  const current = workDrive(work);
+  return current?.archive_run_revision ? { kind: "ARCHIVE_RUN", work_id: work.work_id, revision: current.archive_run_revision } : null;
+}
+
+function Composer({ session, enabled, reason }) {
+  const now = route.value;
+  const draft = ui.newWork.value;
+  const [useScreen, setUseScreen] = useState(true);
+  const [picked, setPicked] = useState(null);
+  const [picker, setPicker] = useState(false);
+  const [text, setText] = useState("");
+  const [sending, setSending] = useState(false);
+  const input = useRef();
+  useEffect(() => { setUseScreen(true); setPicked(null); setPicker(false); }, [now.full]);
+  const screenDrive = now.name === "drive" ? driveView(now.driveID)
+    : now.name === "jobs" && draft?.kind === "ARCHIVE" && draft.driveID ? driveView(draft.driveID) : null;
+  const selection = useScreen ? driveSelection(screenDrive, draft) : null;
+  const work = useScreen || picked ? workReference(now, selection, picked) : null;
+  const refs = referenceLabels(selection, work);
+  const showRefs = refs.length > 0 || (useScreen && Boolean(screenDrive));
+  const choices = workspaces.value.map((item) => [item, referenceOf(item)]).filter(([, ref]) => ref && ref.work_id !== work?.work_id);
+  const send = async (prompt) => {
+    const body = prompt.trim();
+    if (!session || !enabled || sending || !body) return;
+    setSending(true);
     try {
       await mutation(`/api/v1/archivist-sessions/${encodeURIComponent(session.session_id)}/turns`, {
-        turn_id: newID("TURN"), request_id: newID("REQUEST"), prompt: message.value,
-        drive_selection: currentSelection || undefined, work_reference: currentWork || undefined,
+        turn_id: newID("TURN"), request_id: newID("REQUEST"), prompt: body,
+        drive_selection: selection || undefined, work_reference: work || undefined,
       });
-      form.reset();
+      setText("");
+      setPicked(null);
       await refresh();
     } catch (error) {
-      reason.textContent = error.message;
+      ui.status.value = error.message;
+    } finally {
+      setSending(false);
     }
-  });
-
-  return {
-    update(route) {
-      document.body.dataset.agent = ui.agentOpen ? "open" : "closed";
-      handle.setAttribute("aria-expanded", String(ui.agentOpen));
-      const session = currentSession();
-      const before = select.value;
-      select.replaceChildren(...model.sessions.map((item) => el("option", { value: item.session_id }, `${item.cli_id} · ${item.name || item.session_id}`)));
-      if (model.sessions.some((item) => item.session_id === before)) select.value = before;
-      if (session) select.value = session.session_id;
-      const host = hostFor(session);
-      const active = activeTurn(session);
-      const online = host?.state === "ONLINE";
-      const available = Boolean(session && online && !active);
-      const [text, signal] = !session ? ["Agent 없음", "idle"] : !online ? ["Host 꺼짐", "fault"] : active ? ["처리 중", "work"] : ["사용 가능", "online"];
-      availability.textContent = text;
-      availability.dataset.signal = signal;
-      setStatusIcon(availabilityIcon, signal);
-      select.title = session ? `${session.archivist_host_id} · ${session.cli_id}` : "";
-
-      const stuck = !thread.childElementCount || thread.scrollHeight - thread.scrollTop - thread.clientHeight < 24;
-      const turns = session?.turns || [];
-      const placed = new Set(turns.map((turn) => turn.turn_id));
-      const rows = session ? workUnits(turns).flatMap((unit) => renderUnit(unit, session, openWork)) : [];
-      for (const card of session?.action_cards || []) if (!placed.has(card.archivist_turn_id)) rows.push(actionCard(card));
-      thread.replaceChildren(...(rows.length ? rows : [el("p", { class: "empty" }, "대화 없음")]));
-      const target = ui.focusCard ? thread.querySelector(`[data-card-id="${CSS.escape(ui.focusCard)}"]`) : null;
-      if (target) {
-        target.dataset.focus = "true";
-        if (focused !== ui.focusCard) { target.scrollIntoView({ block: "nearest" }); focused = ui.focusCard; }
-      } else if (stuck) thread.scrollTop = thread.scrollHeight;
-
-      const screenDrive = route.name === "drive" ? findDrive(route.driveID) : route.name === "jobs" ? findDrive(ui.prepDriveID) : null;
-      currentSelection = driveSelection(screenDrive);
-      currentWork = workReference(route, currentSelection);
-      const selected = referenceLabels(currentSelection, currentWork);
-      chips.replaceChildren(...selected.map((value) => el("span", { class: "selection-chip" }, value)));
-      refCount.textContent = selected.length ? String(selected.length) : "선택 미완료";
-      refs.hidden = !selected.length && !screenDrive;
-      message.disabled = !available;
-      send.disabled = !available;
-      message.placeholder = `${session?.name || "Agent"}에게 지시`;
-      reason.textContent = !session ? "Agent 없음" : !online ? "Host 꺼짐" : active ? `응답 대기 · ${label("turn", active.state)}` : "";
-    },
   };
+  const submit = (event) => { event.preventDefault(); send(text); };
+  const disabled = !enabled || sending || stale.value;
+  return html`<form id="archivist-compose" class="composer" onSubmit=${submit}>
+    ${enabled && !text ? html`<button type="button" class="starter" data-action="send" disabled=${disabled} onClick=${() => send(STARTER)}>“${STARTER}”</button>` : null}
+    <div class="composer-box">
+      ${picker ? html`<div class="picker" role="listbox" aria-label="참조할 작업">
+        ${choices.length ? choices.map(([item, ref]) => html`<button type="button" key=${item.work_id} onClick=${() => { setPicked(ref); setUseScreen(false); setPicker(false); input.current?.focus(); }}>
+          <${StatusIcon} kind="idle" />${workTitle(item)}<small class="faint-id">${item.work_id}</small></button>`) : html`<p class="chooser-empty">고를 작업 없음</p>`}
+      </div>` : null}
+      <div class="chips">
+        ${showRefs ? html`<span class="chip ctx-chip" title=${picked ? "참조" : "지금 보고 있는 화면"}>
+          <${Glyph} d=${GLYPH.screen} />
+          <details id="pane-refs" class="refs-fold pane-refs">
+            <summary>${refs.length ? html`참조 <span class="num">${refs.length}</span>` : "선택 미완료"}</summary>
+            <span id="selection-chips" class="pane-chips">${refs.map((value) => html`<span class="selection-chip" key=${value}>${value}</span>`)}</span>
+          </details>
+          <button type="button" aria-label="참조 빼기" onClick=${() => { setUseScreen(false); setPicked(null); }}><${Glyph} d=${GLYPH.close} /></button>
+        </span>` : null}
+        <button type="button" class="chip chip-add" aria-expanded=${picker ? "true" : "false"} onClick=${() => setPicker(!picker)}>+ 참조</button>
+      </div>
+      <textarea ref=${input} id="archivist-message" name="prompt" rows="1" aria-label="메시지" placeholder=${`${session?.name || "Agent"}에게 지시`}
+        value=${text} disabled=${!enabled} onInput=${(event) => setText(event.currentTarget.value)}
+        onKeyDown=${(event) => { if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); send(event.currentTarget.value); } }}></textarea>
+      <div class="composer-foot">
+        <select id="archivist-session-select" class="model" aria-label="Agent 선택" value=${session?.session_id || ""} title=${session ? `${session.archivist_host_id} · ${session.cli_id}` : ""}
+          onChange=${(event) => { ui.sessionID.value = event.currentTarget.value; }}>
+          ${allSessions.value.map((item) => html`<option key=${item.session_id} value=${item.session_id}>${item.cli_id} · ${item.name || item.session_id}</option>`)}
+        </select>
+        <button type="submit" class="send" data-action="send" aria-label="전송" title="전송" disabled=${disabled || !text.trim()}><${Glyph} d=${GLYPH.up} /></button>
+      </div>
+    </div>
+    <span id="archivist-disabled-reason" class="pane-reason">${reason}</span>
+  </form>`;
+}
+
+// ─── Pane ───────────────────────────────────────────────────────────────────
+
+let stuck = true;
+
+export function AgentPane() {
+  const session = currentSession.value;
+  const [text, signal] = availability(session);
+  const active = activeTurn(session);
+  const host = hostFor(session);
+  const enabled = Boolean(session && host?.state === "ONLINE" && !active);
+  const reason = !session ? "Agent 없음" : host?.state !== "ONLINE" ? "Host 꺼짐" : active ? `응답 대기 · ${label("turn", active.state)}` : "";
+  const thread = useRef();
+  const inner = useRef();
+  const [unread, setUnread] = useState(0);
+  const turns = session?.turns || [];
+  const placed = new Set(turns.map((turn) => turn.turn_id));
+  const items = session ? workUnits(turns).flatMap((unit) => unitItems(unit, session)) : [];
+  if (session) for (const card of session.action_cards || []) if (!placed.has(card.archivist_turn_id)) items.push({ key: `o:${card.action_card_id}`, kind: "orphan", card });
+  const count = items.length;
+  const last = useRef(count);
+  // While the reader is at the bottom, growth keeps the newest line in view.
+  useEffect(() => {
+    const element = thread.current;
+    const pin = new ResizeObserver(() => { if (stuck && element) element.scrollTop = element.scrollHeight; });
+    pin.observe(inner.current);
+    document.fonts?.ready.then(() => { if (element) element.scrollTop = element.scrollHeight; });
+    return () => pin.disconnect();
+  }, []);
+  useEffect(() => {
+    if (count > last.current && !stuck) setUnread((value) => value + count - last.current);
+    last.current = count;
+  }, [count]);
+  const onScroll = (event) => {
+    const element = event.currentTarget;
+    stuck = element.scrollHeight - element.scrollTop - element.clientHeight < 48;
+    if (stuck && unread) setUnread(0);
+  };
+  const jump = async () => {
+    stuck = true;
+    setUnread(0);
+    await settle();
+    thread.current?.scrollTo({ top: thread.current.scrollHeight, behavior: reducedMotion.matches ? "auto" : "smooth" });
+  };
+  return html`<aside id="archivist-pane" class="agent-pane" data-open=${ui.agentOpen.value ? "true" : "false"} aria-label="Agent">
+    <div class="pane-head">
+      <div class="pane-title"><b>Agent</b><small class="pane-availability"><${StatusIcon} kind=${signal} /><span id="archivist-availability" data-signal=${signal}>${text}</span></small></div>
+      <a class="pane-icon" href="#/settings" aria-label="Agent 추가 · 설정" title="Agent 추가 · 설정"><${Glyph} d=${GLYPH.plus} /></a>
+      <button type="button" class="pane-icon pane-close" aria-label="Agent 칸 닫기" title="Agent 칸 닫기" onClick=${() => { ui.agentOpen.value = false; }}><${Glyph} d=${GLYPH.close} /></button>
+    </div>
+    <section id="archivist-panel" class="pane-body" aria-label="Agent 대화">
+      <div class="thread-wrap">
+        <div id="archivist-thread" class="thread" ref=${thread} onScroll=${onScroll} aria-live="polite">
+          <div class="thread-inner" ref=${inner}>
+            ${!store.ready.value ? html`<p class="thread-empty">불러오는 중…</p>`
+              : items.length ? html`<${Presence} items=${items} keyOf=${(item) => item.key}>${(item) => html`<${ThreadItem} item=${item} />`}<//>`
+                : html`<p class="thread-empty">대화 없음</p>`}
+          </div>
+        </div>
+        <button type="button" class="jump" data-show=${unread > 0 ? "true" : "false"} onClick=${jump}>새 활동 ${unread}<${Glyph} d=${GLYPH.down} /></button>
+      </div>
+      <${Composer} session=${session} enabled=${enabled} reason=${reason} />
+    </section>
+  </aside>`;
 }

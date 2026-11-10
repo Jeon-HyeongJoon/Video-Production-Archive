@@ -1,50 +1,21 @@
-// Archive Workspace entry: mounts the screen for the current route, the top
-// bar, the sidebar on the left and the Archivist pane on the right, and
-// redraws them all from one model.
+// Archive Workspace entry. The page painted a placeholder shell from plain
+// HTML. The first refresh is asked for before anything is drawn, and the app
+// takes the shell's place in one step once it answers (or fails), so the
+// screen is drawn once instead of a placeholder and then the screen.
 
-import { byId, setLocked } from "./core.js";
-import { subscribe, startPolling, isStale } from "./store.js";
-import { currentRoute } from "./router.js";
-import { applyStoredTheme } from "./theme.js";
-import { mountTopbar } from "./topbar.js";
-import { mountSidebar } from "./sidebar.js";
-import { mountAgent } from "./agent.js";
-import * as drive from "./views/drive.js";
-import * as jobs from "./views/jobs.js";
-import * as connections from "./views/workers.js";
-import * as search from "./views/search.js";
-import * as settings from "./views/settings.js";
+import { html, render, effect } from "./lib.js";
+import { store, startPolling } from "./store.js";
+import { setScroller } from "./router.js";
+import { App } from "./shell.js";
 
-const screens = { drive, jobs, job: jobs, run: jobs, connections, search, settings };
-const root = byId("view");
-applyStoredTheme();
-const topbar = mountTopbar();
-const sidebar = mountSidebar();
-const agent = mountAgent(byId("archivist-pane"));
-let active = null;
-let activeKey = "";
-
-function render() {
-  const route = currentRoute();
-  const key = `${route.key}?${route.name === "drive" || route.name === "connections" ? route.query.toString() : ""}`;
-  if (key !== activeKey) {
-    active?.dispose?.();
-    activeKey = key;
-    root.replaceChildren();
-    root.dataset.screen = route.name;
-    active = screens[route.name].mount(root, route);
-    root.scrollTop = 0;
-  }
-  const stale = isStale();
-  setLocked(stale);
-  active.update(route);
-  topbar.update(route);
-  sidebar.update(route);
-  agent.update(route);
-  if (stale) for (const button of document.querySelectorAll("[data-action]")) button.disabled = true;
-}
-
-subscribe(render);
-window.addEventListener("hashchange", render);
-render();
 startPolling();
+await new Promise((resolve) => {
+  const stop = effect(() => {
+    if (!store.ready.value && !store.failures.value) return;
+    resolve();
+    queueMicrotask(() => stop());
+  });
+});
+const $app = document.getElementById("app");
+$app.replaceChildren();
+render(html`<${App} onView=${setScroller} />`, $app);

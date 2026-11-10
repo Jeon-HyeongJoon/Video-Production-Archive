@@ -60,8 +60,9 @@ def check_contract(page) -> None:
         html.dataset.theme = before;
         return result;
       };
-      const radiusSelectors = ['.panel','.btn','.option','.chooser-col','.seg','.problem-card','.problem-panel','.overview','.drive-card','.folder-table','.data-table','.worker-row','.capacity-item','.action-card','.message.user','.token','.flow-node','.menu-link','.tree-item','.topbar-field','.alert-button','.toast'];
-      const radii = radiusSelectors.flatMap((selector) => [...document.querySelectorAll(selector)].map((element) => parseFloat(getComputedStyle(element).borderTopLeftRadius) || 0));
+      // Work surfaces keep sharp corners; the Agent panel is a rounded conversation set apart from them.
+      const radiusSelectors = ['.panel','.btn','.option','.chooser-col','.seg','.problem-panel','.overview','.folder-table','.table','.results','.worker-card','.capacity-item','.token','.step-node','.menu-link','.workspace-card','.side-search','.bell','.alert-toast','.work-block','.new-work'];
+      const radii = radiusSelectors.flatMap((selector) => [...document.querySelectorAll(selector)].filter((element) => !element.closest('#archivist-pane')).map((element) => parseFloat(getComputedStyle(element).borderTopLeftRadius) || 0));
       const visibleText = []; const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
       while (walker.nextNode()) { const parent = walker.currentNode.parentElement; if (walker.currentNode.textContent.trim() && parent && parent.getClientRects().length && !parent.closest('.sr-only')) visibleText.push(walker.currentNode); }
       const box = (selector) => document.querySelector(selector).getBoundingClientRect();
@@ -72,9 +73,10 @@ def check_contract(page) -> None:
         menus: [...document.querySelectorAll('#menu .menu-link .menu-label')].map((label)=>label.textContent.trim()),
         side: box('.sidebar').right <= box('#view').left + 1 && document.querySelectorAll('#tree .workspace-card').length > 0,
         sideDetail: {sidebarRight: box('.sidebar').right, viewLeft: box('#view').left, workspaces: document.querySelectorAll('#tree .workspace-card').length},
-        pane: (() => { const pane = box('#archivist-pane'); return pane.width > 0 && pane.left >= box('#view').right - 1 && pane.top <= 1; })(),
-        agentDark: (() => { const rgbValue=rgb(getComputedStyle(document.querySelector('.pane-body')).backgroundColor); return rgbValue.length === 3 && Math.max(...rgbValue) <= 12; })(),
-        agentHead: rgb(getComputedStyle(document.querySelector('.pane-head')).backgroundColor),
+        pane: (() => { const pane = box('#archivist-pane'); return pane.width > 0 && pane.left >= box('#view').right - 1 && pane.top <= 9; })(),
+        // The Agent panel sits on the work surface colour of the chosen theme.
+        agentSurface: rgb(getComputedStyle(document.querySelector('#archivist-pane')).backgroundColor),
+        topbar: document.querySelectorAll('.topbar').length,
         viewWidth: box('#view').width,
         explanatory: visibleText.filter((text)=>!text.parentElement.closest('#archivist-pane')).some((text)=>/했습니다|입니다|하세요/.test(text.textContent)),
       };
@@ -83,7 +85,7 @@ def check_contract(page) -> None:
     if (
         contract["theme"] != "dark" or dark["canvas"] > 40 or light["canvas"] < 200
         or max(dark["chroma"], light["chroma"]) > 12 or min(dark["text"], light["text"]) < 4.5 or min(dark["mark"], light["mark"]) < 3
-        or contract["maxRadius"] > 2 or contract["minTextSize"] < 12 or not contract["agentDark"] or contract["agentHead"] != [27, 27, 27]
+        or contract["maxRadius"] > 2 or contract["minTextSize"] < 12 or contract["agentSurface"] != [27, 27, 27] or contract["topbar"]
         or contract["menus"] != MENUS or not contract["side"] or not contract["pane"] or contract["viewWidth"] > 1440 or contract["explanatory"]
     ):
         raise AssertionError(f"Archive Workspace visual contract failed: {contract}")
@@ -95,7 +97,7 @@ def check_stage_summary(page, scene) -> None:
     matrix = page.locator("#drive-overview .stage-matrix")
     expect(matrix).to_have_attribute("data-open", "false")
     expect(matrix.locator(".flow-node")).to_have_count(0)
-    expect(matrix.locator(".stage-chip span")).to_have_text(["1단계 정리", "2단계 전사", "기록"])
+    expect(matrix.locator(".stage-chip .stage-name")).to_have_text(["1단계 정리", "2단계 전사", "기록"])
     for chip, state in zip(matrix.locator(".stage-chip").all(), scene["stages"]):
         expect(chip).to_have_attribute("data-state", state)
     problems = scene.get("stage_problems", [])
@@ -166,8 +168,9 @@ def check_drive(page, scene) -> None:
     expect(page.locator('#drive-folders .folder-row .archive-badge[data-state="STORED"]')).to_have_count(scene["stored"])
     expect(page.locator('#drive-folders .folder-row .archive-badge[data-state="COMMITTED"]')).to_have_count(scene["committed"])
     folder, stages = scene["detail"]
-    if folder != scene["panels"][0]:
-        page.locator(f'#drive-folders .folder-row[data-folder-id="{folder}"]').click()
+    # The folder table opens its own rows; an open problem does not open its row.
+    expect(page.locator("#folder-detail")).to_have_count(0)
+    page.locator(f'#drive-folders .folder-row[data-folder-id="{folder}"]').click()
     detail = page.locator("#folder-detail")
     expect(detail).to_have_attribute("data-folder-id", folder)
     expect(detail.locator(".detail-facts")).to_contain_text(" 영상")
@@ -186,37 +189,39 @@ def check_jobs(page, scene) -> None:
     expect(page.locator("#new-job-open")).to_have_text("새 작업 생성")
     expect(page.locator("#new-job-open")).to_have_attribute("aria-expanded", "false")
     expect(page.locator("#new-job-form")).to_have_count(0)
-    expect(page.locator("#active-jobs .data-head span")).to_have_text(["작업", "상태", "진행", "최근"])
+    expect(page.locator(".job-cols span")).to_have_text(["작업", "상태", "진행", "요청", ""])
     running = page.locator('#active-jobs .work-row[data-work-id="JOB-RUNNING"]')
     expect(running).to_have_count(1)
     expect(running).to_have_attribute("title", re.compile("Worker WORKER-1"))
-    expect(running.locator(".meter-bar")).to_have_count(1)
+    expect(running.locator(".meter")).to_have_count(1)
     expect(page.locator('#queued-jobs .work-row[data-work-id="JOB-QUEUED"]')).to_have_count(1)
-    expect(page.locator("#queued-jobs .meter-bar, #attention-jobs .meter-bar, #completed-jobs .meter-bar")).to_have_count(0)
-    expect(page.locator("#attention-jobs")).to_have_attribute("open", "")
-    expect(page.locator("#attention-jobs > summary")).to_have_text("확인 필요1")
+    expect(page.locator("#queued-jobs .meter, #attention-jobs .meter, #completed-jobs .meter")).to_have_count(0)
+    expect(page.locator("#attention-jobs")).to_have_attribute("data-open", "true")
+    expect(page.locator("#attention-jobs .lane-toggle")).to_have_text("확인 필요 1")
     expect(page.locator('#attention-jobs .work-row[data-work-id="JOB-REVIEW"]')).to_have_count(1)
-    expect(page.locator("#completed-jobs")).not_to_have_attribute("open", "")
-    expect(page.locator("#completed-jobs > summary")).to_have_text("완료1")
-    completed = page.locator('#completed-jobs .work-row[data-work-id="ARCHIVE-RUN-1"]')
-    expect(completed).to_have_attribute("href", "#/runs/ARCHIVE-RUN-1")
-    expect(completed).to_contain_text("8 폴더 · 795 영상")
+    expect(page.locator("#completed-jobs")).to_have_attribute("data-open", "false")
+    expect(page.locator("#completed-jobs .lane-toggle")).to_have_text("완료 1")
+    expect(page.locator('#completed-jobs .work-row')).to_have_count(0)
 
 
 def check_job_detail(page, _scene) -> None:
     expect(page.locator('.page-head a[href="#/jobs"]')).to_have_count(0)
     summary = page.locator("#run-summary")
-    expect(summary.locator(".job-fact span")).to_have_text(["원본 → 아카이브", "폴더", "영상"])
+    expect(summary.locator(".run-facts .fact-label")).to_have_text(["원본 → 아카이브", "폴더", "영상"])
     expect(summary).to_contain_text("VOLUME-1 → archive-main")
     expect(summary).to_have_attribute("title", re.compile("작업 ID ARCHIVE-RUN-1"))
     expect(summary).to_have_attribute("title", re.compile("Worker WORKER-1"))
-    # The run's open problems come first and lead to the drive that resolves them.
-    attention = page.locator("#run-attention .attention-link")
+    # The work's open problems follow its overview, failures first, and are
+    # resolved in place: a hold offers its choices here.
+    attention = page.locator("#run-attention .problem-panel")
     expect(attention).to_have_count(3)
     expect(attention.first).to_have_attribute("data-signal", "fault")
-    expect(page.locator('#run-attention .attention-link[data-kind="hold"]')).to_have_attribute("href", "#/drives/VOLUME-1?folder=hold")
-    expect(page.locator("#run-scope")).not_to_have_attribute("open", "")
-    expect(page.locator("#run-scope .data-row")).to_have_count(8)
+    expect(attention.first).to_have_attribute("data-open", "true")
+    page.locator('#run-attention .problem-panel[data-kind="hold"] .problem-head').click()
+    expect(page.locator('#run-attention .problem-panel[data-kind="hold"] #hold-submit')).to_have_count(1)
+    page.locator('#run-attention .problem-panel[data-kind="hold"] .problem-head').click()
+    expect(page.locator("#run-scope")).to_have_attribute("data-open", "false")
+    expect(page.locator("#run-scope .scope-row")).to_have_count(0)
     child = page.locator('#run-children .child-work[data-job-id="JOB-SOURCE"]')
     expect(child).to_have_count(1)
     expect(child.locator(".video-row")).to_have_count(0)
@@ -279,8 +284,8 @@ def main() -> None:
         page.evaluate("document.fonts.ready")
         page.screenshot(path=output, full_page=True, animations="disabled")
         # The light theme is a settings choice this browser keeps; the default
-        # stays dark and the top bar carries no theme control.
-        expect(page.locator(".topbar #theme-switch")).to_have_count(0)
+        # stays dark and no screen outside settings carries a theme control.
+        expect(page.locator("#theme-switch")).to_have_count(0)
         page.goto(url + "/#/settings", wait_until="networkidle")
         expect(page.locator('#theme-switch [data-theme-choice="dark"]')).to_have_attribute("aria-pressed", "true")
         page.locator('#theme-switch [data-theme-choice="light"]').click()
@@ -288,10 +293,9 @@ def main() -> None:
         page.reload(wait_until="networkidle")
         expect(page.locator("html")).to_have_attribute("data-theme", "light")
         expect(page.locator('#theme-switch [data-theme-choice="light"]')).to_have_attribute("aria-pressed", "true")
-        expect(page.locator(".pane-head")).to_have_css("background-color", "rgb(255, 255, 255)")
-        expect(page.locator(".pane-head")).to_have_css("color", "rgb(51, 51, 51)")
-        expect(page.locator(".pane-body")).to_have_css("background-color", "rgb(10, 10, 10)")
-        expect(page.locator(".pane-body")).to_have_css("color", "rgb(218, 218, 218)")
+        # The Agent panel follows the chosen theme like the work surface.
+        expect(page.locator("#archivist-pane")).to_have_css("background-color", "rgb(255, 255, 255)")
+        expect(page.locator("#archivist-pane")).to_have_css("color", "rgb(51, 51, 51)")
         browser.close()
 
 

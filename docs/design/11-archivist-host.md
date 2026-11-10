@@ -160,7 +160,7 @@ archivist_turn_lease_fencing_token
 idempotency_key
 ```
 
-Control의 MCP Adapter는 도구를 좁은 Application Service 입력으로 변환한다. 조회는 정제된 결과를 반환하고 상태 변경은 사람의 직접 명령과 같은 Command Bus를 통과한다. `archive.work.reference.get.v1`은 현재 Turn에 고정된 `WorkReference`만 반환해 작업 도중 이관 대상의 종류·ID·revision을 채팅 본문과 분리한다. 모든 영속 업무를 서버 Adapter 없이 직접 실행하는 공통 Capability Registry는 `APP-001` planned 경계다. 제공 도구는 업무 의미 allowlist로 제한하며 `run_shell`, 임의 terminal 입력, 임의 path 읽기·이동·삭제를 제공하지 않는다. `COL-004`
+Control의 MCP Adapter는 도구를 좁은 Application Service 입력으로 변환한다. 조회는 정제된 결과를 반환하고 상태 변경은 사람의 직접 명령과 같은 Command Bus를 통과한다. `archive.work.reference.get.v1`은 현재 Turn에 고정된 `WorkReference`만 반환해 작업 도중 이관 대상의 종류·ID·revision을 채팅 본문과 분리한다. 선택 범위 또는 `WorkReference`가 없는 유효한 Turn을 조회하면 `bound=false`를 반환하고 Tool Call을 `COMPLETED`로 기록한다. 잘못된 Turn 문맥과 Adapter 오류만 조회 실패이며, 선택을 요구하는 실행 Capability는 계속 ActionCard 또는 충돌로 차단한다. 모든 영속 업무를 서버 Adapter 없이 직접 실행하는 공통 Capability Registry는 `APP-001` planned 경계다. 제공 도구는 업무 의미 allowlist로 제한하며 `run_shell`, 임의 terminal 입력, 임의 path 읽기·이동·삭제를 제공하지 않는다. `COL-004`, `MCP-008`
 
 ArchivistToolCall receipt가 이미 있으면 최초 결과를 반환한다. timeout이나 CLI 재개 뒤에도 같은 호출이 Command를 다시 만들지 않는다. 인증된 MCP Capability는 allowlist의 비파괴 `PROCESS` Command를 직접 실행할 수 있다. 파괴적 작업과 `GATED` 작업은 ActionCard를 만들 수만 있고, 별도의 사람 Approval과 최신 expected revision 없이 실행하지 않는다.
 
@@ -179,6 +179,8 @@ Turn: QUEUED | LEASED | SUBMITTED | RUNNING | WAITING | COMPLETED | FAILED | CAN
 Tool Call: 이름, 대상, 상태, 정제된 결과
 Action Card: 제안 Command, 대상, expected revision, 사유, 근거, 승인 필요 여부
 ```
+
+Turn, Tool Call, ArchiveRun은 서로 다른 생애주기다. 개별 Tool Call 실패만으로 Turn이나 ArchiveRun 실패를 추론하지 않고, Agent 응답의 완료는 ArchivistTurn의 terminal event, 아카이브 처리의 완료·실패는 ArchiveRun과 하위 Job의 영속 상태로 표시한다. 선택적 문맥의 미고정 조회는 실패 Tool Call 자체를 만들지 않는다.
 
 채팅 입력은 ArchivistTurn을 만들고 Control에 확정된 뒤 Host로 전달한다. 채팅 텍스트의 “진행”은 Archivist에게 후속 Tool Call을 요청할 수 있지만 Approval은 아니다. 승인 필요한 명령은 ActionCard의 명시적 조작만 Approval 또는 Command 후보를 만들며 제출 시 현재 리비전을 다시 검사한다.
 

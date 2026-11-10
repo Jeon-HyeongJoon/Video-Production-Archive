@@ -56,7 +56,25 @@ with sync_playwright() as playwright:
         page.goto(sys.argv[1] + "/#/drives/VOLUME-2", wait_until="networkidle")
         expect(page.locator('#drive-overview [data-fact="connection"]')).to_contain_text("확인 불가")
         expect(page.locator("#prepare-run, #drive-prep, #start-archive-run, #archive-scope")).to_have_count(0)
+    elif scene == "complete":
+        # A failed folder is not retried in place: once its run is over, it goes
+        # into a new work with its drive, the folder and the original archive chosen.
+        page.goto(sys.argv[1] + "/#/drives/VOLUME-1", wait_until="networkidle")
+        broken = page.locator('#drive-problems .problem-panel[data-folder-id="broken"]')
+        expect(broken).to_have_attribute("data-open", "true")
+        broken.locator('[data-action="redo"]').click()
+        expect(page).to_have_url(sys.argv[1] + "/#/jobs")
+        expect(page.locator('#new-work-kind [data-kind="ARCHIVE"]')).to_have_attribute("aria-pressed", "true")
+        expect(page.locator('#prep-drives [data-drive-id="VOLUME-1"]')).to_have_attribute("aria-pressed", "true")
+        expect(page.locator('#prep-folders [data-folder-id="broken"] input[type="checkbox"]')).to_be_checked()
+        expect(page.locator('#prep-folders input[type="checkbox"]:checked:not(#select-all)')).to_have_count(1)
+        expect(page.locator('#prep-archives [data-storage-id="archive-main"]')).to_have_attribute("aria-pressed", "true")
+        expect(page.locator("#selection-summary")).to_contain_text("1 폴더")
     else:
+        # A failed folder of a running ArchiveRun waits for the run to end.
+        page.goto(sys.argv[1] + "/#/drives/VOLUME-1", wait_until="networkidle")
+        expect(page.locator('#drive-problems .problem-panel[data-folder-id="broken"] [data-action="redo"]')).to_be_disabled()
+
         # A running ArchiveRun is not a source choice for another new work.
         page.goto(sys.argv[1] + "/#/jobs", wait_until="networkidle")
         page.locator("#new-job-open").click()

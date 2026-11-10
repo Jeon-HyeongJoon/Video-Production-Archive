@@ -53,6 +53,39 @@ func TestControlHTTPServesSQLiteArchiveWorkspaceAndSearchOnlyToAllowedNetwork(t 
 	testControlHTTPWorkspace(t, nil)
 }
 
+// Requirement: DSH-034
+func TestArchiveWorkspaceDirectReplacementUsesOnlyJSONAPIBoundary(t *testing.T) {
+	testControlHTTPScene(t, sceneComplete, func(t *testing.T, handler http.Handler) {
+		assertArchiveWorkspaceScript(t, handler, "check_archive_workspace_api_boundary.py")
+	})
+}
+
+// Requirement: DSH-035
+func TestDirectFrontendReplacementRevalidatesStableAssetURLs(t *testing.T) {
+	testControlHTTPWorkspace(t, func(t *testing.T, handler http.Handler) {
+		for _, request := range []struct {
+			path        string
+			cache       string
+			contentType string
+			status      int
+		}{
+			{path: "/", cache: "no-store", contentType: "text/html", status: http.StatusOK},
+			{path: "/assets/js/main.js", cache: "no-cache, must-revalidate", contentType: "text/javascript", status: http.StatusOK},
+			{path: "/assets/js/flow.js", cache: "", contentType: "text/plain", status: http.StatusNotFound},
+		} {
+			recorder := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, request.path, nil)
+			req.RemoteAddr = "127.0.0.1:45000"
+			handler.ServeHTTP(recorder, req)
+			if recorder.Code != request.status || recorder.Header().Get("Cache-Control") != request.cache ||
+				!strings.HasPrefix(recorder.Header().Get("Content-Type"), request.contentType) {
+				t.Fatalf("replacement asset response mismatch: path=%s status=%d cache=%q content_type=%q",
+					request.path, recorder.Code, recorder.Header().Get("Cache-Control"), recorder.Header().Get("Content-Type"))
+			}
+		}
+	})
+}
+
 func TestArchiveIntakeWorkspaceProjectsSafeStateAndAcceptsOnlyExplicitCurrentCSRFOverride(t *testing.T) {
 	drives := newArchiveIntakeWorkspaceFixture(t)
 	handler, err := httpcontrol.New(httpcontrol.Configuration{
@@ -237,7 +270,7 @@ func TestArchiveWorkspaceKeepsLayoutAcrossViewportWidths(t *testing.T) {
 
 // Requirement: DSH-010
 func TestJobManagementSelectsArchiveDriveAndFolderScopeAndDriveDetailDoesNotCreateWork(t *testing.T) {
-	for _, scene := range []archiveWorkspaceScene{scenePreRun, sceneStageOne} {
+	for _, scene := range []archiveWorkspaceScene{scenePreRun, sceneStageOne, sceneComplete} {
 		t.Run(string(scene), func(t *testing.T) {
 			testControlHTTPScene(t, scene, func(t *testing.T, handler http.Handler) {
 				assertArchiveWorkspaceScript(t, handler, "check_archive_workspace_selection.py", string(scene))

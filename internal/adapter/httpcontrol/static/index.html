@@ -4,42 +4,43 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Archive</title>
+  <script src="/assets/js/theme-boot.js"></script>
+  <!-- Fonts and every module are asked for at once instead of one import level after another. -->
+  <link rel="preload" href="/assets/fonts/Geist-Variable.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/assets/fonts/NotoSansKR-subset.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/assets/style.css">
+  <link rel="modulepreload" href="/assets/js/vendor/preact.js">
+  <link rel="modulepreload" href="/assets/js/vendor/hooks.js">
+  <link rel="modulepreload" href="/assets/js/vendor/signals-core.js">
+  <link rel="modulepreload" href="/assets/js/vendor/signals.js">
+  <link rel="modulepreload" href="/assets/js/vendor/htm.js">
+  <link rel="modulepreload" href="/assets/js/lib.js">
+  <link rel="modulepreload" href="/assets/js/core.js">
+  <link rel="modulepreload" href="/assets/js/motion.js">
+  <link rel="modulepreload" href="/assets/js/router.js">
+  <link rel="modulepreload" href="/assets/js/store.js">
+  <link rel="modulepreload" href="/assets/js/ui.js">
+  <link rel="modulepreload" href="/assets/js/theme.js">
+  <link rel="modulepreload" href="/assets/js/agent.js">
+  <link rel="modulepreload" href="/assets/js/shell.js">
+  <link rel="modulepreload" href="/assets/js/views/drive.js">
+  <link rel="modulepreload" href="/assets/js/views/run.js">
+  <link rel="modulepreload" href="/assets/js/views/job.js">
+  <link rel="modulepreload" href="/assets/js/views/jobs.js">
+  <link rel="modulepreload" href="/assets/js/views/connections.js">
+  <link rel="modulepreload" href="/assets/js/views/search.js">
+  <link rel="modulepreload" href="/assets/js/views/settings.js">
+  <script type="module" src="/assets/js/main.js"></script>
 </head>
 <body>
   <span class="sr-only">아카이브 작업 공간</span>
-  <div class="shell">
-    <header class="topbar">
-      <a class="brand" href="#/jobs" aria-label="아카이브 작업 관리"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M3 5h18v4H3zM5 9v10h14V9M10 13h4"/></svg><span class="brand-text">아카이브</span></a>
-      <nav id="crumbs" class="crumbs" aria-label="위치"></nav>
-      <div class="topbar-tools">
-        <form id="search-form" class="topbar-search" role="search">
-          <label class="topbar-field"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M10.5 4a6.5 6.5 0 1 0 0 13a6.5 6.5 0 1 0 0-13zM15.5 15.5 20 20"/></svg><input id="search-text" type="search" name="q" aria-label="기록물·전사문 검색" placeholder="기록물·전사문 검색" autocomplete="off"><kbd aria-hidden="true">/</kbd></label>
-        </form>
-        <a id="open-settings" class="topbar-icon" href="#/settings" aria-label="설정" title="설정"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 8.8a3.2 3.2 0 1 0 0 6.4a3.2 3.2 0 1 0 0-6.4zM12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4M5.5 5.5l1.7 1.7M16.8 16.8l1.7 1.7M5.5 18.5l1.7-1.7M16.8 7.2l1.7-1.7"/></svg></a>
-        <div class="alert-wrap" id="alert-wrap">
-          <button type="button" id="alert-button" class="alert-button" aria-haspopup="dialog" aria-expanded="false" aria-controls="alert-panel"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M6 16v-5a6 6 0 0 1 12 0v5l1.5 2h-15zM10 20.5h4"/></svg><b id="alert-count" class="alert-count num" hidden></b></button>
-          <div id="alert-panel" class="alert-panel" role="dialog" aria-label="알림" hidden></div>
-        </div>
-      </div>
-    </header>
-    <aside class="sidebar" aria-label="메뉴">
-      <nav id="menu" class="menu" aria-label="메뉴"></nav>
-      <section id="tree" class="tree" aria-label="워크스페이스"></section>
-    </aside>
-    <div class="main-col">
-      <div id="stale-banner" class="banner banner-stale" role="alert" hidden><svg class="sicon" data-kind="fault" aria-hidden="true" viewBox="0 0 16 16"><path class="sicon-shape" d="M8 1.75a6.25 6.25 0 1 0 0 12.5a6.25 6.25 0 1 0 0-12.5z"/><path class="sicon-glyph" d="M5.7 5.7l4.6 4.6M10.3 5.7l-4.6 4.6"/></svg><span><b>연결 끊김</b> · <span id="stale-text"></span></span></div>
-      <main id="view" class="view"></main>
-      <div id="fresh-banner" class="toast" role="status" hidden>
-        <svg class="sicon" aria-hidden="true" viewBox="0 0 16 16"><path class="sicon-shape"/><path class="sicon-glyph"/></svg>
-        <span class="toast-text"><b>새 확인 필요</b><span id="fresh-text"></span></span>
-        <button type="button" id="fresh-go" class="toast-go">열기</button>
-        <button type="button" id="fresh-close" class="toast-close" aria-label="알림 닫기"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
-      </div>
-    </div>
-    <aside id="archivist-pane" class="agent-pane" aria-label="Agent"></aside>
-    <button type="button" id="agent-handle" class="agent-handle" aria-controls="archivist-pane" aria-expanded="false">Agent</button>
-  </div>
-  <script type="module" src="/assets/js/main.js"></script>
+  <!-- A placeholder shell painted from plain HTML; the app takes its place in one step. -->
+  <div id="app"><div class="page boot" aria-busy="true"><div class="shell">
+    <nav class="sidebar"><div class="side-tools"><span class="skel-card boot-search"></span><span class="skel-card boot-bell"></span></div>
+      <span class="skel boot-menu"></span><span class="skel boot-menu short"></span>
+      <div class="tree"><span class="skel-card"></span><span class="skel-card"></span><span class="skel-card"></span></div></nav>
+    <main class="view"><div class="view-inner"><div class="boot-view"><span class="skel boot-line"></span><span class="skel boot-title"></span><span class="skel-card boot-card"></span><span class="skel-card boot-card tall"></span></div></div></main>
+    <aside class="agent-pane"></aside>
+  </div></div></div>
 </body>
 </html>

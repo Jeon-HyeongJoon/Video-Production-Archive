@@ -36,12 +36,13 @@ with sync_playwright() as playwright:
     page.route("**/api/v1/archive-intake", failing("intro"))
     page.clock.run_for(5_100)
     expect(banner).to_be_visible()
-    expect(page.locator("#fresh-text")).to_have_text("VOLUME-1 / intro · 처리 실패")
-    # The toast rises at the bottom right of the screen, over nothing else.
+    expect(page.locator("#fresh-text")).to_have_text("VOLUME-1 / intro")
+    expect(banner).to_contain_text("새 처리 실패")
+    # The toast rises at the bottom of the screen, over nothing else.
     placed = page.evaluate("""() => { const toast = document.querySelector('#fresh-banner').getBoundingClientRect(), view = document.querySelector('#view').getBoundingClientRect();
       return toast.right <= view.right && toast.bottom <= innerHeight && toast.top > view.top + view.height / 2; }""")
     if not placed:
-        raise AssertionError("new-problem toast is not at the bottom right of the screen")
+        raise AssertionError("new-problem toast is not at the bottom of the screen")
     expect(page.locator("#alert-count")).to_have_text("7")
     expect(button).to_have_attribute("data-new", "true")
     button.click()

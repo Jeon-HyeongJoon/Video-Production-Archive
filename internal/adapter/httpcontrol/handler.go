@@ -503,7 +503,11 @@ func securityHeaders(next http.Handler) http.Handler {
 
 func cacheAssets(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		writer.Header().Set("Cache-Control", "public, max-age=300")
+		// Asset names are deliberately stable because the workspace is embedded
+		// without a separate frontend build. Revalidate them on every page load so
+		// a directly replaced component graph cannot be mixed with cached legacy
+		// modules from the previous Control binary.
+		writer.Header().Set("Cache-Control", "no-cache, must-revalidate")
 		next.ServeHTTP(writer, request)
 	})
 }

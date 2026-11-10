@@ -340,7 +340,7 @@ func knownTools() map[string]ToolDefinition {
 			Parameters: objectSchema(map[string]any{"job_id": stringProperty("Persistent job ID")}, "job_id"),
 		},
 		"archive.work.reference.get.v1": {
-			Name: "archive.work.reference.get.v1", ProviderName: "archive_work_reference_get_v1", Description: "Read the persistent work kind, ID, and revision fixed to this turn for mid-work handoff.",
+			Name: "archive.work.reference.get.v1", ProviderName: "archive_work_reference_get_v1", Description: "Read the persistent work kind, ID, and revision fixed to this turn for mid-work handoff. A successful result with bound=false means this new turn has no work reference.",
 			Parameters: objectSchema(map[string]any{}),
 		},
 		"archive.assets.search.v1": {
@@ -360,7 +360,7 @@ func knownTools() map[string]ToolDefinition {
 			}, "job_id", "template_name", "target_title", "reason"),
 		},
 		"archive.intake.selection.get.v1": {
-			Name: "archive.intake.selection.get.v1", ProviderName: "archive_intake_selection_get_v1", Description: "Read the Worker, source, archive storage, and folder selection already fixed to this turn.", Parameters: objectSchema(map[string]any{}),
+			Name: "archive.intake.selection.get.v1", ProviderName: "archive_intake_selection_get_v1", Description: "Read the Worker, source, archive storage, and folder selection already fixed to this turn. A successful result with bound=false means no selection is fixed yet; search current candidates and pin one before starting work.", Parameters: objectSchema(map[string]any{}),
 		},
 		"archive.intake.candidates.search.v1": {
 			Name: "archive.intake.candidates.search.v1", ProviderName: "archive_intake_candidates_search_v1", Description: "Search current connected source folders and eligible archive storage candidates. Use prompt words only as the query, then use returned IDs and revisions for selection.",
