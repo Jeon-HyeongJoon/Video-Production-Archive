@@ -108,7 +108,7 @@ func TestArchiveCatalogVerifyReportsBidirectionalStatesWithoutChangingStorage(t 
 	if err := fixture.archiveRoot.MkdirAll("2026-11-08_invalid__INVALID/nested", 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := fixture.archiveRoot.WriteFile("2026-11-08_invalid__INVALID/metadata.json", []byte("{}"), 0o600); err != nil {
+	if err := fixture.archiveRoot.WriteFile("2026-11-08_invalid__INVALID/"+archivebundle.CompactPackageDocumentName, []byte("{}"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	before := snapshotStorage(t, fixture.archiveRoot, ".")
@@ -246,8 +246,8 @@ func (fixture *v2CatalogFixture) close() {
 
 func (fixture *v2CatalogFixture) publish(t *testing.T, packageID, decisionID, folder string, sources []archivebundle.SourceReference) (archivebundle.Package, archivebundle.Metadata, PackageRow) {
 	t.Helper()
-	stored, err := fixture.publisher.PublishInitialV2(archivebundle.InitialRequest{
-		LayoutVersion: archive.PackageLayoutFlatResultFolder, PackageID: packageID, WorkspaceDriveID: "SOURCE-DRIVE-1",
+	stored, err := fixture.publisher.PublishInitialCompact(archivebundle.InitialRequest{
+		LayoutVersion: archive.PackageLayoutCompactResultFolder, PackageID: packageID, WorkspaceDriveID: "SOURCE-DRIVE-1",
 		DecisionID: decisionID, MediaFolder: folder, Disposition: vocabulary.OrganizationAsIs,
 		ProfileReference: "archive-1080p-6mbps@v1", Sources: sources,
 		Video:     archivebundle.FileSource{Root: archivebundle.RootSource, Path: "source/video.mov", Checksum: fixture.checksum},

@@ -95,7 +95,7 @@ func MaterializeDependentStepExecutionSpec(request MaterializeRequest) (StepExec
 			if err != nil {
 				return StepExecutionSpec{}, ErrCannotMaterializeStepExecutionSpec
 			}
-			outputs = append(outputs, OutputTarget{ID: packageID, Kind: OutputOrganizedMedia, StorageID: parameters.ArchiveStorageID, RelativePath: path.Join(directory, "metadata.json")})
+			outputs = append(outputs, OutputTarget{ID: packageID, Kind: OutputOrganizedMedia, StorageID: parameters.ArchiveStorageID, RelativePath: path.Join(directory, ".archive-package.json")})
 		} else {
 			for _, original := range originalInputs {
 				packageID := stableArchivePackageID(parameters.ArchiveDate, parameters.OrganizationDecisionID, original.OriginalAssetID)
@@ -103,7 +103,7 @@ func MaterializeDependentStepExecutionSpec(request MaterializeRequest) (StepExec
 				if err != nil {
 					return StepExecutionSpec{}, ErrCannotMaterializeStepExecutionSpec
 				}
-				outputs = append(outputs, OutputTarget{ID: packageID, Kind: OutputOrganizedMedia, StorageID: parameters.ArchiveStorageID, RelativePath: path.Join(directory, "metadata.json"), OriginalAssetID: original.OriginalAssetID})
+				outputs = append(outputs, OutputTarget{ID: packageID, Kind: OutputOrganizedMedia, StorageID: parameters.ArchiveStorageID, RelativePath: path.Join(directory, ".archive-package.json"), OriginalAssetID: original.OriginalAssetID})
 			}
 		}
 	case "audio":
@@ -151,9 +151,16 @@ func MaterializeDependentStepExecutionSpec(request MaterializeRequest) (StepExec
 			if err != nil {
 				return StepExecutionSpec{}, ErrCannotMaterializeStepExecutionSpec
 			}
+			relativePath := path.Join(directory, ".archive-package.json")
+			for _, candidate := range allOutputs {
+				if candidate.ID == parameters.ArchivePackageID && candidate.Kind == OutputOrganizedMedia && candidate.RelativePath != "" {
+					relativePath = candidate.RelativePath
+					break
+				}
+			}
 			outputs = []OutputTarget{{
 				ID: parameters.ArchivePackageID, Kind: OutputArchiveRevision, StorageID: parameters.ArchiveStorageID,
-				RelativePath: path.Join(directory, "metadata.json"),
+				RelativePath: relativePath,
 			}}
 		}
 	case "archive_catalog":

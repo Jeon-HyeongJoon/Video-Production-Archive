@@ -120,7 +120,7 @@ Storage와 폴더 범위 선택은 담당자 화면 또는 인증된 Archivist�
 
 예외는 항목별로 격리한다. 손상 입력·지원하지 않는 codec은 해당 영상 실패, 일시 process 오류는 재시도, 원본 또는 네트워크 Storage 단절과 실행 중 용량 부족은 시도 횟수를 소비하지 않는 `WAITING/DEVICE`다. 실행 가능한 작업이 없으면 ArchiveRun을 완료로 보고하되 HOLD는 별도 확인 필요 상태로 유지한다.
 
-layout v2는 Archive Storage root 바로 아래 결과 폴더 한 단계만 허용한다. 결과 폴더 하나는 ArchivePackage 하나와 결과 영상 하나를 소유하고 루트 ArchiveCatalog 한 행에 대응한다. 다중 입력의 상세 기술정보는 폴더 최상단 `video-info.csv`의 OriginalAsset별 행으로 분리한다. package metadata와 manifest가 복구 원본이고 ArchiveCatalog는 다시 만들 수 있는 검색 projection이다. 기존 layout v1은 읽기 호환을 유지하며 자동 migration하지 않는다. `ARC-015~018`, `MED-008`, `ORG-015`
+layout v3는 Archive Storage root 바로 아래 결과 폴더 한 단계만 허용한다. 결과 폴더 하나는 ArchivePackage 하나와 결과 영상 하나를 소유하고 루트 ArchiveCatalog 한 행에 대응한다. 다중 입력의 상세 기술정보는 폴더 최상단 `video-info.csv`의 OriginalAsset별 행으로 분리하고, package metadata·checksum·revision history·구조화 Transcript는 `.archive-package.json` 하나가 소유한다. ArchiveCatalog는 다시 만들 수 있는 검색 projection이다. 기존 layout v1·v2는 읽기 호환을 유지하며 자동 migration하지 않는다. `ARC-015~018`, `MED-008`, `ORG-015`
 
 ## 6. 작업과 단계 실행
 

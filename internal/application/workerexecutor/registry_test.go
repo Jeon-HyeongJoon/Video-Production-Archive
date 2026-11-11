@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"videoarchive/internal/adapter/archivebundle"
 	"videoarchive/internal/adapter/workerconfig"
 	"videoarchive/internal/application/workerclient"
 	"videoarchive/internal/core/archive"
@@ -58,7 +59,7 @@ func TestProductionExecutorRoutesOneTypedOperationThroughRegisteredStorageRoots(
 		}},
 		Outputs: []execution.OutputTarget{{
 			ID: "VP-20261031-0001", Kind: execution.OutputOrganizedMedia, StorageID: "working",
-			RelativePath: "2026-10-31_clip__0001/metadata.json", OriginalAssetID: "ASSET-1",
+			RelativePath: "2026-10-31_clip__0001/.archive-package.json", OriginalAssetID: "ASSET-1",
 		}},
 		ProfileReference: "archive-1080p-6mbps@v1",
 		Parameters: execution.StepExecutionParameters{
@@ -789,7 +790,7 @@ func TestMultiFileAsIsPackagesPreserveEachReadyInputProfile(t *testing.T) {
 		}
 		outputs = append(outputs, execution.OutputTarget{
 			ID: item.packageID, Kind: execution.OutputOrganizedMedia, StorageID: "archive",
-			RelativePath: filepath.ToSlash(filepath.Join(presentation.PackageDirectory, "metadata.json")), OriginalAssetID: item.assetID,
+			RelativePath: filepath.ToSlash(filepath.Join(presentation.PackageDirectory, archivebundle.CompactPackageDocumentName)), OriginalAssetID: item.assetID,
 		})
 	}
 	spec, err := execution.NewStepExecutionSpec(execution.StepExecutionSpec{

@@ -14,9 +14,9 @@ import (
 )
 
 // Requirement: ARC-015
-func TestFlatArchivePackagePublishesOneVideoAndSidecarsAtOneRootLevel(t *testing.T) {
+func TestCompactArchivePackagePublishesOnlyHumanFilesAndRecoveryDocument(t *testing.T) {
 	publisher, _, archiveRoot, checksum, _, _ := publisherFixture(t)
-	stored, err := publisher.PublishInitialV2(v2InitialRequest("VP-20261108-FLAT", "DECISION-FLAT", checksum, []SourceReference{{
+	stored, err := publisher.PublishInitialCompact(compactInitialRequest("VP-20261108-FLAT", "DECISION-FLAT", checksum, []SourceReference{{
 		OriginalAssetID: "ASSET-FLAT", OriginalName: "event.mov", RelativePath: "recordings/event.mov", Checksum: checksum,
 	}}))
 	if err != nil {
@@ -28,6 +28,7 @@ func TestFlatArchivePackagePublishesOneVideoAndSidecarsAtOneRootLevel(t *testing
 		t.Fatal(err)
 	}
 	videoCount := 0
+	names := make(map[string]bool, len(entries))
 	for _, entry := range entries {
 		if entry.IsDir() {
 			t.Fatalf("flat package contains a nested directory: %s", entry.Name())
@@ -35,15 +36,14 @@ func TestFlatArchivePackagePublishesOneVideoAndSidecarsAtOneRootLevel(t *testing
 		if strings.EqualFold(path.Ext(entry.Name()), ".mp4") && !strings.HasPrefix(entry.Name(), ".") {
 			videoCount++
 		}
+		names[entry.Name()] = true
 	}
 	if directory != "2026-11-08_event__FLAT" || strings.Contains(directory, "/") || videoCount != 1 ||
-		stored.LayoutVersion != archive.PackageLayoutFlatResultFolder || stored.VideoPath != path.Join(directory, "event.mp4") {
-		t.Fatalf("layout v2 package is not a one-level result folder: package=%+v videos=%d", stored, videoCount)
+		stored.LayoutVersion != archive.PackageLayoutCompactResultFolder || stored.VideoPath != path.Join(directory, "event.mp4") ||
+		len(entries) != 3 || !names["event.mp4"] || !names["video-info.csv"] || !names[CompactPackageDocumentName] {
+		t.Fatalf("layout v3 package contains files outside the compact contract: package=%+v entries=%v", stored, names)
 	}
-	for _, required := range []string{
-		stored.VideoPath, stored.MetadataPath, stored.VideoInfoPath, stored.FilesPath,
-		stored.EventsPath, stored.ManifestPath, stored.ReadmePath, path.Join(directory, "current.json"),
-	} {
+	for _, required := range []string{stored.VideoPath, stored.MetadataPath, stored.VideoInfoPath} {
 		if _, _, err := archiveRoot.FileSHA256(required); err != nil {
 			t.Fatalf("flat package sidecar %s is missing: %v", required, err)
 		}
@@ -54,7 +54,8 @@ func TestFlatArchivePackagePublishesOneVideoAndSidecarsAtOneRootLevel(t *testing
 	}
 	var metadata Metadata
 	if json.Unmarshal(payload, &metadata) != nil || metadata.PackageID != stored.PackageID ||
-		metadata.LayoutVersion != archive.PackageLayoutFlatResultFolder {
+		metadata.LayoutVersion != archive.PackageLayoutCompactResultFolder || stored.FilesPath != "" ||
+		stored.EventsPath != "" || stored.ManifestPath != "" || stored.ReadmePath != "" {
 		t.Fatalf("metadata identity does not match the result folder: %s", payload)
 	}
 }
@@ -77,7 +78,7 @@ func TestFlatArchivePackageVideoInfoHasOneHumanReadableRowPerOriginal(t *testing
 			Checksum: strings.Repeat("b", 64), DurationMillis: 5_000, VideoCodec: "h264", Width: 1920, Height: 1080,
 		},
 	}
-	stored, err := publisher.PublishInitialV2(v2InitialRequest("VP-20261108-VIDEOINFO", "DECISION-VIDEO", checksum, sources))
+	stored, err := publisher.PublishInitialCompact(compactInitialRequest("VP-20261108-VIDEOINFO", "DECISION-VIDEO", checksum, sources))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,29 +100,28 @@ func TestFlatArchivePackageVideoInfoHasOneHumanReadableRowPerOriginal(t *testing
 }
 
 // Requirement: ARC-016
-func TestFlatArchivePackageRevisionPreservesImmutableFilesBeforeCurrentPointerMoves(t *testing.T) {
+func TestCompactArchivePackageRevisionPreservesHistoryInsideRecoveryDocument(t *testing.T) {
 	publisher, _, archiveRoot, checksum, _, _ := publisherFixture(t)
 	now := time.Date(2026, 11, 8, 11, 0, 0, 0, time.UTC)
-	request := v2InitialRequest("VP-20261108-REVISION", "DECISION-REVISION", checksum, []SourceReference{{
+	request := compactInitialRequest("VP-20261108-REVISION", "DECISION-REVISION", checksum, []SourceReference{{
 		OriginalAssetID: "ASSET-REVISION", OriginalName: "event.mov", RelativePath: "recordings/event.mov", Checksum: checksum,
 	}})
 	request.CreatedAt = now
-	initial, err := publisher.PublishInitialV2(request)
+	initial, err := publisher.PublishInitialCompact(request)
 	if err != nil {
 		t.Fatal(err)
 	}
 	directory := path.Dir(initial.MetadataPath)
-	metadataV1Path := path.Join(directory, ".r000001.metadata.json")
-	manifestV1Path := path.Join(directory, ".r000001.manifest-sha256.txt")
-	metadataV1, err := archiveRoot.ReadFile(metadataV1Path)
+	documentV1Payload, err := archiveRoot.ReadFile(initial.MetadataPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	manifestV1, err := archiveRoot.ReadFile(manifestV1Path)
-	if err != nil {
-		t.Fatal(err)
+	var documentV1 CompactDocument
+	if json.Unmarshal(documentV1Payload, &documentV1) != nil || len(documentV1.Revisions) != 1 {
+		t.Fatalf("initial compact history is invalid: %s", documentV1Payload)
 	}
-	revised, err := publisher.ReviseV2(RevisionRequest{
+	firstRevision, _ := json.Marshal(documentV1.Revisions[0])
+	revised, err := publisher.ReviseCompact(RevisionRequest{
 		PackageID:      initial.PackageID,
 		Transcript:     FileSource{Root: RootArchive, Path: "staging/transcript.json", Checksum: fixtureDigest(`{"segments":[{"text":"행사"}]}`)},
 		TranscriptText: FileSource{Root: RootArchive, Path: "staging/transcript.txt", Checksum: fixtureDigest("행사\n")},
@@ -135,24 +135,30 @@ func TestFlatArchivePackageRevisionPreservesImmutableFilesBeforeCurrentPointerMo
 	if err != nil {
 		t.Fatal(err)
 	}
-	metadataV1After, _ := archiveRoot.ReadFile(metadataV1Path)
-	manifestV1After, _ := archiveRoot.ReadFile(manifestV1Path)
+	documentV2Payload, _ := archiveRoot.ReadFile(revised.MetadataPath)
+	var documentV2 CompactDocument
+	if json.Unmarshal(documentV2Payload, &documentV2) != nil || len(documentV2.Revisions) != 2 {
+		t.Fatalf("revised compact history is invalid: %s", documentV2Payload)
+	}
+	firstRevisionAfter, _ := json.Marshal(documentV2.Revisions[0])
 	transcript, transcriptErr := archiveRoot.ReadFile(path.Join(directory, "transcript.txt"))
 	if revised.Revision != 2 || current.Revision != 2 || current.ManifestDigest != revised.ManifestDigest ||
-		!bytes.Equal(metadataV1, metadataV1After) || !bytes.Equal(manifestV1, manifestV1After) ||
+		!bytes.Equal(firstRevision, firstRevisionAfter) ||
 		transcriptErr != nil || string(transcript) != "행사\n" {
-		t.Fatalf("revision projection moved without preserving immutable revision files: initial=%+v revised=%+v current=%+v", initial, revised, current)
+		t.Fatalf("revision projection moved without preserving compact history: initial=%+v revised=%+v current=%+v", initial, revised, current)
 	}
-	for _, immutable := range []string{".r000002.metadata.json", ".r000002.manifest-sha256.txt", ".r000002.transcript.txt"} {
-		if _, _, err := archiveRoot.FileSHA256(path.Join(directory, immutable)); err != nil {
-			t.Fatalf("new immutable revision file %s is missing: %v", immutable, err)
-		}
+	entries, err := archiveRoot.ReadDir(directory)
+	if err != nil || len(entries) != 5 {
+		t.Fatalf("STT revision must expose only video, video info, text, subtitle, and recovery document: entries=%v err=%v", entries, err)
+	}
+	if exists, _ := archiveRoot.Exists(path.Join(directory, "transcript.json")); exists {
+		t.Fatal("structured transcript leaked into the human-facing result folder")
 	}
 }
 
-func v2InitialRequest(packageID, decisionID, checksum string, sources []SourceReference) InitialRequest {
+func compactInitialRequest(packageID, decisionID, checksum string, sources []SourceReference) InitialRequest {
 	return InitialRequest{
-		LayoutVersion: FlatLayoutVersion, PackageID: packageID, WorkspaceDriveID: "SOURCE-DRIVE-1", DecisionID: decisionID,
+		LayoutVersion: CompactLayoutVersion, PackageID: packageID, WorkspaceDriveID: "SOURCE-DRIVE-1", DecisionID: decisionID,
 		MediaFolder: "recordings", Disposition: vocabulary.OrganizationAsIs, ProfileReference: "archive-1080p-6mbps@v1",
 		Sources: sources, Video: FileSource{Root: RootSource, Path: "recordings/event.mov", Checksum: checksum},
 		CreatedAt: time.Date(2026, 11, 8, 9, 0, 0, 0, time.UTC),

@@ -1,16 +1,16 @@
 # 15. 현재 구현 기준선
 
-기준일: 2026-11-09
+기준일: 2026-11-12
 
 이 문서는 설계 목표, 실제 운영 진입점, 현재 연결된 기능과 planned 경계를 한 곳에서 대조한다. 상세 규칙은 각 소유 설계와 `requirements/catalog.json`이 우선하며, 이 문서는 현재 상태를 찾는 인덱스다.
 
 ## 1. 검증 기준선
 
-- 요구사항 288개 중 implemented 248개, planned 40개
-- implemented 요구사항과 주석 테스트 248개가 1:1 연결
+- 요구사항 302개 중 implemented 262개, planned 40개
+- implemented 요구사항과 주석 테스트 262개가 1:1 연결
 - `make verify`, `go vet ./...` 통과를 변경 인계 조건으로 사용
 - Core는 Application·Adapter와 HTTP·SQLite·FFmpeg·Windows API를 import하지 않음
-- 실제 제품 수직 경로는 Archive Intake와 별도 STT, layout v2 게시·카탈로그 대조까지 연결
+- 실제 제품 수직 경로는 Archive Intake와 별도 STT, layout v3 compact 게시·카탈로그 대조까지 연결
 - 일반 Template Job은 영속 생성·목록·상세·취소까지만 연결되고 실제 Worker 실행 명세 조립은 연결되지 않음
 
 ## 2. 컨테이너와 의존 방향
@@ -39,7 +39,7 @@ flowchart LR
     subgraph Files[StorageRoot]
         Source[SOURCE_MEDIA]
         Archive[ARCHIVE_PRIMARY]
-        Package[layout v2 결과 폴더]
+        Package[layout v3 compact 결과 폴더]
         Catalog[archive-catalog.csv]
         Archive --> Package
         Archive --> Catalog
@@ -95,7 +95,7 @@ flowchart TD
     I2 --> R3[렌더] --> Q2[QC]
     I3 --> T3[타임라인과 마커] --> R4[통합 렌더] --> Q3[QC]
 
-    Q1 & Q2 & Q3 --> P[layout v2 패키지 게시]
+    Q1 & Q2 & Q3 --> P[layout v3 compact 패키지 게시]
     P --> K[ArchiveCatalog 병합]
     K --> S{1단계 실행 가능 작업 없음}
 
@@ -126,14 +126,14 @@ flowchart TD
 
 - 자동 분류는 기술 관찰값과 versioned policy만 사용한다.
 - HOLD는 외부 Step을 만들지 않고 `WAITING/INPUT`으로 투영한다.
-- HOLD는 Control 원장과 작업 공간에 남고 layout v2 루트 Catalog 행은 만들지 않는다.
+- HOLD는 Control 원장과 작업 공간에 남고 layout v3 루트 Catalog 행은 만들지 않는다.
 - 사람 또는 Archivist가 실행 ID·최신 revision·근거를 붙여 명시적으로 분류하면 같은 ArchiveRun에 Folder Job을 한 번 연결한다.
 
 ### 보관과 기록
 
-- Production Worker의 새 게시 기본값은 layout v2다.
+- Production Worker의 새 게시 기본값은 layout v3 compact다. 기존 layout v1·v2는 읽기·복구 호환을 유지한다.
 - Archive Storage root 바로 아래 결과 폴더 한 단계만 둔다.
-- 결과 폴더에는 영상 정확히 하나와 metadata·video-info·전사·자막·manifest·event·README를 같은 최상단에 둔다.
+- 결과 폴더에는 영상 정확히 하나·video-info.csv와 선택적인 transcript.txt·subtitle.srt만 공개하고 복구 정보는 `.archive-package.json`에 둔다.
 - root `archive-catalog.csv`는 ArchivePackage 하나당 한 행이다.
 - 폴더 `video-info.csv`는 OriginalAsset 하나당 한 행이다.
 - `verify`와 `rebuild`는 `결과 폴더 1 = Package 1 = 결과 영상 1 = root CSV 행 1`을 대조한다.
@@ -182,7 +182,7 @@ ArchiveRun은 영속 업무 identity와 선택 일관성 경계다. 현재 1·2�
 | Worker | 자원 관측, 수용 판정, queue, reservation, lease 갱신, 취소·결과 정산 | 연결됨 |
 | 1단계 | 검사, 분류, 렌더, 시퀀스, QC, 패키지, Catalog | 연결됨 |
 | 2단계 | 오디오, STT, SRT, transcript.txt, 패키지 리비전, Catalog | 연결됨, 실제 한국어 모델 품질 planned |
-| 기록 형식 | layout v2 flat 결과 폴더, root Catalog, video-info, verify·rebuild | 연결됨 |
+| 기록 형식 | layout v3 compact 결과 폴더, root Catalog, video-info, verify·rebuild | 연결됨 |
 | 검색 | 자료·전사문 검색, 기록물 상세·요약 조회 | 화면 연결됨 |
 | Archivist | Session·Turn·Tool Call·ActionCard·SYSTEM 재호출 | fixture 수직 연결, 실제 계정 acceptance 일부 planned |
 | MCP | Job 조회·생성, 자료 검색, 선택 조회, ArchiveRun 상태·시작·STT, HOLD 목록·상세·분류 | 연결됨 |
@@ -215,7 +215,7 @@ Archivist는 메시지 본문에서 원본·아카이브 Storage·폴더 범위�
 4. 논리 Volume 자동 관찰과 source/archive 역할 분리
 5. ArchiveRun 고정 범위, 검사 결과 outbox 조정, 규칙 분류와 HOLD 재개
 6. 1단계 렌더·QC·보관과 2단계 STT 분리
-7. layout v2 결과 폴더, Package revision, root Catalog와 video-info 대조·재생성
+7. layout v3 compact 결과 폴더, Package revision, root Catalog와 video-info 대조·재생성
 8. 작업 관리·드라이브·연결 관리·검색·Archivist 대화 화면과 golden 회귀
 9. Archivist Host, Codex app-server Adapter, ChatGPT·local model loop, MCP·ActionCard·재호출 계약
 10. `archive-media` 단독 CLI와 선택형 관리 Runner의 공통 MediaOperation

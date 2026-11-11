@@ -15,12 +15,14 @@ var ErrInvalidPackagePresentation = errors.New("archive package presentation is 
 type PackageLayoutVersion uint8
 
 const (
-	PackageLayoutDateRevisionTree PackageLayoutVersion = 1
-	PackageLayoutFlatResultFolder PackageLayoutVersion = 2
+	PackageLayoutDateRevisionTree    PackageLayoutVersion = 1
+	PackageLayoutFlatResultFolder    PackageLayoutVersion = 2
+	PackageLayoutCompactResultFolder PackageLayoutVersion = 3
 )
 
 func (version PackageLayoutVersion) Valid() bool {
-	return version == PackageLayoutDateRevisionTree || version == PackageLayoutFlatResultFolder
+	return version == PackageLayoutDateRevisionTree || version == PackageLayoutFlatResultFolder ||
+		version == PackageLayoutCompactResultFolder
 }
 
 var packageIdentityPattern = regexp.MustCompile(`^VP-([0-9]{4})([0-9]{2})([0-9]{2})-[A-Za-z0-9._-]+$`)

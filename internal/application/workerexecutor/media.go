@@ -748,7 +748,7 @@ func (operations *mediaOperations) reviseArchivePackage(_ context.Context, spec 
 	if err != nil {
 		return nil, nil, err
 	}
-	revised, err := publisher.ReviseV2(archivebundle.RevisionRequest{
+	revised, err := publisher.ReviseStored(archivebundle.RevisionRequest{
 		PackageID:      spec.Parameters.ArchivePackageID,
 		Transcript:     archivebundle.FileSource{Root: archivebundle.RootArchive, Path: transcriptInput.RelativePath, Checksum: transcriptInput.Checksum},
 		TranscriptText: archivebundle.FileSource{Root: archivebundle.RootArchive, Path: textInput.RelativePath, Checksum: textInput.Checksum},
@@ -803,7 +803,7 @@ func (operations *mediaOperations) organizeMedia(_ context.Context, spec executi
 			profileReference = sourceInputs[0].ProfileReference
 		}
 		request := archivebundle.InitialRequest{
-			LayoutVersion: archive.PackageLayoutFlatResultFolder,
+			LayoutVersion: archive.PackageLayoutCompactResultFolder,
 			PackageID:     target.ID, WorkspaceDriveID: spec.Parameters.WorkspaceDriveID,
 			DecisionID: spec.Parameters.OrganizationDecisionID, MediaFolder: spec.Parameters.MediaFolder,
 			Disposition:      spec.Parameters.Disposition,
@@ -825,7 +825,7 @@ func (operations *mediaOperations) organizeMedia(_ context.Context, spec executi
 				AudioChannels: source.AudioChannels, AudioChannelLayout: source.AudioChannelLayout,
 			})
 		}
-		bundle, err := publisher.PublishInitialV2(request)
+		bundle, err := publisher.PublishInitialCompact(request)
 		if err != nil || bundle.MetadataPath != target.RelativePath {
 			return nil, nil, errors.Join(ErrProductionExecution, err)
 		}
@@ -858,10 +858,11 @@ func (operations *mediaOperations) writeArchiveCatalog(ctx context.Context, spec
 		packages = append(packages, archiveStoredPackage{metadata: metadata, path: input.RelativePath})
 	}
 	packageRows := make([]archivecatalog.PackageRow, 0, len(packages))
-	allV2 := len(packages) > 0
+	allPackageRows := len(packages) > 0
 	for _, stored := range packages {
-		if stored.metadata.LayoutVersion != archive.PackageLayoutFlatResultFolder {
-			allV2 = false
+		if stored.metadata.LayoutVersion != archive.PackageLayoutCompactResultFolder &&
+			stored.metadata.LayoutVersion != archive.PackageLayoutFlatResultFolder {
+			allPackageRows = false
 			break
 		}
 		root := roots.MustRoot(spec.Outputs[0].StorageID)
@@ -917,7 +918,7 @@ func (operations *mediaOperations) writeArchiveCatalog(ctx context.Context, spec
 		return nil, nil, err
 	}
 	var result organization.ArchiveCatalog
-	if allV2 {
+	if allPackageRows {
 		result, err = publisher.PublishPackageRowsMerged(packageRows, temporaryOutputPath(ctx, target.RelativePath), target.RelativePath)
 	} else {
 		result, err = publisher.PublishMerged(archivecatalog.Request{

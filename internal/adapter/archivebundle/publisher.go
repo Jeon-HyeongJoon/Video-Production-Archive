@@ -86,6 +86,8 @@ type Package struct {
 	ReadmePath         string                       `json:"readme_path"`
 }
 
+const CompactPackageDocumentName = ".archive-package.json"
+
 type InitialRequest struct {
 	LayoutVersion    archive.PackageLayoutVersion
 	PackageID        string
@@ -252,6 +254,12 @@ func (publisher *Publisher) Commit(packageID string, evidence archive.CommitEvid
 		return Package{}, ErrPackageState
 	}
 	current.State = archive.PackageCommitted
+	if current.LayoutVersion == archive.PackageLayoutCompactResultFolder {
+		if err := publisher.commitCompact(current); err != nil {
+			return Package{}, err
+		}
+		return publisher.loadPackage(current), nil
+	}
 	if err := publisher.writeCurrent(current); err != nil {
 		return Package{}, err
 	}
@@ -275,6 +283,25 @@ func (publisher *Publisher) Current(packageID string) (Package, error) {
 		return Package{}, err
 	}
 	return publisher.loadPackage(current), nil
+}
+
+// ReviseStored preserves read/write compatibility for packages that were
+// created before the compact layout became the default.
+func (publisher *Publisher) ReviseStored(request RevisionRequest) (Package, error) {
+	current, err := publisher.readCurrent(strings.TrimSpace(request.PackageID))
+	if err != nil {
+		return Package{}, err
+	}
+	switch current.LayoutVersion {
+	case archive.PackageLayoutCompactResultFolder:
+		return publisher.ReviseCompact(request)
+	case archive.PackageLayoutFlatResultFolder:
+		return publisher.ReviseV2(request)
+	case archive.PackageLayoutDateRevisionTree:
+		return publisher.Revise(request)
+	default:
+		return Package{}, ErrInvalidRequest
+	}
 }
 
 func (publisher *Publisher) publish(metadata Metadata, video FileSource, additions map[string]FileSource, packageDirectory string) (Package, error) {
@@ -419,6 +446,16 @@ func (publisher *Publisher) readCurrent(packageID string) (currentDocument, erro
 	var err error
 	selected := ""
 	for _, candidate := range directories {
+		payload, err = publisher.archive.ReadFile(path.Join(candidate, CompactPackageDocumentName))
+		if err == nil {
+			var document CompactDocument
+			if json.Unmarshal(payload, &document) == nil && document.PackageID == packageID && document.valid() {
+				return currentDocument{
+					PackageID: document.PackageID, LayoutVersion: document.LayoutVersion, Revision: document.Revision,
+					State: document.State, ManifestDigest: document.ManifestDigest, packageDirectory: candidate,
+				}, nil
+			}
+		}
 		payload, err = publisher.archive.ReadFile(path.Join(candidate, "current.json"))
 		if err == nil {
 			var observed currentDocument
@@ -492,7 +529,13 @@ func (publisher *Publisher) loadPackage(current currentDocument) Package {
 	eventsPath := path.Join(directory, "events.jsonl")
 	manifestPath := path.Join(directory, "manifest-sha256.txt")
 	readmePath := path.Join(directory, "README.md")
-	if current.LayoutVersion != archive.PackageLayoutFlatResultFolder {
+	if current.LayoutVersion == archive.PackageLayoutCompactResultFolder {
+		metadataPath = path.Join(directory, CompactPackageDocumentName)
+		filesPath = ""
+		eventsPath = ""
+		manifestPath = ""
+		readmePath = ""
+	} else if current.LayoutVersion != archive.PackageLayoutFlatResultFolder {
 		directory = path.Join(directory, "revisions", fmt.Sprintf("%06d", current.Revision))
 		metadataPath = path.Join(directory, "metadata.json")
 		filesPath = path.Join(directory, "files.csv")

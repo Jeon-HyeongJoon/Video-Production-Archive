@@ -301,10 +301,11 @@ func (reconciler *Reconciler) scanPackages() ([]PackageRow, []VerificationEntry,
 		}
 		metadataExists, metadataErr := reconciler.root.Exists(path.Join(name, "metadata.json"))
 		currentExists, currentErr := reconciler.root.Exists(path.Join(name, "current.json"))
-		if metadataErr != nil || currentErr != nil {
-			return nil, nil, errors.Join(metadataErr, currentErr)
+		compactExists, compactErr := reconciler.root.Exists(path.Join(name, archivebundle.CompactPackageDocumentName))
+		if metadataErr != nil || currentErr != nil || compactErr != nil {
+			return nil, nil, errors.Join(metadataErr, currentErr, compactErr)
 		}
-		if !metadataExists && !currentExists {
+		if !metadataExists && !currentExists && !compactExists {
 			continue
 		}
 		row, rowErr := reconciler.inspectPackage(name)
@@ -319,6 +320,13 @@ func (reconciler *Reconciler) scanPackages() ([]PackageRow, []VerificationEntry,
 }
 
 func (reconciler *Reconciler) inspectPackage(directory string) (PackageRow, error) {
+	compact, err := reconciler.root.Exists(path.Join(directory, archivebundle.CompactPackageDocumentName))
+	if err != nil {
+		return PackageRow{}, err
+	}
+	if compact {
+		return reconciler.inspectCompactPackage(directory)
+	}
 	entries, err := reconciler.root.ReadDir(directory)
 	if err != nil {
 		return PackageRow{}, err
@@ -380,6 +388,31 @@ func (reconciler *Reconciler) inspectPackage(directory string) (PackageRow, erro
 	return PackageRowFrom(metadata, packageView)
 }
 
+func (reconciler *Reconciler) inspectCompactPackage(directory string) (PackageRow, error) {
+	payload, err := reconciler.root.ReadFile(path.Join(directory, archivebundle.CompactPackageDocumentName))
+	if err != nil {
+		return PackageRow{}, err
+	}
+	var metadata archivebundle.Metadata
+	if json.Unmarshal(payload, &metadata) != nil || metadata.LayoutVersion != archive.PackageLayoutCompactResultFolder ||
+		metadata.PackageID == "" || metadata.Revision == 0 || len(metadata.Sources) == 0 {
+		return PackageRow{}, ErrCatalogReconciliation
+	}
+	packageView, err := archivebundle.InspectCompactPackage(reconciler.root, directory)
+	if err != nil {
+		return PackageRow{}, errors.Join(ErrCatalogReconciliation, err)
+	}
+	videoInfo, err := reconciler.root.ReadFile(path.Join(directory, "video-info.csv"))
+	if err != nil {
+		return PackageRow{}, err
+	}
+	sourceCount, err := archivebundle.ParseVideoInfoCount(videoInfo)
+	if err != nil || sourceCount != len(metadata.Sources) {
+		return PackageRow{}, ErrCatalogReconciliation
+	}
+	return PackageRowFrom(metadata, packageView)
+}
+
 func (reconciler *Reconciler) verifyManifest(directory string, payload []byte) error {
 	lines := strings.Split(strings.TrimSpace(string(payload)), "\n")
 	if len(lines) == 0 {
@@ -420,7 +453,8 @@ func normalizePackageRow(row *PackageRow) bool {
 	if !row.CompletedAt.IsZero() {
 		row.CompletedAt = row.CompletedAt.UTC()
 	}
-	if row.LayoutVersion != archive.PackageLayoutFlatResultFolder || row.PackageID == "" || row.Revision == 0 ||
+	if (row.LayoutVersion != archive.PackageLayoutFlatResultFolder && row.LayoutVersion != archive.PackageLayoutCompactResultFolder) ||
+		row.PackageID == "" || row.Revision == 0 ||
 		!checksumPattern.MatchString(row.ManifestDigest) || !row.ArchiveState.Valid() || !row.Disposition.Valid() ||
 		row.Disposition == vocabulary.OrganizationHold || row.SourceCount <= 0 || row.ResultTitle == "" ||
 		row.ResultFolder == "" || row.ResultFolder != path.Base(row.ResultFolder) || strings.HasPrefix(row.ResultFolder, ".") ||

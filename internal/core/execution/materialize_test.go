@@ -48,7 +48,7 @@ func TestMaterializeArchiveTranscriptionUsesVerifiedOutputsAndArchivePackageRevi
 	if revision.Operation != OperationReviseArchivePackage || len(revision.Inputs) != 3 ||
 		len(revision.Outputs) != 1 || revision.Outputs[0].Kind != OutputArchiveRevision ||
 		revision.Outputs[0].StorageID != "ARCHIVE-1" ||
-		revision.Outputs[0].RelativePath != "2026-10-31_master__0001/metadata.json" {
+		revision.Outputs[0].RelativePath != "2026-10-31_master__0001/.archive-package.json" {
 		t.Fatalf("archive package revision spec is invalid: %+v", revision)
 	}
 	completed = append(completed, completeSpec(t, revision, "1"))

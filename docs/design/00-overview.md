@@ -111,7 +111,7 @@ Archivist Host의 세션·재시작·도구 경계와 Orca 최소 활용 결정�
 
 ## 6. 현재 수직 기준선과 다음 순서
 
-현재 실제 제품 경로는 `논리 Volume 관찰 → 사람 선택 → ArchiveRun → Worker 검사·분류 → 렌더·QC → layout v2 보관·ArchiveCatalog → 별도 STT → 패키지 리비전`까지 조립되어 있다. 단일 미디어 기능은 `archive-media` CLI로 Control 없이 실행하며 관리 Runner와 같은 MediaOperation을 사용한다. 사람·Archivist 협업은 Session·Turn·Tool Call·ActionCard·SYSTEM 재호출을 Control 원장에 보존한다.
+현재 실제 제품 경로는 `논리 Volume 관찰 → 사람 선택 → ArchiveRun → Worker 검사·분류 → 렌더·QC → layout v3 compact 보관·ArchiveCatalog → 별도 STT → 패키지 리비전`까지 조립되어 있다. 단일 미디어 기능은 `archive-media` CLI로 Control 없이 실행하며 관리 Runner와 같은 MediaOperation을 사용한다. 사람·Archivist 협업은 Session·Turn·Tool Call·ActionCard·SYSTEM 재호출을 Control 원장에 보존한다.
 
 현재 기능·경계·영속 객체·후속 작업은 [15. 현재 구현 기준선](15-current-baseline.md)에서 한 번에 확인한다. 다음 구현 순서는 다음과 같다.
 
