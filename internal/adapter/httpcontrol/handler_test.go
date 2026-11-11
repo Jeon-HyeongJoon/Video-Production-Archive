@@ -404,6 +404,34 @@ func TestWorkspaceLoadsJobVideoInformationOnlyWhenDisclosureOpens(t *testing.T) 
 	})
 }
 
+// Requirement: DSH-037
+func TestWorkspaceUsesOneUnresolvedFailureProjectionForListsAndAlerts(t *testing.T) {
+	testControlHTTPScene(t, sceneComplete, func(t *testing.T, handler http.Handler) {
+		assertArchiveWorkspaceScript(t, handler, "check_archive_workspace_resolved_failures.py")
+	})
+}
+
+// Requirement: DSH-038
+func TestDriveSurfacesSeparateLatestRunScopeFromWholeInventory(t *testing.T) {
+	testControlHTTPScene(t, sceneComplete, func(t *testing.T, handler http.Handler) {
+		assertArchiveWorkspaceScript(t, handler, "check_archive_workspace_drive_scope.py")
+	})
+}
+
+// Requirement: DSH-039
+func TestArchiveRunDetailShowsParentFailureEvidenceWithoutOpeningChild(t *testing.T) {
+	testControlHTTPScene(t, sceneComplete, func(t *testing.T, handler http.Handler) {
+		assertArchiveWorkspaceScript(t, handler, "check_archive_workspace_run_failure.py")
+	})
+}
+
+// Requirement: DSH-040
+func TestSelectionRequestCardCanBeClosedFromAgentPane(t *testing.T) {
+	testControlHTTPScene(t, sceneComplete, func(t *testing.T, handler http.Handler) {
+		assertArchiveWorkspaceScript(t, handler, "check_archive_workspace_selection_card_close.py")
+	})
+}
+
 func testControlHTTPWorkspace(t *testing.T, check func(*testing.T, http.Handler)) {
 	testControlHTTPScene(t, sceneStageOne, check)
 }

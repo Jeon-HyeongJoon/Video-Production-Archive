@@ -88,9 +88,9 @@ function focusResult(resultID) {
 
 const Mentions = ({ ids }) => (ids?.length ? html`<div class="mentions message-refs">${ids.map((id) => html`<button type="button" class="mention ref-chip" key=${id} onClick=${() => focusResult(id)}>${id}</button>`)}</div>` : null);
 
-async function decideCard(cardID, action) {
+async function decideCard(cardID, action, reason = "담당자 거절") {
   try {
-    await mutation(`/api/v1/action-cards/${encodeURIComponent(cardID)}/${action}`, action === "reject" ? { reason: "담당자 거절" } : {});
+    await mutation(`/api/v1/action-cards/${encodeURIComponent(cardID)}/${action}`, action === "reject" ? { reason } : {});
     await refresh();
   } catch (error) {
     ui.status.value = error.message;
@@ -121,7 +121,8 @@ function AskCard({ card }) {
       <ul class="ask-effects"><li class="card-scope">${cardScope(card)}</li></ul>
       <div class="ask-actions">
         ${selection
-          ? html`<button type="button" class="btn btn-sm primary" onClick=${() => { openNewWork(); go("#/jobs"); }}>드라이브 선택</button>`
+          ? [html`<button type="button" key="close" class="btn btn-sm" data-action="card-reject" disabled=${stale.value} onClick=${() => decideCard(card.action_card_id, "reject", "선택 요청 닫음")}>닫기</button>`,
+            html`<button type="button" key="select" class="btn btn-sm primary" onClick=${() => { openNewWork(); go("#/jobs"); }}>드라이브 선택</button>`]
           : [html`<button type="button" key="reject" class="btn btn-sm" data-action="card-reject" disabled=${stale.value} onClick=${() => decideCard(card.action_card_id, "reject")}>거절</button>`,
             html`<button type="button" key="run" class="btn btn-sm primary" data-action="card-execute" disabled=${stale.value} onClick=${() => decideCard(card.action_card_id, "execute")}>${card.approval_required ? "승인" : "실행"}</button>`]}
       </div>

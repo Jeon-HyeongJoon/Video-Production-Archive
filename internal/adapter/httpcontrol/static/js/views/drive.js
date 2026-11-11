@@ -165,17 +165,19 @@ function StageSummary({ drive: current }) {
   </div>`;
 }
 
-// progressHover lists what the percentage stands for: archived videos and
-// folders, the run's fixed scope and its CSV record.
+// progressHover names the latest run scope and the whole discovered inventory
+// separately. A completed one-folder run is never described as a completed
+// 221-folder source volume.
 function progressHover(current) {
   const progress = driveProgress(current);
   const folders = current.folders || [];
   const transcribed = folders.filter((folder) => folder.transcription_job_id && folder.step_state === "COMPLETED").length;
   const bytes = folders.reduce((sum, folder) => sum + (folder.estimated_output_bytes || 0), 0);
   return [
-    `보관 ${formatCount(progress.stored)} / ${formatCount(progress.total)} 영상`,
-    `보관 폴더 ${progress.storedFolders} / ${progress.folders}${transcribed ? ` · STT ${transcribed} 폴더` : ""}`,
-    `범위 r${current.input_revision} 고정 · ${folders.length} 폴더 · ${formatCount(progress.total)} 영상 · ${formatBytes(bytes)}`,
+    `최근 작업 보관 ${formatCount(progress.stored)} / ${formatCount(progress.total)} 영상`,
+    `최근 작업 폴더 ${progress.storedFolders} / ${progress.folders}${transcribed ? ` · STT ${transcribed} 폴더` : ""}`,
+    `전체 발견 ${formatCount(progress.discoveredFolders)} 폴더`,
+    `작업 범위 r${current.input_revision} 고정 · ${folders.length} 폴더 · ${formatCount(progress.total)} 영상 · ${formatBytes(bytes)}`,
     current.archive_run_state === "COMPLETED" ? `CSV ${formatCount(current.catalog_row_count)}행 · ${shortTime(current.catalog_updated_at)} 기록` : "",
   ].filter(Boolean).join("\n");
 }
@@ -202,10 +204,10 @@ export function DriveOverview({ drive: current, id = "", progressID = "", facts 
       ${offline ? html`<span class="fact-inline" data-fact="worker" title=${`마지막 응답 ${clockTime(worker?.last_heartbeat, true)}`}><span class="ok"><${StatusIcon} kind="fault" />${current.worker_id} ${label("worker", worker?.state)}</span></span>` : null}
       ${current.archive_storage_id ? null : html`<span class="fact-inline muted" data-fact="archive">아카이브 미정</span>`}
       ${current.archive_run_id
-        ? html`<span class="progress-fact" id=${progressID || null} data-fact="progress" title=${progressHover(current)}><span class="muted">보관 진행</span><b class="progress-pct num">${progress.pct}%</b></span>`
+        ? html`<span class="progress-fact" id=${progressID || null} data-fact="progress" title=${progressHover(current)}><span class="muted">${phase === "done" ? "최근 작업" : "현재 작업"}</span><b class="progress-pct num">${formatCount(progress.storedFolders)} / ${formatCount(progress.folders)} 폴더</b><small>발견 ${formatCount(progress.discoveredFolders)} 폴더</small></span>`
         : html`<span class="progress-fact" data-fact="found"><span class="muted">발견</span><b class="num">${folderDiscoveryText(current)}</b></span>`}
     </div>
-    ${current.archive_run_id ? html`<div class="overview-meter"><${Meter} value=${progress.pct / 100} done=${phase === "done"} label="보관 진행" /></div>` : null}
+    ${current.archive_run_id && phase !== "done" ? html`<div class="overview-meter"><${Meter} value=${progress.pct / 100} label="현재 작업 보관 진행" /></div>` : null}
     ${facts}
     <${StageSummary} drive=${current} />
   </section>`;

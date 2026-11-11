@@ -36,10 +36,30 @@ function WorkOverview({ summary, trace }) {
   return html`<section class="overview" id="run-summary" aria-label="개요" title=${trace}>
     <div class="overview-head">
       <span class="state" data-fact="state" data-phase=${phase}><${StatusIcon} kind=${workKind(summary)} /><${Swap} text=${workText(summary)} /></span>
-      <span class="progress-fact"><span class="muted">진행</span><b class="num">${Math.round((summary.progress || 0) * 100)}%</b></span>
+      ${summary.replacement_work_id
+        ? html`<span class="progress-fact"><span class="muted">후속 작업</span><b class="num">연결됨</b></span>`
+        : html`<span class="progress-fact"><span class="muted">진행</span><b class="num">${Math.round((summary.progress || 0) * 100)}%</b></span>`}
     </div>
-    <div class="overview-meter"><${Meter} value=${summary.progress || 0} done=${summary.state === "COMPLETED"} label="진행" /></div>
+    ${summary.replacement_work_id ? null : html`<div class="overview-meter"><${Meter} value=${summary.progress || 0} done=${summary.state === "COMPLETED"} label="진행" /></div>`}
     <${RunFacts} summary=${summary} />
+  </section>`;
+}
+
+// FailureHistory keeps the reason at the ArchiveRun level. The child Job link
+// remains available for deeper evidence, but the person does not need to open
+// it merely to learn why the parent work ended.
+function FailureHistory({ failures, summary }) {
+  if (!failures?.length) return null;
+  return html`<section class="section" id="run-failures" aria-label="실패 기록">
+    <div class="section-head"><h2 class="section-title">실패 기록${" "}<span class="num">${formatCount(failures.length)}</span></h2>
+      ${summary.replacement_work_id ? html`<a class="text-btn" href=${`#/runs/${encodeURIComponent(summary.replacement_work_id)}`}>새 작업으로 넘김<${Glyph} d=${GLYPH.next} /></a>` : null}
+    </div>
+    <div class="card-list">
+      ${failures.map((failure) => html`<a class="problem-panel failure-record" key=${failure.job_id} data-signal="fault" href=${`#/jobs/${encodeURIComponent(failure.job_id)}`}>
+        <span class="problem-head"><${StatusIcon} kind="fault" /><span class="problem-line"><b>${failure.folder || "원본 검사"}</b><span>${label("stage", failure.step_id)} · ${failure.error_class || "처리 실패"}</span></span><span class="token">실패</span><${Glyph} d=${GLYPH.next} /></span>
+        ${failure.log_reference ? html`<small class="muted failure-reference">${failure.log_reference}</small>` : null}
+      </a>`)}
+    </div>
   </section>`;
 }
 
@@ -189,6 +209,7 @@ export function RunScreen({ id }) {
       ? html`<${DriveOverview} key="overview" drive=${current} id="run-summary" title=${trace} facts=${html`<${RunFacts} summary=${summary} />`} />`
       : html`<${WorkOverview} key="overview" summary=${summary} trace=${trace} />`,
     html`<${StatusLine} key="status" />`,
+    html`<${FailureHistory} key="failures" failures=${detail?.failures || []} summary=${summary} />`,
     current ? html`<${Problems} key="problems" drive=${current} items=${driveProblems(current)} id="run-attention" />` : null,
     holdLink ? html`<section key="holds" class="section" id="run-attention" aria-label="확인 필요">
       <h2 class="section-title">확인 필요${" "}<span class="num">1</span></h2>

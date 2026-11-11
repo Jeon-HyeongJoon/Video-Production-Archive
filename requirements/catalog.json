@@ -3564,6 +3564,66 @@
       "test_name": "TestMultiFileAsIsPackagesPreserveEachReadyInputProfile",
       "status": "implemented",
       "level": "integration"
+    },
+    {
+      "id": "DSH-036",
+      "design": "archive-run-failure-replacement-projection",
+      "statement": "작업 관리 읽기 모델은 실패한 ArchiveRun의 실패 결과를 보존하면서 같은 원본 Volume에서 그 실행보다 뒤에 생성되고 실패 폴더 전체를 고정 범위로 받은 가장 이른 ArchiveRun을 후속 작업으로 연결해 더 이상 사람 조치가 남지 않았음을 구분해야 한다.",
+      "given": "같은 원본 Volume과 폴더에 대해 실패한 ArchiveRun, 그 뒤 같은 폴더를 고정한 첫 후속 ArchiveRun, 더 늦은 ArchiveRun과 각 하위 Job 결과가 영속되어 있다.",
+      "when": "Control이 관리 작업 목록과 실패 ArchiveRun 상세를 재구성한다.",
+      "then": "이전 ArchiveRun의 결과 상태와 구조화된 실패 증적은 FAILED로 보존되지만 replacement_work_id는 가장 이른 후속 ArchiveRun을 가리키고 더 늦은 실행으로 바뀌지 않는다.",
+      "test_file": "internal/application/archivework/service_test.go",
+      "test_name": "TestArchiveWorkMarksFailedRunHandledByEarliestReplacementScope",
+      "status": "implemented",
+      "level": "unit"
+    },
+    {
+      "id": "DSH-037",
+      "design": "archive-workspace-unresolved-work-projection",
+      "statement": "아카이브 작업 공간은 현재 드라이브 실행 범위 밖의 실패 ArchiveRun도 후속 작업이 연결되지 않은 동안 작업 관리 확인 필요·왼쪽 워크스페이스·전역 알림에 같은 미해결 관리 작업으로 표시하고 후속 작업이 연결되면 세 곳에서 제거해 완료 이력에 새 작업으로 넘김으로 남겨야 한다.",
+      "given": "현재 드라이브 실행보다 이전인 미해결 실패 ArchiveRun과 replacement_work_id가 있는 처리된 실패 ArchiveRun이 함께 있다.",
+      "when": "담당자가 작업 관리·왼쪽 워크스페이스·전역 알림과 완료 목록을 확인한다.",
+      "then": "미해결 실패는 세 조작 표면에 한 관리 작업으로 보이고 처리된 실패는 세 표면에 없으며 완료 목록에 새 작업으로 넘김 상태와 영속 상세 이동을 유지한다.",
+      "test_file": "internal/adapter/httpcontrol/handler_test.go",
+      "test_name": "TestWorkspaceUsesOneUnresolvedFailureProjectionForListsAndAlerts",
+      "status": "implemented",
+      "level": "integration"
+    },
+    {
+      "id": "DSH-038",
+      "design": "drive-latest-run-scope-safety-projection",
+      "statement": "드라이브 화면과 연결 관리의 단계·진행 표시는 최근 ArchiveRun의 고정 범위와 전체 발견 inventory를 서로 다른 수치로 명시하고 최근 범위의 100%를 원본 드라이브 전체 완료로 표현하지 않아야 한다.",
+      "given": "발견 폴더 221개인 원본 드라이브에서 폴더 1개만 고정한 최근 ArchiveRun이 그 폴더의 보관을 완료했다.",
+      "when": "담당자가 연결 관리의 드라이브 행과 드라이브 상세 개요를 확인한다.",
+      "then": "두 화면은 최근 작업 완료와 보관 1/1 폴더 및 발견 221 폴더를 함께 표시하고 드라이브 보관 진행 100%나 전체 완료를 표시하지 않는다.",
+      "test_file": "internal/adapter/httpcontrol/handler_test.go",
+      "test_name": "TestDriveSurfacesSeparateLatestRunScopeFromWholeInventory",
+      "status": "implemented",
+      "level": "integration"
+    },
+    {
+      "id": "DSH-039",
+      "design": "archive-run-parent-failure-evidence",
+      "statement": "실패 ArchiveRun의 주소 가능한 작업 화면은 하위 Job을 열기 전에도 실패한 폴더·단계·구조화된 오류 종류·안전한 로그 참조를 상위 실패 기록으로 보여 주고 해당 Job 상세로 이동시켜야 한다.",
+      "given": "하위 Folder Job의 QC 단계가 구조화된 error_class와 log_reference를 남기고 실패한 과거 ArchiveRun이 있다.",
+      "when": "담당자가 그 ArchiveRun 작업 화면을 직접 연다.",
+      "then": "개요 바로 아래 실패 기록에 폴더·QC 단계·error_class·log_reference가 보이고 행은 실패 Job 상세를 가리키며 원인을 보기 위해 하위 작업 disclosure를 먼저 펼칠 필요가 없다.",
+      "test_file": "internal/adapter/httpcontrol/handler_test.go",
+      "test_name": "TestArchiveRunDetailShowsParentFailureEvidenceWithoutOpeningChild",
+      "status": "implemented",
+      "level": "integration"
+    },
+    {
+      "id": "DSH-040",
+      "design": "archivist-selection-request-card-close",
+      "statement": "Agent 대화 칸의 선택 요청 ActionCard는 작업 관리로 이동하는 드라이브 선택과 별도로 사람이 닫기를 선택할 수 있고 닫으면 거절 기록으로 종결되어 결정 대기 카드와 전역 알림에서 제거되어야 한다.",
+      "given": "Archivist가 원본·아카이브·폴더 선택이 없어 archive_intake.selection.required PENDING ActionCard를 만들었다.",
+      "when": "담당자가 Agent 대화 칸에서 그 선택 요청의 닫기를 누른다.",
+      "then": "선택 요청 닫음 사유의 reject 명령이 제출되고 카드는 REJECTED 이력으로 접히며 같은 카드의 결정 대기 표시와 전역 알림이 사라지고 ArchiveRun은 생성되지 않는다.",
+      "test_file": "internal/adapter/httpcontrol/handler_test.go",
+      "test_name": "TestSelectionRequestCardCanBeClosedFromAgentPane",
+      "status": "implemented",
+      "level": "integration"
     }
   ]
 }

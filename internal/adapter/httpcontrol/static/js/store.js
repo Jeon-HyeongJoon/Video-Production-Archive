@@ -221,7 +221,7 @@ export function startPolling() {
 // ─── Drives ─────────────────────────────────────────────────────────────────
 
 const RUN_PHASE = { STAGE_ONE_RUNNING: "stage1", TRANSCRIPTION_READY: "stt", STAGE_TWO_RUNNING: "stage2", COMPLETED: "done" };
-export const PHASE_LABEL = { intake: "실행 전", stage1: "1단계 정리 중", stt: "STT 시작 가능", stage2: "2단계 전사 중", done: "완료" };
+export const PHASE_LABEL = { intake: "실행 전", stage1: "1단계 정리 중", stt: "STT 시작 가능", stage2: "2단계 전사 중", done: "최근 작업 완료" };
 // The status icon of each phase: running phases turn, the STT gate waits on a
 // person, a finished run is done.
 export const PHASE_ICON = { intake: "idle", stage1: "work", stt: "decide", stage2: "work", done: "done" };
@@ -245,13 +245,19 @@ export function driveConnection(current) {
   return { state, text: label("volumeConnection", state), signal: stateSignal(state) };
 }
 
-// driveProgress counts videos in folders whose package is stored or committed.
+// driveProgress is explicitly the current/latest ArchiveRun scope. The whole
+// discovered inventory is a separate denominator and must never inherit a
+// run's 100% as if the whole source volume had been archived.
 export function driveProgress(current) {
   const folders = current.folders || [];
   const total = folders.reduce((sum, folder) => sum + (folder.video_count || 0), 0);
   const storedFolders = folders.filter((folder) => folder.archive_state);
   const stored = storedFolders.reduce((sum, folder) => sum + (folder.video_count || 0), 0);
-  return { total, stored, storedFolders: storedFolders.length, folders: folders.length, pct: total ? Math.round((stored / total) * 100) : 0 };
+  return {
+    total, stored, storedFolders: storedFolders.length, folders: folders.length,
+    discoveredFolders: current.discovered_folder_count || current.inventoryFolders?.length || 0,
+    pct: total ? Math.round((stored / total) * 100) : 0,
+  };
 }
 
 export function isRunning(current) {
@@ -376,6 +382,13 @@ export const problemItems = computed(() => {
   for (const { card, session } of cards) {
     items.push({ key: `card:${card.action_card_id}`, kind: "card", signal: "decide", title: "Agent 결정 대기", cardID: card.action_card_id, sessionID: session.session_id, label: label("card", card.command_type) });
   }
+  // A past ArchiveRun is no longer present in its drive's current-scope
+  // projection. Keep an unresolved failed work visible in the global bell;
+  // a run with a persisted replacement link has already been handed over.
+  for (const work of allWork.value) {
+    if (work.kind !== "ARCHIVE_RUN" || workLane(work) !== "fault" || workDrive(work)) continue;
+    items.push({ key: `work:${work.work_id}`, kind: "work", signal: "fault", title: "아카이브 작업 실패", workID: work.work_id, driveID: work.source_volume_id || "" });
+  }
   return items.sort((left, right) => SIGNAL_RANK[right.signal] - SIGNAL_RANK[left.signal]);
 });
 
@@ -385,12 +398,14 @@ export function problemSubject(item) {
     const name = driveNameOf(item.driveID);
     return item.folder ? `${name} / ${item.folder}` : name;
   }
+  if (item.kind === "work") return workTitle(workOf(item.workID));
   if (item.kind === "job") return jobOf(item.jobID)?.target_title || item.jobID;
   return item.workerID || item.hostID || item.label || "";
 }
 
 // problemPath is the route where a person resolves the problem.
 export function problemPath(item) {
+  if (item.kind === "work") return `#/runs/${encodeURIComponent(item.workID)}`;
   if (item.driveID) return `#/drives/${encodeURIComponent(item.driveID)}${item.folder ? `?folder=${encodeURIComponent(item.folder)}` : ""}`;
   if (item.kind === "worker") return `#/connections?worker=${encodeURIComponent(item.workerID)}`;
   if (item.kind === "job") return `#/jobs/${encodeURIComponent(item.jobID)}`;
@@ -435,6 +450,7 @@ export function jobLane(job) {
 }
 
 export function workLane(work) {
+  if (work?.replacement_work_id) return "done";
   return { FAILED: "fault", ATTENTION: "decide", ACTIVE: "work", QUEUED: "queue", COMPLETED: "done" }[work?.state] || "queue";
 }
 
@@ -466,11 +482,13 @@ const LANE_KIND = { fault: "fault", decide: "decide", work: "work", resource: "w
 
 // workText is a work's state in words: an archive work names its phase.
 export function workText(work) {
+  if (work.replacement_work_id) return "새 작업으로 넘김";
   if (work.kind === "JOB" || work.state === "QUEUED" || work.state === "FAILED") return WORK_TEXT[work.state] || work.state;
   return PHASE_LABEL[workPhase(work)] || WORK_TEXT[work.state];
 }
 
 export function workKind(work) {
+  if (work.replacement_work_id) return "done";
   if (work.kind === "ARCHIVE_RUN" && !["QUEUED", "FAILED"].includes(work.state)) return PHASE_ICON[workPhase(work)] || "idle";
   return LANE_KIND[workLane(work)] || "idle";
 }

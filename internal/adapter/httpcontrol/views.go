@@ -321,22 +321,23 @@ type jobDetailView struct {
 }
 
 type workSummaryView struct {
-	WorkID           string    `json:"work_id"`
-	Kind             string    `json:"kind"`
-	State            string    `json:"state"`
-	CreatedAt        time.Time `json:"created_at"`
-	LastEventAt      time.Time `json:"last_event_at"`
-	WorkerID         string    `json:"worker_id,omitempty"`
-	SourceVolumeID   string    `json:"source_volume_id,omitempty"`
-	SourceStorageID  string    `json:"source_storage_id,omitempty"`
-	ArchiveStorageID string    `json:"archive_storage_id,omitempty"`
-	FolderCount      int       `json:"folder_count"`
-	VideoCount       int       `json:"video_count"`
-	HoldCount        int       `json:"hold_count"`
-	ResultCount      int       `json:"result_count"`
-	ChildJobCount    int       `json:"child_job_count"`
-	Progress         float64   `json:"progress"`
-	Title            string    `json:"title,omitempty"`
+	WorkID            string    `json:"work_id"`
+	Kind              string    `json:"kind"`
+	State             string    `json:"state"`
+	CreatedAt         time.Time `json:"created_at"`
+	LastEventAt       time.Time `json:"last_event_at"`
+	WorkerID          string    `json:"worker_id,omitempty"`
+	SourceVolumeID    string    `json:"source_volume_id,omitempty"`
+	SourceStorageID   string    `json:"source_storage_id,omitempty"`
+	ArchiveStorageID  string    `json:"archive_storage_id,omitempty"`
+	FolderCount       int       `json:"folder_count"`
+	VideoCount        int       `json:"video_count"`
+	HoldCount         int       `json:"hold_count"`
+	ResultCount       int       `json:"result_count"`
+	ChildJobCount     int       `json:"child_job_count"`
+	Progress          float64   `json:"progress"`
+	Title             string    `json:"title,omitempty"`
+	ReplacementWorkID string    `json:"replacement_work_id,omitempty"`
 }
 
 type workChildJobView struct {
@@ -350,6 +351,15 @@ type workDetailView struct {
 	FolderIDs     []string                 `json:"folder_ids"`
 	Children      []workChildJobView       `json:"children"`
 	CompletedWork []driveCompletedWorkView `json:"completed_work"`
+	Failures      []workFailureView        `json:"failures"`
+}
+
+type workFailureView struct {
+	JobID        string `json:"job_id"`
+	Folder       string `json:"folder,omitempty"`
+	StepID       string `json:"step_id"`
+	ErrorClass   string `json:"error_class"`
+	LogReference string `json:"log_reference,omitempty"`
 }
 
 type jobVideoInfoView struct {
@@ -400,6 +410,7 @@ func projectWorkSummary(value archivework.Summary) workSummaryView {
 		SourceStorageID: value.SourceStorageID, ArchiveStorageID: value.ArchiveStorageID,
 		FolderCount: value.FolderCount, VideoCount: value.VideoCount, HoldCount: value.HoldCount,
 		ResultCount: value.ResultCount, ChildJobCount: value.ChildJobCount, Progress: value.Progress, Title: value.Title,
+		ReplacementWorkID: value.ReplacementWorkID,
 	}
 }
 
@@ -437,6 +448,12 @@ func projectWorkDetail(value archivework.View) workDetailView {
 			ArchiveDisplayName: completed.ArchiveDisplayName, ArchiveVideoFileName: completed.ArchiveVideoFileName,
 			ArchiveRelativePath: completed.ArchiveRelativePath,
 			ArchiveState:        string(completed.ArchiveState), CompletedAt: completed.CompletedAt,
+		})
+	}
+	for _, failure := range value.Failures {
+		result.Failures = append(result.Failures, workFailureView{
+			JobID: failure.JobID, Folder: failure.Folder, StepID: failure.StepID,
+			ErrorClass: failure.ErrorClass, LogReference: failure.LogReference,
 		})
 	}
 	return result

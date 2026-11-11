@@ -14,21 +14,21 @@ SCENES: dict[str, dict[str, Any]] = {
     "stage-one": {
         "route": DRIVE, "problems": ("6", "fault"), "phase": "stage1", "stages": ["now", "todo", "part"],
         "stage_problems": [("fault", "렌더 1"), ("decide", "분류 1"), ("decide", "보관 1")],
-        "progress": ("24%", "보관 191 / 795 영상", "보관 폴더 2 / 8"), "stt": None,
+        "progress": ("2 / 8 폴더", "최근 작업 보관 191 / 795 영상", "최근 작업 폴더 2 / 8"), "stt": None,
         "words": {"INPUT": "분류 확인 필요", "DEVICE": "저장소 연결 대기"}, "panels": ["broken", "hold", "source-b"], "stored": 1, "committed": 1,
         "detail": ("broken", ["분류", "렌더"]),
     },
     "stt-ready": {
         "route": DRIVE, "problems": ("6", "fault"), "phase": "stt", "stages": ["done", "ask", "part"],
         "stage_problems": [("fault", "렌더 1"), ("decide", "분류 1")],
-        "progress": ("99%", "보관 790 / 795 영상", "보관 폴더 6 / 8"), "stt": "STT 시작 · 4 폴더",
+        "progress": ("6 / 8 폴더", "최근 작업 보관 790 / 795 영상", "최근 작업 폴더 6 / 8"), "stt": "STT 시작 · 4 폴더",
         "words": {"INPUT": "분류 확인 필요"}, "panels": ["broken", "hold"], "stored": 5, "committed": 1,
         "detail": ("broken", ["분류", "렌더"]),
     },
     "complete": {
         "route": DRIVE, "problems": ("6", "fault"), "phase": "done", "stages": ["done", "done", "done"],
         "stage_problems": [("fault", "렌더 1"), ("decide", "분류 1")],
-        "progress": ("99%", "보관 790 / 795 영상", "보관 폴더 6 / 8 · STT 4 폴더"), "stt": None, "catalog": "CSV 795행 · 10. 31. 00:00 기록",
+        "progress": ("6 / 8 폴더", "최근 작업 보관 790 / 795 영상", "최근 작업 폴더 6 / 8 · STT 4 폴더"), "stt": None, "catalog": "CSV 795행 · 10. 31. 00:00 기록",
         "words": {"INPUT": "분류 확인 필요"}, "panels": ["broken", "hold", "ready"], "stored": 5, "committed": 1,
         "detail": ("ready", ["분류", "QC", "보관", "오디오 추출", "STT", "자막", "전사 텍스트", "패키지 추가"]),
     },
@@ -133,7 +133,8 @@ def check_drive(page, scene) -> None:
     hover = page.locator("#drive-progress")
     expect(hover).to_have_attribute("title", re.compile(re.escape(counts)))
     expect(hover).to_have_attribute("title", re.compile(re.escape(folders)))
-    expect(hover).to_have_attribute("title", re.compile(re.escape("범위 r7 고정 · 8 폴더 · 795 영상 · 211 GB")))
+    expect(hover).to_have_attribute("title", re.compile(re.escape("전체 발견 8 폴더")))
+    expect(hover).to_have_attribute("title", re.compile(re.escape("작업 범위 r7 고정 · 8 폴더 · 795 영상 · 211 GB")))
     # Only a button a person can press now sits beside the title.
     if scene["stt"]:
         expect(page.locator("#start-stt")).to_have_text(scene["stt"])

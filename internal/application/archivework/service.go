@@ -70,6 +70,10 @@ type Summary struct {
 	ChildJobCount    int
 	Progress         float64
 	Title            string
+	// ReplacementWorkID is the next ArchiveRun that took over every failed
+	// folder of this run. The failed outcome remains historical truth, while
+	// this reference says there is no longer an unresolved handoff action.
+	ReplacementWorkID string
 }
 
 type ChildJob struct {
@@ -78,11 +82,23 @@ type ChildJob struct {
 	Job    archiveworkspace.JobSummary
 }
 
+// Failure is the parent-level failure evidence for one child Job. It keeps
+// the structured class and safe log reference already stored on the Job; it
+// never copies raw process output into the work projection.
+type Failure struct {
+	JobID        string
+	Folder       string
+	StepID       string
+	ErrorClass   string
+	LogReference string
+}
+
 type View struct {
 	Summary       Summary
 	FolderIDs     []string
 	Children      []ChildJob
 	CompletedWork []archiveintakeworkspace.CompletedWorkView
+	Failures      []Failure
 }
 
 // VideoInfo is the persisted, observed source-video information for one Job.
@@ -410,6 +426,7 @@ func (service *Service) project(ctx context.Context) ([]View, error) {
 		result = append(result, View{
 			Summary:   summarizeRun(run, children, drive, current, completed),
 			FolderIDs: append([]string(nil), run.FolderIDs...), Children: children, CompletedWork: completed,
+			Failures: failuresFromChildren(children),
 		})
 	}
 	for runID, drive := range driveByRun {
@@ -423,7 +440,7 @@ func (service *Service) project(ctx context.Context) ([]View, error) {
 		folders := driveFolderIDs(drive)
 		result = append(result, View{
 			Summary: summarizeProjectedRun(runID, drive, children, completed), FolderIDs: folders,
-			Children: children, CompletedWork: completed,
+			Children: children, CompletedWork: completed, Failures: failuresFromChildren(children),
 		})
 	}
 	for _, summary := range jobSummaries {
@@ -433,8 +450,10 @@ func (service *Service) project(ctx context.Context) ([]View, error) {
 		result = append(result, View{
 			Summary:  summarizeStandalone(summary),
 			Children: []ChildJob{{Role: ChildFolder, Folder: summary.TargetTitle, Job: summary}},
+			Failures: failuresFromChildren([]ChildJob{{Role: ChildFolder, Folder: summary.TargetTitle, Job: summary}}),
 		})
 	}
+	markReplacementRuns(result)
 	sort.SliceStable(result, func(i, j int) bool {
 		left, right := stateRank(result[i].Summary.State), stateRank(result[j].Summary.State)
 		if left != right {
@@ -446,6 +465,85 @@ func (service *Service) project(ctx context.Context) ([]View, error) {
 		return result[i].Summary.WorkID < result[j].Summary.WorkID
 	})
 	return result, nil
+}
+
+// markReplacementRuns separates a run's immutable failed outcome from the
+// question "does a person still need to do anything?". A later ArchiveRun on
+// the same source volume takes over a failed run when its fixed scope contains
+// every failed folder. The earliest matching run is the durable handoff link;
+// if that replacement also fails it becomes its own unresolved work item.
+func markReplacementRuns(views []View) {
+	for index := range views {
+		failed := failedFolders(views[index])
+		if views[index].Summary.Kind != ArchiveRunWork || views[index].Summary.State != StateFailed || len(failed) == 0 {
+			continue
+		}
+		candidate := -1
+		for other := range views {
+			if other == index || views[other].Summary.Kind != ArchiveRunWork ||
+				views[other].Summary.SourceVolumeID == "" || views[other].Summary.SourceVolumeID != views[index].Summary.SourceVolumeID ||
+				!views[other].Summary.CreatedAt.After(views[index].Summary.CreatedAt) || !containsFolders(views[other].FolderIDs, failed) {
+				continue
+			}
+			if candidate < 0 || views[other].Summary.CreatedAt.Before(views[candidate].Summary.CreatedAt) {
+				candidate = other
+			}
+		}
+		if candidate >= 0 {
+			views[index].Summary.ReplacementWorkID = views[candidate].Summary.WorkID
+		}
+	}
+}
+
+func failedFolders(view View) []string {
+	set := make(map[string]bool)
+	for _, child := range view.Children {
+		if child.Job.StepState != workflow.Failed && child.Job.ErrorClass == "" {
+			continue
+		}
+		if strings.TrimSpace(child.Folder) != "" {
+			set[child.Folder] = true
+			continue
+		}
+		// Inspection failed before a folder Job existed. A replacement must own
+		// the whole fixed scope rather than merely sharing the same drive.
+		for _, folder := range view.FolderIDs {
+			set[folder] = true
+		}
+	}
+	result := make([]string, 0, len(set))
+	for folder := range set {
+		result = append(result, folder)
+	}
+	sort.Strings(result)
+	return result
+}
+
+func containsFolders(scope, required []string) bool {
+	available := make(map[string]bool, len(scope))
+	for _, folder := range scope {
+		available[folder] = true
+	}
+	for _, folder := range required {
+		if !available[folder] {
+			return false
+		}
+	}
+	return len(required) > 0
+}
+
+func failuresFromChildren(children []ChildJob) []Failure {
+	result := make([]Failure, 0)
+	for _, child := range children {
+		if child.Job.StepState != workflow.Failed && child.Job.ErrorClass == "" {
+			continue
+		}
+		result = append(result, Failure{
+			JobID: child.Job.JobID, Folder: child.Folder, StepID: child.Job.CurrentStepID,
+			ErrorClass: child.Job.ErrorClass, LogReference: child.Job.LogReference,
+		})
+	}
+	return result
 }
 
 func driveFolderIDs(drive archiveintakeworkspace.DriveView) []string {

@@ -65,6 +65,60 @@ func TestArchiveWorkGroupsFixedFolderJobsUnderOneArchiveRunAndKeepsStandaloneJob
 	}
 }
 
+// Requirement: DSH-036
+func TestArchiveWorkMarksFailedRunHandledByEarliestReplacementScope(t *testing.T) {
+	now := time.Date(2026, 11, 11, 9, 0, 0, 0, time.UTC)
+	failedRun := archiverun.State{
+		ID: "ARCHIVE-RUN-FAILED", Revision: 1, WorkerID: "worker-windows", SourceStorageID: "source-e",
+		SourceVolumeID: "volume-e", SourcePhysicalDeviceID: "disk-e", ArchiveStorageID: "archive-local",
+		StartIdempotencyKey: "failed-run", FolderDiscoveryRevision: 7, FolderIDs: []string{"event-a"},
+		SelectedBy:      command.Actor{Type: vocabulary.ActorHuman, ID: "operator-local"},
+		StageOwnerships: []archiverun.StageOwnership{{Kind: archiverun.OrganizationStage}, {Kind: archiverun.TranscriptionStage}}, CreatedAt: now,
+	}
+	replacementRun := failedRun
+	replacementRun.ID, replacementRun.StartIdempotencyKey, replacementRun.CreatedAt = "ARCHIVE-RUN-REPLACEMENT", "replacement-run", now.Add(time.Hour)
+	laterRun := replacementRun
+	laterRun.ID, laterRun.StartIdempotencyKey, laterRun.CreatedAt = "ARCHIVE-RUN-LATER", "later-run", now.Add(2*time.Hour)
+	failed := linkedJob("JOB-FAILED", "archive-intake-as-is", "event-a", failedRun.ID, "event-a", workflow.Failed, now.Add(10*time.Minute))
+	completed := linkedJob("JOB-REPLACEMENT", "archive-intake-as-is", "event-a", replacementRun.ID, "event-a", workflow.Completed, now.Add(70*time.Minute))
+	later := linkedJob("JOB-LATER", "archive-intake-as-is", "event-a", laterRun.ID, "event-a", workflow.Completed, now.Add(130*time.Minute))
+	snapshots := []command.Snapshot{
+		snapshotOf(t, failedRun.ID, failedRun.Revision, failedRun), snapshotOf(t, replacementRun.ID, replacementRun.Revision, replacementRun),
+		snapshotOf(t, laterRun.ID, laterRun.Revision, laterRun), snapshotOf(t, failed.ID, failed.Revision, failed),
+		snapshotOf(t, completed.ID, completed.Revision, completed), snapshotOf(t, later.ID, later.Revision, later),
+	}
+	jobs := fixedJobs{summaries: []archiveworkspace.JobSummary{
+		{JobID: failed.ID, Revision: 1, TemplateName: failed.TemplateName, TargetTitle: failed.TargetTitle, CurrentStepID: "organize", StepState: workflow.Failed, ErrorClass: "STEP_EXECUTION_FAILED", LogReference: "worker://operation-failed", LastEventAt: now.Add(10 * time.Minute)},
+		summaryOf(completed, workflow.Completed, 1), summaryOf(later, workflow.Completed, 1),
+	}}
+	service, err := New(fixedSnapshots{snapshots: snapshots}, jobs, fixedDrives{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	values, err := service.Inbox(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found Summary
+	for _, value := range values {
+		if value.WorkID == failedRun.ID {
+			found = value
+		}
+	}
+	if found.State != StateFailed || found.ReplacementWorkID != replacementRun.ID {
+		t.Fatalf("failed outcome or earliest replacement link was lost: %+v", found)
+	}
+	detail, err := service.Detail(context.Background(), failedRun.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(detail.Failures) != 1 || detail.Failures[0].Folder != "event-a" || detail.Failures[0].StepID != "organize" ||
+		detail.Failures[0].ErrorClass != "STEP_EXECUTION_FAILED" || detail.Failures[0].LogReference != "worker://operation-failed" {
+		t.Fatalf("parent work lost structured child failure evidence: %+v", detail.Failures)
+	}
+}
+
 // Requirement: DSH-029
 func TestArchiveWorkRebuildsCurrentArchiveRunFromPersistedDriveProjection(t *testing.T) {
 	now := time.Date(2026, 11, 6, 14, 0, 0, 0, time.UTC)

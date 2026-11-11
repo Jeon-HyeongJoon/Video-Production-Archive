@@ -82,7 +82,9 @@ function DriveRow({ drive: current }) {
     <span class="num">${current.connection_worker_id || current.worker_id || "배정 없음"}</span>
     <span class="state"><${StatusIcon} kind=${PHASE_ICON[phase]} /><${Swap} text=${PHASE_LABEL[phase]} /></span>
     ${phase === "intake" ? html`<span class="muted">—</span>`
-      : html`<span class="cell-meter"><${Meter} value=${progress.pct / 100} done=${phase === "done"} label="보관 진행" /><span class="num">${progress.pct}% · ${formatCount(progress.stored)} / ${formatCount(progress.total)}</span></span>`}
+      : phase === "done"
+        ? html`<span class="num latest-scope">보관 ${formatCount(progress.storedFolders)} / ${formatCount(progress.folders)} 폴더 · 발견 ${formatCount(progress.discoveredFolders)} 폴더</span>`
+        : html`<span class="cell-meter"><${Meter} value=${progress.pct / 100} label="현재 작업 보관 진행" /><span class="num">현재 작업 ${progress.pct}% · ${formatCount(progress.storedFolders)} / ${formatCount(progress.folders)} 폴더</span></span>`}
     <span>${current.archive_storage_id || "—"}</span>
     <span>${problems.length ? html`<${IssueTags} fault=${fault} decide=${problems.length - fault} />` : html`<span class="muted">—</span>`}</span>
     <${Chevron} />
@@ -113,7 +115,7 @@ export function ConnectionsScreen() {
     html`<section key="drives" class="section" id="connection-drives" aria-label="드라이브">
       <h2 class="section-title">드라이브${" "}<span class="num" id="connection-drive-count">${drives.length}</span></h2>
       <div class="table drives-table" role="table">
-        <div class="trow head" role="row">${["드라이브", "연결", "Worker", "단계", "보관 진행", "아카이브", "확인 필요", ""].map((text, index) => html`<span role="columnheader" key=${index}>${text}</span>`)}</div>
+        <div class="trow head" role="row">${["드라이브", "연결", "Worker", "단계", "최근 작업 범위", "아카이브", "확인 필요", ""].map((text, index) => html`<span role="columnheader" key=${index}>${text}</span>`)}</div>
         ${drives.length ? drives.map((current) => html`<${DriveRow} key=${current.workspace_drive_id} drive=${current} />`) : html`<${Empty} text="드라이브 없음" />`}
       </div>
     </section>`,
