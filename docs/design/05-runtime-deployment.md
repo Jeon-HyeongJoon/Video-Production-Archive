@@ -100,7 +100,7 @@ Windows Archivist acceptance는 DPAPI secret의 새 프로세스 복호화와 �
 
 구독 로그인 Codex는 Windows Service·SYSTEM·SSH batch logon에서 시작하지 않는다. 배포본은 같은 버전의 `codex.exe`, `codex-code-mode-host.exe`, `codex-exec-server.exe`를 고정 runtime root의 한 디렉터리에 둔다. `deploy/windows/configure-interactive-archivist.ps1`이 이 실행 번들을 확인하고 현재 console 사용자의 대화형 예약 작업에서 `codex login status`를 먼저 실행하며, 성공한 같은 SID와 0이 아닌 Session에서만 Archivist Host를 시작한다. Control의 Turn은 이 Host에 전달되고 Host가 구조화 stdio로 `codex app-server`를 새로 열므로 Windows Terminal 화면이나 ANSI 출력을 중계하지 않는다. 사용자가 로그아웃하면 Host는 offline이 되고 Worker 작업은 계속되며 다음 로그인 뒤 예약 작업이 Host를 다시 시작한다. `LRH-020`
 
-## 7. Windows 서비스 배포
+## 7. Windows 서비스와 사용자 Tray 배포
 
 - `archive-control`, 선택형 `archive-media runner`, 필요한 PC의 `archivist-host`를 별도 Windows Service로 등록
 - 자동 시작은 delayed start 사용
@@ -109,6 +109,8 @@ Windows Archivist acceptance는 DPAPI secret의 새 프로세스 복호화와 �
 - AC 전원 시 sleep/hibernate 비활성화
 - 정전 후 자동 부팅과 UPS 종료 hook 구성
 - 로그와 DB는 scratch 및 외장 archive와 분리
+
+`archive-tray.exe`는 위 서비스와 다른 사용자 Session Adapter다. 트레이 아이콘은 Session 0에 표시할 수 없으므로 Windows Service로 등록하지 않는다. 설치기는 현재 console 사용자의 `AtLogOn`·`Interactive`·`Limited` 예약 작업 `Archive Tray`를 등록하고, 표준 runtime root의 실행 파일에 검증된 Chrome 절대경로와 고정 아카이브 작업 공간 URL을 인수로 준다. 왼쪽 클릭은 Chrome에 `--new-tab <url>` 인수 배열을 한 번 제출한다. Tray 종료나 로그아웃은 Control·Worker·Archivist Host를 건드리지 않으며, Control·Worker의 부팅 자동 시작도 로그인과 무관하게 유지된다. `DSH-041`, `CFG-016`
 
 Windows v1 설치는 `C:\Archive` 하나를 runtime root로 사용한다. 선택한 ARCHIVE_PRIMARY가 이 root라는 뜻은 아니며, 프로그램 작업 공간과 기록물 Storage를 섞지 않는다.
 
@@ -125,6 +127,8 @@ C:\Archive\
 └── legacy\               # 이전 위치 inventory와 복구 가능한 격리
 ```
 
+`runtime\current`에는 서비스 실행 파일과 함께 `archive-tray.exe`를 둔다. 사용자에게 보이는 Tray는 PC 전원 직후가 아니라 Windows 로그인 직후 시작된다. 대화형 desktop이 없는 로그인 전에는 아이콘을 표시할 수 없다는 운영체제 경계를 자동 시작 실패로 해석하지 않는다.
+
 새 release는 별도 `releases/<rev>`에 복사·검증한 뒤 `current`를 전환한다. `C:\Video-Production-Archive`, 과거 `deploy/<rev>`와 다른 임시 배포는 먼저 inventory에 기록하고 서비스·설정·DB·패키지 checksum을 대조한 뒤 `legacy`로 옮긴다. 자동 삭제는 하지 않으며 ArchivePackage나 catalog는 선택한 아카이브 Storage에 그대로 둔다. Windows acceptance는 실행 중인 프로세스와 예약 작업이 `runtime/current`만 가리키는지, 역할별 설정 경로와 DB·scratch가 분리됐는지, 이전 경로와 패키지 검증 기록이 복구 가능한 `legacy`에 남았는지를 함께 확인한다. `CFG-014`
 
 `deploy/windows/manage-runtime-layout.ps1`은 기본 `Plan`, 비파괴 `Inventory`, 해시를 검증하는 `Stage`만 제공한다. 서비스의 `current` 전환과 이전 경로 격리는 Windows acceptance에서 설정·DB·패키지 manifest를 대조한 뒤 수행한다.
@@ -134,6 +138,8 @@ C:\Archive\
 .\deploy\windows\manage-runtime-layout.ps1 -Mode Inventory
 .\deploy\windows\manage-runtime-layout.ps1 -Mode Stage -Revision <git-revision> -SourceDirectory <binary-directory>
 ```
+
+Windows release 묶음은 `make build-windows`로 만들며 Tray만 Windows GUI subsystem으로 링크해 console 창을 만들지 않는다.
 
 실제 설치를 전환하고 이전 경로를 격리한 뒤 다음 acceptance를 실행한다. 증적 디렉터리는 전환 전후 API·예약 작업·프로세스·DB migration·패키지 manifest 검증과 이동 목록을 포함해야 한다.
 
@@ -165,6 +171,14 @@ Tailscale 같은 overlay network를 사용할 때도 전체 CGNAT 대역을 허�
 ```powershell
 .\deploy\windows\configure-interactive-archivist.ps1 -Mode Probe -Root C:\Archive
 .\deploy\windows\configure-interactive-archivist.ps1 -Mode Install -Root C:\Archive
+```
+
+같은 PC에서 Tray를 설치·확인하거나 제거할 때는 다음 명령을 사용한다. `Probe`는 파일·URL·Chrome·로그인 사용자를 읽기 전용으로 확인하고, `Install`은 canonical 예약 작업을 교체한 뒤 현재 사용자 Session에서 시작하며, `Remove`는 Tray 작업과 Tray process만 제거한다.
+
+```powershell
+.\deploy\windows\configure-tray.ps1 -Mode Probe -Root C:\Archive -DashboardURL https://<archive-control>/
+.\deploy\windows\configure-tray.ps1 -Mode Install -Root C:\Archive -DashboardURL https://<archive-control>/
+.\deploy\windows\configure-tray.ps1 -Mode Remove -Root C:\Archive
 ```
 
 ## 8. 종료와 재시작

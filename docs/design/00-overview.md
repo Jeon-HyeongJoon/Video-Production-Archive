@@ -53,6 +53,8 @@ Windows PC
 │   ├── ArchivistTurn lease/event client
 │   ├── loopback MCP proxy
 │   └── Embedded Core 또는 선택형 Orca CLI backend
+├── archive-tray.exe
+│   └── 로그인 사용자 알림 영역 → Chrome Archive Workspace
 ├── OS Secret Store
 ├── Internal SSD: DB, logs
 ├── Scratch SSD: temporary outputs

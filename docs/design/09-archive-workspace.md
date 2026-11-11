@@ -72,6 +72,8 @@ Archivist Session 영역은 Host 상태, backend, CLI, workspace label, 현재 T
 
 초기 웹 표면은 Archive Control에 embed되어 별도 frontend build 없이 제공된다. 메인 아카이브 작업 공간은 드라이브 선택·아카이브 실행·Archivist 대화를 제공하고 자산 metadata·전사 timecode 검색은 별도 “아카이브” 화면으로 이동한다. 두 화면은 rebuild 가능한 같은 SQLite projection을 읽는다. 네트워크 접근 판정은 정적 파일과 API에 동일하게 적용되고 원본·아티팩트의 Storage 경로는 조회 DTO에 포함하지 않는다. `CTL-001`
 
+Windows의 Archive Tray는 이 웹 표면을 복제하거나 상태를 소유하지 않는 진입 Adapter다. 로그인 사용자가 아이콘을 왼쪽 클릭하면 설치 때 고정한 아카이브 작업 공간 URL을 Chrome 새 탭으로 열며, Tray 수명주기는 Archive Control·Worker와 분리한다. `DSH-041`, `CFG-016`
+
 허용된 내부 CIDR의 평문 HTTP 접속은 브라우저 secure context가 아닐 수 있다. 따라서 초기 렌더와 브라우저 명령 ID 생성은 `crypto.randomUUID` 같은 secure-context 전용 API의 존재를 전제로 하지 않고, 사용할 수 없는 경우 `crypto.getRandomValues`로 같은 UUID v4 형식을 만든다. `CTL-001`, `DSH-009`
 
 ## 5. 사용자 직접 명령과 Archivist 협업

@@ -1,4 +1,4 @@
-.PHONY: build test requirements requirements-lock ontology visual-deps archive-workspace-golden-update archive-workspace-golden-evidence verify
+.PHONY: build build-windows test requirements requirements-lock ontology visual-deps archive-workspace-golden-update archive-workspace-golden-evidence verify
 
 build:
 	mkdir -p bin
@@ -9,6 +9,15 @@ build:
 	go build -o bin/archivist-host ./cmd/archivist-host
 	go build -o bin/archivist-fixture ./cmd/archivist-fixture
 	go build -o bin/archive-secret ./cmd/archive-secret
+	go build -o bin/archive-tray ./cmd/archive-tray
+
+build-windows:
+	mkdir -p bin/windows-amd64
+	GOOS=windows GOARCH=amd64 go build -o bin/windows-amd64/archive-control.exe ./cmd/archive-control
+	GOOS=windows GOARCH=amd64 go build -o bin/windows-amd64/archive-media.exe ./cmd/archive-media
+	GOOS=windows GOARCH=amd64 go build -o bin/windows-amd64/archive-codex.exe ./cmd/archive-codex
+	GOOS=windows GOARCH=amd64 go build -o bin/windows-amd64/archivist-host.exe ./cmd/archivist-host
+	GOOS=windows GOARCH=amd64 go build -ldflags '-H=windowsgui' -o bin/windows-amd64/archive-tray.exe ./cmd/archive-tray
 
 test:
 	go test ./...

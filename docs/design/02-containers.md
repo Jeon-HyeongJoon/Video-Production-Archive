@@ -5,6 +5,7 @@
 ```mermaid
 flowchart LR
     Browser[Archive Workspace Browser] -->|Firewall + CIDR guard + HTTP/SSE| Control[Archive Control]
+    Tray[Archive Tray in interactive Windows Session] -->|Chrome new tab with configured URL| Browser
     MCPClient[External MCP Client] -->|authenticated MCP| Control
     Worker[Archive Media Runner 0..N] -->|service-authenticated lease/heartbeat/result API| Control
     Host[Archivist Host 1..N] -->|service-authenticated turn lease/event stream| Control
@@ -79,6 +80,7 @@ v1 `archive-media runner`는 별도 strict YAML의 identity·Control URL·Window
 - Worker는 하나의 heavy slot만 lease할 수 있다. `RES-005`
 - 같은 물리 장치 충돌은 논리 경로가 달라도 차단한다. `RES-006`
 - Archivist Host 종료는 Control, 아카이브 작업 공간과 Worker를 종료하지 않는다.
+- Archive Tray는 로그인 사용자의 대화형 Session에만 존재하고 클릭 때 설정된 URL을 Chrome 새 탭으로 연다. Tray 종료·로그아웃은 Control·Worker·Archivist Host를 종료하지 않는다. `DSH-041`, `CFG-016`
 - Control의 durable ArchivistSession과 ArchivistTurnLease fencing을 기준으로 stale runtime event를 거부하고, Host 재시작 뒤 임시 runtime handle을 다시 해석한다. `LRH-003~006`
 
 ## 5. Adapter 계약
