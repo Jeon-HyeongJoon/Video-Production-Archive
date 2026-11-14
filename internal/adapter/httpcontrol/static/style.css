@@ -120,7 +120,7 @@ summary::-webkit-details-marker{display:none}
 .meter>span[data-done="true"]{background:var(--done)}
 .fold{display:grid;grid-template-rows:0fr;transition:grid-template-rows var(--dur-medium) var(--ease-standard)}
 .fold[data-open="true"]{grid-template-rows:1fr}
-.fold-clip{min-height:0;overflow:hidden;opacity:0;transition:opacity var(--dur-short) linear}
+.fold-clip{min-height:0;overflow:clip;opacity:0;transition:opacity var(--dur-short) linear}
 .fold[data-open="true"]>.fold-clip{opacity:1}
 .swap-box{display:inline-flex;min-width:0}
 .swap{display:inline-block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
