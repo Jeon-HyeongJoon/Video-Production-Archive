@@ -1,4 +1,4 @@
-// 작업 관리: one row per work a person requested. An archive work names its
+// 작업: one row per work a person requested. An archive work names its
 // drive, its first folder and when it was asked for; the work ID stays faint
 // because nobody tells works apart by it. A row opens into its folders, or a
 // Template Job's steps. Running work stays on top, queued work in its own
@@ -16,9 +16,9 @@ import { StatusIcon, Glyph, GLYPH, Chevron, Swap, Meter, Fold, IssueTags, Empty,
 
 const LANES = [
   ["work", "active-jobs", "진행 중", "진행 중인 작업 없음"],
-  ["queue", "queued-jobs", "작업 큐", "대기 중인 작업 없음"],
-  ["attention", "attention-jobs", "확인 필요", "확인할 작업 없음"],
-  ["done", "completed-jobs", "완료", "완료된 작업 없음"],
+  ["queue", "queued-jobs", "시작 대기", "시작을 기다리는 작업 없음"],
+  ["attention", "attention-jobs", "직접 확인할 항목", "직접 확인할 작업 없음"],
+  ["done", "completed-jobs", "완료된 작업", "완료된 작업 없음"],
 ];
 const IN_LANE = { work: ["work"], queue: ["queue"], attention: ["fault", "decide"], done: ["done"] };
 const TEMPLATES = [["occasion-recording", "행사 기록"], ["vj-compilation", "VJ 모음"], ["final-edit", "최종 편집"], ["large-file-intake", "대용량 입고"]];
@@ -34,12 +34,12 @@ export function JobsScreen() {
   const draft = ui.newWork.value;
   return [
     html`<div key="head" class="page-head">
-      <div class="page-title"><h1 id="jobs-title">작업 관리</h1></div>
+      <div class="page-title"><h1 id="jobs-title">작업</h1></div>
       <button type="button" class="btn" id="new-job-open" aria-expanded=${draft ? "true" : "false"} onClick=${() => (draft ? (ui.newWork.value = null) : openNewWork())}>
-        <${Glyph} d=${GLYPH.plus} />새 작업 생성</button>
+        <${Glyph} d=${GLYPH.plus} />새 작업</button>
     </div>`,
     html`<${Fold} key="new" open=${!!draft}>${draft ? html`<${NewWork} draft=${draft} />` : null}<//>`,
-    html`<div key="cols" class="job-cols with-chev" aria-hidden="true"><span>작업</span><span>상태</span><span>진행</span><span>요청</span><span></span></div>`,
+    html`<div key="cols" class="job-cols with-chev" aria-hidden="true"><span>작업</span><span>상태</span><span>진행</span><span>추가</span><span></span></div>`,
     ...LANES.map(([lane, id, title, empty]) => html`<${Lane} key=${lane} lane=${lane} id=${id} title=${title} empty=${empty} />`),
   ];
 }
@@ -81,7 +81,7 @@ function WorkBlock({ work, meter }) {
       title=${[work.work_id, `Worker ${work.worker_id || "배정 없음"}`].join("\n")} onClick=${toggle}>
       <span class="job-name">
         <b class=${isShared ? "shared" : null}>${workTitle(work)}</b>
-        <small class="work-scope">${run ? workScopeText(work) : `Template 작업 · ${label("template", job?.template_name)}`} <i class="faint-id">${work.work_id}</i></small>
+        <small class="work-scope">${run ? workScopeText(work) : `템플릿 작업 · ${label("template", job?.template_name)}`} <i class="faint-id">${work.work_id}</i></small>
       </span>
       <span class="state"><${StatusIcon} kind=${workKind(work)} /><${Swap} cls="job-state" text=${workText(work)} />${run ? html`<${IssueTags} ...${workIssues(work)} cls="row-issue" />` : null}</span>
       <span class="job-progress">${meter ? html`<${Meter} value=${work.progress || 0} label=${`진행 ${pct}%`} />` : null}</span>
@@ -108,7 +108,7 @@ function WorkFolders({ work, href }) {
   for (const folder of current?.folders || []) {
     const state = folderState(folder);
     if (state.signal === "work") running += 1;
-    else if (state.word === "대기열") queued += 1;
+    else if (state.word === "시작 대기") queued += 1;
     else if (state.signal === "done") done += 1;
   }
   const moved = newer && names ? names.filter((name) => newer.has(name)).length : 0;
@@ -116,7 +116,7 @@ function WorkFolders({ work, href }) {
   return html`<div class="work-children">
     <div class="children-head">
       <span>${counts}${moved ? ` · 새 작업으로 넘김 ${moved}` : ""}</span>
-      <a class="text-btn" href=${href} data-shared="row">작업 화면 열기<${Glyph} d=${GLYPH.next} /></a>
+      <a class="text-btn" href=${href} data-shared="row">작업 보기<${Glyph} d=${GLYPH.next} /></a>
     </div>
     <div class="child-list">
       ${names ? names.slice(0, CHILDREN_SHOWN).map((name) => html`<${ChildFolder} key=${name} work=${work} current=${current} name=${name}
@@ -138,7 +138,7 @@ function ChildFolder({ work, current, name, job, movedTo }) {
     const problem = folderProblem(folder);
     const state = folderState(folder);
     const signal = problem?.signal || (folder.archive_state ? "done" : state.signal);
-    const word = problem?.word || (folder.archive_state ? (folder.archive_state === "COMMITTED" ? "확정됨" : "보관됨") : state.word);
+    const word = problem?.word || (folder.archive_state ? (folder.archive_state === "COMMITTED" ? "보존 완료" : "저장 완료") : state.word);
     const href = folder.job_id ? `#/jobs/${encodeURIComponent(folder.job_id)}` : `#/drives/${encodeURIComponent(current.workspace_drive_id)}?folder=${encodeURIComponent(name)}`;
     return html`<a class="child-row" href=${href} data-shared="child" data-folder-id=${name} data-job-id=${folder.job_id || null}>
       <b>${name}</b>
@@ -160,7 +160,7 @@ function TemplateSteps({ work, href }) {
   const answer = jobDetail(work.work_id);
   const steps = answer.value?.steps || null;
   return html`<div class="work-children">
-    <div class="children-head"><span>단계 ${steps ? steps.length : "—"}</span><a class="text-btn" href=${href} data-shared="row">작업 화면 열기<${Glyph} d=${GLYPH.next} /></a></div>
+    <div class="children-head"><span>처리 과정 ${steps ? steps.length : "—"}</span><a class="text-btn" href=${href} data-shared="row">작업 보기<${Glyph} d=${GLYPH.next} /></a></div>
     ${steps ? html`<ol class="child-steps">
       ${steps.map((step) => {
         const kind = step.state === "COMPLETED" ? "done" : step.state === "FAILED" ? "fault" : step.state === "WAITING" && ["INPUT", "APPROVAL", "DEVICE"].includes(step.wait_reason) ? "decide" : ["RUNNING", "RESERVED", "VERIFYING"].includes(step.state) ? "work" : "idle";
@@ -176,11 +176,11 @@ function NewWork({ draft }) {
   const head = html`<div class="new-work-head">
     <b>새 작업</b>
     <div class="seg plain-seg job-kind" id="new-work-kind" role="group" aria-label="작업 종류">
-      ${[["ARCHIVE", "아카이브"], ["TEMPLATE", "Template 작업"]].map(([kind, text]) => html`<button type="button" key=${kind} data-kind=${kind} aria-pressed=${draft.kind === kind ? "true" : "false"}
+      ${[["ARCHIVE", "영상 정리·보관"], ["TEMPLATE", "기타 작업"]].map(([kind, text]) => html`<button type="button" key=${kind} data-kind=${kind} aria-pressed=${draft.kind === kind ? "true" : "false"}
         onClick=${() => setDraft({ kind, error: "" })}>${text}</button>`)}
     </div>
   </div>`;
-  return html`<section class="new-work" id="new-job" aria-label="새 작업 생성">${head}${draft.kind === "ARCHIVE" ? html`<${ArchiveScope} draft=${draft} />` : html`<${TemplateForm} draft=${draft} />`}</section>`;
+  return html`<section class="new-work" id="new-job" aria-label="새 작업">${head}${draft.kind === "ARCHIVE" ? html`<${ArchiveScope} draft=${draft} />` : html`<${TemplateForm} draft=${draft} />`}</section>`;
 }
 
 function TemplateForm({ draft }) {
@@ -193,7 +193,7 @@ function TemplateForm({ draft }) {
     try {
       await mutation("/api/v1/jobs", {
         job_id: jobID, command_id: newID("COMMAND"), idempotency_key: `${jobID}:create`,
-        reason: "작업 관리에서 생성", template_name: draft.template, target_title: draft.title.trim(), expected_revision: 0,
+        reason: "작업 화면에서 추가", template_name: draft.template, target_title: draft.title.trim(), expected_revision: 0,
       });
       ui.newWork.value = null;
       await refresh();
@@ -212,7 +212,7 @@ function TemplateForm({ draft }) {
     <div class="new-work-foot">
       ${draft.error ? html`<span class="summary" id="new-job-status" role="status">${draft.error}</span>` : null}
       <button type="button" class="btn" disabled=${draft.pending} onClick=${() => { ui.newWork.value = null; }}>취소</button>
-      <button type="submit" class="btn primary" id="new-job-submit" data-action="create" disabled=${!ready || stale.value}>${draft.pending ? "요청 보냄…" : "작업 요청"}</button>
+      <button type="submit" class="btn primary" id="new-job-submit" data-action="create" disabled=${!ready || stale.value}>${draft.pending ? "추가 중…" : "작업 추가"}</button>
     </div>
   </form>`;
 }
@@ -222,8 +222,8 @@ function ArchiveScope({ draft }) {
   const current = draft.driveID ? driveView(draft.driveID) : null;
   useEffect(() => { if (current) syncDraft(current, ui.newWork.peek()); }, [current, draft]);
   const chooseDrive = (id) => { setDraft({ error: "" }); prepareDrive(id); };
-  const drives = html`<div class="chooser-col" id="prep-drives" aria-label="원본 드라이브">
-    <div class="chooser-head"><span>원본 드라이브</span><span class="chooser-value">${current ? driveName(current) : "선택 없음"}</span></div>
+  const drives = html`<div class="chooser-col" id="prep-drives" aria-label="가져올 드라이브">
+    <div class="chooser-head"><span>가져올 드라이브</span><span class="chooser-value">${current ? driveName(current) : "선택 없음"}</span></div>
     ${available.length ? available.map((item) => html`<button type="button" class="option" key=${item.workspace_drive_id} data-drive-id=${item.workspace_drive_id}
       aria-pressed=${draft.driveID === item.workspace_drive_id ? "true" : "false"} onClick=${() => chooseDrive(item.workspace_drive_id)}>
       <b>${driveName(item)}</b><small>${item.worker_id} · ${folderDiscoveryText(item)}</small></button>`) : html`<p class="chooser-empty">연결된 드라이브 없음</p>`}
@@ -267,8 +267,8 @@ function ArchiveScope({ draft }) {
   return html`<div class="chooser archive-create" id="archive-create">
       ${drives}
       <div class="chooser-stack" id="archive-scope">
-        <div class="chooser-col" id="prep-archives" aria-label="아카이브 저장소">
-          <div class="chooser-head"><span>아카이브 저장소</span><span class="chooser-value">${draft.archiveID || "선택 없음"}</span></div>
+        <div class="chooser-col" id="prep-archives" aria-label="저장할 위치">
+          <div class="chooser-head"><span>저장할 위치</span><span class="chooser-value">${draft.archiveID || "선택 없음"}</span></div>
           ${candidates.length ? candidates.map((storage) => html`<button type="button" class="option" key=${storage.storage_id} data-storage-id=${storage.storage_id} data-access-kind=${storage.access_kind || ""}
             aria-pressed=${storage.storage_id === draft.archiveID ? "true" : "false"} disabled=${!storage.accessible}
             onClick=${() => batch(() => { setDraft({ archiveID: draft.archiveID === storage.storage_id ? "" : storage.storage_id }); resetRunIntent(); })}>
@@ -276,8 +276,8 @@ function ArchiveScope({ draft }) {
             <small>${label("storageRole", storage.role)} · ${label("storageAccess", storage.access_kind)} · ${storage.accessible ? `여유 ${formatBytes(storage.free_bytes)} / ${formatBytes(storage.capacity_bytes)}` : "연결 필요"}</small>
           </button>`) : html`<p class="chooser-empty">후보 없음</p>`}
         </div>
-        <div class="chooser-col folder-picks" id="prep-folders" aria-label="폴더">
-          <div class="chooser-head"><span>폴더</span><span class="chooser-value num">${heading}</span></div>
+        <div class="chooser-col folder-picks" id="prep-folders" aria-label="처리할 폴더">
+          <div class="chooser-head"><span>처리할 폴더</span><span class="chooser-value num">${heading}</span></div>
           <label class="pick all folder-pick folder-all"><input type="checkbox" id="select-all" aria-label="전체 선택" disabled=${!ready}
             checked=${ready && folders.length > 0 && selected.length === folders.length} indeterminate=${selected.length > 0 && selected.length < folders.length}
             onChange=${(event) => pick(event.currentTarget.checked ? folders.map((folder) => folder.folder) : [])} /><span>전체</span><small class="num">${selected.length} / ${folders.length}</small></label>
@@ -293,6 +293,6 @@ function ArchiveScope({ draft }) {
       <span class="summary num" id="selection-summary">${selected.length} 폴더 · ${formatCount(videos)} 영상 · ${formatBytes(bytes)}</span>
       <span class="start-reason" id="start-reason">${draft.error || blocker}</span>
       <button type="button" class="btn" disabled=${draft.starting} onClick=${() => { ui.newWork.value = null; }}>취소</button>
-      <button type="button" class="btn primary" id="start-archive-run" data-action="create" disabled=${Boolean(blocker) || draft.starting || stale.value} onClick=${start}>${draft.starting ? "요청 보냄…" : "작업 요청"}</button>
+      <button type="button" class="btn primary" id="start-archive-run" data-action="create" disabled=${Boolean(blocker) || draft.starting || stale.value} onClick=${start}>${draft.starting ? "추가 중…" : "작업 추가"}</button>
     </div>`;
 }

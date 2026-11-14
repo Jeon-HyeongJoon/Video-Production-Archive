@@ -11,23 +11,23 @@ with sync_playwright() as playwright:
 
     completed = page.locator("#completed-work")
     expect(completed).to_be_visible()
-    expect(completed.locator(".section-title")).to_contain_text("완료 내역 7")
+    expect(completed.locator(".section-title")).to_contain_text("저장된 결과 7")
 
     # A row shows the result, its folder and its state; the rest waits on hover.
     source = completed.locator('[data-package-id="VP-20261030-SOURCE"]')
     expect(source.locator(".completed-result b")).to_have_text("source.mp4")
     expect(source.locator(".completed-result small")).to_have_text("source")
-    expect(source.locator(".completed-place")).to_have_text("확정됨")
+    expect(source.locator(".completed-place")).to_have_text("보존 완료")
     hover = source.get_attribute("title") or ""
-    for value in ("소스 시퀀스", "원본 → 결과 86 → 1", "완료 ", "archive-main · packages/2026/10/30/VP-20261030-SOURCE/revisions/000001", "VP-20261030-SOURCE", "JOB-SOURCE"):
+    for value in ("여러 영상 합치기", "원본 → 결과 86 → 1", "완료 ", "archive-main · packages/2026/10/30/VP-20261030-SOURCE/revisions/000001", "VP-20261030-SOURCE", "JOB-SOURCE"):
         if value not in hover:
             raise AssertionError(f"completed result hover lost {value!r}: {hover!r}")
-    if any(value in source.inner_text() for value in ("소스 시퀀스", "86 → 1", "archive-main", "packages/")):
+    if any(value in source.inner_text() for value in ("여러 영상 합치기", "86 → 1", "archive-main", "packages/")):
         raise AssertionError(f"completed row shows hover-only facts: {source.inner_text()!r}")
 
     older = completed.locator('[data-package-id="VP-20261029-LECTURE"]')
     expect(older.locator(".completed-result b")).to_have_text("lecture.mp4")
-    expect(older).to_contain_text("보관됨")
+    expect(older).to_contain_text("저장 완료")
 
     response = page.request.get(base_url + "/api/v1/archive-intake")
     drive = next(item for item in response.json()["data"] if item["workspace_drive_id"] == "VOLUME-1")

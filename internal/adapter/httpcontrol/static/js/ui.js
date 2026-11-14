@@ -55,7 +55,7 @@ export function IssueTags({ fault = 0, decide = 0, cls = "" }) {
   if (!fault && !decide) return null;
   return html`<span class=${`issues ${cls}`.trim()}>
     ${fault ? html`<span title=${`실패 ${fault}`}><${StatusIcon} kind="fault" />실패 ${fault}</span>` : null}
-    ${decide ? html`<span title=${`확인 필요 ${decide}`}><${StatusIcon} kind="decide" />확인 ${decide}</span>` : null}
+    ${decide ? html`<span title=${`직접 확인 필요 ${decide}`}><${StatusIcon} kind="decide" />확인 ${decide}</span>` : null}
   </span>`;
 }
 

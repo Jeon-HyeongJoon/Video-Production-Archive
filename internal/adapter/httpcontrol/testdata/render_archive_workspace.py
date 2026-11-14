@@ -7,30 +7,30 @@ from typing import Any
 from playwright.sync_api import expect, sync_playwright
 
 # Per-scene projection facts the screens must show without inference.
-MENUS = ["작업 관리", "연결 관리"]
+MENUS = ["작업", "장비·에이전트"]
 DRIVE = "#/drives/VOLUME-1"
 SCENES: dict[str, dict[str, Any]] = {
     "pre-run": {"route": DRIVE, "problems": ("3", "fault"), "phase": "intake", "stages": ["todo", "todo", "todo"]},
     "stage-one": {
         "route": DRIVE, "problems": ("6", "fault"), "phase": "stage1", "stages": ["now", "todo", "part"],
-        "stage_problems": [("fault", "렌더 1"), ("decide", "분류 1"), ("decide", "보관 1")],
+        "stage_problems": [("fault", "영상 변환 1"), ("decide", "처리 방식 결정 1"), ("decide", "결과 저장 1")],
         "progress": ("2 / 8 폴더", "최근 작업 보관 191 / 795 영상", "최근 작업 폴더 2 / 8"), "stt": None,
-        "words": {"INPUT": "분류 확인 필요", "DEVICE": "저장소 연결 대기"}, "panels": ["broken", "hold", "source-b"], "stored": 1, "committed": 1,
-        "detail": ("broken", ["분류", "렌더"]),
+        "words": {"INPUT": "처리 방법 선택 필요", "DEVICE": "저장 위치 연결 필요"}, "panels": ["broken", "hold", "source-b"], "stored": 1, "committed": 1,
+        "detail": ("broken", ["처리 방식 결정", "영상 변환"]),
     },
     "stt-ready": {
         "route": DRIVE, "problems": ("6", "fault"), "phase": "stt", "stages": ["done", "ask", "part"],
-        "stage_problems": [("fault", "렌더 1"), ("decide", "분류 1")],
-        "progress": ("6 / 8 폴더", "최근 작업 보관 790 / 795 영상", "최근 작업 폴더 6 / 8"), "stt": "STT 시작 · 4 폴더",
-        "words": {"INPUT": "분류 확인 필요"}, "panels": ["broken", "hold"], "stored": 5, "committed": 1,
-        "detail": ("broken", ["분류", "렌더"]),
+        "stage_problems": [("fault", "영상 변환 1"), ("decide", "처리 방식 결정 1")],
+        "progress": ("6 / 8 폴더", "최근 작업 보관 790 / 795 영상", "최근 작업 폴더 6 / 8"), "stt": "자막·텍스트 만들기 · 4 폴더",
+        "words": {"INPUT": "처리 방법 선택 필요"}, "panels": ["broken", "hold"], "stored": 5, "committed": 1,
+        "detail": ("broken", ["처리 방식 결정", "영상 변환"]),
     },
     "complete": {
         "route": DRIVE, "problems": ("6", "fault"), "phase": "done", "stages": ["done", "done", "done"],
-        "stage_problems": [("fault", "렌더 1"), ("decide", "분류 1")],
-        "progress": ("6 / 8 폴더", "최근 작업 보관 790 / 795 영상", "최근 작업 폴더 6 / 8 · STT 4 폴더"), "stt": None, "catalog": "CSV 795행 · 10. 31. 00:00 기록",
-        "words": {"INPUT": "분류 확인 필요"}, "panels": ["broken", "hold", "ready"], "stored": 5, "committed": 1,
-        "detail": ("ready", ["분류", "QC", "보관", "오디오 추출", "STT", "자막", "전사 텍스트", "패키지 추가"]),
+        "stage_problems": [("fault", "영상 변환 1"), ("decide", "처리 방식 결정 1")],
+        "progress": ("6 / 8 폴더", "최근 작업 보관 790 / 795 영상", "최근 작업 폴더 6 / 8 · 자막·텍스트 4 폴더"), "stt": None, "catalog": "CSV 795행 · 10. 31. 00:00 기록",
+        "words": {"INPUT": "처리 방법 선택 필요"}, "panels": ["broken", "hold", "ready"], "stored": 5, "committed": 1,
+        "detail": ("ready", ["처리 방식 결정", "결과 검사", "결과 저장", "음성 준비", "음성을 텍스트로 변환", "자막 생성", "텍스트 파일 생성", "결과에 추가"]),
     },
     # DSH-004/025: grouped work management and one addressable ArchiveRun detail.
     "jobs": {"route": "#/jobs", "menu": "jobs", "problems": ("6", "fault"), "rows": 3},
@@ -97,7 +97,7 @@ def check_stage_summary(page, scene) -> None:
     matrix = page.locator("#drive-overview .stage-matrix")
     expect(matrix).to_have_attribute("data-open", "false")
     expect(matrix.locator(".flow-node")).to_have_count(0)
-    expect(matrix.locator(".stage-chip .stage-name")).to_have_text(["1단계 정리", "2단계 전사", "기록"])
+    expect(matrix.locator(".stage-chip .stage-name")).to_have_text(["영상 정리·저장", "자막·텍스트", "영상 목록"])
     for chip, state in zip(matrix.locator(".stage-chip").all(), scene["stages"]):
         expect(chip).to_have_attribute("data-state", state)
     problems = scene.get("stage_problems", [])
@@ -105,7 +105,7 @@ def check_stage_summary(page, scene) -> None:
     for index, (signal, _) in enumerate(problems):
         expect(matrix.locator(".stage-problem").nth(index)).to_have_attribute("data-signal", signal)
     toggle = matrix.locator(".stage-toggle")
-    expect(toggle).to_have_text("단계 펼치기")
+    expect(toggle).to_have_text("처리 과정 보기")
     toggle.click()
     expect(page.locator("#drive-overview .stage-matrix")).to_have_attribute("data-open", "true")
     expect(page.locator("#drive-overview .flow-node")).to_have_count(12)
@@ -125,7 +125,7 @@ def check_drive(page, scene) -> None:
         expect(page.locator("#prepare-run, #drive-prep, #start-archive-run")).to_have_count(0)
         expect(page.locator("#drive-progress")).to_have_count(0)
         expect(page.locator("#drive-folders .folder-row")).to_have_count(4)
-        expect(page.locator("#drive-contents .section-title")).to_contain_text("폴더 구조")
+        expect(page.locator("#drive-contents .section-title")).to_contain_text("영상 폴더")
         return
     pct, counts, folders = scene["progress"]
     expect(page.locator("#drive-progress .progress-pct")).to_have_text(pct)
@@ -165,7 +165,7 @@ def check_drive(page, scene) -> None:
     row_text = " ".join(page.evaluate("() => [...document.querySelectorAll('#drive-folders .folder-row')].map((row) => row.innerText)"))
     if any(word in row_text for word in ("렌더", "QC", "오디오 추출", "자막", "전사 텍스트", "그대로 보관", "소스 시퀀스", "보류")):
         raise AssertionError(f"folder rows exposed steps or dispositions: {row_text}")
-    expect(page.locator('#drive-folders .folder-row[data-folder-id="broken"]')).to_have_attribute("title", "개별 렌더 · 2 영상")
+    expect(page.locator('#drive-folders .folder-row[data-folder-id="broken"]')).to_have_attribute("title", "영상별 변환 · 2 영상")
     expect(page.locator('#drive-folders .folder-row .archive-badge[data-state="STORED"]')).to_have_count(scene["stored"])
     expect(page.locator('#drive-folders .folder-row .archive-badge[data-state="COMMITTED"]')).to_have_count(scene["committed"])
     folder, stages = scene["detail"]
@@ -182,15 +182,15 @@ def check_drive(page, scene) -> None:
     if page.locator("#completed-work").count():
         order = page.evaluate("() => document.querySelector('#drive-problems').getBoundingClientRect().top < document.querySelector('#completed-work').getBoundingClientRect().top")
         if not order:
-            raise AssertionError("확인 필요 is not above 완료 내역")
+            raise AssertionError("직접 확인할 항목 is not above 저장된 결과")
 
 
 def check_jobs(page, scene) -> None:
     expect(page.locator("#jobs-title ~ .num")).to_have_count(0)
-    expect(page.locator("#new-job-open")).to_have_text("새 작업 생성")
+    expect(page.locator("#new-job-open")).to_have_text("새 작업")
     expect(page.locator("#new-job-open")).to_have_attribute("aria-expanded", "false")
     expect(page.locator("#new-job-form")).to_have_count(0)
-    expect(page.locator(".job-cols span")).to_have_text(["작업", "상태", "진행", "요청", ""])
+    expect(page.locator(".job-cols span")).to_have_text(["작업", "상태", "진행", "추가", ""])
     running = page.locator('#active-jobs .work-row[data-work-id="JOB-RUNNING"]')
     expect(running).to_have_count(1)
     expect(running).to_have_attribute("title", re.compile("Worker WORKER-1"))
@@ -198,17 +198,17 @@ def check_jobs(page, scene) -> None:
     expect(page.locator('#queued-jobs .work-row[data-work-id="JOB-QUEUED"]')).to_have_count(1)
     expect(page.locator("#queued-jobs .meter, #attention-jobs .meter, #completed-jobs .meter")).to_have_count(0)
     expect(page.locator("#attention-jobs")).to_have_attribute("data-open", "true")
-    expect(page.locator("#attention-jobs .lane-toggle")).to_have_text("확인 필요 1")
+    expect(page.locator("#attention-jobs .lane-toggle")).to_have_text("직접 확인할 항목 1")
     expect(page.locator('#attention-jobs .work-row[data-work-id="JOB-REVIEW"]')).to_have_count(1)
     expect(page.locator("#completed-jobs")).to_have_attribute("data-open", "false")
-    expect(page.locator("#completed-jobs .lane-toggle")).to_have_text("완료 1")
+    expect(page.locator("#completed-jobs .lane-toggle")).to_have_text("완료된 작업 1")
     expect(page.locator('#completed-jobs .work-row')).to_have_count(0)
 
 
 def check_job_detail(page, _scene) -> None:
     expect(page.locator('.page-head a[href="#/jobs"]')).to_have_count(0)
     summary = page.locator("#run-summary")
-    expect(summary.locator(".run-facts .fact-label")).to_have_text(["원본 → 아카이브", "폴더", "영상"])
+    expect(summary.locator(".run-facts .fact-label")).to_have_text(["가져올 드라이브 → 저장 위치", "폴더", "영상"])
     expect(summary).to_contain_text("VOLUME-1 → archive-main")
     expect(summary).to_have_attribute("title", re.compile("작업 ID ARCHIVE-RUN-1"))
     expect(summary).to_have_attribute("title", re.compile("Worker WORKER-1"))

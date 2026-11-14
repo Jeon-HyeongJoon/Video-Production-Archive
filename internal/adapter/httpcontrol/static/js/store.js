@@ -221,7 +221,7 @@ export function startPolling() {
 // ─── Drives ─────────────────────────────────────────────────────────────────
 
 const RUN_PHASE = { STAGE_ONE_RUNNING: "stage1", TRANSCRIPTION_READY: "stt", STAGE_TWO_RUNNING: "stage2", COMPLETED: "done" };
-export const PHASE_LABEL = { intake: "실행 전", stage1: "1단계 정리 중", stt: "STT 시작 가능", stage2: "2단계 전사 중", done: "최근 작업 완료" };
+export const PHASE_LABEL = { intake: "아직 작업 전", stage1: "영상 정리·저장 중", stt: "자막·텍스트 만들기 가능", stage2: "자막·텍스트 만드는 중", done: "최근 작업 완료" };
 // The status icon of each phase: running phases turn, the STT gate waits on a
 // person, a finished run is done.
 export const PHASE_ICON = { intake: "idle", stage1: "work", stt: "decide", stage2: "work", done: "done" };
@@ -292,14 +292,14 @@ export function folderProblem(folder) {
   const failed = stages.find((stage) => stage.state === "FAILED");
   const waiting = stages.find((stage) => stage.state === "WAITING" && humanWait.has(stage.wait_reason));
   if (failed) return { kind: "fault", signal: "fault", title: "처리 실패", word: "실패", token: "실패", stage: failed };
-  if (folder.disposition === "HOLD") return { kind: "hold", signal: "decide", title: "분류 확인 필요", word: "분류 확인 필요", token: "보류", reason: waiting?.wait_reason || "" };
-  if (waiting?.wait_reason === "DEVICE") return { kind: "device", signal: "decide", title: "아카이브 저장소 연결 대기", word: "저장소 연결 대기", token: "대기", reason: "DEVICE", stage: waiting, target: waiting.wait_target_storage_id || "" };
+  if (folder.disposition === "HOLD") return { kind: "hold", signal: "decide", title: "처리 방법 선택 필요", word: "처리 방법 선택 필요", token: "선택", reason: waiting?.wait_reason || "" };
+  if (waiting?.wait_reason === "DEVICE") return { kind: "device", signal: "decide", title: "저장 위치 연결 필요", word: "저장 위치 연결 필요", token: "연결", reason: "DEVICE", stage: waiting, target: waiting.wait_target_storage_id || "" };
   if (waiting) {
-    const word = waiting.wait_reason === "APPROVAL" ? "승인 필요" : "판정 필요";
+    const word = waiting.wait_reason === "APPROVAL" ? "승인 필요" : "직접 입력 필요";
     return { kind: "wait", signal: "decide", title: word, word, token: "대기", reason: waiting.wait_reason, stage: waiting };
   }
   const reviews = (folder.transcript_qualities || []).filter((quality) => quality.state === "REVIEW_RECOMMENDED");
-  if (reviews.length) return { kind: "review", signal: "decide", title: "전사 검토 권장", word: "전사 검토 권장", token: "검토" };
+  if (reviews.length) return { kind: "review", signal: "decide", title: "자막·텍스트 확인 권장", word: "자막·텍스트 확인 권장", token: "확인" };
   return null;
 }
 
@@ -317,7 +317,7 @@ export function folderState(folder) {
   if (!stages.length) return { word: "—", signal: "idle" };
   if (stages.some((stage) => activeStates.has(stage.state) || (stage.state === "WAITING" && !humanWait.has(stage.wait_reason)))) return { word: "진행 중", signal: "work" };
   if (stages.every((stage) => stage.state === "COMPLETED")) return { word: folder.archive_state ? "" : "완료", signal: "done" };
-  return { word: "대기열", signal: "idle" };
+  return { word: "시작 대기", signal: "idle" };
 }
 
 // folderSignal is the one signal of a folder: its problem, its stored record,
@@ -365,13 +365,13 @@ export const problemItems = computed(() => {
       if (problem) items.push({ ...base, key: `${problem.kind}:${current.workspace_drive_id}:${folder.folder}`, kind: problem.kind, signal: problem.signal, title: problem.title, folder: folder.folder, target: problem.target || "" });
     }
     const sttCard = cards.some(({ card }) => card.command_type === "archive_run.transcription.start" && card.target_id === current.archive_run_id);
-    if (current.archive_run_state === "TRANSCRIPTION_READY" && !sttCard) items.push({ ...base, key: `stt:${current.workspace_drive_id}`, kind: "stt", signal: "decide", title: "STT 시작 가능" });
+    if (current.archive_run_state === "TRANSCRIPTION_READY" && !sttCard) items.push({ ...base, key: `stt:${current.workspace_drive_id}`, kind: "stt", signal: "decide", title: "자막·텍스트 만들기 가능" });
   }
   for (const worker of store.workers.value) {
-    if (stateSignal(worker.state) === "fault") items.push({ key: `worker:${worker.worker_id}`, kind: "worker", signal: "fault", title: "Worker 꺼짐", workerID: worker.worker_id });
+    if (stateSignal(worker.state) === "fault") items.push({ key: `worker:${worker.worker_id}`, kind: "worker", signal: "fault", title: "작업 PC 연결 끊김", workerID: worker.worker_id });
   }
   for (const host of store.hosts.value) {
-    if (stateSignal(host.state) === "fault") items.push({ key: `host:${host.archivist_host_id}`, kind: "host", signal: "fault", title: "Agent Host 꺼짐", hostID: host.archivist_host_id });
+    if (stateSignal(host.state) === "fault") items.push({ key: `host:${host.archivist_host_id}`, kind: "host", signal: "fault", title: "에이전트 실행 PC 연결 끊김", hostID: host.archivist_host_id });
   }
   for (const job of standaloneJobs.value) {
     const lane = jobLane(job);
@@ -380,14 +380,14 @@ export const problemItems = computed(() => {
     items.push({ key: `job:${job.job_id}`, kind: "job", signal: lane, title, jobID: job.job_id, workerID: job.worker_id || "" });
   }
   for (const { card, session } of cards) {
-    items.push({ key: `card:${card.action_card_id}`, kind: "card", signal: "decide", title: "Agent 결정 대기", cardID: card.action_card_id, sessionID: session.session_id, label: label("card", card.command_type) });
+    items.push({ key: `card:${card.action_card_id}`, kind: "card", signal: "decide", title: "에이전트 요청 확인 필요", cardID: card.action_card_id, sessionID: session.session_id, label: label("card", card.command_type) });
   }
   // A past ArchiveRun is no longer present in its drive's current-scope
   // projection. Keep an unresolved failed work visible in the global bell;
   // a run with a persisted replacement link has already been handed over.
   for (const work of allWork.value) {
     if (work.kind !== "ARCHIVE_RUN" || workLane(work) !== "fault" || workDrive(work)) continue;
-    items.push({ key: `work:${work.work_id}`, kind: "work", signal: "fault", title: "아카이브 작업 실패", workID: work.work_id, driveID: work.source_volume_id || "" });
+    items.push({ key: `work:${work.work_id}`, kind: "work", signal: "fault", title: "영상 정리·보관 실패", workID: work.work_id, driveID: work.source_volume_id || "" });
   }
   return items.sort((left, right) => SIGNAL_RANK[right.signal] - SIGNAL_RANK[left.signal]);
 });
@@ -454,7 +454,7 @@ export function workLane(work) {
   return { FAILED: "fault", ATTENTION: "decide", ACTIVE: "work", QUEUED: "queue", COMPLETED: "done" }[work?.state] || "queue";
 }
 
-export const WORK_TEXT = { FAILED: "실패", ATTENTION: "확인 필요", ACTIVE: "실행 중", QUEUED: "대기열", COMPLETED: "완료" };
+export const WORK_TEXT = { FAILED: "실패", ATTENTION: "직접 확인 필요", ACTIVE: "처리 중", QUEUED: "시작 대기", COMPLETED: "완료" };
 
 // workDrive is the drive whose current ArchiveRun is this work, if it still is.
 export function workDrive(work) {
@@ -622,16 +622,16 @@ export function startBlocker(current, draft, selected) {
   const requiredCapacity = estimated + capacityReserve;
   if (current.connection_state === "DISCONNECTED") return "드라이브 연결 해제됨";
   if (current.connection_state !== "CONNECTED") return "드라이브 연결 확인 불가";
-  if (isRunning(current)) return "진행 중인 아카이브 실행";
+  if (isRunning(current)) return "이 드라이브에서 작업 진행 중";
   if (current.folder_discovery_state === "SCANNING") return "폴더 검색 중";
   if (current.folder_discovery_state === "FAILED") return "폴더 검색 실패";
   if (!folderDiscoveryReady(current)) return "폴더 검색 대기";
-  if (!selected.length) return "폴더 선택 없음";
-  if (!draft.archiveID) return "아카이브 선택 없음";
-  if (!source?.accessible) return "원본 접근 불가";
-  if (!archive?.accessible) return "아카이브 접근 불가";
-  if (archive.free_bytes < requiredCapacity) return "아카이브 여유 용량 부족";
-  if (!worker || worker.state === "OFFLINE" || worker.state === "DISABLED") return "Worker 꺼짐";
+  if (!selected.length) return "처리할 폴더를 선택하세요";
+  if (!draft.archiveID) return "저장할 위치를 선택하세요";
+  if (!source?.accessible) return "가져올 드라이브를 사용할 수 없음";
+  if (!archive?.accessible) return "저장할 위치를 사용할 수 없음";
+  if (archive.free_bytes < requiredCapacity) return "저장 공간 부족";
+  if (!worker || worker.state === "OFFLINE" || worker.state === "DISABLED") return "작업 PC가 연결되지 않음";
   if (!current.source_volume_id) return "원본 정보 없음";
   return "";
 }
@@ -740,8 +740,8 @@ export function activeTurn(session) {
 
 export function availability(session) {
   const host = hostFor(session);
-  if (!session) return ["Agent 없음", "idle"];
-  if (host?.state !== "ONLINE") return ["Host 꺼짐", "fault"];
+  if (!session) return ["에이전트 없음", "idle"];
+  if (host?.state !== "ONLINE") return ["실행 PC 연결 끊김", "fault"];
   if (activeTurn(session)) return ["처리 중", "work"];
-  return ["사용 가능", "online"];
+  return ["요청 가능", "online"];
 }

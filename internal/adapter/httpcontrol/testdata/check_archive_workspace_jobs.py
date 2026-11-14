@@ -22,22 +22,22 @@ with sync_playwright() as playwright:
     running = page.locator('#tree .workspace-card[data-work-id="JOB-RUNNING"]')
     expect(running).to_have_attribute("title", "행사 하이라이트 · JOB-RUNNING · 드라이브 없음 · WORKER-1")
     expect(running.locator(".workspace-work-name")).to_have_text("행사 하이라이트")
-    expect(running.locator(".workspace-state")).to_have_text("실행 중")
+    expect(running.locator(".workspace-state")).to_have_text("처리 중")
     if any(value in running.inner_text() for value in ("JOB-RUNNING", "드라이브 없음", "WORKER-1")):
         raise AssertionError(f"workspace card shows hover-only facts: {running.inner_text()!r}")
     expect(running).to_have_attribute("href", "#/jobs/JOB-RUNNING")
     running.click()
     expect(page).to_have_url(sys.argv[1] + "/#/jobs/JOB-RUNNING")
-    expect(page.locator(".page-head .job-head-state")).to_have_text("실행 중")
+    expect(page.locator(".page-head .job-head-state")).to_have_text("처리 중")
     expect(page.locator(".page-head .job-head-state")).to_have_attribute("title", "RUNNING")
     expect(page.locator('#job-steps .step-item[data-step="render"] .stage-state')).to_have_text("RUNNING · 64% · worker-main")
     page.locator("#cancel-job").click()
     expect(page.locator("#cancel-job-confirm")).to_be_visible()
 
-    # The same persistent Job appears in 작업 관리 확인 필요 and opens its detail.
+    # The same persistent Job appears in 작업의 직접 확인할 항목 list and opens its detail.
     page.goto(sys.argv[1] + "/#/jobs", wait_until="networkidle")
     row = page.locator('#attention-jobs .work-row[data-work-id="JOB-REVIEW"]')
-    expect(row).to_contain_text("확인 필요")
+    expect(row).to_contain_text("직접 확인 필요")
     row.click()
     page.locator('#attention-jobs .work-block[data-work-id="JOB-REVIEW"] .children-head a').click()
     expect(page).to_have_url(sys.argv[1] + "/#/jobs/JOB-REVIEW")

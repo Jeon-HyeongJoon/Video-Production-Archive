@@ -12,11 +12,11 @@ import { route, go } from "../router.js";
 import { StatusIcon, Chevron, Swap, Meter, Fold, Crumbs, Fact, Empty, Skeleton, useLinger } from "../ui.js";
 import { StatusLine, titleShared } from "./drive.js";
 
-const LANE = { fault: ["실패", "fault"], decide: ["사람 대기", "decide"], work: ["실행 중", "work"], resource: ["자원 대기", "work"], queue: ["대기열", "idle"], done: ["완료", "done"] };
+const LANE = { fault: ["실패", "fault"], decide: ["직접 확인 필요", "decide"], work: ["처리 중", "work"], resource: ["작업 PC 여유 대기", "work"], queue: ["시작 대기", "idle"], done: ["완료", "done"] };
 
 export function laneText(job) {
   const lane = jobLane(job) || "done";
-  if (lane === "decide") return job.wait_reason ? `${label("wait", job.wait_reason)} 대기` : "사람 대기";
+  if (lane === "decide") return job.wait_reason ? `${label("wait", job.wait_reason)} 필요` : "직접 확인 필요";
   return LANE[lane]?.[0] || label("step", job.step_state);
 }
 
@@ -90,17 +90,17 @@ function ResultPanel({ found }) {
   if (!found) return null;
   const { item, drive } = found;
   const href = `#/runs/${encodeURIComponent(item.archive_run_id)}?result=${encodeURIComponent(item.archive_package_id)}`;
-  return html`<section class="panel job-result" id="job-result" aria-label="완료 결과" data-package-id=${item.archive_package_id}>
-    <div class="panel-toolbar"><b>완료 결과</b><b class="archive-badge" data-state=${item.archive_state}>${item.archive_state === "COMMITTED" ? "확정됨" : "보관됨"}</b>
-      <a class="btn btn-sm archive-result-link" href=${href} data-shared="row">아카이브 결과</a></div>
+  return html`<section class="panel job-result" id="job-result" aria-label="저장된 결과" data-package-id=${item.archive_package_id}>
+    <div class="panel-toolbar"><b>저장된 결과</b><b class="archive-badge" data-state=${item.archive_state}>${item.archive_state === "COMMITTED" ? "보존 완료" : "저장 완료"}</b>
+      <a class="btn btn-sm archive-result-link" href=${href} data-shared="row">저장 결과 보기</a></div>
     <div class="facts">
       <${Fact} label="결과 영상" value=${item.archive_video_file_name || item.archive_package_id} />
       <${Fact} label="원본 폴더" value=${item.folder} />
       <${Fact} label="처리 방식" value=${label("disposition", item.disposition)} />
       <${Fact} label="원본 → 결과" value=${`${formatCount(item.source_video_count)} → 1`} />
       <${Fact} label="완료" value=${shortTime(item.completed_at)} />
-      <${Fact} label="아카이브" value=${item.archive_storage_id} />
-      <${Fact} label="아카이브 위치" value=${item.archive_relative_path || "—"} />
+      <${Fact} label="저장 위치" value=${item.archive_storage_id} />
+      <${Fact} label="결과 폴더" value=${item.archive_relative_path || "—"} />
       <${Fact} label="원본 드라이브" value=${driveName(drive)} />
     </div>
   </section>`;
@@ -111,14 +111,14 @@ function ProblemAction({ linked }) {
   if (!linked) return null;
   const problem = folderProblem(linked.folder);
   if (problem?.kind === "hold") {
-    return html`<a class="btn" href=${`#/drives/${encodeURIComponent(linked.drive.workspace_drive_id)}?folder=${encodeURIComponent(linked.folder.folder)}`}>분류 선택하러 가기</a>`;
+    return html`<a class="btn" href=${`#/drives/${encodeURIComponent(linked.drive.workspace_drive_id)}?folder=${encodeURIComponent(linked.folder.folder)}`}>처리 방법 선택</a>`;
   }
   if (problem?.kind !== "fault") return null;
   const redo = () => {
     openNewWork(linked.drive.workspace_drive_id, [linked.folder.folder], linked.drive.archive_storage_id || "");
     go("#/jobs");
   };
-  return html`<button type="button" class="btn" data-action="redo" disabled=${isRunning(linked.drive) || stale.value} title=${isRunning(linked.drive) ? "이 실행이 끝나면 새 작업으로 요청할 수 있음" : ""} onClick=${redo}>새 작업으로 다시 요청</button>`;
+  return html`<button type="button" class="btn" data-action="redo" disabled=${isRunning(linked.drive) || stale.value} title=${isRunning(linked.drive) ? "현재 작업이 끝나면 다시 처리할 수 있음" : ""} onClick=${redo}>이 폴더 다시 처리</button>`;
 }
 
 function stepLine(step) {
@@ -138,7 +138,7 @@ export function JobScreen({ id }) {
   if (!summary) {
     return answer.value === undefined && !answer.error
       ? html`<div class="boot-view"><span class="skel boot-title"></span><span class="skel-card boot-card"></span></div>`
-      : [html`<div key="head" class="page-head"><div class="page-title"><h1>작업 관리</h1></div></div>`, html`<${Empty} key="empty" text="작업을 찾을 수 없음" />`];
+      : [html`<div key="head" class="page-head"><div class="page-title"><h1>작업</h1></div></div>`, html`<${Empty} key="empty" text="작업을 찾을 수 없음" />`];
   }
   const lane = jobLane(summary) || "done";
   const linked = linkedFolder(id);
@@ -162,7 +162,7 @@ export function JobScreen({ id }) {
       setPending(false);
     }
   };
-  const crumbs = [["작업 관리", "#/jobs"]];
+  const crumbs = [["작업", "#/jobs"]];
   if (linked?.drive.archive_run_id) crumbs.push([driveName(linked.drive), `#/runs/${encodeURIComponent(linked.drive.archive_run_id)}`]);
   crumbs.push([title]);
   return [
@@ -187,15 +187,15 @@ export function JobScreen({ id }) {
     html`<${ResultPanel} key="result" found=${completion(id)} />`,
     html`<section key="facts" class="panel" id="job-summary" aria-label="작업 정보"><div class="panel-toolbar"><b>작업 정보</b></div><div class="facts">
       <${Fact} label="작업 ID" value=${html`<span class="faint-id">${summary.job_id}</span>`} />
-      <${Fact} label="Template" value=${html`${label("template", summary.template_name)} <span class="faint-id">${summary.template_name}</span>`} />
+      <${Fact} label="작업 유형" value=${html`${label("template", summary.template_name)} <span class="faint-id">${summary.template_name}</span>`} />
       <${Fact} label="리비전" value=${`r${summary.revision}`} />
-      <${Fact} label="Worker" value=${summary.worker_id || "배정 없음"} />
+      <${Fact} label="작업 PC" value=${summary.worker_id || "배정 없음"} />
       <${Fact} label="현재 단계" value=${label("stage", summary.current_step_id)} />
       <${Fact} label="최근" value=${shortTime(summary.last_event_at)} />
       <${Fact} label="원본 위치" value=${linked ? `${driveName(linked.drive)} / ${linked.folder.folder}` : "—"} />
     </div></section>`,
-    html`<section key="steps" class="panel" id="job-steps" aria-label="단계">
-      <div class="panel-toolbar"><b>단계</b><span class="muted num">${steps.length}</span></div>
+    html`<section key="steps" class="panel" id="job-steps" aria-label="처리 과정">
+      <div class="panel-toolbar"><b>처리 과정</b><span class="muted num">${steps.length}</span></div>
       <ol class="step-list">
         ${steps.length ? steps.map((step) => {
           const signal = stageSignal({ state: step.state, wait_reason: step.wait_reason });

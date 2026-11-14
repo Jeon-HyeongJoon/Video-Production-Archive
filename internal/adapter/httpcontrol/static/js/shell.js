@@ -75,11 +75,11 @@ function Sidebar() {
       <form id="search-form" class="side-search" role="search" onSubmit=${search}>
         <${Glyph} d=${GLYPH.search} />
         <input ref=${input} id="search-text" type="search" name="q" value=${query} onInput=${(event) => setQuery(event.currentTarget.value)}
-          placeholder="기록물·전사문 검색" aria-label="기록물·전사문 검색" autocomplete="off" />
+          placeholder="보관 영상·자막 검색" aria-label="보관 영상·자막 검색" autocomplete="off" />
         <kbd aria-hidden="true">/</kbd>
       </form>
       <button type="button" id="alert-button" class="bell" aria-haspopup="dialog" aria-controls="alert-panel" aria-expanded=${ui.alertsOpen.value ? "true" : "false"}
-        data-new=${fresh ? "true" : "false"} aria-label=${`알림 · 실패 ${faults} · 확인 필요 ${items.length - faults}${fresh ? ` · 새 ${fresh}` : ""}`} onClick=${toggleAlerts}>
+        data-new=${fresh ? "true" : "false"} aria-label=${`알림 · 실패 ${faults} · 직접 확인 ${items.length - faults}${fresh ? ` · 새 ${fresh}` : ""}`} onClick=${toggleAlerts}>
         <${Glyph} d=${GLYPH.bell} />
         ${items.length ? html`<b id="alert-count" class="bell-count num" data-signal=${faults ? "fault" : "decide"}><${Swap} text=${String(items.length)} /></b>` : null}
         ${fresh ? html`<i class="bell-new" aria-hidden="true"></i>` : null}
@@ -89,8 +89,8 @@ function Sidebar() {
       ${menus.map((menu) => html`<a class="menu-link" key=${menu.id} href=${menu.path} data-menu=${menu.id} aria-current=${now.menu === menu.id ? "page" : null}>
         <${Glyph} d=${GLYPH[menu.id]} /><span class="menu-label">${menu.label}</span></a>`)}
     </div>
-    <section id="tree" class="tree" aria-label="워크스페이스">
-      <span class="tree-title">워크스페이스</span>
+    <section id="tree" class="tree" aria-label="현재 작업">
+      <span class="tree-title">현재 작업</span>
       ${list === null ? html`<span class="skel-card"></span><span class="skel-card"></span>`
         : list.length ? list.map((work) => html`<${WorkspaceCard} key=${work.work_id} work=${work} />`) : html`<p class="empty">작업 없음</p>`}
     </section>
@@ -146,7 +146,7 @@ function AlertPanel() {
   const faults = items.filter((item) => item.signal === "fault").length;
   const fresh = ui.newProblems.value;
   return html`<section ref=${panel} id="alert-panel" class="alert-panel" role="dialog" aria-label="알림" style=${`top:${at.top}px;left:${at.left}px`}>
-    <div class="alert-head"><span>알림<span class="num">실패 ${faults} · 확인 필요 ${items.length - faults}</span></span>
+    <div class="alert-head"><span>알림<span class="num">실패 ${faults} · 직접 확인 ${items.length - faults}</span></span>
       <button type="button" class="icon-btn" aria-label="닫기" onClick=${closeAlerts}><${Glyph} d=${GLYPH.close} /></button></div>
     <div class="alert-list">
       ${items.length ? items.slice(0, ALERTS_SHOWN).map((item) => html`<button type="button" class="alert-item" key=${item.key} data-key=${item.key} data-kind=${item.kind} data-signal=${item.signal} onClick=${() => resolve(item)}>
@@ -155,7 +155,7 @@ function AlertPanel() {
         ${fresh.has(item.key) ? html`<span class="new-tag">새</span>` : html`<span></span>`}
         <${Glyph} d=${GLYPH.next} />
       </button>`) : html`<p class="alert-empty">확인할 것 없음</p>`}
-      ${items.length > ALERTS_SHOWN ? html`<p class="alert-empty">외 ${items.length - ALERTS_SHOWN}건 · 각 드라이브의 확인 필요에서 확인</p>` : null}
+      ${items.length > ALERTS_SHOWN ? html`<p class="alert-empty">외 ${items.length - ALERTS_SHOWN}건 · 각 드라이브의 직접 확인할 항목에서 확인</p>` : null}
     </div>
   </section>`;
 }
@@ -179,7 +179,7 @@ function Stale() {
   if (!stale.value) return null;
   const at = store.refreshedAt.value;
   return html`<div id="stale-banner" class="stale" role="alert"><${StatusIcon} kind="fault" />
-    <span><b>연결 끊김</b> · <span id="stale-text">${at ? `${clockTime(at, true)} 이후 갱신 없음` : "갱신 없음"} · 다시 연결 중 · 판정·실행 잠김</span></span></div>`;
+    <span><b>화면 갱신 중단</b> · <span id="stale-text">${at ? `${clockTime(at, true)} 이후 새 정보 없음` : "새 정보 없음"} · 다시 연결 중 · 선택과 작업 시작 잠김</span></span></div>`;
 }
 
 // ─── Screens ────────────────────────────────────────────────────────────────
@@ -214,7 +214,7 @@ export function App({ onView }) {
       <${AgentPane} />
     </div>
     <button type="button" id="agent-handle" class="agent-handle" aria-controls="archivist-pane" aria-expanded=${ui.agentOpen.value ? "true" : "false"}
-      onClick=${() => { ui.agentOpen.value = !ui.agentOpen.peek(); }}>${waiting ? html`<i aria-label="결정 대기"></i>` : null}Agent</button>
+      onClick=${() => { ui.agentOpen.value = !ui.agentOpen.peek(); }}>${waiting ? html`<i aria-label="실행 전 확인 필요"></i>` : null}에이전트</button>
     <div class="agent-scrim" data-open=${ui.agentOpen.value ? "true" : "false"} onClick=${() => { ui.agentOpen.value = false; }}></div>
     <${AlertPanel} />
     <${AlertToast} />

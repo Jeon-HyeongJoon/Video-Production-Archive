@@ -42,7 +42,7 @@ with sync_playwright() as playwright:
     card = page.locator(f'[data-card-id="{CARD_ID}"][data-state="PENDING"]')
     expect(card).to_be_visible()
     expect(card).to_contain_text("선택 필요")
-    expect(card.locator("button")).to_have_text(["닫기", "드라이브 선택"])
+    expect(card.locator("button")).to_have_text(["닫기", "작업 대상 선택"])
     page.locator("#alert-button").click()
     expect(page.locator(f'#alert-panel [data-key="card:{CARD_ID}"]')).to_be_visible()
     page.locator("#alert-button").click()

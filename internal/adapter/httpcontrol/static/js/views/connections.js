@@ -1,4 +1,4 @@
-// 연결 관리: Worker PC, logical drives and Agent/Host connections in one
+// 장비·에이전트: 작업 PC, logical drives and 에이전트/실행 PC connections in one
 // operational screen. Registration and credentials remain local-config work;
 // this screen shows live state and links to the owning detail. A normal state
 // in a labelled column is its icon alone.
@@ -12,9 +12,9 @@ import { route } from "../router.js";
 import { StatusIcon, Chevron, Swap, Meter, Fine, IssueTags, Empty } from "../ui.js";
 
 function admissionLabel(admission) {
-  if (admission?.available) return "추가 가능";
-  if (admission?.wait_reason) return `보류 · ${label("wait", admission.wait_reason)}`;
-  return `보류 · ${label("admission", admission?.code)}`;
+  if (admission?.available) return "새 작업 가능";
+  if (admission?.wait_reason) return `새 작업 대기 · ${label("wait", admission.wait_reason)}`;
+  return `새 작업 불가 · ${label("admission", admission?.code)}`;
 }
 
 const Capacity = ({ name, value, detail = "", signal = "", hover = "" }) => html`<div class="capacity-item" title=${hover || null} data-signal=${signal || null}>
@@ -28,9 +28,9 @@ function CapacityGrid({ worker }) {
     <${Capacity} name="GPU" value=${formatPercent(worker.gpu_average_5m)} />
     <${Capacity} name="메모리" value=${formatBytes(worker.capacity_available_memory_bytes)} hover=${`예약 ${formatBytes(worker.reserved_memory_bytes)} 차감`} />
     <${Capacity} name="작업 공간" value=${formatBytes(worker.capacity_scratch_free_bytes)} hover=${`예약 ${formatBytes(worker.reserved_scratch_bytes)} 차감`} />
-    <${Capacity} name="HEAVY" value=${`${worker.heavy_slots_used || 0}/${worker.heavy_slots_maximum || 0}`} detail=${admissionLabel(heavy)} signal=${heavy.available ? "" : "decide"} />
-    <${Capacity} name="LIGHT" value=${`${worker.light_slots_used || 0}/${worker.light_slots_maximum || 0}`} detail=${admissionLabel(light)} signal=${light.available ? "" : "decide"} />
-    <${Capacity} name="관측" value=${clockTime(worker.observed_at || worker.last_heartbeat, true)} detail=${worker.additional_work_possible ? "수용 가능" : "보류"} signal=${worker.additional_work_possible ? "" : "decide"} />
+    <${Capacity} name="고부하 작업" value=${`${worker.heavy_slots_used || 0}/${worker.heavy_slots_maximum || 0}`} detail=${admissionLabel(heavy)} signal=${heavy.available ? "" : "decide"} />
+    <${Capacity} name="일반 작업" value=${`${worker.light_slots_used || 0}/${worker.light_slots_maximum || 0}`} detail=${admissionLabel(light)} signal=${light.available ? "" : "decide"} />
+    <${Capacity} name="상태 갱신" value=${clockTime(worker.observed_at || worker.last_heartbeat, true)} detail=${worker.additional_work_possible ? "새 작업 가능" : "현재 새 작업 불가"} signal=${worker.additional_work_possible ? "" : "decide"} />
   </div>`;
 }
 
@@ -44,11 +44,11 @@ function StorageTable({ worker }) {
   const offline = stateSignal(worker.state) === "fault";
   const rows = [...seen.values()].sort((left, right) => left.storage_id.localeCompare(right.storage_id));
   return html`<div class="table storage-table" role="table">
-    <div class="trow head" role="row"><span role="columnheader">아카이브 저장소</span><span role="columnheader">접근 방식</span><span role="columnheader">접근</span><span role="columnheader">여유 / 용량</span></div>
+    <div class="trow head" role="row"><span role="columnheader">결과 저장 위치</span><span role="columnheader">연결 방식</span><span role="columnheader">상태</span><span role="columnheader">여유 / 전체</span></div>
     ${rows.length ? rows.map((storage) => html`<div class="trow" role="row" key=${storage.storage_id} data-storage-id=${storage.storage_id}>
       <b>${storage.label || storage.storage_id}</b>
       <span>${label("storageAccess", storage.access_kind)}</span>
-      ${offline ? html`<span class="muted">확인 불가</span>` : storage.accessible ? html`<${Fine} text="접근 가능" />` : html`<span class="ok"><${StatusIcon} kind="fault" />접근 안 됨</span>`}
+      ${offline ? html`<span class="muted">확인 불가</span>` : storage.accessible ? html`<${Fine} text="사용 가능" />` : html`<span class="ok"><${StatusIcon} kind="fault" />사용할 수 없음</span>`}
       <span class="num">${!offline && storage.accessible && storage.capacity_bytes ? `${formatBytes(storage.free_bytes)} / ${formatBytes(storage.capacity_bytes)}` : "—"}</span>
     </div>`) : html`<${Empty} text="저장소 없음" />`}
   </div>`;
@@ -60,11 +60,11 @@ function WorkerCard({ worker, focused }) {
   const box = useRef();
   useEffect(() => { if (focused) box.current?.scrollIntoView({ block: "nearest" }); }, [focused]);
   return html`<section class="worker-card worker-row" ref=${box} aria-label=${worker.worker_id} data-worker-id=${worker.worker_id} data-signal=${offline ? "fault" : null} data-focus=${focused ? "true" : null}>
-    <div class="worker-head" title=${`heartbeat ${clockTime(worker.last_heartbeat, true)}`}>
+    <div class="worker-head" title=${`마지막 응답 ${clockTime(worker.last_heartbeat, true)}`}>
       ${offline ? html`<span class="ok"><${StatusIcon} kind="fault" /></span>` : html`<${Fine} text=${label("worker", worker.state)} kind=${signal === "work" ? "work" : "online"} />`}
       <b class="worker-name">${worker.worker_id}</b>
       ${offline ? html`<span class="state">${label("worker", worker.state)}</span>` : null}
-      <small>${offline ? `마지막 응답 ${clockTime(worker.last_heartbeat)}` : `heartbeat ${clockTime(worker.last_heartbeat, true)}`}</small>
+      <small>마지막 응답 ${clockTime(worker.last_heartbeat, true)}</small>
     </div>
     <div class="worker-body"><${StorageTable} worker=${worker} /><${CapacityGrid} worker=${worker} /></div>
   </section>`;
@@ -103,26 +103,26 @@ export function ConnectionsScreen() {
   const detached = drives.filter((item) => item.connection_state === "DISCONNECTED").length;
   return [
     html`<div key="head" class="page-head">
-      <div class="page-title"><h1 id="connections-title" title=${`Worker PC ${workers.length} · 연결 ${online} · 드라이브 ${drives.length} (연결 ${connected} · 해제 ${detached}) · Agent ${sessions.length}`}>연결 관리</h1></div>
-      <a class="btn" href="#/settings">Agent 추가</a>
+      <div class="page-title"><h1 id="connections-title" title=${`작업 PC ${workers.length} · 연결 ${online} · 드라이브 ${drives.length} (연결 ${connected} · 해제 ${detached}) · 에이전트 ${sessions.length}`}>장비·에이전트</h1></div>
+      <a class="btn" href="#/settings">에이전트 추가</a>
     </div>`,
-    html`<section key="workers" class="section" id="connection-workers" aria-label="Worker PC">
-      <h2 class="section-title">Worker PC${" "}<span class="num" id="connection-worker-count">${workers.length}</span></h2>
+    html`<section key="workers" class="section" id="connection-workers" aria-label="작업 PC">
+      <h2 class="section-title">작업 PC${" "}<span class="num" id="connection-worker-count">${workers.length}</span></h2>
       <div class="worker-list" id="worker-list">
-        ${workers.length ? workers.map((worker) => html`<${WorkerCard} key=${worker.worker_id} worker=${worker} focused=${focusWorker === worker.worker_id} />`) : html`<${Empty} text="Worker PC 없음" />`}
+        ${workers.length ? workers.map((worker) => html`<${WorkerCard} key=${worker.worker_id} worker=${worker} focused=${focusWorker === worker.worker_id} />`) : html`<${Empty} text="작업 PC 없음" />`}
       </div>
     </section>`,
     html`<section key="drives" class="section" id="connection-drives" aria-label="드라이브">
       <h2 class="section-title">드라이브${" "}<span class="num" id="connection-drive-count">${drives.length}</span></h2>
       <div class="table drives-table" role="table">
-        <div class="trow head" role="row">${["드라이브", "연결", "Worker", "단계", "최근 작업 범위", "아카이브", "확인 필요", ""].map((text, index) => html`<span role="columnheader" key=${index}>${text}</span>`)}</div>
+        <div class="trow head" role="row">${["드라이브", "연결", "작업 PC", "현재 상태", "마지막으로 처리한 범위", "저장 위치", "직접 확인", ""].map((text, index) => html`<span role="columnheader" key=${index}>${text}</span>`)}</div>
         ${drives.length ? drives.map((current) => html`<${DriveRow} key=${current.workspace_drive_id} drive=${current} />`) : html`<${Empty} text="드라이브 없음" />`}
       </div>
     </section>`,
-    html`<section key="agents" class="section" id="connection-agents" aria-label="Agent">
-      <h2 class="section-title">Agent${" "}<span class="num" id="connection-agent-count">${sessions.length}</span></h2>
+    html`<section key="agents" class="section" id="connection-agents" aria-label="에이전트">
+      <h2 class="section-title">에이전트${" "}<span class="num" id="connection-agent-count">${sessions.length}</span></h2>
       <${AgentTable} sessions=${sessions} />
-      <h2 class="section-title connection-subtitle">Agent Host${" "}<span class="num">${hosts.length}</span></h2>
+      <h2 class="section-title connection-subtitle">에이전트 실행 PC${" "}<span class="num">${hosts.length}</span></h2>
       <${HostTable} hosts=${hosts} focus=${focusHost} />
     </section>`,
   ];
@@ -130,7 +130,7 @@ export function ConnectionsScreen() {
 
 export function AgentTable({ sessions, rowClass = "", onRemove = null, removing = "" }) {
   return html`<div class=${`table agents-table${onRemove ? " has-actions" : ""}`} role="table">
-    <div class="trow head" role="row"><span role="columnheader">Agent</span><span role="columnheader">Agent Host</span><span role="columnheader">CLI</span><span role="columnheader">상태</span>${onRemove ? html`<span role="columnheader"></span>` : null}</div>
+    <div class="trow head" role="row"><span role="columnheader">에이전트</span><span role="columnheader">실행 PC</span><span role="columnheader">실행 도구</span><span role="columnheader">상태</span>${onRemove ? html`<span role="columnheader"></span>` : null}</div>
     ${sessions.length ? sessions.map((session) => {
       const [text, signal] = availability(session);
       return html`<div class=${`trow ${rowClass}`.trim()} role="row" key=${session.session_id} data-session-id=${session.session_id}>
@@ -138,21 +138,21 @@ export function AgentTable({ sessions, rowClass = "", onRemove = null, removing 
         ${signal === "online" ? html`<${Fine} text=${text} kind="online" />` : html`<span class="ok" data-signal=${signal}><${StatusIcon} kind=${signal} />${text}</span>`}
         ${onRemove ? html`<button type="button" class="btn btn-sm" data-action="archivist-remove" disabled=${Boolean(removing)} onClick=${() => onRemove(session)}>${removing === session.session_id ? "제거 중" : "제거"}</button>` : null}
       </div>`;
-    }) : html`<${Empty} text="Agent 없음" />`}
+    }) : html`<${Empty} text="에이전트 없음" />`}
   </div>`;
 }
 
 export function HostTable({ hosts, focus = "" }) {
   return html`<div class="table hosts-table" role="table" id="host-table">
-    <div class="trow head" role="row"><span role="columnheader">Agent Host</span><span role="columnheader">상태</span><span role="columnheader">감지된 CLI</span><span role="columnheader">heartbeat</span></div>
+    <div class="trow head" role="row"><span role="columnheader">에이전트 실행 PC</span><span role="columnheader">상태</span><span role="columnheader">사용 가능한 실행 도구</span><span role="columnheader">마지막 응답</span></div>
     ${hosts.length ? hosts.map((host) => {
       const signal = stateSignal(host.state);
       return html`<div class="trow" role="row" key=${host.archivist_host_id} data-host-id=${host.archivist_host_id} data-focus=${focus === host.archivist_host_id ? "true" : null}>
         <b class="num">${host.archivist_host_id}</b>
         ${signal === "fault" ? html`<span class="ok"><${StatusIcon} kind="fault" />${label("host", host.state)}</span>` : html`<${Fine} text=${label("host", host.state)} kind=${signal === "work" ? "work" : "online"} />`}
-        <span class="num">${(host.detected_cli_ids || []).join(" · ") || "감지된 CLI 없음"}</span>
+        <span class="num">${(host.detected_cli_ids || []).join(" · ") || "실행 도구 없음"}</span>
         <span class="num muted">${clockTime(host.last_heartbeat, true)}</span>
       </div>`;
-    }) : html`<${Empty} text="Agent Host 없음" />`}
+    }) : html`<${Empty} text="에이전트 실행 PC 없음" />`}
   </div>`;
 }

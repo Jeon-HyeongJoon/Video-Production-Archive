@@ -21,7 +21,7 @@ with sync_playwright() as playwright:
     expect(stale).to_be_hidden()
     page.clock.run_for(5_000)
     expect(stale).to_be_visible()
-    expect(page.locator("#stale-text")).to_contain_text("이후 갱신 없음 · 다시 연결 중 · 판정·실행 잠김")
+    expect(page.locator("#stale-text")).to_contain_text("이후 새 정보 없음 · 다시 연결 중 · 선택과 작업 시작 잠김")
     expect(submit).to_be_disabled()
     expect(page.locator("[data-action]:enabled")).to_have_count(0)
 

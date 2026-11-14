@@ -14,16 +14,16 @@ import { StatusIcon, Glyph, GLYPH, Chevron, Swap, Meter, Fold, Presence, Crumbs,
 import { DriveOverview, Problems, SttButton, StatusLine, titleShared, useOpenProblem } from "./drive.js";
 import { MediaTable } from "./job.js";
 
-const ROLE = { INSPECTION: "검사", FOLDER: "폴더 처리", TRANSCRIPTION: "STT" };
-const LANE_TEXT = { fault: "실패", decide: "사람 대기", work: "실행 중", resource: "자원 대기", queue: "대기열", done: "완료" };
+const ROLE = { INSPECTION: "원본 확인", FOLDER: "폴더 처리", TRANSCRIPTION: "자막·텍스트" };
+const LANE_TEXT = { fault: "실패", decide: "직접 확인 필요", work: "처리 중", resource: "작업 PC 여유 대기", queue: "시작 대기", done: "완료" };
 const LANE_KIND = { fault: "fault", decide: "decide", work: "work", resource: "work", queue: "idle", done: "done" };
 
-const archiveBadge = (state) => html`<b class="archive-badge" data-state=${state}>${state === "COMMITTED" ? "확정됨" : "보관됨"}</b>`;
+const archiveBadge = (state) => html`<b class="archive-badge" data-state=${state}>${state === "COMMITTED" ? "보존 완료" : "저장 완료"}</b>`;
 
 function RunFacts({ summary }) {
   const source = summary.source_volume_id || summary.source_storage_id || "—";
   return html`<div class="facts run-facts">
-    <${Fact} label="원본 → 아카이브" value=${`${source} → ${summary.archive_storage_id || "—"}`} />
+    <${Fact} label="가져올 드라이브 → 저장 위치" value=${`${source} → ${summary.archive_storage_id || "—"}`} />
     <${Fact} label="폴더" value=${formatCount(summary.folder_count)} />
     <${Fact} label="영상" value=${formatCount(summary.video_count)} />
   </div>`;
@@ -69,7 +69,7 @@ function RunningJobs({ drive: current }) {
   const counts = { queued: 0, done: 0 };
   for (const folder of current.folders) {
     const state = folderState(folder);
-    if (state.word === "대기열") counts.queued += 1;
+    if (state.word === "시작 대기") counts.queued += 1;
     else if (state.signal === "done") counts.done += 1;
   }
   return html`<section class="section" id="run-running" aria-label="진행 중 작업">
@@ -88,7 +88,7 @@ function RunningJobs({ drive: current }) {
 function FolderJobRow({ driveID, name }) {
   const folder = store.folders.get(folderKey(driveID, name))?.value;
   if (!folder) return null;
-  const stage = folder.transcription_job_id ? "2단계 전사" : "1단계 정리";
+  const stage = folder.transcription_job_id ? "자막·텍스트 만들기" : "영상 정리·저장";
   // A resource wait shows as waiting; its reason stays in the folder's steps.
   const now = (folder.stages || []).find((item) => !["COMPLETED", "FAILED", "CANCELLED"].includes(item.state));
   const word = now ? `${label("stage", now.stage_id)} ${now.state === "WAITING" ? "대기" : "중"}` : "진행 중";
@@ -116,7 +116,7 @@ function ChildWork({ child }) {
   };
   return html`<div class="child-work" data-job-id=${job.job_id} data-lane=${lane} data-open=${open ? "true" : "false"}>
     <div class="child-line">
-      <button type="button" class="child-row" aria-expanded=${open ? "true" : "false"} title=${`${job.job_id}\nWorker ${job.worker_id || "배정 없음"}`} onClick=${toggle}>
+      <button type="button" class="child-row" aria-expanded=${open ? "true" : "false"} title=${`${job.job_id}\n작업 PC ${job.worker_id || "배정 없음"}`} onClick=${toggle}>
         <b>${child.folder || ROLE[child.role] || child.role}</b>
         <span class="muted">${ROLE[child.role] || child.role} · 영상 정보</span>
         <span class="state"><${StatusIcon} kind=${LANE_KIND[lane]} />${LANE_TEXT[lane] || label("step", job.step_state)}</span>
@@ -139,8 +139,8 @@ function ChildMedia({ jobID }) {
 
 function Results({ items, selected }) {
   if (!items.length) return null;
-  return html`<section class="section" id="run-results" aria-label="결과">
-    <h2 class="section-title">결과${" "}<span class="num">${formatCount(items.length)}</span></h2>
+  return html`<section class="section" id="run-results" aria-label="저장된 결과">
+    <h2 class="section-title">저장된 결과${" "}<span class="num">${formatCount(items.length)}</span></h2>
     <div class="results">
       ${items.map((item) => html`<div class="result-row run-result" key=${item.archive_package_id} data-package-id=${item.archive_package_id} data-job-id=${item.job_id}
         data-selected=${item.archive_package_id === selected ? "true" : null}>
@@ -167,7 +167,7 @@ function Scope({ names, current }) {
           const folder = current ? store.folders.get(folderKey(current.workspace_drive_id, name))?.value : null;
           const state = folder ? folderState(folder) : null;
           return html`<div class="trow scope-row" role="row" key=${name} data-folder-id=${name}>
-            <b>${name}</b>${state ? html`<span class="state"><${StatusIcon} kind=${folder.archive_state ? "done" : state.signal} />${folder.archive_state ? (folder.archive_state === "COMMITTED" ? "확정됨" : "보관됨") : state.word}</span>` : html`<span></span>`}
+            <b>${name}</b>${state ? html`<span class="state"><${StatusIcon} kind=${folder.archive_state ? "done" : state.signal} />${folder.archive_state ? (folder.archive_state === "COMMITTED" ? "보존 완료" : "저장 완료") : state.word}</span>` : html`<span></span>`}
           </div>`;
         }) : html`<${Empty} text="폴더 없음" />`}
       </div>
@@ -185,7 +185,7 @@ export function RunScreen({ id }) {
   if (!summary) {
     return answer.value === undefined && !answer.error
       ? html`<div class="boot-view"><span class="skel boot-title"></span><span class="skel-card boot-card"></span></div>`
-      : html`<${Empty} text="아카이브 작업을 찾을 수 없음" />`;
+      : html`<${Empty} text="영상 정리·보관 작업을 찾을 수 없음" />`;
   }
   const title = workTitle(summary);
   const trace = [`작업 ID ${summary.work_id}`, `Worker ${summary.worker_id || "배정 없음"}`, `하위 작업 ${formatCount(summary.child_job_count)}`, `결과 ${formatCount(summary.result_count)}`].join("\n");
@@ -194,7 +194,7 @@ export function RunScreen({ id }) {
   const scope = detail?.folder_ids || current?.scope || [];
   const holdLink = !current && summary.hold_count > 0;
   return [
-    html`<${Crumbs} key="crumbs" items=${[["작업 관리", "#/jobs"], [title]]} />`,
+    html`<${Crumbs} key="crumbs" items=${[["작업", "#/jobs"], [title]]} />`,
     html`<div key="head" class="page-head">
       <div class="page-title">
         <h1 id="run-title" class=${titleShared(route.value.full) ? "shared" : null}>${title}</h1>
@@ -211,10 +211,10 @@ export function RunScreen({ id }) {
     html`<${StatusLine} key="status" />`,
     html`<${FailureHistory} key="failures" failures=${detail?.failures || []} summary=${summary} />`,
     current ? html`<${Problems} key="problems" drive=${current} items=${driveProblems(current)} id="run-attention" />` : null,
-    holdLink ? html`<section key="holds" class="section" id="run-attention" aria-label="확인 필요">
-      <h2 class="section-title">확인 필요${" "}<span class="num">1</span></h2>
+    holdLink ? html`<section key="holds" class="section" id="run-attention" aria-label="직접 확인할 항목">
+      <h2 class="section-title">직접 확인할 항목${" "}<span class="num">1</span></h2>
       <a class="problem-panel attention-link" data-kind="hold" data-signal="decide" href=${`#/drives/${encodeURIComponent(summary.source_volume_id)}`}>
-        <span class="problem-head"><${StatusIcon} kind="decide" /><span class="problem-line"><b>분류 확인 필요</b><span>${formatCount(summary.hold_count)} 폴더 · 드라이브에서 판정</span></span><span></span><${Glyph} d=${GLYPH.next} /></span>
+        <span class="problem-head"><${StatusIcon} kind="decide" /><span class="problem-line"><b>처리 방법 선택 필요</b><span>${formatCount(summary.hold_count)} 폴더 · 드라이브에서 선택</span></span><span></span><${Glyph} d=${GLYPH.next} /></span>
       </a>
     </section>` : null,
     current && ["stage1", "stage2"].includes(workPhase(summary)) ? html`<${RunningJobs} key="running" drive=${current} />` : null,

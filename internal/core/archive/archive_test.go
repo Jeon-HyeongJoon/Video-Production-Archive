@@ -240,7 +240,7 @@ func TestStorageRootRejectsTraversalAbsoluteUNCAndSymlinkEscape(t *testing.T) {
 		t.Fatalf("safe path rejected: %v", err)
 	}
 	file.Close()
-	for _, unsafe := range []string{"../escape.mov", "/absolute.mov", `C:\escape.mov`, `\\server\share\file.mov`} {
+	for _, unsafe := range []string{"../escape.mov", "/absolute.mov", `\absolute.mov`, `C:\escape.mov`, `\\server\share\file.mov`} {
 		if _, err := storageRoot.Open(unsafe); !errors.Is(err, ErrUnsafeStoragePath) {
 			t.Fatalf("unsafe path %q accepted: %v", unsafe, err)
 		}

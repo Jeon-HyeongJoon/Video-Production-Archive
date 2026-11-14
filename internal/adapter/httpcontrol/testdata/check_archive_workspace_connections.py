@@ -9,7 +9,7 @@ with sync_playwright() as playwright:
     page.goto(sys.argv[1] + "/#/connections", wait_until="networkidle")
 
     expect(page.locator('#menu [data-menu="connections"]')).to_have_attribute("aria-current", "page")
-    expect(page.locator("#connections-title")).to_have_text("연결 관리")
+    expect(page.locator("#connections-title")).to_have_text("장비·에이전트")
     expect(page.locator("#connection-worker-count")).to_have_text("2")
     expect(page.locator("#connection-drive-count")).to_have_text("2")
     expect(page.locator("#connection-agent-count")).to_have_text("1")

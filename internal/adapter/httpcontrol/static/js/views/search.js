@@ -6,7 +6,7 @@ import { formatSize, shortTime, api } from "../core.js";
 import { route } from "../router.js";
 import { Fact, Empty, Skeleton, highlight } from "../ui.js";
 
-const AUTHOR = { HUMAN: "담당자", ARCHIVIST: "Agent", SYSTEM: "시스템" };
+const AUTHOR = { HUMAN: "담당자", ARCHIVIST: "에이전트", SYSTEM: "시스템" };
 
 function timecode(millis) {
   const total = Math.floor((millis || 0) / 1000);
@@ -59,7 +59,7 @@ export function SearchScreen() {
     list = hits.length ? hits.map((hit, index) => html`<button type="button" class="result-item result-row hit" key=${`${hit.original_asset_id}${index}`} data-asset-id=${hit.original_asset_id}
       onClick=${() => setSelected(hit.original_asset_id)}>
       <span class="timecode">${timecode(hit.segment.start_millis)}</span><span>${highlight(hit.segment.text, query)}<br /><small class="num">${hit.original_asset_id}</small></span>
-    </button>`) : html`<${Empty} text="전사문에서 찾지 못함" />`;
+    </button>`) : html`<${Empty} text="자막·텍스트에서 찾지 못함" />`;
   }
   const inspection = item?.inspection;
   const video = inspection?.video_streams?.[0];
@@ -67,13 +67,13 @@ export function SearchScreen() {
     html`<div key="head" class="page-head">
       <div class="page-title"><h1 id="search-query" title=${query ? `“${query}”` : "검색어 없음"}>${query ? `“${query}” 검색 결과` : "검색"}</h1><small class="sub">사이드바 검색칸에 쓰고 Enter · 단축키 /</small></div>
       <div class="seg plain-seg" id="search-scopes" role="group" aria-label="검색 대상">
-        ${[["assets", "자료", assets.length], ["text", "전사문", hits.length]].map(([key, text, count]) => html`<button type="button" key=${key} data-scope=${key}
+        ${[["assets", "보관 영상", assets.length], ["text", "자막·텍스트", hits.length]].map(([key, text, count]) => html`<button type="button" key=${key} data-scope=${key}
           aria-pressed=${scope === key ? "true" : "false"} onClick=${() => setScope(key)}>${text} <span class="num">${count}</span></button>`)}
       </div>
     </div>`,
     html`<div key="split" class="split">
       <section class="panel results-panel" id="search-results" aria-label="검색 결과">${list}</section>
-      <section class="panel detail-panel" id="record-detail" aria-label="기록물 상세">
+      <section class="panel detail-panel" id="record-detail" aria-label="보관 영상 상세">
         ${item ? html`<div class="panel-toolbar"><b>${item.metadata.title || item.original.original_name}</b><span class="faint-id">${item.original.id}</span></div>
           <div class="detail-body">
             <div class="facts">
@@ -82,10 +82,10 @@ export function SearchScreen() {
               <${Fact} label="길이" value=${duration(inspection?.duration_millis)} />
               <${Fact} label="기술정보" value=${video ? `${video.codec} · ${video.width}×${video.height}` : "—"} />
               <${Fact} label="checksum" value=${`${item.original.checksum.slice(0, 12)}…`} />
-              <${Fact} label="입고" value=${shortTime(item.original.registered_at)} />
+              <${Fact} label="등록" value=${shortTime(item.original.registered_at)} />
             </div>
             <div class="catalog-box">
-              <span class="fact-label">카탈로그 r${item.metadata.revision}</span>
+              <span class="fact-label">영상 정보 r${item.metadata.revision}</span>
               <p class="summary-text">${item.metadata.description || "—"}</p>
               <div class="keyword-list mentions">${(item.metadata.keywords || []).map((keyword) => html`<span class="ref-chip mention" key=${keyword}>${keyword}</span>`)}</div>
               <small class="muted">${AUTHOR[item.metadata.author_type] || item.metadata.author_type} 작성</small>
@@ -93,7 +93,7 @@ export function SearchScreen() {
             <div class="segments"><span class="fact-label">요약</span>
               ${summaries.length ? summaries.map((entry) => html`<span key=${entry.id}>r${entry.revision} · ${entry.content?.text || entry.id}</span>`) : html`<span class="muted">요약 없음</span>`}
             </div>
-          </div>` : html`<${Empty} text="기록물 선택 없음" />`}
+          </div>` : html`<${Empty} text="보관 영상을 선택하세요" />`}
       </section>
     </div>`,
   ];

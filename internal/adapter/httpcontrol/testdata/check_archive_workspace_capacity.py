@@ -16,12 +16,12 @@ with sync_playwright() as playwright:
     expect(capacity).to_contain_text("작업 공간395 GB")
     expect(capacity.locator(".capacity-item", has_text="메모리")).to_have_attribute("title", re.compile(re.escape("예약 4.0 GB")))
     expect(capacity.locator(".capacity-item", has_text="작업 공간")).to_have_attribute("title", re.compile(re.escape("예약 25 GB")))
-    expect(capacity).to_contain_text("HEAVY1/1보류 · 슬롯")
-    expect(capacity).to_contain_text("LIGHT0/2추가 가능")
-    expect(capacity).to_contain_text("관측")
-    expect(capacity).to_contain_text("수용 가능")
+    expect(capacity).to_contain_text("고부하 작업1/1새 작업 대기 · 처리 순서")
+    expect(capacity).to_contain_text("일반 작업0/2새 작업 가능")
+    expect(capacity).to_contain_text("상태 갱신")
+    expect(capacity).to_contain_text("새 작업 가능")
     offline = page.locator('#worker-list [data-worker-id="WORKER-2"] .capacity-grid')
-    expect(offline).to_contain_text("HEAVY0/1보류 · 꺼짐")
+    expect(offline).to_contain_text("고부하 작업0/1새 작업 불가 · 연결되지 않음")
 
     projected = page.evaluate("""async () => {
       const response = await fetch('/api/v1/workers');

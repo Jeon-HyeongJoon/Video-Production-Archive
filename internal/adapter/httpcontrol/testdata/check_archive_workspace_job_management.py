@@ -11,7 +11,7 @@ with sync_playwright() as playwright:
 
     links = page.locator("#menu .menu-link")
     expect(links).to_have_count(2)
-    expect(links.locator(".menu-label")).to_have_text(["작업 관리", "연결 관리"])
+    expect(links.locator(".menu-label")).to_have_text(["작업", "장비·에이전트"])
     expect(links.first).to_have_attribute("data-menu", "jobs")
     expect(links.first).to_have_attribute("aria-current", "page")
 
@@ -39,10 +39,10 @@ with sync_playwright() as playwright:
     # Queue admission is visible as its own operational list instead of being
     # mixed into running work. It is still a projection of persisted Job/Step.
     queue = page.locator("#queued-jobs")
-    expect(queue.locator(".section-title")).to_have_text("작업 큐 1")
+    expect(queue.locator(".section-title")).to_have_text("시작 대기 1")
     queued = queue.locator('.work-row[data-work-id="JOB-QUEUED"]')
     expect(queued).to_be_visible()
-    expect(queued.locator(".job-state")).to_have_text("대기열")
+    expect(queued.locator(".job-state")).to_have_text("시작 대기")
     expect(page.locator('#active-jobs .work-row[data-work-id="JOB-QUEUED"]')).to_have_count(0)
 
     # Job failures and human waits are the collapsible attention list. Folder,
@@ -50,9 +50,9 @@ with sync_playwright() as playwright:
     attention = page.locator("#attention-jobs")
     toggle = attention.locator(".lane-toggle")
     expect(attention).to_have_attribute("data-open", "true")
-    expect(toggle).to_have_text("확인 필요 1")
+    expect(toggle).to_have_text("직접 확인할 항목 1")
     expect(attention.locator('.work-row[data-work-id="JOB-REVIEW"]')).to_be_visible()
-    expect(attention.locator('.work-row[data-work-id="JOB-REVIEW"] .job-state')).to_have_text("확인 필요")
+    expect(attention.locator('.work-row[data-work-id="JOB-REVIEW"] .job-state')).to_have_text("직접 확인 필요")
     expect(attention.locator(".work-row")).to_have_count(1)
     toggle.click()
     expect(attention).to_have_attribute("data-open", "false")

@@ -39,7 +39,7 @@ function cardScope(card) {
     const current = allDrives.value.find((item) => item.archive_run_id === card.target_id);
     return `${card.target_id} · 대상 ${formatCount(current?.eligible_transcription_count)} 폴더`;
   }
-  if (card.command_type === "archive_intake.selection.required") return "Worker · 원본 · 아카이브 · 폴더";
+  if (card.command_type === "archive_intake.selection.required") return "작업 PC · 가져올 드라이브 · 저장할 위치 · 처리할 폴더";
   return card.target_id || "—";
 }
 
@@ -58,14 +58,14 @@ const EntryRow = ({ entry }) => {
 function RefsFold({ refs, cls }) {
   if (!refs.length) return null;
   return html`<details class=${`refs-fold ${cls}`}>
-    <summary>참조 <span class="num">${refs.length}</span></summary>
+    <summary>첨부한 작업 <span class="num">${refs.length}</span></summary>
     <div class="message-refs">${refs.map((value) => html`<span class="ref-chip" key=${value}>${value}</span>`)}</div>
   </details>`;
 }
 
 function referenceLabels(selection, work) {
   const values = selectionRefs(selection);
-  if (work) values.unshift(`${work.kind === "JOB" ? "작업" : "아카이브 실행"} · ${work.work_id} · r${work.revision}`);
+  if (work) values.unshift(`${work.kind === "JOB" ? "작업" : "영상 정리·보관"} · ${work.work_id} · r${work.revision}`);
   return values;
 }
 
@@ -77,7 +77,7 @@ function UserBubble({ turn }) {
 }
 
 const SystemRow = ({ turn }) => html`<div class="message system" data-turn-id=${turn.turn_id}>
-  <span>재호출 · ${turn.prompt || turn.request_id}</span><span class="num">${clockTime(turn.created_at)}</span>
+  <span>자동으로 이어서 진행 · ${turn.prompt || turn.request_id}</span><span class="num">${clockTime(turn.created_at)}</span>
   ${finishedTurns.has(turn.state) ? null : html`<span class="token">${label("turn", turn.state)}</span>`}
 </div>`;
 
@@ -122,9 +122,9 @@ function AskCard({ card }) {
       <div class="ask-actions">
         ${selection
           ? [html`<button type="button" key="close" class="btn btn-sm" data-action="card-reject" disabled=${stale.value} onClick=${() => decideCard(card.action_card_id, "reject", "선택 요청 닫음")}>닫기</button>`,
-            html`<button type="button" key="select" class="btn btn-sm primary" onClick=${() => { openNewWork(); go("#/jobs"); }}>드라이브 선택</button>`]
-          : [html`<button type="button" key="reject" class="btn btn-sm" data-action="card-reject" disabled=${stale.value} onClick=${() => decideCard(card.action_card_id, "reject")}>거절</button>`,
-            html`<button type="button" key="run" class="btn btn-sm primary" data-action="card-execute" disabled=${stale.value} onClick=${() => decideCard(card.action_card_id, "execute")}>${card.approval_required ? "승인" : "실행"}</button>`]}
+            html`<button type="button" key="select" class="btn btn-sm primary" onClick=${() => { openNewWork(); go("#/jobs"); }}>작업 대상 선택</button>`]
+          : [html`<button type="button" key="reject" class="btn btn-sm" data-action="card-reject" disabled=${stale.value} onClick=${() => decideCard(card.action_card_id, "reject")}>하지 않기</button>`,
+            html`<button type="button" key="run" class="btn btn-sm primary" data-action="card-execute" disabled=${stale.value} onClick=${() => decideCard(card.action_card_id, "execute")}>${card.approval_required ? "승인" : "진행"}</button>`]}
       </div>
     </div>
   </div>`;
@@ -139,7 +139,7 @@ function LiveLine({ turn }) {
   const row = running ? html`<${ToolRow} call=${running} />`
     : entries.length ? html`<${EntryRow} entry=${entries[entries.length - 1]} />`
       : calls.length ? html`<${ToolRow} call=${calls[calls.length - 1]} />`
-        : html`<li class="tool turn-entry" data-kind="STATE" data-signal="work"><${StatusIcon} kind="work" /><b class="turn-entry-kind">${isSystem(turn) ? "재호출" : "진행"}</b><span>${isSystem(turn) ? turn.prompt || turn.request_id : ""}</span></li>`;
+        : html`<li class="tool turn-entry" data-kind="STATE" data-signal="work"><${StatusIcon} kind="work" /><b class="turn-entry-kind">${isSystem(turn) ? "자동 진행" : "진행"}</b><span>${isSystem(turn) ? turn.prompt || turn.request_id : ""}</span></li>`;
   return html`<div class="turn-live" data-turn-id=${turn.turn_id}><ul class="tools">${row}</ul><span class="token">${label("turn", turn.state)}</span></div>`;
 }
 
@@ -153,7 +153,7 @@ function TraceTurn({ turn, session, source, summary, excludeFailure }) {
   return [
     source ? html`<${SystemRow} key="source" turn=${turn} />` : null,
     calls.length || entries.length || text ? html`<div key="answer" class="turn message archivist" data-turn-id=${turn.turn_id} data-settled=${String(settled)}>
-      <div class="turn-head message-head">Agent · ${settled ? `${label("turn", turn.state)} · ${clockTime(turn.updated_at)}` : label("turn", turn.state)}</div>
+      <div class="turn-head message-head">에이전트 · ${settled ? `${label("turn", turn.state)} · ${clockTime(turn.updated_at)}` : label("turn", turn.state)}</div>
       ${text ? html`<div class="text message-body">${text}</div>` : null}
       ${text ? html`<${Mentions} ids=${turn.final_response?.result_ids} />` : null}
       ${calls.length || entries.length ? html`<ul class="tools turn-trace">${entries.map((entry, index) => html`<${EntryRow} key=${`e${index}`} entry=${entry} />`)}${calls.map((call) => html`<${ToolRow} key=${call.tool_call_id || call.tool_name} call=${call} />`)}</ul>` : null}
@@ -197,7 +197,7 @@ function unitItems(unit, session) {
   const calls = turns.reduce((count, turn) => count + (turn.tool_calls || []).length, 0);
   const recalls = turns.filter((turn) => turn !== origin && isSystem(turn)).length;
   const end = (final || active || turns[turns.length - 1]).updated_at;
-  const foldText = traced.length ? `작업 내역 · 도구 ${calls}${recalls ? ` · 재호출 ${recalls}` : ""}${settled ? ` · ${minutesBetween(origin.created_at, end)}` : ""}` : "";
+  const foldText = traced.length ? `처리 내역 · 실행 ${calls}${recalls ? ` · 자동 이어서 ${recalls}` : ""}${settled ? ` · ${minutesBetween(origin.created_at, end)}` : ""}` : "";
   if (shown || active || failure || foldText) {
     items.push({ key: `a:${unit.key}`, kind: "answer", unit, origin, active, shown, failed, failure, settled, foldText, session });
   }
@@ -213,7 +213,7 @@ const head = (item) => (item.active ? label("turn", item.active.state)
 function Answer({ item }) {
   const { unit, origin, active, shown, failed, failure, settled, foldText, session } = item;
   return html`<div class=${`turn message archivist${unit.workID && settled ? " work-result" : ""}`} data-turn-id=${unit.workID ? null : origin.turn_id} data-work-id=${unit.workID || null} data-settled=${String(settled)}>
-    <div class="turn-head message-head">Agent · ${head(item)}</div>
+    <div class="turn-head message-head">에이전트 · ${head(item)}</div>
     ${shown ? html`<div class="text message-body">${shown.final_response.summary}</div>` : failure ? html`<ul class="tools"><${EntryRow} entry=${failure} /></ul>` : null}
     ${active ? html`<${LiveLine} turn=${active} />` : null}
     ${foldText ? html`<details class=${`turn-work${unit.workID ? " work-fold" : ""}`} data-work-id=${unit.workID || null} data-turn-id=${unit.workID ? null : origin.turn_id}>
@@ -301,26 +301,26 @@ function Composer({ session, enabled, reason }) {
   return html`<form id="archivist-compose" class="composer" onSubmit=${submit}>
     ${enabled && !text ? html`<button type="button" class="starter" data-action="send" disabled=${disabled} onClick=${() => send(STARTER)}>“${STARTER}”</button>` : null}
     <div class="composer-box">
-      ${picker ? html`<div class="picker" role="listbox" aria-label="참조할 작업">
+      ${picker ? html`<div class="picker" role="listbox" aria-label="첨부할 작업">
         ${choices.length ? choices.map(([item, ref]) => html`<button type="button" key=${item.work_id} onClick=${() => { setPicked(ref); setUseScreen(false); setPicker(false); input.current?.focus(); }}>
           <${StatusIcon} kind="idle" />${workTitle(item)}<small class="faint-id">${item.work_id}</small></button>`) : html`<p class="chooser-empty">고를 작업 없음</p>`}
       </div>` : null}
       <div class="chips">
-        ${showRefs ? html`<span class="chip ctx-chip" title=${picked ? "참조" : "지금 보고 있는 화면"}>
+        ${showRefs ? html`<span class="chip ctx-chip" title=${picked ? "첨부한 작업" : "지금 보고 있는 화면"}>
           <${Glyph} d=${GLYPH.screen} />
           <details id="pane-refs" class="refs-fold pane-refs">
-            <summary>${refs.length ? html`참조 <span class="num">${refs.length}</span>` : "선택 미완료"}</summary>
+            <summary>${refs.length ? html`작업 첨부 <span class="num">${refs.length}</span>` : "작업 대상 선택 미완료"}</summary>
             <span id="selection-chips" class="pane-chips">${refs.map((value) => html`<span class="selection-chip" key=${value}>${value}</span>`)}</span>
           </details>
-          <button type="button" aria-label="참조 빼기" onClick=${() => { setUseScreen(false); setPicked(null); }}><${Glyph} d=${GLYPH.close} /></button>
+          <button type="button" aria-label="첨부한 작업 빼기" onClick=${() => { setUseScreen(false); setPicked(null); }}><${Glyph} d=${GLYPH.close} /></button>
         </span>` : null}
-        <button type="button" class="chip chip-add" aria-expanded=${picker ? "true" : "false"} onClick=${() => setPicker(!picker)}>+ 참조</button>
+        <button type="button" class="chip chip-add" aria-expanded=${picker ? "true" : "false"} onClick=${() => setPicker(!picker)}>+ 작업 첨부</button>
       </div>
-      <textarea ref=${input} id="archivist-message" name="prompt" rows="1" aria-label="메시지" placeholder=${`${session?.name || "Agent"}에게 지시`}
+      <textarea ref=${input} id="archivist-message" name="prompt" rows="1" aria-label="메시지" placeholder="할 일을 입력하세요"
         value=${text} disabled=${!enabled} onInput=${(event) => setText(event.currentTarget.value)}
         onKeyDown=${(event) => { if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); send(event.currentTarget.value); } }}></textarea>
       <div class="composer-foot">
-        <select id="archivist-session-select" class="model" aria-label="Agent 선택" value=${session?.session_id || ""} title=${session ? `${session.archivist_host_id} · ${session.cli_id}` : ""}
+        <select id="archivist-session-select" class="model" aria-label="에이전트 선택" value=${session?.session_id || ""} title=${session ? `${session.archivist_host_id} · ${session.cli_id}` : ""}
           onChange=${(event) => { ui.sessionID.value = event.currentTarget.value; }}>
           ${allSessions.value.map((item) => html`<option key=${item.session_id} value=${item.session_id}>${item.cli_id} · ${item.name || item.session_id}</option>`)}
         </select>
@@ -341,7 +341,7 @@ export function AgentPane() {
   const active = activeTurn(session);
   const host = hostFor(session);
   const enabled = Boolean(session && host?.state === "ONLINE" && !active);
-  const reason = !session ? "Agent 없음" : host?.state !== "ONLINE" ? "Host 꺼짐" : active ? `응답 대기 · ${label("turn", active.state)}` : "";
+  const reason = !session ? "에이전트 없음" : host?.state !== "ONLINE" ? "에이전트 실행 PC가 연결되지 않음" : active ? `응답 대기 · ${label("turn", active.state)}` : "";
   const thread = useRef();
   const inner = useRef();
   const [unread, setUnread] = useState(0);
@@ -374,12 +374,12 @@ export function AgentPane() {
     await settle();
     thread.current?.scrollTo({ top: thread.current.scrollHeight, behavior: reducedMotion.matches ? "auto" : "smooth" });
   };
-  return html`<aside id="archivist-pane" class="agent-pane" data-open=${ui.agentOpen.value ? "true" : "false"} aria-label="Agent">
+  return html`<aside id="archivist-pane" class="agent-pane" data-open=${ui.agentOpen.value ? "true" : "false"} aria-label="에이전트">
     <div class="pane-head">
-      <div class="pane-title"><b>Agent</b><small class="pane-availability"><${StatusIcon} kind=${signal} /><span id="archivist-availability" data-signal=${signal}>${text}</span></small></div>
-      <button type="button" class="pane-icon pane-close" aria-label="Agent 칸 닫기" title="Agent 칸 닫기" onClick=${() => { ui.agentOpen.value = false; }}><${Glyph} d=${GLYPH.close} /></button>
+      <div class="pane-title"><b>에이전트</b><small class="pane-availability"><${StatusIcon} kind=${signal} /><span id="archivist-availability" data-signal=${signal}>${text}</span></small></div>
+      <button type="button" class="pane-icon pane-close" aria-label="에이전트 칸 닫기" title="에이전트 칸 닫기" onClick=${() => { ui.agentOpen.value = false; }}><${Glyph} d=${GLYPH.close} /></button>
     </div>
-    <section id="archivist-panel" class="pane-body" aria-label="Agent 대화">
+    <section id="archivist-panel" class="pane-body" aria-label="에이전트 대화">
       <div class="thread-wrap">
         <div id="archivist-thread" class="thread" ref=${thread} onScroll=${onScroll} aria-live="polite">
           <div class="thread-inner" ref=${inner}>

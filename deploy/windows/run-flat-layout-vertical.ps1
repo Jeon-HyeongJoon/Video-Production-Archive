@@ -51,6 +51,9 @@ $sourceBytes = (Get-Item -LiteralPath $sourceTarget).Length
 $archiveDate = $PackageID.Substring(3, 8)
 $archiveDate = $archiveDate.Substring(0, 4) + '-' + $archiveDate.Substring(4, 2) + '-' + $archiveDate.Substring(6, 2)
 $packageSuffix = $PackageID.Substring(12)
+if ($packageSuffix.Length -gt 12) {
+    $packageSuffix = $packageSuffix.Substring($packageSuffix.Length - 12)
+}
 $resultFolder = $archiveDate + '_windows-vertical__' + $packageSuffix
 $metadataRelative = $resultFolder + '/.archive-package.json'
 $sourceReference = [ordered]@{

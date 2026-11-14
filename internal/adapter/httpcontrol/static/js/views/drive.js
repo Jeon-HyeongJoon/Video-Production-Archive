@@ -17,10 +17,10 @@ import { route, go, onRepeat, shared } from "../router.js";
 import { StatusIcon, Glyph, GLYPH, Chevron, Swap, Meter, Fold, Presence, Crumbs, Fine, Empty, useLinger } from "../ui.js";
 
 const WORK_CHOICE_LABELS = {
-  "RENDER_RECORDINGS:6000": ["render-6000", "개별 렌더 6M"],
-  "RENDER_RECORDINGS:20000": ["render-20000", "개별 렌더 20M"],
-  "COMPILE_SOURCE_SEQUENCE:0": ["source", "소스 시퀀스"],
-  "ORGANIZE_AS_IS:0": ["as-is", "그대로 보관"],
+  "RENDER_RECORDINGS:6000": ["render-6000", "영상별 변환 · 6Mbps"],
+  "RENDER_RECORDINGS:20000": ["render-20000", "영상별 변환 · 20Mbps"],
+  "COMPILE_SOURCE_SEQUENCE:0": ["source", "여러 영상 합치기"],
+  "ORGANIZE_AS_IS:0": ["as-is", "원본 그대로 저장"],
 };
 const DATE = /(\d{4})-(\d{2})-(\d{2})/;
 const pad = (value) => String(value).padStart(2, "0");
@@ -28,24 +28,24 @@ const pad = (value) => String(value).padStart(2, "0");
 // ─── Overview: phase, archived video share and the stage summary ───────────
 
 const INFO = {
-  classification: ["영상 기술정보와 정책으로 처리 방식 결정 · 그대로 보관 / 개별 렌더 / 소스 시퀀스 / 보류", "모든 폴더"],
-  markers: ["짧은 Clip 순서와 컷 마커 고정 · 통합 렌더 입력", "소스 시퀀스"],
-  render: ["1080p 렌더 · 개별 렌더 6Mbps(선택 시 20Mbps) · 소스 시퀀스 20Mbps 통합", "개별 렌더 · 소스 시퀀스"],
-  qc: ["결과 영상을 원본 기술정보·렌더 Profile과 대조하는 검사", "보류를 뺀 모든 폴더"],
-  archive: ["아카이브 저장소에 복사 · checksum 검증 뒤 보관됨", "보류를 뺀 모든 폴더"],
-  gate: ["1단계 실행 작업이 0이면 열림 · 담당자가 2단계 시작 선택", "보관된 그대로 보관 · 개별 렌더"],
-  audio: ["STT 입력용 16kHz mono 오디오 추출", "STT 대상"],
-  transcript: ["음성을 시간 구간 전사문으로 인식", "STT 대상"],
-  subtitle: ["전사문 시간 구간으로 SRT 자막 생성 · 전사 텍스트와 동시 진행", "STT 대상"],
-  transcript_text: ["전사문을 시간순으로 합친 전사 텍스트 · 자막과 동시 진행", "STT 대상"],
-  add: ["전사문·자막·전사 텍스트를 보관 패키지의 새 리비전으로 게시", "STT 대상"],
-  catalog: ["아카이브 카탈로그 · 원본 영상마다 1행 · 1단계와 2단계 뒤 갱신", "모든 원본 영상"],
+  classification: ["영상 기술정보와 정책으로 처리 방식 결정 · 원본 그대로 저장 / 영상별 변환 / 여러 영상 합치기 / 직접 선택", "모든 폴더"],
+  markers: ["짧은 영상의 순서와 구간 표시 고정 · 합칠 영상 입력", "여러 영상 합치기"],
+  render: ["1080p 변환 · 영상별 6Mbps(선택 시 20Mbps) · 여러 영상은 20Mbps로 합침", "영상별 변환 · 여러 영상 합치기"],
+  qc: ["결과 영상을 원본 기술정보·변환 설정과 대조하는 검사", "처리 방법 선택이 필요한 폴더를 뺀 모든 폴더"],
+  archive: ["결과 저장 위치에 복사 · checksum 검증 뒤 저장 완료", "처리 방법 선택이 필요한 폴더를 뺀 모든 폴더"],
+  gate: ["영상 정리·저장에 남은 작업이 없으면 열림 · 담당자가 자막·텍스트 만들기 선택", "저장 완료된 원본 그대로 저장 · 영상별 변환"],
+  audio: ["음성 인식용 16kHz mono 오디오 준비", "자막·텍스트 대상"],
+  transcript: ["음성을 시간 구간 텍스트로 인식", "자막·텍스트 대상"],
+  subtitle: ["인식한 시간 구간으로 SRT 자막 생성 · 텍스트 파일과 동시 진행", "자막·텍스트 대상"],
+  transcript_text: ["인식한 내용을 시간순으로 합친 텍스트 파일 생성 · 자막과 동시 진행", "자막·텍스트 대상"],
+  add: ["음성 인식 결과·자막·텍스트 파일을 저장된 결과의 새 버전으로 게시", "자막·텍스트 대상"],
+  catalog: ["영상 목록 파일 · 원본 영상마다 1행 · 영상 저장과 자막·텍스트 생성 뒤 갱신", "모든 원본 영상"],
 };
 const GROUPS = [
-  ["one", "1단계 정리", ["classification", "markers", "render", "qc", "archive"]],
+  ["one", "영상 정리·저장", ["classification", "markers", "render", "qc", "archive"]],
   ["gate", "", ["gate"]],
-  ["two", "2단계 전사", ["audio", "transcript", "subtitle", "transcript_text", "add"]],
-  ["record", "기록", ["catalog"]],
+  ["two", "자막·텍스트 만들기", ["audio", "transcript", "subtitle", "transcript_text", "add"]],
+  ["record", "영상 목록", ["catalog"]],
 ];
 const WORDS = { todo: "아직", part: "일부 지남", now: "지금 진행", done: "모두 지남", closed: "닫힘", ask: "시작 선택", skip: "대상 없음" };
 const PROBLEM_STEPS = ["classification", "markers", "render", "qc", "archive", "audio", "transcript", "subtitle", "transcript_text", "add"];
@@ -77,7 +77,7 @@ function tallyState(counts) {
 }
 
 function tallyLines(counts) {
-  return [["완료", counts.done], ["진행", counts.now], ["대기열", counts.queued], ["확인 필요", counts.decide], ["실패", counts.fault]]
+  return [["완료", counts.done], ["진행", counts.now], ["시작 대기", counts.queued], ["직접 확인", counts.decide], ["실패", counts.fault]]
     .filter(([, value]) => value).map(([name, value]) => `${name} ${formatCount(value)} 폴더`);
 }
 
@@ -86,7 +86,7 @@ function gateState(current) {
   if (state === "TRANSCRIPTION_READY") return ["ask", `대상 ${formatCount(current.eligible_transcription_count)} 폴더`];
   if (state === "STAGE_TWO_RUNNING" || (state === "COMPLETED" && current.eligible_transcription_count > 0)) return ["done", "시작됨"];
   if (state === "COMPLETED") return ["skip", "대상 없음"];
-  if (current.archive_run_id) return ["closed", `1단계 ${formatCount(current.stage_one_remaining)} 폴더 남음`];
+  if (current.archive_run_id) return ["closed", `영상 정리·저장 ${formatCount(current.stage_one_remaining)} 폴더 남음`];
   return ["todo", ""];
 }
 
@@ -137,7 +137,7 @@ function StageSummary({ drive: current }) {
   const id = current.workspace_drive_id;
   const open = ui.stagesOpen.value.has(id);
   const [one, two] = STAGE_STATES[drivePhase(current)] || STAGE_STATES.intake;
-  const stages = [["one", "1단계 정리", one], ["two", "2단계 전사", two], ["record", "기록", catalogState(current)]];
+  const stages = [["one", "영상 정리·저장", one], ["two", "자막·텍스트", two], ["record", "영상 목록", catalogState(current)]];
   const problems = [];
   for (const step of PROBLEM_STEPS) {
     const counts = tally(current, step);
@@ -159,7 +159,7 @@ function StageSummary({ drive: current }) {
       <span class="stage-problems">
         ${problems.map(([signal, step, count]) => html`<span class="stage-problem" key=${`${signal}${step}`} data-signal=${signal} data-step=${step}><${StatusIcon} kind=${signal} />${label("stage", step)} ${formatCount(count)}</span>`)}
       </span>
-      <button type="button" class="btn btn-sm stage-toggle" aria-expanded=${open ? "true" : "false"} onClick=${toggle}>${open ? "단계 접기" : "단계 펼치기"}</button>
+      <button type="button" class="btn btn-sm stage-toggle" aria-expanded=${open ? "true" : "false"} onClick=${toggle}>${open ? "처리 과정 접기" : "처리 과정 보기"}</button>
     </div>
     <${Fold} open=${open}><${StepNodes} drive=${current} /><//>
   </div>`;
@@ -175,7 +175,7 @@ function progressHover(current) {
   const bytes = folders.reduce((sum, folder) => sum + (folder.estimated_output_bytes || 0), 0);
   return [
     `최근 작업 보관 ${formatCount(progress.stored)} / ${formatCount(progress.total)} 영상`,
-    `최근 작업 폴더 ${progress.storedFolders} / ${progress.folders}${transcribed ? ` · STT ${transcribed} 폴더` : ""}`,
+    `최근 작업 폴더 ${progress.storedFolders} / ${progress.folders}${transcribed ? ` · 자막·텍스트 ${transcribed} 폴더` : ""}`,
     `전체 발견 ${formatCount(progress.discoveredFolders)} 폴더`,
     `작업 범위 r${current.input_revision} 고정 · ${folders.length} 폴더 · ${formatCount(progress.total)} 영상 · ${formatBytes(bytes)}`,
     current.archive_run_state === "COMPLETED" ? `CSV ${formatCount(current.catalog_row_count)}행 · ${shortTime(current.catalog_updated_at)} 기록` : "",
@@ -202,7 +202,7 @@ export function DriveOverview({ drive: current, id = "", progressID = "", facts 
       <span class="state" data-fact="state" data-phase=${phase}><${StatusIcon} kind=${PHASE_ICON[phase]} /><${Swap} text=${PHASE_LABEL[phase]} /></span>
       <${ConnectionFact} drive=${current} />
       ${offline ? html`<span class="fact-inline" data-fact="worker" title=${`마지막 응답 ${clockTime(worker?.last_heartbeat, true)}`}><span class="ok"><${StatusIcon} kind="fault" />${current.worker_id} ${label("worker", worker?.state)}</span></span>` : null}
-      ${current.archive_storage_id ? null : html`<span class="fact-inline muted" data-fact="archive">아카이브 미정</span>`}
+      ${current.archive_storage_id ? null : html`<span class="fact-inline muted" data-fact="archive">저장 위치 미선택</span>`}
       ${current.archive_run_id
         ? html`<span class="progress-fact" id=${progressID || null} data-fact="progress" title=${progressHover(current)}><span class="muted">${phase === "done" ? "최근 작업" : "현재 작업"}</span><b class="progress-pct num">${formatCount(progress.storedFolders)} / ${formatCount(progress.folders)} 폴더</b><small>발견 ${formatCount(progress.discoveredFolders)} 폴더</small></span>`
         : html`<span class="progress-fact" data-fact="found"><span class="muted">발견</span><b class="num">${folderDiscoveryText(current)}</b></span>`}
@@ -218,7 +218,7 @@ export function DriveOverview({ drive: current, id = "", progressID = "", facts 
 function reasonOf(current, folder, problem) {
   if (problem.kind === "fault") return `${label("stage", problem.stage.stage_id)} 단계 실패`;
   if (problem.kind === "hold") return (folder.hold_reasons || []).map((reason) => label("hold", reason)).join(" · ") || "처리 방식을 고르기 전";
-  if (problem.kind === "device") return `${problem.target || "아카이브 저장소"} 연결 시 자동 재개`;
+  if (problem.kind === "device") return `${problem.target || "저장 위치"} 연결 시 자동 재개`;
   if (problem.kind === "review") return (folder.transcript_qualities || []).flatMap((quality) => quality.reasons || []).map((reason) => label("transcriptQuality", reason)).filter((value, index, all) => all.indexOf(value) === index).join(" · ");
   return `${label("stage", problem.stage.stage_id)} · ${label("wait", problem.stage.wait_reason)} 대기`;
 }
@@ -250,12 +250,12 @@ function HoldDecision({ drive: current, folder, open }) {
     }
   };
   return html`<div class="problem-body">
-    <span class="muted hold-reasons">보류 사유 · ${(folder.hold_reasons || []).map((reason) => label("hold", reason)).join(" · ") || "—"} · 영상 ${formatCount(folder.video_count)}</span>
-    ${available.length ? html`<div class="seg plain-seg hold-choices" role="group" aria-label="작업 선택">
+    <span class="muted hold-reasons">선택이 필요한 이유 · ${(folder.hold_reasons || []).map((reason) => label("hold", reason)).join(" · ") || "—"} · 영상 ${formatCount(folder.video_count)}</span>
+    ${available.length ? html`<div class="seg plain-seg hold-choices" role="group" aria-label="처리 방법 선택">
       ${available.map(([value, text]) => html`<button type="button" key=${value} data-choice=${value} aria-pressed=${chosen === value ? "true" : "false"} disabled=${stale.value}
         onClick=${() => { ui.hold.value = { key: folder.folder, choice: value }; }}>${text}</button>`)}
     </div>` : html`<span class="muted">선택 가능한 작업 없음</span>`}
-    <button type="button" class="btn primary" id=${open ? "hold-submit" : null} data-action="hold" disabled=${!chosen || pending || stale.value} onClick=${submit}>${pending ? "요청 보냄…" : "작업 선택"}</button>
+    <button type="button" class="btn primary" id=${open ? "hold-submit" : null} data-action="hold" disabled=${!chosen || pending || stale.value} onClick=${submit}>${pending ? "적용 중…" : "선택한 방식으로 처리"}</button>
   </div>`;
 }
 
@@ -287,8 +287,8 @@ function FaultBody({ drive: current, folder, problem }) {
   };
   return html`<div class="problem-body">
     <span class="muted" title=${hover}>${label("stage", stage.stage_id)} 단계 실패 · 영상 ${formatCount(folder.video_count)} · ${label("disposition", folder.disposition)}</span>
-    <button type="button" class="btn" data-action="redo" disabled=${running || stale.value} onClick=${redo}>새 작업으로 다시 요청</button>
-    ${running ? html`<small class="muted">이 실행이 끝나면 새 작업으로 요청할 수 있음</small>` : null}
+    <button type="button" class="btn" data-action="redo" disabled=${running || stale.value} onClick=${redo}>이 폴더 다시 처리</button>
+    ${running ? html`<small class="muted">현재 작업이 끝나면 다시 처리할 수 있음</small>` : null}
   </div>`;
 }
 
@@ -300,8 +300,8 @@ function ProblemBody({ drive: current, folder, problem, open }) {
   const count = stage?.total_count ? ` · ${formatCount(stage.completed_count)} / ${formatCount(stage.total_count)} 영상` : "";
   if (problem.kind === "device") {
     return html`<div class="problem-body">
-      <span class="muted" title=${`${label("stage", stage.stage_id)} 단계 대기${count}`}>${problem.target || "아카이브 저장소"} 연결 시 자동 재개</span>
-      <a class="text-btn" href=${`#/connections?worker=${encodeURIComponent(current.worker_id)}`}>${current.worker_id} 저장소 보기</a>
+      <span class="muted" title=${`${label("stage", stage.stage_id)} 단계 대기${count}`}>${problem.target || "저장 위치"} 연결 시 자동 재개</span>
+      <a class="text-btn" href=${`#/connections?worker=${encodeURIComponent(current.worker_id)}`}>작업 PC와 저장 위치 보기</a>
     </div>`;
   }
   return html`<div class="problem-body"><span class="muted">${label("stage", stage.stage_id)} · ${label("wait", stage.wait_reason)} 대기${count}</span></div>`;
@@ -334,8 +334,8 @@ export function Problems({ drive: current, items, id = "drive-problems" }) {
   const shown = items.length > PROBLEMS_SHOWN
     ? items.filter(([folder], index) => index < PROBLEMS_SHOWN || folder.folder === open) : items;
   return html`<${Fold} open=${items.length > 0} keep=${true}>
-    <section class="section" id=${id} aria-label="확인 필요">
-      <h2 class="section-title">확인 필요${" "}<span class="num">${formatCount(items.length)}</span></h2>
+    <section class="section" id=${id} aria-label="직접 확인할 항목">
+      <h2 class="section-title">직접 확인할 항목${" "}<span class="num">${formatCount(items.length)}</span></h2>
       <div class="card-list">
         <${Presence} items=${shown} keyOf=${([folder]) => folder.folder}>${([folder, problem], entry) => html`<${ProblemPanel} drive=${current} folder=${folder} problem=${problem} entering=${entry.entering} />`}<//>
       </div>
@@ -364,7 +364,7 @@ onRepeat((next) => {
 
 // ─── Folders: list or calendar, drawn by position for a long drive ──────────
 
-const archiveBadge = (state) => html`<b class="archive-badge" data-state=${state}>${state === "STORED" ? "보관됨" : "확정됨"}</b>`;
+const archiveBadge = (state) => html`<b class="archive-badge" data-state=${state}>${state === "STORED" ? "저장 완료" : "보존 완료"}</b>`;
 
 function FolderDetail({ folder, current }) {
   const steps = useComputed(() => ui.openSteps.value === folder.folder).value;
@@ -378,8 +378,8 @@ function FolderDetail({ folder, current }) {
       <span class="detail-facts num muted">${folder.disposition ? label("disposition", folder.disposition) : "미처리"} · ${formatCount(folder.video_count)} 영상 · ${formatBytes(folder.estimated_output_bytes)}</span>
       ${folder.archive_state || folder.can_add_transcription || (folder.transcription_job_id && folder.step_state === "COMPLETED") ? html`<span class="detail-notes">
         ${folder.archive_state ? archiveBadge(folder.archive_state) : null}
-        ${folder.can_add_transcription ? html`<span class="note-tag folder-note">STT 추가 가능</span>` : null}
-        ${folder.transcription_job_id && folder.step_state === "COMPLETED" ? html`<span class="note-tag folder-note">STT 완료</span>` : null}
+        ${folder.can_add_transcription ? html`<span class="note-tag folder-note">자막·텍스트 만들기 가능</span>` : null}
+        ${folder.transcription_job_id && folder.step_state === "COMPLETED" ? html`<span class="note-tag folder-note">자막·텍스트 완료</span>` : null}
       </span>` : null}
     </div>
     ${state.signal === "work" ? html`<${Meter} value=${folderProgress(folder)} label="진행" />` : null}
@@ -391,7 +391,7 @@ function FolderDetail({ folder, current }) {
         <span class="num muted">${video.size_bytes < 1024 ** 3 ? formatSize(video.size_bytes || 0) : formatBytes(video.size_bytes || 0)}</span>
       </div>`)}
     </div>` : html`<${Empty} text="영상 기록 없음" />`}
-    ${folder.job_id ? html`<button type="button" class="text-btn steps-toggle" aria-expanded=${steps ? "true" : "false"} onClick=${() => { ui.openSteps.value = steps ? "" : folder.folder; }}>${steps ? "세부 단계 숨기기" : "세부 단계 보기"}</button>` : null}
+    ${folder.job_id ? html`<button type="button" class="text-btn steps-toggle" aria-expanded=${steps ? "true" : "false"} onClick=${() => { ui.openSteps.value = steps ? "" : folder.folder; }}>${steps ? "처리 과정 숨기기" : "처리 과정 보기"}</button>` : null}
     <${Fold} open=${steps}><div class="stage-list">
       ${(folder.stages || []).length ? folder.stages.map((stage) => {
         const signal = stageSignal(stage);
@@ -530,7 +530,7 @@ function Calendar({ days }) {
 
 const RANK = { fault: 4, decide: 3, work: 2, idle: 1, done: 0 };
 
-export function Folders({ drive: current, names, title = "폴더 구조", id = "drive-contents" }) {
+export function Folders({ drive: current, names, title = "영상 폴더", id = "drive-contents" }) {
   const driveID = current.workspace_drive_id;
   const view = ui.folderView.value;
   const day = ui.dayFilter.value;
@@ -582,8 +582,8 @@ export function CompletedWork({ items }) {
   // A row shows the result, its folder and its stored or committed state. The
   // disposition, source count, time, storage and package path wait on hover
   // and in the archive work's result the row opens.
-  return html`<section class="section" id="completed-work" aria-label="완료 내역">
-    <h2 class="section-title">완료 내역${" "}<span class="num">${formatCount(items.length)}</span></h2>
+  return html`<section class="section" id="completed-work" aria-label="저장된 결과">
+    <h2 class="section-title">저장된 결과${" "}<span class="num">${formatCount(items.length)}</span></h2>
     <div class="results drive-completed">
       <${Presence} items=${shown} keyOf=${(item) => item.archive_package_id}>${(item) => {
         const sourceCount = item.source_video_count > 1 ? `${formatCount(item.source_video_count)} → 1` : formatCount(item.source_video_count);
@@ -616,7 +616,7 @@ export function SttButton({ drive: current }) {
     setPending(true);
     try {
       const result = await mutation(`/api/v1/archive-runs/${encodeURIComponent(current.archive_run_id)}/transcription`, { idempotency_key: newID("STT"), expected_archive_run_revision: current.archive_run_revision });
-      ui.status.value = `STT ${result.eligible_count} 폴더`;
+      ui.status.value = `자막·텍스트 만들기 시작 · ${result.eligible_count} 폴더`;
       await refresh();
     } catch (error) {
       ui.status.value = error.message;
@@ -625,7 +625,7 @@ export function SttButton({ drive: current }) {
     }
   };
   return html`<button type="button" class="btn" id="start-stt" data-action="stt" data-signal=${pending ? null : "decide"} disabled=${pending || stale.value} onClick=${start}>
-    ${pending ? "요청 보냄…" : `STT 시작 · ${formatCount(current.eligible_transcription_count)} 폴더`}</button>`;
+    ${pending ? "시작 중…" : `자막·텍스트 만들기 · ${formatCount(current.eligible_transcription_count)} 폴더`}</button>`;
 }
 
 export const StatusLine = () => (ui.status.value ? html`<p class="status-line" role="status" id="command-status">${ui.status.value}</p>` : null);
@@ -639,16 +639,16 @@ export function DriveScreen({ id }) {
   useOpenProblem(current);
   if (!current) return html`<div class="page-head"><div class="page-title"><h1 id="drive-title">${id}</h1></div></div><${Empty} text="드라이브 없음" />`;
   const worker = store.workers.value.find((item) => item.worker_id === current.worker_id);
-  const hover = `${current.worker_id} ${label("worker", worker?.state)} · → ${current.archive_storage_id || "아카이브 미정"} · ${current.archive_run_id || "실행 없음"} · r${current.input_revision} · ${formatCount(current.folder_count)} 폴더 · ${formatCount(current.file_count)} 영상`;
+  const hover = `${current.worker_id} ${label("worker", worker?.state)} · → ${current.archive_storage_id || "저장 위치 미선택"} · ${current.archive_run_id || "작업 없음"} · r${current.input_revision} · ${formatCount(current.folder_count)} 폴더 · ${formatCount(current.file_count)} 영상`;
   const runHref = current.archive_run_id ? `#/runs/${encodeURIComponent(current.archive_run_id)}` : "";
   return [
-    html`<${Crumbs} key="crumbs" items=${[["연결 관리", "#/connections"], [driveName(current)]]} />`,
+    html`<${Crumbs} key="crumbs" items=${[["장비·에이전트", "#/connections"], [driveName(current)]]} />`,
     html`<div key="head" class="page-head">
       <div class="page-title"><h1 id="drive-title" class=${titleShared(route.value.full) ? "shared" : null} title=${hover}>${driveName(current)}</h1></div>
       <div class="page-actions">
-        ${runHref ? html`<a class="btn" href=${runHref}>작업 열기</a>` : null}
+        ${runHref ? html`<a class="btn" href=${runHref}>최근 작업 보기</a>` : null}
         ${!current.archive_run_id && current.connection_state === "CONNECTED"
-          ? html`<button type="button" class="btn" id="open-new-work" onClick=${() => { openNewWork(current.workspace_drive_id); go("#/jobs"); }}>작업 만들기</button>` : null}
+          ? html`<button type="button" class="btn" id="open-new-work" onClick=${() => { openNewWork(current.workspace_drive_id); go("#/jobs"); }}>이 드라이브 처리</button>` : null}
         <${SttButton} drive=${current} />
       </div>
     </div>`,

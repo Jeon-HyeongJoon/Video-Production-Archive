@@ -1,7 +1,7 @@
 // Hash routes keep every screen addressable without server-side routing:
-//   #/connections                     Worker PC, 드라이브, Agent 연결 관리
+//   #/connections                     작업 PC, 드라이브, 에이전트 관리
 //   #/drives/<drive>[?folder=<f>]     드라이브 상세, 그 폴더의 문제를 펼침
-//   #/jobs                            작업 관리
+//   #/jobs                            작업
 //   #/jobs/<job>                      영속 작업 상세
 //   #/runs/<archive-run>[?result=<p>] 아카이브 작업 화면
 //   #/search[?q=<text>]               검색 결과
@@ -13,8 +13,8 @@ import { signal } from "./lib.js";
 import { transition, settle } from "./motion.js";
 
 export const menus = [
-  { id: "jobs", label: "작업 관리", path: "#/jobs" },
-  { id: "connections", label: "연결 관리", path: "#/connections" },
+  { id: "jobs", label: "작업", path: "#/jobs" },
+  { id: "connections", label: "장비·에이전트", path: "#/connections" },
 ];
 
 export function parseRoute(hash) {
@@ -27,11 +27,11 @@ export function parseRoute(hash) {
   if (menu === "drives" && parts[1]) return { menu: "connections", name: "drive", driveID: parts[1], query, full };
   if (menu === "jobs" && parts[1]) return { menu: "jobs", name: "job", jobID: parts[1], query, full };
   if (menu === "runs" && parts[1]) return { menu: "jobs", name: "run", workID: parts[1], query, full };
-  // Old Worker and drive-list bookmarks land on 연결 관리.
+  // Old Worker and drive-list bookmarks land on 장비·에이전트.
   if (menu === "connections" || menu === "workers" || menu === "drives") return { menu: "connections", name: "connections", query, full };
   if (menu === "search") return { menu: "search", name: "search", query, full };
   if (menu === "settings") return { menu: "settings", name: "settings", query, full };
-  // Old bookmarks and unknown routes land on 작업 관리.
+  // Old bookmarks and unknown routes land on 작업.
   return { menu: "jobs", name: "jobs", query, full: menu === "jobs" ? full : "#/jobs" };
 }
 
