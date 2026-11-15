@@ -44,7 +44,7 @@ func TestWindowsCodexHostRunsInAuthenticatedInteractiveTerminalSession(t *testin
 		t.Fatalf("interactive Codex login is unavailable: decode=%v output=%s", err, probeOutput)
 	}
 
-	inspectScript := `$task=Get-ScheduledTask -TaskName 'Archive Archivist Host'; $interactive=(Get-CimInstance Win32_ComputerSystem).UserName; $interactiveSid=(New-Object System.Security.Principal.NTAccount($interactive)).Translate([System.Security.Principal.SecurityIdentifier]).Value; $process=Get-CimInstance Win32_Process | Where-Object {$_.Name -eq 'archivist-host.exe'} | Select-Object -First 1; if($null -eq $process){throw 'Archivist Host process is unavailable'}; $owner=Invoke-CimMethod -InputObject $process -MethodName GetOwner; $ownerSid=(New-Object System.Security.Principal.NTAccount($owner.Domain+'\'+$owner.User)).Translate([System.Security.Principal.SecurityIdentifier]).Value; [pscustomobject]@{logon_type=[string]$task.Principal.LogonType;task_user_sid=(New-Object System.Security.Principal.NTAccount($task.Principal.UserId)).Translate([System.Security.Principal.SecurityIdentifier]).Value;interactive_user_sid=$interactiveSid;process_owner_sid=$ownerSid;process_session_id=$process.SessionId;execute=$task.Actions[0].Execute} | ConvertTo-Json -Compress`
+	inspectScript := `$task=Get-ScheduledTask -TaskName 'Archive Archivist Host'; $interactive=(Get-CimInstance Win32_ComputerSystem).UserName; $interactiveSid=(New-Object System.Security.Principal.NTAccount($interactive)).Translate([System.Security.Principal.SecurityIdentifier]).Value; $process=Get-CimInstance Win32_Process | Where-Object {$_.Name -eq 'archivist-host.exe'} | Select-Object -First 1; if($null -eq $process){throw 'Archivist Host process is unavailable'}; $owner=Invoke-CimMethod -InputObject $process -MethodName GetOwner; $ownerSid=(New-Object System.Security.Principal.NTAccount($owner.Domain+'\'+$owner.User)).Translate([System.Security.Principal.SecurityIdentifier]).Value; $recovery=@($task.Triggers | Where-Object {-not [string]::IsNullOrWhiteSpace([string]$_.Repetition.Interval)} | Select-Object -First 1); [pscustomobject]@{logon_type=[string]$task.Principal.LogonType;task_user_sid=(New-Object System.Security.Principal.NTAccount($task.Principal.UserId)).Translate([System.Security.Principal.SecurityIdentifier]).Value;interactive_user_sid=$interactiveSid;process_owner_sid=$ownerSid;process_session_id=$process.SessionId;execute=$task.Actions[0].Execute;trigger_count=@($task.Triggers).Count;recovery_interval=if($recovery.Count -eq 0){''}else{[string]$recovery[0].Repetition.Interval}} | ConvertTo-Json -Compress`
 	inspect := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", inspectScript)
 	inspectOutput, err := inspect.CombinedOutput()
 	if err != nil {
@@ -57,6 +57,8 @@ func TestWindowsCodexHostRunsInAuthenticatedInteractiveTerminalSession(t *testin
 		ProcessOwnerSID    string `json:"process_owner_sid"`
 		ProcessSessionID   uint32 `json:"process_session_id"`
 		Execute            string `json:"execute"`
+		TriggerCount       int    `json:"trigger_count"`
+		RecoveryInterval   string `json:"recovery_interval"`
 	}
 	if err := json.Unmarshal(trimPowerShellOutput(inspectOutput), &actual); err != nil {
 		t.Fatalf("decode interactive Host inspection: %v: %s", err, inspectOutput)
@@ -64,7 +66,8 @@ func TestWindowsCodexHostRunsInAuthenticatedInteractiveTerminalSession(t *testin
 	wantLauncher := filepath.Join(root, "runtime", "current", "run-archivist-host.cmd")
 	if actual.LogonType != "Interactive" || actual.TaskUserSID != login.UserSID ||
 		actual.InteractiveUserSID != login.UserSID || actual.ProcessOwnerSID != login.UserSID ||
-		actual.ProcessSessionID == 0 || !sameWindowsPath(actual.Execute, wantLauncher) {
+		actual.ProcessSessionID == 0 || !sameWindowsPath(actual.Execute, wantLauncher) ||
+		actual.TriggerCount < 2 || actual.RecoveryInterval != "PT1M" {
 		t.Fatalf("Archivist Host does not use the authenticated interactive terminal session: %+v login=%+v", actual, login)
 	}
 }

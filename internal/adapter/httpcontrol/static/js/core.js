@@ -44,6 +44,10 @@ export async function mutation(path, payload) {
   }
 }
 
+export function startArchivistHost(archivistHostID) {
+  return mutation(`/api/v1/archivist-hosts/${encodeURIComponent(archivistHostID)}/start`, {});
+}
+
 function uuidV4() {
   if (typeof globalThis.crypto?.randomUUID === "function") return globalThis.crypto.randomUUID();
   const bytes = new Uint8Array(16);

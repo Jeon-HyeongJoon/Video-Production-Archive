@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strconv"
@@ -81,6 +82,12 @@ func runTurn(ctx context.Context, arguments []string) int {
 		fmt.Fprintln(os.Stderr, "archive-codex executable path is unavailable")
 		return 2
 	}
+	if !codexLoginAvailable(ctx, strings.TrimSpace(*codex)) {
+		_ = json.NewEncoder(os.Stdout).Encode(map[string]any{
+			"type": "failure", "code": "CODEX_LOGIN_REQUIRED", "summary": "Codex 로그인이 필요합니다",
+		})
+		return 0
+	}
 	mcpURL := strings.TrimSpace(os.Getenv("ARCHIVE_MCP_URL"))
 	tools, err := archivistmcpclient.New(mcpURL, &http.Client{Timeout: 30 * time.Second})
 	if err != nil {
@@ -116,6 +123,13 @@ func runTurn(ctx context.Context, arguments []string) int {
 		return 1
 	}
 	return 0
+}
+
+func codexLoginAvailable(ctx context.Context, executable string) bool {
+	command := exec.CommandContext(ctx, executable, "login", "status")
+	command.Stdout = io.Discard
+	command.Stderr = io.Discard
+	return command.Run() == nil
 }
 
 // serveMCP is the stdio MCP server Codex launches inside a turn.

@@ -15,6 +15,12 @@ type message struct {
 }
 
 func main() {
+	if len(os.Args) >= 3 && os.Args[1] == "login" && os.Args[2] == "status" {
+		if os.Getenv("ARCHIVE_CODEX_FIXTURE_LOGIN_MISSING") == "1" {
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) < 2 || os.Args[1] != "app-server" {
 		os.Exit(2)
 	}

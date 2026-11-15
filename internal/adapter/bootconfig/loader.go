@@ -35,6 +35,7 @@ type Configuration struct {
 	ArchivistTurnLeaseTTL time.Duration
 	Workers               []worker.Definition
 	ArchivistHosts        []archivistruntime.HostDefinition
+	ArchivistHostTasks    map[string]string
 	Storages              []storage.Topology
 	ArchiveOrganization   *ArchiveOrganizationConfiguration
 }
@@ -94,6 +95,7 @@ type document struct {
 			AllowedBackends         []vocabulary.RuntimeBackend `yaml:"allowed_backend_ids"`
 			AllowedCLIIDs           []string                    `yaml:"allowed_cli_ids"`
 			AllowedWorkspaceRootIDs []string                    `yaml:"allowed_workspace_root_ids"`
+			WindowsTaskName         string                      `yaml:"windows_task_name"`
 		} `yaml:"definitions"`
 	} `yaml:"archivist_hosts"`
 	Storage []struct {
@@ -255,6 +257,7 @@ func normalize(configurationPath string, source document) (Configuration, error)
 		}
 	}
 	archivistHosts := make([]archivistruntime.HostDefinition, 0, len(source.ArchivistHosts.Definitions))
+	archivistHostTasks := make(map[string]string)
 	for _, definition := range source.ArchivistHosts.Definitions {
 		id := strings.TrimSpace(definition.ID)
 		credentialRef := strings.TrimSpace(definition.CredentialRef)
@@ -278,6 +281,12 @@ func normalize(configurationPath string, source document) (Configuration, error)
 			ID: id, Enabled: definition.Enabled, CredentialRef: credentialRef,
 			AllowedBackends: backends, AllowedCLIIDs: cliIDs, AllowedWorkspaceRootIDs: workspaceIDs,
 		})
+		if taskName := strings.TrimSpace(definition.WindowsTaskName); taskName != "" {
+			if len(taskName) > 128 || strings.ContainsAny(taskName, "\x00\r\n") {
+				return Configuration{}, ErrInvalidConfiguration
+			}
+			archivistHostTasks[id] = taskName
+		}
 	}
 	if settings.Validate() != nil {
 		return Configuration{}, ErrInvalidConfiguration
@@ -299,7 +308,8 @@ func normalize(configurationPath string, source document) (Configuration, error)
 		Access:         security.AccessConfig{Mode: settings.AuthMode, AllowedNetworks: allowedNetworks},
 		AllowedOrigins: allowedOrigins, TrustedProxies: trustedProxies,
 		HeartbeatTTL: heartbeatTTL, RuntimeHeartbeatTTL: runtimeHeartbeatTTL, ArchivistTurnLeaseTTL: archivistTurnLeaseTTL,
-		Workers: workers, ArchivistHosts: archivistHosts, Storages: storages, ArchiveOrganization: archiveIntake,
+		Workers: workers, ArchivistHosts: archivistHosts, ArchivistHostTasks: archivistHostTasks,
+		Storages: storages, ArchiveOrganization: archiveIntake,
 	}, nil
 }
 

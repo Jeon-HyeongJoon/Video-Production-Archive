@@ -28,6 +28,7 @@ import (
 	"videoarchive/internal/adapter/sqlitecatalog"
 	"videoarchive/internal/adapter/sqlitecommand"
 	"videoarchive/internal/adapter/sqlitestorage"
+	"videoarchive/internal/adapter/windowstask"
 	"videoarchive/internal/application/archiveintake"
 	"videoarchive/internal/application/archiveintakeworkspace"
 	"videoarchive/internal/application/archiveorganization"
@@ -35,6 +36,7 @@ import (
 	"videoarchive/internal/application/archivework"
 	"videoarchive/internal/application/archiveworkspace"
 	"videoarchive/internal/application/archivistcontrol"
+	"videoarchive/internal/application/archivisthostactivation"
 	"videoarchive/internal/application/dispatchcoordinator"
 	"videoarchive/internal/application/jobcontrol"
 	"videoarchive/internal/application/workercapacity"
@@ -60,6 +62,7 @@ type Dependencies struct {
 	Secrets                SecretResolver
 	Now                    func() time.Time
 	ArchiveIntakeAnalyzers archiveorganization.AnalyzerFactory
+	ArchivistHostStarter   archivisthostactivation.Starter
 }
 
 type credentialVerifier struct {
@@ -293,6 +296,17 @@ func OpenWithDependencies(ctx context.Context, configuration bootconfig.Configur
 		return fail(err)
 	}
 	runtime.archivists = archivists
+	hostStarter := dependencies.ArchivistHostStarter
+	if hostStarter == nil {
+		hostStarter, err = windowstask.New(configuration.ArchivistHostTasks, windowstask.OSCommandRunner{})
+		if err != nil {
+			return fail(err)
+		}
+	}
+	hostActivation, err := archivisthostactivation.New(archivists, hostStarter)
+	if err != nil {
+		return fail(err)
+	}
 	archivistAPI, err := httparchivist.New(archivists)
 	if err != nil {
 		return fail(err)
@@ -320,7 +334,7 @@ func OpenWithDependencies(ctx context.Context, configuration bootconfig.Configur
 		Access: configuration.Access, TrustedProxies: configuration.TrustedProxies,
 		Catalog: catalogStore, ArchiveWorkspace: queries, ArchiveWork: workQueries, Notifications: notificationsse.New(&notification.Feed{}),
 		Commands: jobCommands, WorkerAPI: workerAPI, Workers: workerCapacity,
-		ArchivistAPI: archivistAPI, Archivists: archivists,
+		ArchivistAPI: archivistAPI, Archivists: archivists, ArchivistHostActivation: hostActivation,
 		Drives: archiveIntakeWorkspace, ArchiveIntake: archiveIntakeSelection,
 		ArchiveRuns: archiveRuns, ArchiveTranscriptions: archiveTranscriptions,
 		AllowedOrigins: configuration.AllowedOrigins, Version: version,

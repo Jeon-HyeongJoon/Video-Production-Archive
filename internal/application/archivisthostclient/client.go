@@ -191,6 +191,10 @@ func (client *Client) execute(ctx context.Context, claimed claimedTurn, onError 
 	}
 	if err != nil {
 		failure, _ := archivistruntime.NewFailureReport("RUNTIME_FAILED", "Archivist 실행을 완료하지 못했습니다")
+		var reported *archivistruntime.RuntimeExecutionFailure
+		if errors.As(err, &reported) {
+			failure = reported.Report
+		}
 		if reportErr := nextEvent(archivistruntime.RuntimeEvent{Kind: archivistruntime.RuntimeTurnFailed, Failure: &failure}); reportErr != nil {
 			return errors.Join(err, reportErr)
 		}

@@ -25,6 +25,7 @@ import (
 	"videoarchive/internal/adapter/mcpproxy"
 	"videoarchive/internal/adapter/sqlitecommand"
 	"videoarchive/internal/adapter/sqlitestorage"
+	"videoarchive/internal/adapter/windowstask"
 	"videoarchive/internal/adapter/workerconfig"
 	"videoarchive/internal/application/archiveorganization"
 	"videoarchive/internal/application/archivistcontrol"
@@ -41,6 +42,28 @@ import (
 	"videoarchive/internal/core/vocabulary"
 	"videoarchive/internal/core/worker"
 )
+
+type recordingCommandRunner struct {
+	mu    sync.Mutex
+	calls [][]string
+}
+
+func (runner *recordingCommandRunner) Run(_ context.Context, executable string, arguments ...string) error {
+	runner.mu.Lock()
+	defer runner.mu.Unlock()
+	runner.calls = append(runner.calls, append([]string{executable}, arguments...))
+	return nil
+}
+
+func (runner *recordingCommandRunner) Calls() [][]string {
+	runner.mu.Lock()
+	defer runner.mu.Unlock()
+	result := make([][]string, len(runner.calls))
+	for index := range runner.calls {
+		result[index] = append([]string(nil), runner.calls[index]...)
+	}
+	return result
+}
 
 // Requirement: CTL-002
 func TestControlRuntimeBootstrapsPersistentStorageAndHTTPAcrossRestart(t *testing.T) {
@@ -711,6 +734,47 @@ func TestArchivistAddAPIAcceptsOnlyNameRegisteredHostAndDetectedCLI(t *testing.T
 	if view.Code != http.StatusOK || !strings.Contains(view.Body.String(), `"archivist_host_id":"archivist-windows"`) ||
 		!strings.Contains(view.Body.String(), `"workspace_root_id":"video-project"`) || strings.Contains(view.Body.String(), `"control_mode"`) {
 		t.Fatalf("durable pinned session response=%d %s", view.Code, view.Body.String())
+	}
+}
+
+// Requirement: CTL-009
+func TestControlStartsPinnedOfflineArchivistHostWithoutDuplicatingOnlineStart(t *testing.T) {
+	configuration := runtimeTestConfiguration(t)
+	runner := &recordingCommandRunner{}
+	starter, err := windowstask.New(configuration.ArchivistHostTasks, runner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 11, 15, 4, 0, 0, 0, time.UTC)
+	runtime, err := controlruntime.OpenWithDependencies(context.Background(), configuration, "v1-test", controlruntime.Dependencies{
+		Secrets: runtimeSecret("runtime-service-secret"), Now: func() time.Time { return now }, ArchivistHostStarter: starter,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer runtime.Close()
+	cookie, token := runtimeSession(t, runtime.Handler())
+	origin := "http://127.0.0.1:8080"
+	path := "/api/v1/archivist-hosts/archivist-windows/start"
+	if denied := runtimeRequest(runtime.Handler(), http.MethodPost, path, `{}`, nil, "", ""); denied.Code != http.StatusForbidden {
+		t.Fatalf("Host start without browser proof returned %d: %s", denied.Code, denied.Body.String())
+	}
+	started := runtimeRequest(runtime.Handler(), http.MethodPost, path, `{}`, cookie, token, origin)
+	if started.Code != http.StatusAccepted || !strings.Contains(started.Body.String(), `"state":"CONNECTING"`) {
+		t.Fatalf("offline Host start returned %d: %s", started.Code, started.Body.String())
+	}
+	if calls := runner.Calls(); len(calls) != 1 || strings.Join(calls[0], "|") != "schtasks.exe|/Run|/TN|Archive Archivist Host" {
+		t.Fatalf("unexpected Host start calls: %v", calls)
+	}
+	if heartbeat := archivistHostRequest(runtime.Handler(), http.MethodPost, "/archivist/v1/heartbeat", "", "runtime-service-secret"); heartbeat.Code != http.StatusOK {
+		t.Fatalf("Host heartbeat returned %d: %s", heartbeat.Code, heartbeat.Body.String())
+	}
+	alreadyOnline := runtimeRequest(runtime.Handler(), http.MethodPost, path, `{}`, cookie, token, origin)
+	if alreadyOnline.Code != http.StatusAccepted || !strings.Contains(alreadyOnline.Body.String(), `"state":"ONLINE"`) {
+		t.Fatalf("online Host start returned %d: %s", alreadyOnline.Code, alreadyOnline.Body.String())
+	}
+	if calls := runner.Calls(); len(calls) != 1 {
+		t.Fatalf("online Host was started again: %v", calls)
 	}
 }
 
@@ -1796,6 +1860,7 @@ archivist_hosts:
       allowed_backend_ids: [EMBEDDED_CORE]
       allowed_cli_ids: [codex]
       allowed_workspace_root_ids: [video-project]
+      windows_task_name: Archive Archivist Host
 storage:
   - id: scratch-main
     role: SCRATCH

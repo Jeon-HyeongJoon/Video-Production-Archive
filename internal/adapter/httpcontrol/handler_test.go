@@ -311,6 +311,13 @@ func TestArchivistAddSettingsShowsOnlyNameHostAndDetectedCLI(t *testing.T) {
 	})
 }
 
+// Requirement: DSH-042
+func TestArchivistSelectionAndAddStartOfflineLocalHostWithoutTerminal(t *testing.T) {
+	testControlHTTPWorkspace(t, func(t *testing.T, handler http.Handler) {
+		assertArchiveWorkspaceScript(t, handler, "check_archive_workspace_archivist_start.py")
+	})
+}
+
 // Requirement: DSH-014
 func TestWorkspaceShowsReservationAdjustedWorkerCapacity(t *testing.T) {
 	testControlHTTPWorkspace(t, func(t *testing.T, handler http.Handler) {

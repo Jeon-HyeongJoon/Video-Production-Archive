@@ -98,7 +98,7 @@ Windows FFmpeg acceptance는 실제 출력에 실제 ffprobe 검증을 적용하
 
 Windows Archivist acceptance는 DPAPI secret의 새 프로세스 복호화와 실제 Archivist Host·계약 CLI fixture의 강제 재시작을 한 Windows 장비에서 실행한다. 재실행 절차와 정규화된 테스트 증적은 `deploy/windows/run-archivist-acceptance.ps1`이 소유한다. 실제 Codex 또는 Claude 계정 acceptance와 fixture acceptance는 같은 결과로 간주하지 않는다. `LRH-009~011`
 
-구독 로그인 Codex는 Windows Service·SYSTEM·SSH batch logon에서 시작하지 않는다. 배포본은 같은 버전의 `codex.exe`, `codex-code-mode-host.exe`, `codex-exec-server.exe`를 고정 runtime root의 한 디렉터리에 둔다. `deploy/windows/configure-interactive-archivist.ps1`이 이 실행 번들을 확인하고 현재 console 사용자의 대화형 예약 작업에서 `codex login status`를 먼저 실행하며, 성공한 같은 SID와 0이 아닌 Session에서만 Archivist Host를 시작한다. Control의 Turn은 이 Host에 전달되고 Host가 구조화 stdio로 `codex app-server`를 새로 열므로 Windows Terminal 화면이나 ANSI 출력을 중계하지 않는다. 사용자가 로그아웃하면 Host는 offline이 되고 Worker 작업은 계속되며 다음 로그인 뒤 예약 작업이 Host를 다시 시작한다. `LRH-020`
+구독 로그인 Codex는 Windows Service·SYSTEM·SSH batch logon에서 시작하지 않는다. 배포본은 같은 버전의 `codex.exe`, `codex-code-mode-host.exe`, `codex-exec-server.exe`를 고정 runtime root의 한 디렉터리에 둔다. `deploy/windows/configure-interactive-archivist.ps1`은 이 실행 번들을 확인하고 현재 console 사용자의 SID와 0이 아닌 Session에서 Archivist Host를 실행하는 대화형 예약 작업을 등록한다. 작업은 로그인 trigger와 1분 복구 trigger를 함께 가져 process 중단 뒤 자동으로 다시 시작한다. Host 기동은 Codex 로그인 유무에 막히지 않고, `archive-codex`가 local-codex Turn마다 같은 사용자 문맥의 로그인을 검사해 없으면 그 Turn만 `CODEX_LOGIN_REQUIRED`로 끝낸다. Control의 Turn은 이 Host에 전달되고 Host가 구조화 stdio로 `codex app-server`를 새로 열므로 Windows Terminal 화면이나 ANSI 출력을 중계하지 않는다. 사용자가 로그아웃하면 Host는 offline이 되고 Worker 작업은 계속되며 다음 로그인 뒤 예약 작업이 Host를 다시 시작한다. `LRH-020`, `LRH-022`
 
 ## 7. Windows 서비스와 사용자 Tray 배포
 
@@ -164,7 +164,7 @@ Tailscale 같은 overlay network를 사용할 때도 전체 CGNAT 대역을 허�
 
 단독 작업 PC에는 `archive-media`만 설치하며 CLI 실행은 Control 연결이나 service credential을 요구하지 않는다. 관리형 원격 PC에는 같은 실행 파일의 `runner` 하위 명령을 서비스로 등록한다. runner가 Control로 outbound 연결하므로 inbound 포트를 열지 않으며, Worker ID와 credential reference는 양쪽 로컬 설정에 사전 등록한다. 아카이브 작업 공간의 사용자 인증 비활성 설정은 runner service 인증을 끄지 않는다. `APP-009~010`
 
-로컬 CLI가 필요한 PC에는 Archivist Host를 추가한다. Archivist Host도 Control로 outbound 연결하며 CLI용 MCP proxy는 loopback에서만 연다. 허용 backend·CLI 실행 파일·workspace root와 credential reference를 양쪽 시작 설정에 사전 등록하고, raw credential·임의 path·shell command를 원격 입력으로 받지 않는다. 전체 Orca 앱 설치는 필수가 아니며 Embedded Core backend를 기본으로 한다. Orca CLI backend를 선택한 배포만 별도 Orca 설치를 요구한다. `LRH-001`, `LRH-007`, `MCP-001`
+로컬 CLI가 필요한 PC에는 Archivist Host를 추가한다. Archivist Host도 Control로 outbound 연결하며 CLI용 MCP proxy는 loopback에서만 연다. 허용 backend·CLI 실행 파일·workspace root와 credential reference를 양쪽 시작 설정에 사전 등록하고, 같은 PC에서 자동 시작할 Host만 Control boot config에 고정 `windows_task_name`을 둔다. 화면은 이 task 이름을 입력받지 않으며 offline Agent 선택·추가 때 Control이 고정 task를 시작한다. raw credential·임의 path·shell command를 원격 입력으로 받지 않는다. 전체 Orca 앱 설치는 필수가 아니며 Embedded Core backend를 기본으로 한다. Orca CLI backend를 선택한 배포만 별도 Orca 설치를 요구한다. `LRH-001`, `LRH-007`, `CTL-009`, `MCP-001`
 
 구독 로그인 Codex CLI를 등록한 Windows PC에서는 Codex standalone release의 `bin`에 있는 세 실행 파일을 `C:\Archive\tools\codex\<version>`에 함께 배치한 뒤 관리자 터미널에서 다음을 한 번 실행한다. 설치기는 전체 실행 번들을 확인하고 기존 작업 정의를 증적 폴더에 백업하며 legacy 중복 Host 작업을 비활성화한 뒤 현재 로그인 사용자의 `InteractiveToken` 작업으로 canonical Host를 등록한다. `Probe`는 작업을 바꾸지 않고 실행 번들과 같은 사용자 문맥의 Codex 로그인만 확인한다.
 

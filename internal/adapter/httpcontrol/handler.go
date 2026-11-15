@@ -20,6 +20,7 @@ import (
 	"videoarchive/internal/application/archivework"
 	"videoarchive/internal/application/archiveworkspace"
 	"videoarchive/internal/application/archivistcontrol"
+	"videoarchive/internal/application/archivisthostactivation"
 	"videoarchive/internal/core/archivistruntime"
 	"videoarchive/internal/core/catalog"
 	"videoarchive/internal/core/command"
@@ -82,45 +83,51 @@ type ArchivistWorkspace interface {
 	RejectActionCard(context.Context, string, string, string) error
 }
 
+type ArchivistHostActivation interface {
+	Start(context.Context, string) (archivisthostactivation.Result, error)
+}
+
 type Configuration struct {
-	Access                security.AccessConfig
-	TrustedProxies        []netip.Prefix
-	Catalog               CatalogReader
-	ArchiveWorkspace      ArchiveWorkspaceReader
-	ArchiveWork           ArchiveWorkReader
-	Notifications         http.Handler
-	Commands              JobCommander
-	WorkerAPI             http.Handler
-	Workers               WorkerReader
-	ArchivistAPI          http.Handler
-	Archivists            ArchivistWorkspace
-	Drives                archiveintakeworkspace.Workspace
-	ArchiveIntake         ArchiveIntakeSelector
-	ArchiveRuns           archiveorganization.Starter
-	ArchiveTranscriptions ArchiveTranscriptionStarter
-	AllowedOrigins        []string
-	Version               string
+	Access                  security.AccessConfig
+	TrustedProxies          []netip.Prefix
+	Catalog                 CatalogReader
+	ArchiveWorkspace        ArchiveWorkspaceReader
+	ArchiveWork             ArchiveWorkReader
+	Notifications           http.Handler
+	Commands                JobCommander
+	WorkerAPI               http.Handler
+	Workers                 WorkerReader
+	ArchivistAPI            http.Handler
+	Archivists              ArchivistWorkspace
+	ArchivistHostActivation ArchivistHostActivation
+	Drives                  archiveintakeworkspace.Workspace
+	ArchiveIntake           ArchiveIntakeSelector
+	ArchiveRuns             archiveorganization.Starter
+	ArchiveTranscriptions   ArchiveTranscriptionStarter
+	AllowedOrigins          []string
+	Version                 string
 }
 
 type Handler struct {
-	access                security.AccessConfig
-	trustedProxies        []netip.Prefix
-	catalog               CatalogReader
-	archiveWorkspace      ArchiveWorkspaceReader
-	archiveWork           ArchiveWorkReader
-	notifications         http.Handler
-	commands              JobCommander
-	workerAPI             http.Handler
-	workers               WorkerReader
-	archivistAPI          http.Handler
-	archivists            ArchivistWorkspace
-	drives                archiveintakeworkspace.Workspace
-	archiveIntake         ArchiveIntakeSelector
-	archiveRuns           archiveorganization.Starter
-	archiveTranscriptions ArchiveTranscriptionStarter
-	allowedOrigins        []string
-	version               string
-	router                http.Handler
+	access                  security.AccessConfig
+	trustedProxies          []netip.Prefix
+	catalog                 CatalogReader
+	archiveWorkspace        ArchiveWorkspaceReader
+	archiveWork             ArchiveWorkReader
+	notifications           http.Handler
+	commands                JobCommander
+	workerAPI               http.Handler
+	workers                 WorkerReader
+	archivistAPI            http.Handler
+	archivists              ArchivistWorkspace
+	archivistHostActivation ArchivistHostActivation
+	drives                  archiveintakeworkspace.Workspace
+	archiveIntake           ArchiveIntakeSelector
+	archiveRuns             archiveorganization.Starter
+	archiveTranscriptions   ArchiveTranscriptionStarter
+	allowedOrigins          []string
+	version                 string
+	router                  http.Handler
 }
 
 //go:embed static/*
@@ -140,7 +147,8 @@ func New(configuration Configuration) (*Handler, error) {
 		notifications: configuration.Notifications, commands: configuration.Commands,
 		workerAPI: configuration.WorkerAPI, workers: configuration.Workers,
 		archivistAPI: configuration.ArchivistAPI, archivists: configuration.Archivists,
-		drives: configuration.Drives, archiveIntake: configuration.ArchiveIntake,
+		archivistHostActivation: configuration.ArchivistHostActivation,
+		drives:                  configuration.Drives, archiveIntake: configuration.ArchiveIntake,
 		archiveRuns: configuration.ArchiveRuns, archiveTranscriptions: configuration.ArchiveTranscriptions,
 		allowedOrigins: append([]string(nil), configuration.AllowedOrigins...),
 		version:        strings.TrimSpace(configuration.Version),
@@ -174,6 +182,9 @@ func New(configuration Configuration) (*Handler, error) {
 	}
 	if handler.archivists != nil {
 		mux.HandleFunc("GET /api/v1/archivist-hosts", handler.archivistHostStatuses)
+		if handler.archivistHostActivation != nil {
+			mux.HandleFunc("POST /api/v1/archivist-hosts/{archivistHostID}/start", handler.startArchivistHost)
+		}
 		mux.HandleFunc("GET /api/v1/archivist-sessions", handler.archivistSessions)
 		mux.HandleFunc("POST /api/v1/archivist-sessions", handler.createArchivistSession)
 		mux.HandleFunc("POST /api/v1/archivist-sessions/{sessionID}/remove", handler.removeArchivistSession)

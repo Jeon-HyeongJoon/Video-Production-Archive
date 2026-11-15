@@ -356,6 +356,27 @@ type FailureReport struct {
 	Summary string `json:"summary"`
 }
 
+// RuntimeExecutionFailure is a sanitized failure emitted by an allowlisted
+// local CLI. It carries no stderr, command text, credential, or path.
+type RuntimeExecutionFailure struct {
+	Report FailureReport
+}
+
+func (failure *RuntimeExecutionFailure) Error() string {
+	if failure == nil {
+		return "runtime execution failed"
+	}
+	return failure.Report.Code
+}
+
+func NewRuntimeExecutionFailure(code, summary string) (*RuntimeExecutionFailure, error) {
+	report, err := NewFailureReport(code, summary)
+	if err != nil {
+		return nil, err
+	}
+	return &RuntimeExecutionFailure{Report: report}, nil
+}
+
 type TurnEntryKind string
 
 const (

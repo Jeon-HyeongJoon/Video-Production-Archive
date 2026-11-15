@@ -32,6 +32,7 @@ archivist_hosts:
       allowed_backend_ids: [EMBEDDED_CORE]
       allowed_cli_ids: [fixture-archivist]
       allowed_workspace_root_ids: [video-project]
+      windows_task_name: Archive Archivist Host
 storage:
   - id: scratch-windows
     role: SCRATCH

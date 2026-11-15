@@ -8,7 +8,7 @@
 // row, and references fold behind one "참조 N" row.
 
 import { html, useEffect, useRef, useState, useComputed, batch } from "./lib.js";
-import { label, finishedTurns, formatCount, clockTime, mutation, newID } from "./core.js";
+import { label, finishedTurns, formatCount, clockTime, mutation, newID, startArchivistHost } from "./core.js";
 import {
   ui, store, stale, refresh, allDrives, currentSession, allSessions, hostFor, activeTurn, availability, driveView, driveSelection,
   selectionRefs, jobOf, workDrive, workspaces, workTitle, openNewWork,
@@ -261,7 +261,7 @@ function referenceOf(work) {
   return current?.archive_run_revision ? { kind: "ARCHIVE_RUN", work_id: work.work_id, revision: current.archive_run_revision } : null;
 }
 
-function Composer({ session, enabled, reason }) {
+function Composer({ session, enabled, reason, canWake, waking, wake, selectSession }) {
   const now = route.value;
   const draft = ui.newWork.value;
   const [useScreen, setUseScreen] = useState(true);
@@ -321,13 +321,14 @@ function Composer({ session, enabled, reason }) {
         onKeyDown=${(event) => { if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); send(event.currentTarget.value); } }}></textarea>
       <div class="composer-foot">
         <select id="archivist-session-select" class="model" aria-label="에이전트 선택" value=${session?.session_id || ""} title=${session ? `${session.archivist_host_id} · ${session.cli_id}` : ""}
-          onChange=${(event) => { ui.sessionID.value = event.currentTarget.value; }}>
+          onChange=${(event) => selectSession(event.currentTarget.value)}>
           ${allSessions.value.map((item) => html`<option key=${item.session_id} value=${item.session_id}>${item.cli_id} · ${item.name || item.session_id}</option>`)}
         </select>
         <button type="submit" class="send" data-action="send" aria-label="전송" title="전송" disabled=${disabled || !text.trim()}><${Glyph} d=${GLYPH.up} /></button>
       </div>
     </div>
     <span id="archivist-disabled-reason" class="pane-reason">${reason}</span>
+    ${session && canWake ? html`<button type="button" class="btn btn-sm agent-wake" data-action="archivist-start" disabled=${waking || stale.value} onClick=${wake}>${waking ? "에이전트 켜는 중" : "에이전트 켜기"}</button>` : null}
   </form>`;
 }
 
@@ -337,11 +338,40 @@ let stuck = true;
 
 export function AgentPane() {
   const session = currentSession.value;
-  const [text, signal] = availability(session);
-  const active = activeTurn(session);
   const host = hostFor(session);
+  const [wakingHostID, setWakingHostID] = useState("");
+  const waking = Boolean(session && wakingHostID === session.archivist_host_id && host?.state !== "ONLINE");
+  const available = availability(session);
+  const [text, signal] = waking ? ["연결 중", "work"] : available;
+  const active = activeTurn(session);
   const enabled = Boolean(session && host?.state === "ONLINE" && !active);
-  const reason = !session ? "에이전트 없음" : host?.state !== "ONLINE" ? "에이전트 실행 PC가 연결되지 않음" : active ? `응답 대기 · ${label("turn", active.state)}` : "";
+  const reason = !session ? "에이전트 없음" : waking ? "에이전트를 자동으로 켜고 있음" : host?.state !== "ONLINE" ? "에이전트가 꺼져 있음" : active ? `응답 대기 · ${label("turn", active.state)}` : "";
+  const wake = async () => {
+    if (!session || waking) return;
+    setWakingHostID(session.archivist_host_id);
+    try {
+      await startArchivistHost(session.archivist_host_id);
+      await refresh();
+    } catch (error) {
+      setWakingHostID("");
+      ui.status.value = error.message;
+    }
+  };
+  const selectSession = (sessionID) => {
+    ui.sessionID.value = sessionID;
+    const selected = allSessions.value.find((item) => item.session_id === sessionID);
+    const selectedHost = hostFor(selected);
+    if (selected && selectedHost?.state !== "ONLINE") {
+      setWakingHostID(selected.archivist_host_id);
+      startArchivistHost(selected.archivist_host_id).then(refresh).catch((error) => {
+        setWakingHostID("");
+        ui.status.value = error.message;
+      });
+    }
+  };
+  useEffect(() => {
+    if (host?.state === "ONLINE" && wakingHostID === session?.archivist_host_id) setWakingHostID("");
+  }, [host?.state, session?.archivist_host_id, wakingHostID]);
   const thread = useRef();
   const inner = useRef();
   const [unread, setUnread] = useState(0);
@@ -390,7 +420,7 @@ export function AgentPane() {
         </div>
         <button type="button" class="jump" data-show=${unread > 0 ? "true" : "false"} onClick=${jump}>새 활동 ${unread}<${Glyph} d=${GLYPH.down} /></button>
       </div>
-      <${Composer} session=${session} enabled=${enabled} reason=${reason} />
+      <${Composer} session=${session} enabled=${enabled} reason=${reason} canWake=${host?.state !== "ONLINE"} waking=${waking} wake=${wake} selectSession=${selectSession} />
     </section>
   </aside>`;
 }

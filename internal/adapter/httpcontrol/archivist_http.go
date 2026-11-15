@@ -11,6 +11,7 @@ import (
 	"videoarchive/internal/application/archiveorganization"
 	"videoarchive/internal/application/archivetranscription"
 	"videoarchive/internal/application/archivistcontrol"
+	"videoarchive/internal/application/archivisthostactivation"
 	"videoarchive/internal/core/archivistruntime"
 	"videoarchive/internal/core/command"
 	"videoarchive/internal/core/security"
@@ -28,6 +29,31 @@ func (handler *Handler) archivistHostStatuses(writer http.ResponseWriter, _ *htt
 		})
 	}
 	writeJSON(writer, http.StatusOK, map[string]any{"data": result})
+}
+
+func (handler *Handler) startArchivistHost(writer http.ResponseWriter, request *http.Request) {
+	if !handler.allowMutation(writer, request) {
+		return
+	}
+	var payload struct{}
+	if !decodeJSON(writer, request, &payload) {
+		return
+	}
+	result, err := handler.archivistHostActivation.Start(request.Context(), request.PathValue("archivistHostID"))
+	if err != nil {
+		switch {
+		case errors.Is(err, archivisthostactivation.ErrHostNotFound):
+			writeError(writer, http.StatusNotFound, "ARCHIVIST_HOST_NOT_FOUND")
+		case errors.Is(err, archivisthostactivation.ErrHostDisabled), errors.Is(err, archivisthostactivation.ErrHostStartUnmanaged):
+			writeError(writer, http.StatusConflict, "ARCHIVIST_HOST_START_UNAVAILABLE")
+		default:
+			writeError(writer, http.StatusServiceUnavailable, "ARCHIVIST_HOST_START_FAILED")
+		}
+		return
+	}
+	writeJSON(writer, http.StatusAccepted, map[string]any{"data": map[string]any{
+		"archivist_host_id": result.ArchivistHostID, "state": result.State,
+	}})
 }
 
 func (handler *Handler) archivistSessions(writer http.ResponseWriter, request *http.Request) {

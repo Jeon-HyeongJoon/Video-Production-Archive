@@ -42,6 +42,7 @@ func (*Runner) Run(ctx context.Context, plan archivistruntime.LaunchPlan, prompt
 	scanner.Buffer(make([]byte, 4096), 16<<10)
 	var response archivistruntime.FinalResponse
 	finalSeen := false
+	var reportedFailure *archivistruntime.RuntimeExecutionFailure
 	lineCount := 0
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -49,7 +50,7 @@ func (*Runner) Run(ctx context.Context, plan archivistruntime.LaunchPlan, prompt
 			continue
 		}
 		lineCount++
-		if lineCount > 128 || finalSeen {
+		if lineCount > 128 || finalSeen || reportedFailure != nil {
 			_ = command.Process.Kill()
 			_ = command.Wait()
 			return archivistruntime.FinalResponse{}, errors.New("runtime event stream is invalid")
@@ -81,6 +82,13 @@ func (*Runner) Run(ctx context.Context, plan archivistruntime.LaunchPlan, prompt
 				return archivistruntime.FinalResponse{}, errors.New("runtime final response is invalid")
 			}
 			finalSeen = true
+		case "failure":
+			reportedFailure, err = archivistruntime.NewRuntimeExecutionFailure(record.Code, record.Summary)
+			if err != nil {
+				_ = command.Process.Kill()
+				_ = command.Wait()
+				return archivistruntime.FinalResponse{}, errors.New("runtime failure event is invalid")
+			}
 		default:
 			_ = command.Process.Kill()
 			_ = command.Wait()
@@ -95,6 +103,9 @@ func (*Runner) Run(ctx context.Context, plan archivistruntime.LaunchPlan, prompt
 	if err := command.Wait(); err != nil {
 		return archivistruntime.FinalResponse{}, err
 	}
+	if reportedFailure != nil {
+		return archivistruntime.FinalResponse{}, reportedFailure
+	}
 	if !finalSeen {
 		return archivistruntime.FinalResponse{}, errors.New("runtime final response is missing")
 	}
@@ -103,6 +114,7 @@ func (*Runner) Run(ctx context.Context, plan archivistruntime.LaunchPlan, prompt
 
 type outputRecord struct {
 	Type      string   `json:"type,omitempty"`
+	Code      string   `json:"code,omitempty"`
 	Summary   string   `json:"summary"`
 	ResultIDs []string `json:"result_ids,omitempty"`
 }

@@ -35,7 +35,7 @@ Archivist Host는 Archivist 역할이 아니다. 특정 PC에서 CLI 프로세�
 
 Control의 `archivist_session_id`와 `archivist_turn_id`만 영속 identity다. Orca terminal ID, PID, PTY handle 같은 `runtime_handle`은 프로세스 수명에 한정하며 DB identity로 저장하지 않는다.
 
-Archivist 구성 화면은 이름·`archivist_host_id`·감지된 `cli_id`만 받아 Agent를 추가하고, 활성 Agent별 제거 조작을 둔다. 제거는 끝나지 않은 Turn과 결정 대기 ActionCard가 없을 때만 ArchivistSession을 활성 목록에서 제외하는 retirement이며 Session·Turn·Tool Call 이력을 삭제하지 않는다. 제거된 Session은 새 Turn과 SYSTEM 재호출을 받지 않지만 이미 시작된 ArchiveRun은 사람 조작 경로에서 계속된다. `runtime_backend`와 `workspace_root_id`는 사전 등록된 Host 설정에서 결정하고 화면이 임의 값을 받지 않는다. 고정된 Host가 offline이면 ArchivistTurn을 기다리게 하고 다른 PC로 자동 우회하지 않는다. 재배정은 사람이 명시적으로 선택한 별도 Command로만 허용한다. `CTL-006`, `CTL-008`, `DSH-012`
+Archivist 구성 화면은 이름·`archivist_host_id`·감지된 `cli_id`만 받아 Agent를 추가하고, 활성 Agent별 제거 조작을 둔다. 제거는 끝나지 않은 Turn과 결정 대기 ActionCard가 없을 때만 ArchivistSession을 활성 목록에서 제외하는 retirement이며 Session·Turn·Tool Call 이력을 삭제하지 않는다. 제거된 Session은 새 Turn과 SYSTEM 재호출을 받지 않지만 이미 시작된 ArchiveRun은 사람 조작 경로에서 계속된다. `runtime_backend`와 `workspace_root_id`는 사전 등록된 Host 설정에서 결정하고 화면이 임의 값을 받지 않는다. 고정된 Host가 offline이면 다른 PC로 자동 우회하지 않고, 같은 PC의 로컬 설정에 Windows 예약 작업이 고정돼 있을 때만 담당자의 Agent 추가·선택·다시 켜기에서 그 작업의 시작을 요청한다. 이 시작은 Session 재배정이 아니며 Host가 online이면 중복 process를 만들지 않는다. `CTL-006`, `CTL-008~009`, `DSH-012`, `DSH-042`
 
 ## 3. 최소 런타임 코어
 
@@ -56,6 +56,8 @@ v1 기본 backend인 Embedded Core가 제공할 기능은 다음뿐이다.
 Host 설정은 같은 `archive-archivist` executable을 `archive-gpt`와 `archive-local` 같은 서로 다른 CLI ID로 동시에 등록할 수 있다. 각 ArchivistSession은 사람이 고른 CLI ID에 고정되고 Turn 중 자동 전환하지 않는다. local 경로는 `--provider local --api-base http://127.0.0.1:<port>/v1 --model <slug>`를 고정 인수로 사용하며 model endpoint의 function tool call 지원이 필수다.
 
 Windows의 `archive-codex` CLI Adapter는 일회성 `codex exec` 화면을 긁지 않고 Codex `app-server --listen stdio://`의 구조화 protocol을 사용한다. ArchivistSession 하나를 Codex의 영속 native thread 하나에 대응시키고, 실행 process가 끝나도 service 계정 전용 상태 디렉터리에 Session→thread reference만 원자적으로 보존한다. 다음 ArchivistTurn은 새 app-server process에서 `thread/resume`으로 같은 thread를 열고 `turn/start`로 입력한다. Control의 ArchivistSession·Turn이 업무 identity이고 native thread reference는 CLI 대화 재개용일 뿐 Command·Tool Call 멱등성의 원장이 아니다. prompt, raw terminal, reasoning, credential과 실제 파일 경로는 이 mapping에 저장하지 않는다. `LRH-018`
+
+Windows Archivist Host는 로그인 사용자의 대화형 예약 작업으로 상주하되 Codex app-server process는 Turn이 있을 때만 시작한다. Host 예약 작업은 로그인 trigger와 1분 복구 trigger를 함께 가져 비정상 종료 뒤 터미널 조작 없이 다시 시작한다. `archive-codex`는 Turn 시작 전에 같은 사용자 문맥의 `codex login status`만 검사하고, 로그인 정보가 없으면 Host를 종료하지 않은 채 그 Turn에 `CODEX_LOGIN_REQUIRED`와 정제된 안내만 남긴다. `LRH-020`, `LRH-022`
 
 app-server에는 사용자 설정의 MCP 목록을 비우고 Archive stdio MCP 하나만 필수로 주입한다. local terminal·파일 변경·설치된 Skill·보조 Agent는 켜고 `never` approval과 `danger-full-access`를 thread·Turn마다 고정한다. browser·computer use·apps·plugins·외부 connector·image 계열은 끈다. Codex는 Host의 고정 workspace와 같은 로그인 계정 권한 안에서 native 도구를 사용하며 Archive 업무 조회·선택·판정·실행·승인·영속 기록은 Archive MCP를 통해서만 수행하도록 developer instruction을 고정한다. Archive MCP bridge는 Control이 광고하고 로컬 schema registry가 허용한 업무 도구만 반환하며, 호출을 현재 Session·Turn·fencing과 결정적 Tool Call identity가 있는 Host loopback request로 바꾼다. Control service credential은 Codex process에 전달하지 않는다. `LRH-019`, `MCP-006`
 
@@ -132,6 +134,8 @@ Host 또는 backend 재시작 시 다음 순서를 따른다.
 3. token이 없으면 사용자 목표, 확정된 업무 상태, 완료된 ArchivistToolCall 결과 요약과 미완료 호출 ID만 포함한 checkpoint로 새 CLI 세션을 연다.
 4. 완료된 ArchivistToolCall은 결과를 replay하고 다시 실행하지 않는다.
 5. 진행 중 호출만 같은 idempotency key와 현재 fencing token으로 조정한다.
+
+Windows에서 Host process 자체가 없으면 아카이브 작업 공간의 Agent 선택 또는 추가가 Control의 고정 Host 시작 API를 호출한다. Control은 boot config의 `windows_task_name`만 `schtasks.exe /Run /TN` 인수 배열로 실행하며 브라우저가 task 이름이나 실행 파일을 보내지 못하게 한다. 예약 작업의 반복 trigger도 같은 Host를 복구하므로 화면 시작 요청이 유실되어도 다음 주기에 회복한다. `CTL-009`, `DSH-042`
 
 대화 원문 전체, credential, 불필요한 파일 경로와 raw terminal screen은 checkpoint에 넣지 않는다.
 

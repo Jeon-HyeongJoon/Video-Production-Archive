@@ -4,7 +4,7 @@
 // detected CLI.
 
 import { html, useState } from "../lib.js";
-import { label, mutation, newID } from "../core.js";
+import { label, mutation, newID, startArchivistHost } from "../core.js";
 import { store, allSessions, refresh, stale } from "../store.js";
 import { AgentTable, HostTable } from "./connections.js";
 import { ThemeSwitch } from "../theme.js";
@@ -23,9 +23,10 @@ export function SettingsScreen() {
     const name = form.name.trim();
     if (!name || !cli) return;
     try {
-      await mutation("/api/v1/archivist-sessions", { session_id: newID("ARCHIVIST"), name, archivist_host_id: hostID, cli_id: cli });
+      const created = await mutation("/api/v1/archivist-sessions", { session_id: newID("ARCHIVIST"), name, archivist_host_id: hostID, cli_id: cli });
+      await startArchivistHost(created.archivist_host_id);
       setForm({ ...form, name: "" });
-      setStatus("추가됨");
+      setStatus("추가됨 · 에이전트 연결 중");
       await refresh();
     } catch (error) {
       setStatus(error.message);
@@ -59,7 +60,7 @@ export function SettingsScreen() {
         <label class="field"><span>실행 도구</span><select id="archivist-cli-select" name="cli_id" required value=${cli} disabled=${!clis.length} onChange=${(event) => set({ cli: event.currentTarget.value })}>
           ${clis.length ? clis.map((value) => html`<option key=${value} value=${value}>${value}</option>`) : html`<option value="">사용 가능한 실행 도구 없음</option>`}
         </select></label>
-        <div class="form-actions"><button type="submit" class="btn primary" id="archivist-add-submit" data-action="archivist-add" disabled=${!clis.length || stale.value}>추가</button>
+        <div class="form-actions"><button type="submit" class="btn primary" id="archivist-add-submit" data-action="archivist-add" disabled=${!clis.length || stale.value}>추가하고 켜기</button>
           <span id="archivist-add-status" class="muted" role="status">${status}</span></div>
       </form>
     </section>`,

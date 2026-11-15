@@ -86,7 +86,7 @@ Windows의 Archive Tray는 이 웹 표면을 복제하거나 상태를 소유하
 - 승인 대상과 리비전을 확인한 뒤 Approval 기록
 - 같은 Command Bus를 통한 허용된 도메인 기능 실행
 
-설정의 Archivist 구성은 CSRF 검증 뒤 이름·사전 등록된 Archivist Host·감지된 CLI만 받아 추가하고, 끝나지 않은 Turn이나 결정 대기 ActionCard가 없는 활성 Agent만 제거할 수 있다. 제거는 영속 이력을 삭제하지 않고 새 Turn 대상에서 제외한다. backend와 workspace는 Host 시작 설정이 결정하며 Archivist Host 등록 자체도 설정 파일과 Host 설치가 소유한다. 채팅 제출은 ArchivistTurn을 먼저 저장하고 durable Session·Turn ID를 반환한다. 화면에서 고른 Worker·원본·아카이브 Storage·폴더 범위는 ID와 revision으로 Turn에 붙이며 본문에서 추론하지 않는다. 새 Turn에 선택 범위나 작업 참조가 없다는 조회 결과는 정상적인 `bound=false` 문맥이고, 실행 명령만 고정 선택을 요구한다. `CTL-003~006`, `CTL-008`, `COL-003`, `DSH-012`, `MCP-008`
+설정의 Archivist 구성은 CSRF 검증 뒤 이름·사전 등록된 Archivist Host·감지된 CLI만 받아 추가하고, 끝나지 않은 Turn이나 결정 대기 ActionCard가 없는 활성 Agent만 제거할 수 있다. 제거는 영속 이력을 삭제하지 않고 새 Turn 대상에서 제외한다. backend와 workspace는 Host 시작 설정이 결정하며 Archivist Host 등록 자체도 설정 파일과 Host 설치가 소유한다. Agent를 추가하거나 offline Agent를 선택하면 화면은 임의 실행 명령을 받지 않고 Control의 고정 Host 시작 API만 호출한다. 채팅 제출은 ArchivistTurn을 먼저 저장하고 durable Session·Turn ID를 반환한다. 화면에서 고른 Worker·원본·아카이브 Storage·폴더 범위는 ID와 revision으로 Turn에 붙이며 본문에서 추론하지 않는다. 새 Turn에 선택 범위나 작업 참조가 없다는 조회 결과는 정상적인 `bound=false` 문맥이고, 실행 명령만 고정 선택을 요구한다. `CTL-003~006`, `CTL-008~009`, `COL-003`, `DSH-012`, `DSH-042`, `MCP-008`
 
 ActionCard의 채팅 분리는 승인 경계에만 적용한다. 채팅의 “진행”은 Archivist에게 후속 행동을 요청할 수 있지만 그 자체를 Approval 또는 ActionCard 제출로 해석하지 않는다. 명시적 카드 조작 시 현재 리비전을 다시 검사한다. `DSH-003`
 
@@ -152,6 +152,8 @@ ArchiveCatalog의 마지막 기록 시각은 receipt 생성 시각이나 실행 
 화면은 같은 5초 projection을 읽되 응답 본문이 그대로면 다시 해석하지 않고, 바뀐 레코드(드라이브·폴더·작업·Job·Session)만 그 값을 읽는 행에 반영해 다시 그린다. 접힌 내용은 펼칠 때만 그리고, 200개가 넘는 폴더 표는 화면 근처의 행만 같은 높이로 그린다. 화면 이동은 깊이에 따른 방향으로, 작업의 목록 이동은 한 행의 이동으로 View Transition을 쓰며 줄인 움직임 설정에서는 투명도 변화만 남긴다. 화면 코드와 그 UI 라이브러리(Preact·signals·htm, `static/js/vendor/LICENSES.txt`)는 Control 바이너리에 내장해 제공하고 외부 네트워크를 쓰지 않으며, Content-Security-Policy의 `script-src 'self'`·`style-src 'self'`를 그대로 따른다. `DSH-004`, `DSH-007`, `DSH-019`
 
 컴포넌트 화면은 기존 화면을 직접 대체한다. 별도 legacy route나 실행 중 전환 설정을 두지 않고 이전 화면 모듈도 배포하지 않는다. 루트 HTML은 mount point와 component entry만 가진 정적 shell이며 ArchiveRun·Job·Worker·Archivist projection이나 명령 입력값을 서버에서 직렬화해 넣지 않는다. 화면의 업무 상태 조회와 명령은 모두 같은 origin의 versioned `/api/v1` JSON API를 사용하고, health·정적 asset 같은 비업무 경로만 그 경계 밖에 둔다. Control의 Application Service와 Command Bus는 화면 모듈에서 직접 참조하지 않고 HTTP Adapter 뒤에 유지한다. stable asset URL은 직접 교체할 때 이전 모듈과 새 graph가 섞이지 않도록 root를 `no-store`, asset을 `no-cache, must-revalidate`로 제공한다. `DSH-034~035`
+
+offline Agent는 터미널 실행 안내로 끝내지 않는다. 기존 Session 선택과 새 Agent 추가는 사전 등록된 Host 시작을 자동 요청하고 `연결 중`을 표시하며, 실패하거나 다시 시도할 때는 같은 칸의 `에이전트 켜기`를 사용한다. Codex 로그인 정보만 없으면 Host 꺼짐으로 표시하지 않고 해당 Turn의 `Codex 로그인이 필요합니다` 실패만 보여 준다. `CTL-009`, `DSH-042`, `LRH-022`
 
 ## 8. 초기 범위에서 제외
 

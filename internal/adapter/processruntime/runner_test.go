@@ -2,6 +2,7 @@ package processruntime
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -61,6 +62,21 @@ func TestRunnerRejectsUnrestrictedRuntimeEventFields(t *testing.T) {
 	}
 }
 
+func TestRunnerReturnsSanitizedCLIAuthenticationFailure(t *testing.T) {
+	plan := archivistruntime.LaunchPlan{
+		Executable: os.Args[0], Arguments: []string{"-test.run=TestProcessRuntimeHelper", "--"}, WorkingDirectory: t.TempDir(),
+	}
+	_, err := New().Run(
+		context.Background(), plan, "archive this drive", "http://127.0.0.1:1",
+		map[string]string{"ARCHIVE_RUNTIME_TEST_MODE": "login-required"}, func() error { return nil },
+		func(archivistruntime.ProgressUpdate) error { return nil },
+	)
+	var failure *archivistruntime.RuntimeExecutionFailure
+	if !errors.As(err, &failure) || failure.Report.Code != "CODEX_LOGIN_REQUIRED" || failure.Report.Summary != "Codex 로그인이 필요합니다" {
+		t.Fatalf("unexpected public CLI failure: %T %v", err, err)
+	}
+}
+
 func TestProcessRuntimeHelper(t *testing.T) {
 	if len(os.Args) == 0 || os.Getenv("ARCHIVE_RUNTIME_TEST_MODE") == "" {
 		return
@@ -73,6 +89,8 @@ func TestProcessRuntimeHelper(t *testing.T) {
 		fmt.Println(`{"type":"final","summary":"아카이브 실행 시작","result_ids":["ARCHIVE-RUN-1"]}`)
 	case "raw-field":
 		fmt.Println(`{"type":"progress","summary":"폴더 조회","stdout":"secret"}`)
+	case "login-required":
+		fmt.Println(`{"type":"failure","code":"CODEX_LOGIN_REQUIRED","summary":"Codex 로그인이 필요합니다"}`)
 	default:
 		os.Exit(2)
 	}

@@ -2,6 +2,8 @@ package archivisthostclient
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -14,6 +16,20 @@ import (
 	"videoarchive/internal/core/archivistruntime"
 	"videoarchive/internal/core/vocabulary"
 )
+
+type loginRequiredProcessRunner struct{}
+
+func (loginRequiredProcessRunner) Run(
+	_ context.Context, _ archivistruntime.LaunchPlan, _, _ string, _ map[string]string,
+	turnStarted func() error, _ func(archivistruntime.ProgressUpdate) error,
+) (archivistruntime.FinalResponse, error) {
+	if err := turnStarted(); err != nil {
+		return archivistruntime.FinalResponse{}, err
+	}
+	return archivistruntime.FinalResponse{}, &archivistruntime.RuntimeExecutionFailure{Report: archivistruntime.FailureReport{
+		Code: "CODEX_LOGIN_REQUIRED", Summary: "Codex 로그인이 필요합니다",
+	}}
+}
 
 type blockingProcessRunner struct {
 	started chan struct{}
@@ -107,5 +123,59 @@ func TestHostKeepsHeartbeatOnlineWhileCLIProcessesTurn(t *testing.T) {
 	close(runner.release)
 	if err := <-done; err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Requirement: LRH-022
+func TestCodexLoginAbsenceFailsOnlyTurnWithPublicReconnectNotice(t *testing.T) {
+	var failures []archivistruntime.FailureReport
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch {
+		case request.URL.Path == "/archivist/v1/turns/TURN-LOGIN/delivery":
+			writer.Header().Set("Content-Type", "application/json")
+			_, _ = writer.Write([]byte(`{"data":{"deliver":true}}`))
+		case request.URL.Path == "/archivist/v1/turns/TURN-LOGIN/events":
+			var payload struct {
+				Failure *archivistruntime.FailureReport `json:"failure"`
+			}
+			if json.NewDecoder(request.Body).Decode(&payload) == nil && payload.Failure != nil {
+				failures = append(failures, *payload.Failure)
+			}
+			writer.WriteHeader(http.StatusNoContent)
+		default:
+			writer.WriteHeader(http.StatusNoContent)
+		}
+	}))
+	defer server.Close()
+	controlURL, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	executable, workspace := "/bin/true", t.TempDir()
+	if runtime.GOOS == "windows" {
+		executable, workspace = `C:\fixture\archive-codex.exe`, `C:\fixture\workspace`
+	}
+	client := &Client{
+		configuration: archivisthostconfig.Configuration{
+			ID: "HOST-LOGIN", ControlURL: controlURL, MCPListenAddress: "127.0.0.1:19091", HeartbeatInterval: time.Second,
+			LaunchPolicy: archivistruntime.LaunchPolicy{
+				CLIs:           map[string]archivistruntime.CLIExecutable{"codex": {Executable: executable}},
+				WorkspaceRoots: map[string]string{"archive": workspace},
+			},
+		},
+		credential: "fixture-secret", httpClient: server.Client(), runner: loginRequiredProcessRunner{},
+	}
+	claimed := claimedTurn{
+		SessionID: "SESSION-LOGIN", TurnID: "TURN-LOGIN", RequestID: "REQUEST-LOGIN",
+		Backend: vocabulary.RuntimeEmbeddedCore, CLIID: "codex", WorkspaceRootID: "archive",
+		Prompt: "작업 확인", FencingToken: 1, LeaseExpiresAt: time.Now().Add(time.Minute),
+	}
+	err = client.execute(context.Background(), claimed, func(error) {})
+	var runtimeFailure *archivistruntime.RuntimeExecutionFailure
+	if !errors.As(err, &runtimeFailure) {
+		t.Fatalf("expected local runtime failure, got %v", err)
+	}
+	if len(failures) != 1 || failures[0].Code != "CODEX_LOGIN_REQUIRED" || failures[0].Summary != "Codex 로그인이 필요합니다" {
+		t.Fatalf("unexpected public failure events: %+v", failures)
 	}
 }

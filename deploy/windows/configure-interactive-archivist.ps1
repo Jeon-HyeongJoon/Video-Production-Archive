@@ -69,11 +69,9 @@ function Invoke-ArchiveCodexLoginProbe {
         if ($task.State -eq "Running") {
             throw "The interactive Codex login probe did not finish."
         }
-        if ($info.LastTaskResult -ne 0) {
-            throw "Codex is not logged in for the interactive Windows user."
-        }
         return [pscustomobject]@{
             result = $info.LastTaskResult
+            available = ($info.LastTaskResult -eq 0)
             user_sid = Get-ArchiveAccountSid -Account $User
         }
     }
@@ -106,6 +104,7 @@ if ($Mode -eq "Probe") {
         mode = "Probe"
         user_sid = $probe.user_sid
         codex_login_result = $probe.result
+        codex_login_available = $probe.available
     } | ConvertTo-Json -Compress
     exit 0
 }
@@ -141,11 +140,13 @@ Get-CimInstance Win32_Process |
     ForEach-Object { Invoke-CimMethod -InputObject $_ -MethodName Terminate | Out-Null }
 
 $action = New-ScheduledTaskAction -Execute $runScript -WorkingDirectory $resolvedRoot
-$trigger = New-ScheduledTaskTrigger -AtLogOn -User $user
+$logonTrigger = New-ScheduledTaskTrigger -AtLogOn -User $user
+$recoveryTrigger = New-ScheduledTaskTrigger -Once -At ((Get-Date).AddMinutes(1)) `
+    -RepetitionInterval (New-TimeSpan -Minutes 1)
 $principal = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Highest
 $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew `
     -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -StartWhenAvailable
-Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
+Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger @($logonTrigger, $recoveryTrigger) -Principal $principal -Settings $settings -Force | Out-Null
 
 $processRecord = $null
 if (-not $NoStart) {
@@ -175,6 +176,8 @@ $registered = Get-ScheduledTask -TaskName $TaskName
     task_logon_type = [string]$registered.Principal.LogonType
     user_sid = $probe.user_sid
     codex_login_result = $probe.result
+    codex_login_available = $probe.available
+    recovery_interval_seconds = 60
     process_id = if ($null -eq $processRecord) { 0 } else { $processRecord.ProcessId }
     process_session_id = if ($null -eq $processRecord) { 0 } else { $processRecord.SessionId }
     evidence_directory = $evidenceDirectory
