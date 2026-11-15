@@ -268,15 +268,17 @@ func (service *Service) Projection(ctx context.Context) ([]DriveView, error) {
 				view.Stages = append(view.Stages, StageView{ID: "job_pending", State: workflow.Queued, TotalCount: view.VideoCount})
 			}
 			if stageTwo, ok := transcriptionJobs[receipt.ID+"\x00"+coordinated.Folder]; ok {
-				projectCatalogUpdatedAt(&state.view, stageTwo)
-				view.TranscriptionJobID = stageTwo.ID
-				view.CurrentStepID = stageTwo.CurrentStepID
-				view.StepState = currentStepState(stageTwo)
-				view.Stages = append(view.Stages, projectStageTwo(stageTwo, view.VideoCount)...)
-				view.TranscriptQualities = transcriptQualities(stageTwo)
-				if completedJob(stageTwo) {
-					view.CanAddTranscription = false
+				for _, stageTwoJob := range stageTwo {
+					projectCatalogUpdatedAt(&state.view, stageTwoJob)
+					view.TranscriptQualities = append(view.TranscriptQualities, transcriptQualities(stageTwoJob)...)
 				}
+				view.TranscriptionJobID = stageTwo[0].ID
+				view.CurrentStepID, view.StepState = aggregateStageTwoState(stageTwo)
+				view.Stages = append(view.Stages, projectStageTwoJobs(stageTwo)...)
+				sort.Slice(view.TranscriptQualities, func(i, j int) bool {
+					return view.TranscriptQualities[i].TranscriptID < view.TranscriptQualities[j].TranscriptID
+				})
+				view.CanAddTranscription = false
 			}
 			view.Stages = orderedStages(view.Stages)
 			previous, exists := state.folders[coordinated.Folder]
@@ -806,8 +808,8 @@ func (service *Service) projectArchiveRun(view *DriveView, receipt organization.
 	view.ArchiveStorageID = archiveRun.ArchiveStorageID
 }
 
-func (service *Service) transcriptionJobs() (map[string]job.State, error) {
-	result := make(map[string]job.State)
+func (service *Service) transcriptionJobs() (map[string][]job.State, error) {
+	result := make(map[string][]job.State)
 	lister, ok := service.jobs.(SnapshotLister)
 	if !ok {
 		return result, nil
@@ -826,10 +828,10 @@ func (service *Service) transcriptionJobs() (map[string]job.State, error) {
 			continue
 		}
 		key := archiveRunID + "\x00" + folder
-		previous, found := result[key]
-		if !found || state.Revision > previous.Revision {
-			result[key] = state
-		}
+		result[key] = append(result[key], state)
+	}
+	for key := range result {
+		sort.Slice(result[key], func(i, j int) bool { return result[key][i].ID < result[key][j].ID })
 	}
 	return result, nil
 }
@@ -944,6 +946,69 @@ func projectStageTwo(state job.State, total int) []StageView {
 		}
 	}
 	return stages
+}
+
+func projectStageTwoJobs(states []job.State) []StageView {
+	byID := make(map[string][]StageView)
+	for _, state := range states {
+		for _, stage := range projectStageTwo(state, 1) {
+			byID[stage.ID] = append(byID[stage.ID], stage)
+		}
+	}
+	result := make([]StageView, 0, len(byID))
+	for id, values := range byID {
+		aggregate := StageView{ID: id, State: workflow.Completed, TotalCount: len(states)}
+		for _, value := range values {
+			aggregate.CompletedCount += value.CompletedCount
+		}
+		aggregate.State, aggregate.WaitReason, aggregate.WaitTargetStorageID = aggregateStageViews(values)
+		result = append(result, aggregate)
+	}
+	return orderedStages(result)
+}
+
+func aggregateStageViews(values []StageView) (workflow.StepState, vocabulary.WaitReason, string) {
+	for _, desired := range []workflow.StepState{
+		workflow.Failed, workflow.Waiting, workflow.Running, workflow.Verifying,
+		workflow.Reserved, workflow.Paused, workflow.Queued, workflow.Cancelled,
+	} {
+		var selected *StageView
+		for index := range values {
+			if values[index].State == desired {
+				selected = &values[index]
+				break
+			}
+		}
+		if selected == nil {
+			continue
+		}
+		if desired != workflow.Waiting {
+			return desired, "", ""
+		}
+		reason, target := selected.WaitReason, selected.WaitTargetStorageID
+		for _, value := range values {
+			if value.State == workflow.Waiting && (value.WaitReason != reason || value.WaitTargetStorageID != target) {
+				return desired, "", ""
+			}
+		}
+		return desired, reason, target
+	}
+	return workflow.Completed, "", ""
+}
+
+func aggregateStageTwoState(states []job.State) (string, workflow.StepState) {
+	stages := projectStageTwoJobs(states)
+	for _, desired := range []workflow.StepState{
+		workflow.Failed, workflow.Waiting, workflow.Running, workflow.Verifying,
+		workflow.Reserved, workflow.Paused, workflow.Queued, workflow.Cancelled,
+	} {
+		for _, stage := range stages {
+			if stage.State == desired {
+				return stage.ID, desired
+			}
+		}
+	}
+	return "archive_catalog", workflow.Completed
 }
 
 func transcriptQualities(state job.State) []TranscriptQualityView {

@@ -126,22 +126,24 @@ func (service *Service) Start(ctx context.Context, request StartRequest) (Result
 		return recordings[i].ArchivePackageID < recordings[j].ArchivePackageID
 	})
 	result := Result{ArchiveRunID: archiveRun.ID, EligibleCount: len(gate.EligibleFolderIDs), HoldCount: gate.HoldCount}
-	seenFolders := make(map[string]bool, len(recordings))
+	seenPackages := make(map[string]bool, len(recordings))
+	recordingFolders := make(map[string]bool, len(gate.EligibleFolderIDs))
 	for _, recording := range recordings {
 		if !eligible[recording.FolderID] {
 			continue
 		}
-		if seenFolders[recording.FolderID] || validateStoredRecording(archiveRun, recording) != nil {
+		if seenPackages[recording.ArchivePackageID] || validateStoredRecording(archiveRun, recording) != nil {
 			return Result{}, ErrInvalidStoredResult
 		}
-		seenFolders[recording.FolderID] = true
+		seenPackages[recording.ArchivePackageID] = true
+		recordingFolders[recording.FolderID] = true
 		jobID, err := service.createJob(request, archiveRun, recording)
 		if err != nil {
 			return Result{}, err
 		}
 		result.JobIDs = append(result.JobIDs, jobID)
 	}
-	if len(seenFolders) != len(gate.EligibleFolderIDs) {
+	if len(recordingFolders) != len(gate.EligibleFolderIDs) {
 		return Result{}, ErrInvalidStoredResult
 	}
 	return result, nil

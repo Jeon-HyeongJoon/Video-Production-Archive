@@ -273,6 +273,12 @@ func TestTranscriptionPlanIncludesOnlyQCPassedRecordings(t *testing.T) {
 	if got := PlanFollowUp(OrganizationDecision{Disposition: vocabulary.OrganizationRenderRecordings, Inputs: []Input{silentInput}}, true); len(got) != 0 {
 		t.Fatalf("silent recording received STT plan: %v", got)
 	}
+	if got := PlanFollowUp(OrganizationDecision{Disposition: vocabulary.OrganizationAsIs, Inputs: []Input{silentInput, input}}, true); !reflect.DeepEqual(got, []Action{ActionAudioExtract, ActionTranscribe, ActionSubtitle}) {
+		t.Fatalf("multi-recording folder with audible input lost STT plan: %v", got)
+	}
+	if got := PlanFollowUp(OrganizationDecision{Disposition: vocabulary.OrganizationAsIs, Inputs: []Input{silentInput, silentInput}}, true); len(got) != 0 {
+		t.Fatalf("all-silent multi-recording folder received STT plan: %v", got)
+	}
 	for _, value := range []OrganizationDecision{source, hold} {
 		if got := PlanFollowUp(value, true); len(got) != 0 {
 			t.Fatalf("non-recording received STT plan: disposition=%s actions=%v", value.Disposition, got)

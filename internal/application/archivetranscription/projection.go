@@ -102,12 +102,12 @@ func (projection *JobStageOneProjection) StageOne(ctx context.Context, archiveRu
 			(folder.Decision.Disposition != vocabulary.OrganizationAsIs && folder.Decision.Disposition != vocabulary.OrganizationRenderRecordings) {
 			continue
 		}
-		recording, err := storedRecordingFromJob(archiveRun, folder, state)
+		folderRecordings, err := storedRecordingsFromJob(archiveRun, folder, state)
 		if err != nil {
 			return nil, nil, err
 		}
-		progress[len(progress)-1].TranscriptionEligible = recording.TranscriptionEligible
-		recordings = append(recordings, recording)
+		progress[len(progress)-1].TranscriptionEligible = len(folderRecordings) > 0
+		recordings = append(recordings, folderRecordings...)
 	}
 	if len(seen) != len(owned) {
 		return nil, nil, ErrStageOneProjection
@@ -143,54 +143,83 @@ func completedStep(state job.State, stepID string) *job.Step {
 	return nil
 }
 
-func storedRecordingFromJob(archiveRun archiverun.State, folder organization.CoordinatedFolder, state job.State) (StoredRecording, error) {
+func storedRecordingsFromJob(archiveRun archiverun.State, folder organization.CoordinatedFolder, state job.State) ([]StoredRecording, error) {
 	organized := completedStep(state, "organize")
-	if organized == nil || len(organized.OutputRecord.Outputs) != 1 || len(organized.ExecutionSpec.Outputs) != 1 {
-		return StoredRecording{}, ErrStageOneProjection
+	if organized == nil || len(organized.OutputRecord.Outputs) == 0 ||
+		len(organized.OutputRecord.Outputs) != len(organized.ExecutionSpec.Outputs) {
+		return nil, ErrStageOneProjection
 	}
-	packageOutput := organized.OutputRecord.Outputs[0]
-	packageTarget := organized.ExecutionSpec.Outputs[0]
 	parameters := organized.ExecutionSpec.Parameters
-	if packageOutput.Kind != execution.OutputOrganizedMedia || packageOutput.ID != packageTarget.ID ||
-		packageOutput.StorageID != archiveRun.ArchiveStorageID || len(parameters.SourceInputs) != 1 {
-		return StoredRecording{}, ErrStageOneProjection
+	if parameters.Disposition != vocabulary.OrganizationAsIs && parameters.Disposition != vocabulary.OrganizationRenderRecordings {
+		return nil, ErrStageOneProjection
 	}
-	source := parameters.SourceInputs[0]
-	videoChecksum := source.Checksum
-	if folder.Decision.Disposition == vocabulary.OrganizationRenderRecordings {
-		rendered := completedStep(state, "render")
-		if rendered == nil {
-			return StoredRecording{}, ErrStageOneProjection
+	sources := make(map[string]execution.InputReference, len(parameters.SourceInputs))
+	for _, source := range parameters.SourceInputs {
+		if source.OriginalAssetID == "" || sources[source.OriginalAssetID].OriginalAssetID != "" {
+			return nil, ErrStageOneProjection
 		}
-		videoChecksum = ""
-		for _, output := range rendered.OutputRecord.Outputs {
-			if output.Kind == execution.OutputRendition {
-				videoChecksum = output.Checksum
-				break
+		sources[source.OriginalAssetID] = source
+	}
+	renderedChecksums := make(map[string]string)
+	if parameters.Disposition == vocabulary.OrganizationRenderRecordings {
+		rendered := completedStep(state, "render")
+		if rendered == nil || len(rendered.OutputRecord.Outputs) != len(rendered.ExecutionSpec.Outputs) {
+			return nil, ErrStageOneProjection
+		}
+		for index, output := range rendered.OutputRecord.Outputs {
+			target := rendered.ExecutionSpec.Outputs[index]
+			if output.Kind != execution.OutputRendition || target.Kind != execution.OutputRendition ||
+				output.ID != target.ID || target.OriginalAssetID == "" || renderedChecksums[target.OriginalAssetID] != "" {
+				return nil, ErrStageOneProjection
+			}
+			renderedChecksums[target.OriginalAssetID] = output.Checksum
+		}
+	}
+	result := make([]StoredRecording, 0, len(organized.OutputRecord.Outputs))
+	for index, packageOutput := range organized.OutputRecord.Outputs {
+		packageTarget := organized.ExecutionSpec.Outputs[index]
+		if packageOutput.Kind != execution.OutputOrganizedMedia || packageTarget.Kind != execution.OutputOrganizedMedia ||
+			packageOutput.ID != packageTarget.ID || packageOutput.RelativePath != packageTarget.RelativePath ||
+			packageOutput.StorageID != archiveRun.ArchiveStorageID || packageTarget.OriginalAssetID == "" {
+			return nil, ErrStageOneProjection
+		}
+		source, found := sources[packageTarget.OriginalAssetID]
+		if !found {
+			return nil, ErrStageOneProjection
+		}
+		if !source.HasAudio {
+			continue
+		}
+		videoChecksum := source.Checksum
+		if parameters.Disposition == vocabulary.OrganizationRenderRecordings {
+			videoChecksum = renderedChecksums[source.OriginalAssetID]
+			if videoChecksum == "" {
+				return nil, ErrStageOneProjection
 			}
 		}
-		if videoChecksum == "" {
-			return StoredRecording{}, ErrStageOneProjection
+		profileReference := parameters.SelectedProfileReference
+		if parameters.Disposition == vocabulary.OrganizationAsIs && source.ProfileReference != "" {
+			profileReference = source.ProfileReference
 		}
+		presentation, err := archive.PresentPackage(packageOutput.ID, folder.Folder, []string{source.OriginalName})
+		if err != nil {
+			return nil, ErrStageOneProjection
+		}
+		videoFileName := presentation.VideoFileName
+		legacyMetadataPath := path.Join("packages", packageOutput.ID, "revisions", "000001", "metadata.json")
+		if packageTarget.RelativePath == legacyMetadataPath {
+			videoFileName = "video.mp4"
+		}
+		result = append(result, StoredRecording{
+			FolderID: folder.Folder, WorkspaceDriveID: parameters.WorkspaceDriveID,
+			OriginalAssetID: source.OriginalAssetID, OrganizationDecisionID: parameters.OrganizationDecisionID,
+			Disposition: parameters.Disposition, ArchivePackageID: packageOutput.ID, ArchivePackageRevision: 1,
+			VideoRelativePath: path.Join(path.Dir(packageTarget.RelativePath), videoFileName),
+			VideoChecksum:     videoChecksum, SelectedProfileReference: profileReference,
+			SourceInputs: []execution.InputReference{source}, TranscriptionEligible: true,
+		})
 	}
-	presentation, err := archive.PresentPackage(packageOutput.ID, folder.Folder, []string{source.OriginalName})
-	if err != nil {
-		return StoredRecording{}, ErrStageOneProjection
-	}
-	videoFileName := presentation.VideoFileName
-	legacyMetadataPath := path.Join("packages", packageOutput.ID, "revisions", "000001", "metadata.json")
-	if packageTarget.RelativePath == legacyMetadataPath {
-		videoFileName = "video.mp4"
-	}
-	return StoredRecording{
-		FolderID: folder.Folder, WorkspaceDriveID: parameters.WorkspaceDriveID,
-		OriginalAssetID: source.OriginalAssetID, OrganizationDecisionID: parameters.OrganizationDecisionID,
-		Disposition: folder.Decision.Disposition, ArchivePackageID: packageOutput.ID, ArchivePackageRevision: 1,
-		VideoRelativePath: path.Join(path.Dir(packageTarget.RelativePath), videoFileName),
-		VideoChecksum:     videoChecksum, SelectedProfileReference: parameters.SelectedProfileReference,
-		SourceInputs:          append([]execution.InputReference(nil), parameters.SourceInputs...),
-		TranscriptionEligible: parameters.TranscriptionEligible,
-	}, nil
+	return result, nil
 }
 
 var _ StageOneProjection = (*JobStageOneProjection)(nil)

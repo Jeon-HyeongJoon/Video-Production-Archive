@@ -50,7 +50,7 @@ const GROUPS = [
 const WORDS = { todo: "아직", part: "일부 지남", now: "지금 진행", done: "모두 지남", closed: "닫힘", ask: "시작 선택", skip: "대상 없음" };
 const PROBLEM_STEPS = ["classification", "markers", "render", "qc", "archive", "audio", "transcript", "subtitle", "transcript_text", "add"];
 const STAGE_STATES = { intake: ["todo", "todo"], stage1: ["now", "todo"], stt: ["done", "ask"], stage2: ["done", "now"], done: ["done", "done"] };
-const STAGE_ICON = { todo: "idle", part: "part", now: "work", ask: "decide", done: "done" };
+const STAGE_ICON = { todo: "idle", part: "part", now: "work", ask: "decide", done: "done", skip: "idle" };
 
 // tally counts the drive's folders at one step by stored StepState and
 // WaitReason only.
@@ -136,7 +136,8 @@ function StepNodes({ drive: current }) {
 function StageSummary({ drive: current }) {
   const id = current.workspace_drive_id;
   const open = ui.stagesOpen.value.has(id);
-  const [one, two] = STAGE_STATES[drivePhase(current)] || STAGE_STATES.intake;
+  let [one, two] = STAGE_STATES[drivePhase(current)] || STAGE_STATES.intake;
+  if (drivePhase(current) === "done" && !(current.folders || []).some((folder) => folder.transcription_job_id)) two = "skip";
   const stages = [["one", "영상 정리·저장", one], ["two", "자막·텍스트", two], ["record", "영상 목록", catalogState(current)]];
   const problems = [];
   for (const step of PROBLEM_STEPS) {

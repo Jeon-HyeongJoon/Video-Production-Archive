@@ -151,6 +151,17 @@ func TestArchiveRunProjectionPreservesFixedStageWaitReasonsAndArchiveStates(t *t
 				{Workflow: workflow.Step{ID: "archive_catalog", State: workflow.Queued}},
 			},
 		}),
+		"STT-JOB-INTERVIEW-2": jobSnapshot(t, job.State{
+			ID: "STT-JOB-INTERVIEW-2", Revision: 8, TemplateName: "archive-transcription", TargetTitle: "interviews",
+			CurrentStepID: "archive_catalog", Steps: []job.Step{
+				{Workflow: workflow.Step{ID: "audio", State: workflow.Completed}, ExecutionSpec: archiveRunSpec("RUN-9", "interviews")},
+				{Workflow: workflow.Step{ID: "transcript", State: workflow.Completed}},
+				{Workflow: workflow.Step{ID: "subtitle", State: workflow.Completed}},
+				{Workflow: workflow.Step{ID: "transcript_text", State: workflow.Completed}},
+				{Workflow: workflow.Step{ID: "archive_package_revision", State: workflow.Completed}},
+				{Workflow: workflow.Step{ID: "archive_catalog", State: workflow.Completed}},
+			},
+		}),
 	}
 	service, err := archiveintakeworkspace.New(store, jobs, archiveintakeworkspace.WithArchiveStateReader(packageStates{
 		"VP-20261030-INTERVIEW": archive.PackageCommitted,
@@ -182,7 +193,7 @@ func TestArchiveRunProjectionPreservesFixedStageWaitReasonsAndArchiveStates(t *t
 	}
 	interview := folderView(t, views[0], "interviews")
 	if len(interview.Stages) != 8 || interview.Stages[4] != (archiveintakeworkspace.StageView{
-		ID: "transcript", State: workflow.Waiting, WaitReason: workflow.WaitSlot,
+		ID: "transcript", State: workflow.Waiting, WaitReason: workflow.WaitSlot, CompletedCount: 1, TotalCount: 2,
 	}) || interview.ArchiveState != archive.PackageCommitted || interview.CanAddTranscription {
 		t.Fatalf("stt resource wait reason was not preserved: %+v", interview.Stages)
 	}

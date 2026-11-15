@@ -5,6 +5,7 @@ import (
 	"errors"
 	"path"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"videoarchive/internal/core/command"
 	"videoarchive/internal/core/execution"
 	"videoarchive/internal/core/job"
+	"videoarchive/internal/core/organization"
 	"videoarchive/internal/core/vocabulary"
 	"videoarchive/internal/core/workflow"
 )
@@ -61,6 +63,7 @@ func TestStartCreatesOneIdempotentTranscriptionJobPerStoredRecordingInReadyArchi
 		recordings: []StoredRecording{
 			storedRecording("render", "ASSET-2", "DECISION-2", vocabulary.OrganizationRenderRecordings, "VP-20261031-0002", "b"),
 			storedRecording("as-is", "ASSET-1", "DECISION-1", vocabulary.OrganizationAsIs, "VP-20261031-0001", "a"),
+			storedRecording("as-is", "ASSET-3", "DECISION-1", vocabulary.OrganizationAsIs, "VP-20261031-0003", "c"),
 		},
 	}
 	service, err := New(store, projection, jobCommands)
@@ -99,12 +102,13 @@ func TestStartCreatesOneIdempotentTranscriptionJobPerStoredRecordingInReadyArchi
 		t.Fatal(err)
 	}
 	if first.ArchiveRunID != "ARCHIVE-RUN-1" || first.EligibleCount != 2 || first.HoldCount != 1 ||
-		len(first.JobIDs) != 2 || len(second.JobIDs) != 2 || first.JobIDs[0] != second.JobIDs[0] || first.JobIDs[1] != second.JobIDs[1] {
+		len(first.JobIDs) != 3 || len(second.JobIDs) != 3 ||
+		first.JobIDs[0] != second.JobIDs[0] || first.JobIDs[1] != second.JobIDs[1] || first.JobIDs[2] != second.JobIDs[2] {
 		t.Fatalf("unexpected transcription result: first=%+v second=%+v", first, second)
 	}
 	snapshots, err := store.ListSnapshots()
-	if err != nil || len(snapshots) != 3 {
-		t.Fatalf("expected one archiveRun and two idempotent STT Jobs, snapshots=%+v err=%v", snapshots, err)
+	if err != nil || len(snapshots) != 4 {
+		t.Fatalf("expected one archiveRun and three idempotent per-recording STT Jobs, snapshots=%+v err=%v", snapshots, err)
 	}
 	for _, jobID := range first.JobIDs {
 		snapshot, err := store.Load(jobID)
@@ -166,5 +170,51 @@ func storedRecording(folder, originalID, decisionID string, disposition vocabula
 			DurationMillis: 60_000, VideoCodec: "h264", Width: 1920, Height: 1080,
 			VideoBitRateBPS: 6_000_000, HasAudio: true, ProfileReference: "organization-1080p-6000k@v1",
 		}},
+	}
+}
+
+func TestStageOneProjectionExpandsMultiVideoFolderIntoAudibleStoredRecordings(t *testing.T) {
+	checksum := func(value string) string { return strings.Repeat(value, 64) }
+	sources := []execution.InputReference{
+		{OriginalAssetID: "ASSET-1", OriginalName: "first.mp4", StorageID: "SOURCE-1", RelativePath: "talk/first.mp4", Checksum: checksum("a"), HasAudio: true, ProfileReference: "archive-1080p-6mbps@v1"},
+		{OriginalAssetID: "ASSET-2", OriginalName: "silent.mp4", StorageID: "SOURCE-1", RelativePath: "talk/silent.mp4", Checksum: checksum("b"), HasAudio: false, ProfileReference: "archive-1080p-6mbps@v1"},
+		{OriginalAssetID: "ASSET-3", OriginalName: "third.mp4", StorageID: "SOURCE-1", RelativePath: "talk/third.mp4", Checksum: checksum("c"), HasAudio: true, ProfileReference: "archive-1080p-20mbps@v1"},
+	}
+	targets := []execution.OutputTarget{
+		{ID: "VP-20261110-0001", Kind: execution.OutputOrganizedMedia, StorageID: "ARCHIVE-1", RelativePath: "first/.archive-package.json", OriginalAssetID: "ASSET-1"},
+		{ID: "VP-20261110-0002", Kind: execution.OutputOrganizedMedia, StorageID: "ARCHIVE-1", RelativePath: "silent/.archive-package.json", OriginalAssetID: "ASSET-2"},
+		{ID: "VP-20261110-0003", Kind: execution.OutputOrganizedMedia, StorageID: "ARCHIVE-1", RelativePath: "third/.archive-package.json", OriginalAssetID: "ASSET-3"},
+	}
+	outputs := make([]execution.StepOutput, 0, len(targets))
+	for index, target := range targets {
+		outputs = append(outputs, execution.StepOutput{ID: target.ID, Kind: target.Kind, StorageID: target.StorageID, RelativePath: target.RelativePath, Checksum: checksum(string(rune('d' + index)))})
+	}
+	state := job.State{Steps: []job.Step{{
+		Workflow: workflow.Step{ID: "organize", State: workflow.Completed},
+		ExecutionSpec: &execution.StepExecutionSpec{
+			Parameters: execution.StepExecutionParameters{
+				OrganizationDecisionID: "DECISION-1", WorkspaceDriveID: "VOLUME-1", MediaFolder: "talk",
+				ArchiveStorageID: "ARCHIVE-1", Disposition: vocabulary.OrganizationAsIs,
+				// Older completed jobs recorded false for a multi-video folder. Per-result
+				// audio evidence, not that obsolete folder boolean, owns eligibility.
+				TranscriptionEligible: false, SourceInputs: sources,
+			},
+			Outputs: targets,
+		},
+		OutputRecord: &execution.StepOutputRecord{Outputs: outputs},
+	}}}
+	recordings, err := storedRecordingsFromJob(
+		archiverun.State{ArchiveStorageID: "ARCHIVE-1"},
+		organization.CoordinatedFolder{Folder: "talk", Decision: organization.OrganizationDecision{Disposition: vocabulary.OrganizationAsIs}},
+		state,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(recordings) != 2 || recordings[0].OriginalAssetID != "ASSET-1" || recordings[1].OriginalAssetID != "ASSET-3" ||
+		recordings[0].ArchivePackageID != targets[0].ID || recordings[1].ArchivePackageID != targets[2].ID ||
+		recordings[0].SelectedProfileReference != sources[0].ProfileReference || recordings[1].SelectedProfileReference != sources[2].ProfileReference ||
+		len(recordings[0].SourceInputs) != 1 || len(recordings[1].SourceInputs) != 1 {
+		t.Fatalf("multi-video package projection did not preserve per-result identity: %+v", recordings)
 	}
 }

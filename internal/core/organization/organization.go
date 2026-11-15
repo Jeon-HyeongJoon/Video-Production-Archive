@@ -373,6 +373,13 @@ func PlanFollowUp(decision OrganizationDecision, qcPassed bool) []Action {
 }
 
 func TranscriptionEligible(decision OrganizationDecision, qcPassed bool) bool {
-	return qcPassed && len(decision.Inputs) == 1 && len(decision.Inputs[0].Inspection.AudioStreams) > 0 &&
-		(decision.Disposition == vocabulary.OrganizationAsIs || decision.Disposition == vocabulary.OrganizationRenderRecordings)
+	if !qcPassed || (decision.Disposition != vocabulary.OrganizationAsIs && decision.Disposition != vocabulary.OrganizationRenderRecordings) {
+		return false
+	}
+	for _, input := range decision.Inputs {
+		if len(input.Inspection.AudioStreams) > 0 {
+			return true
+		}
+	}
+	return false
 }

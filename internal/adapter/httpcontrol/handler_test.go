@@ -256,6 +256,12 @@ func TestArchiveOrganizationWorkspaceMatchesOperatingSystemGolden(t *testing.T) 
 	}
 }
 
+func TestCompletedArchiveRunDoesNotShowUnstartedTranscriptionAsComplete(t *testing.T) {
+	testControlHTTPScene(t, sceneComplete, func(t *testing.T, handler http.Handler) {
+		assertArchiveWorkspaceScript(t, handler, "check_archive_workspace_skipped_transcription.py")
+	})
+}
+
 // Requirement: DSH-004
 func TestArchiveWorkspaceJobManagementWithArchivistPaneMatchesOperatingSystemGolden(t *testing.T) {
 	testControlHTTPScene(t, sceneComplete, func(t *testing.T, handler http.Handler) {
