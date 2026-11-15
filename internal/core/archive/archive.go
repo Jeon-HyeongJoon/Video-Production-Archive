@@ -73,6 +73,7 @@ type Artifact struct {
 
 var sha256Pattern = regexp.MustCompile(`^[0-9a-fA-F]{64}$`)
 var windowsDrivePattern = regexp.MustCompile(`^[a-zA-Z]:/`)
+var windowsRequestedDrivePattern = regexp.MustCompile(`^[a-zA-Z]:[\\/]`)
 
 func (a Artifact) ValidateDerived() error {
 	if a.ID == "" || a.Path == "" || a.Size < 0 || !sha256Pattern.MatchString(a.Checksum) ||
@@ -768,7 +769,7 @@ func (root *StorageRoot) safeRelative(requested string) (string, error) {
 func normalizeStoragePath(root, requested string) (string, string, error) {
 	if strings.TrimSpace(root) == "" || strings.TrimSpace(requested) == "" || filepath.IsAbs(requested) ||
 		strings.HasPrefix(requested, `/`) || strings.HasPrefix(requested, `\`) ||
-		regexp.MustCompile(`^[a-zA-Z]:[\\/]`).MatchString(requested) {
+		windowsRequestedDrivePattern.MatchString(requested) {
 		return "", "", ErrUnsafeStoragePath
 	}
 	rootAbs, err := filepath.Abs(root)

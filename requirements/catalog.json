@@ -2666,6 +2666,18 @@
       "level": "integration"
     },
     {
+      "id": "DEV-014",
+      "design": "worker-detached-source-discovery-cancellation",
+      "statement": "Worker는 선택된 SOURCE_MEDIA 탐색 중 그 논리 Volume이 분리되거나 선택에서 빠지면 이전 탐색을 취소하고 같은 mount 문자를 이어받은 새 Volume의 내용을 이전 Storage identity로 게시하지 않아야 한다.",
+      "given": "background 탐색이 멈춰 있는 선택된 외장 SOURCE_MEDIA와 그 Volume이 분리된 뒤 같은 local root를 이어받은 다른 stable Volume이 있다.",
+      "when": "Worker가 다음 attached Volume 관찰과 선택된 source 목록을 조정한다.",
+      "then": "분리된 source의 탐색 context와 부분 관찰은 취소·제거되고 늦게 반환된 이전 batch는 버려지며 새 Volume은 자신의 source Storage ID로 별도 SCANNING 뒤 READY가 되어 이전 identity나 폴더를 섞지 않는다.",
+      "test_file": "internal/adapter/storageinventory/attached_test.go",
+      "test_name": "TestDetachedSourceCancelsDiscoveryBeforeReusedMountCanPublishOldIdentity",
+      "status": "implemented",
+      "level": "integration"
+    },
+    {
       "id": "ARC-010",
       "design": "archive-storage-selection-and-reservation",
       "statement": "아카이브 저장소는 담당자 또는 인증된 Archivist가 원본과 다른 접근 가능한 로컬·연결 네트워크·새 외장 드라이브·검증된 원격 파일 서비스의 현재 ARCHIVE_PRIMARY 후보 중 여유 용량을 만족하는 하나를 명시적으로 선택해야 하며 아카이브 실행 동안 Storage 단위 쓰기 예약을 가져야 한다.",

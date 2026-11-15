@@ -184,7 +184,7 @@ func (client *Client) Heartbeat(ctx context.Context) error {
 			return fmt.Errorf("open attached Storage roots: %w", err)
 		}
 	}
-	if client.selectedProbe != nil && len(connectedVolumes) > 0 {
+	if client.selectedProbe != nil {
 		selectedObservations, observeErr := client.selectedProbe.Observe(ctx, client.selectedSourceIDs(), connectedVolumes)
 		if observeErr != nil {
 			return fmt.Errorf("observe selected source storage: %w", observeErr)

@@ -29,11 +29,12 @@ type Probe struct {
 }
 
 type AttachedProbe struct {
-	mu      sync.Mutex
-	states  map[string]*attachedScanState
-	refresh time.Duration
-	now     func() time.Time
-	scan    attachedScanFunc
+	mu          sync.Mutex
+	states      map[string]*attachedScanState
+	nextAttempt uint64
+	refresh     time.Duration
+	now         func() time.Time
+	scan        attachedScanFunc
 }
 
 type attachedScanState struct {
@@ -42,12 +43,15 @@ type attachedScanState struct {
 	scanning    bool
 	lastAttempt time.Time
 	attempt     uint64
+	volume      device.ConnectedVolume
+	cancel      context.CancelFunc
 }
 
 type attachedScanTask struct {
 	storageID string
 	volume    device.ConnectedVolume
 	attempt   uint64
+	ctx       context.Context
 }
 
 type attachedScanFunc func(context.Context, attachedScanTask, func([]worker.MediaFolderObservation)) (worker.StorageObservation, error)
@@ -120,8 +124,12 @@ func (probe *AttachedProbe) Observe(ctx context.Context, selectedStorageIDs []st
 	result := make([]worker.StorageObservation, 0, len(ordered))
 	tasks := make([]attachedScanTask, 0, len(ordered))
 	probe.mu.Lock()
-	for storageID := range probe.states {
-		if !selected[storageID] {
+	for storageID, state := range probe.states {
+		_, connectedNow := connected[storageID]
+		if !selected[storageID] || !connectedNow {
+			if state.cancel != nil {
+				state.cancel()
+			}
 			delete(probe.states, storageID)
 		}
 	}
@@ -132,25 +140,38 @@ func (probe *AttachedProbe) Observe(ctx context.Context, selectedStorageIDs []st
 			continue
 		}
 		state := probe.states[storageID]
+		if state != nil && !sameConnectedVolume(state.volume, volume) {
+			if state.cancel != nil {
+				state.cancel()
+			}
+			delete(probe.states, storageID)
+			state = nil
+		}
 		if state == nil {
-			state = &attachedScanState{observation: scanningObservation(storageID, volume)}
+			state = &attachedScanState{observation: scanningObservation(storageID, volume), volume: volume}
 			probe.states[storageID] = state
 		}
+		state.volume = volume
+		state.observation.CapacityBytes = volume.CapacityBytes
+		state.observation.FreeBytes = volume.FreeBytes
 		retryDue := state.observation.DiscoveryState != vocabulary.FolderDiscoveryFailed || now.Sub(state.lastAttempt) >= probe.refresh
 		if !state.scanning && ((state.ready && now.Sub(state.lastAttempt) >= probe.refresh) || (!state.ready && retryDue)) {
+			scanContext, cancel := context.WithCancel(ctx)
 			state.scanning = true
 			state.lastAttempt = now
-			state.attempt++
+			probe.nextAttempt++
+			state.attempt = probe.nextAttempt
+			state.cancel = cancel
 			if !state.ready {
 				state.observation = scanningObservation(storageID, volume)
 			}
-			tasks = append(tasks, attachedScanTask{storageID: storageID, volume: volume, attempt: state.attempt})
+			tasks = append(tasks, attachedScanTask{storageID: storageID, volume: volume, attempt: state.attempt, ctx: scanContext})
 		}
 		result = append(result, cloneObservation(state.observation))
 	}
 	probe.mu.Unlock()
 	for _, task := range tasks {
-		go probe.runScan(ctx, task)
+		go probe.runScan(task)
 	}
 	return result, nil
 }
@@ -168,8 +189,8 @@ func cloneObservation(observation worker.StorageObservation) worker.StorageObser
 	return observation
 }
 
-func (probe *AttachedProbe) runScan(ctx context.Context, task attachedScanTask) {
-	observation, err := probe.scan(ctx, task, func(folders []worker.MediaFolderObservation) {
+func (probe *AttachedProbe) runScan(task attachedScanTask) {
+	observation, err := probe.scan(task.ctx, task, func(folders []worker.MediaFolderObservation) {
 		probe.progress(task, folders)
 	})
 	probe.finish(task, observation, err == nil)
@@ -193,7 +214,7 @@ func (probe *AttachedProbe) progress(task attachedScanTask, folders []worker.Med
 	probe.mu.Lock()
 	defer probe.mu.Unlock()
 	state := probe.states[task.storageID]
-	if state == nil || state.attempt != task.attempt || state.ready || !state.scanning {
+	if state == nil || state.attempt != task.attempt || state.ready || !state.scanning || task.ctx.Err() != nil {
 		return
 	}
 	state.observation.Folders = append([]worker.MediaFolderObservation(nil), folders...)
@@ -205,6 +226,10 @@ func (probe *AttachedProbe) finish(task attachedScanTask, observation worker.Sto
 	state := probe.states[task.storageID]
 	if state == nil || state.attempt != task.attempt {
 		return
+	}
+	if state.cancel != nil {
+		state.cancel()
+		state.cancel = nil
 	}
 	state.scanning = false
 	if succeeded {
@@ -229,7 +254,7 @@ func observeRoot(ctx context.Context, observation worker.StorageObservation, roo
 	if report != nil {
 		progress = func(folders []mediafolder.Folder) { report(summarizeFolders(folders)) }
 	}
-	folders, err := scanner.DiscoverWithProgress(progress)
+	folders, err := scanner.DiscoverWithProgressContext(ctx, progress)
 	if err != nil {
 		return observation, ErrObservationFailed
 	}
@@ -275,6 +300,11 @@ func observeRoot(ctx context.Context, observation worker.StorageObservation, roo
 		observation.DiscoveryRevision = 1
 	}
 	return observation, nil
+}
+
+func sameConnectedVolume(left, right device.ConnectedVolume) bool {
+	return left.StorageID == right.StorageID && left.VolumeID == right.VolumeID &&
+		left.PhysicalDeviceID == right.PhysicalDeviceID && strings.EqualFold(left.Root, right.Root)
 }
 
 func summarizeFolders(folders []mediafolder.Folder) []worker.MediaFolderObservation {

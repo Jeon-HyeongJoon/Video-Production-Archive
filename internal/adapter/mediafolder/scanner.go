@@ -1,6 +1,7 @@
 package mediafolder
 
 import (
+	"context"
 	"errors"
 	"io/fs"
 	"path"
@@ -31,16 +32,27 @@ func NewScanner(root directoryReader) (*Scanner, error) {
 }
 
 func (scanner *Scanner) Discover() ([]Folder, error) {
-	return scanner.DiscoverWithProgress(nil)
+	return scanner.DiscoverWithProgressContext(context.Background(), nil)
 }
 
 // DiscoverWithProgress reports immutable snapshots after each directory that
 // adds supported video files. A caller may expose those snapshots as partial
 // discovery, but only the returned complete value is suitable for revisioning.
 func (scanner *Scanner) DiscoverWithProgress(report func([]Folder)) ([]Folder, error) {
+	return scanner.DiscoverWithProgressContext(context.Background(), report)
+}
+
+// DiscoverWithProgressContext stops before reading another directory when the
+// owning volume observation is no longer current. Progress snapshots are
+// spaced geometrically after the first 64 changed directories so a large
+// source does not repeatedly copy its entire inventory at a linear cadence.
+func (scanner *Scanner) DiscoverWithProgressContext(ctx context.Context, report func([]Folder)) ([]Folder, error) {
+	if ctx == nil {
+		return nil, ErrScanFailed
+	}
 	grouped := make(map[string][]string)
-	changedDirectories, lastReported := 0, 0
-	if err := scanner.walk("", grouped, report, &changedDirectories, &lastReported); err != nil {
+	changedDirectories, lastReported, nextReportAt := 0, 0, 1
+	if err := scanner.walk(ctx, "", grouped, report, &changedDirectories, &lastReported, &nextReportAt); err != nil {
 		return nil, err
 	}
 	if report != nil && changedDirectories > lastReported {
@@ -60,7 +72,10 @@ func snapshot(grouped map[string][]string) []Folder {
 	return folders
 }
 
-func (scanner *Scanner) walk(directory string, grouped map[string][]string, report func([]Folder), changedDirectories, lastReported *int) error {
+func (scanner *Scanner) walk(ctx context.Context, directory string, grouped map[string][]string, report func([]Folder), changedDirectories, lastReported, nextReportAt *int) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	entries, err := scanner.root.ReadDir(directory)
 	if err != nil {
 		// Protected operating-system folders on an otherwise readable source
@@ -74,6 +89,9 @@ func (scanner *Scanner) walk(directory string, grouped map[string][]string, repo
 	children := make([]string, 0, len(entries))
 	changed := false
 	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if entry.Type()&(fs.ModeSymlink|fs.ModeIrregular) != 0 {
 			continue
 		}
@@ -97,13 +115,18 @@ func (scanner *Scanner) walk(directory string, grouped map[string][]string, repo
 	}
 	if changed && report != nil {
 		(*changedDirectories)++
-		if *changedDirectories == 1 || *changedDirectories-*lastReported >= 64 {
+		if *changedDirectories >= *nextReportAt {
 			report(snapshot(grouped))
 			*lastReported = *changedDirectories
+			if *nextReportAt < 64 {
+				*nextReportAt = 64
+			} else {
+				*nextReportAt *= 2
+			}
 		}
 	}
 	for _, child := range children {
-		if err := scanner.walk(child, grouped, report, changedDirectories, lastReported); err != nil {
+		if err := scanner.walk(ctx, child, grouped, report, changedDirectories, lastReported, nextReportAt); err != nil {
 			return err
 		}
 	}

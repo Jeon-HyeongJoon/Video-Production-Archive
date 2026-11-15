@@ -132,6 +132,72 @@ func TestSelectedAttachedSourceReportsIncrementalDiscoveryStateWithoutBlocking(t
 	}
 }
 
+// Requirement: DEV-014
+func TestDetachedSourceCancelsDiscoveryBeforeReusedMountCanPublishOldIdentity(t *testing.T) {
+	root := t.TempDir()
+	oldVolume := device.ConnectedVolume{
+		PhysicalDeviceID: "physical-old", VolumeID: "volume-old", StorageID: "source-old",
+		Root: root, CapacityBytes: 4_000, FreeBytes: 1_000, ObservedAt: time.Now(),
+	}
+	newVolume := device.ConnectedVolume{
+		PhysicalDeviceID: "physical-new", VolumeID: "volume-new", StorageID: "source-new",
+		Root: root, CapacityBytes: 8_000, FreeBytes: 2_000, ObservedAt: time.Now().Add(time.Second),
+	}
+	probe := NewAttachedProbe()
+	started := make(chan string, 2)
+	canceled := make(chan struct{})
+	probe.scan = func(ctx context.Context, task attachedScanTask, publish func([]worker.MediaFolderObservation)) (worker.StorageObservation, error) {
+		started <- task.storageID
+		if task.storageID == oldVolume.StorageID {
+			<-ctx.Done()
+			// A slow filesystem call may return one last stale batch. The probe
+			// must ignore it after detachment and must not bind it to a reused root.
+			publish([]worker.MediaFolderObservation{{Folder: "stale", VideoCount: 99}})
+			close(canceled)
+			return worker.StorageObservation{}, ctx.Err()
+		}
+		return worker.StorageObservation{
+			StorageID: task.storageID, Connected: true, AccessKind: vocabulary.StorageAccessAttachedVolume,
+			DiscoveryState: vocabulary.FolderDiscoveryReady, CapacityBytes: task.volume.CapacityBytes,
+			FreeBytes: task.volume.FreeBytes, DiscoveryRevision: 88,
+			Folders: []worker.MediaFolderObservation{{Folder: "current", VideoCount: 1}},
+		}, nil
+	}
+
+	observations, err := probe.Observe(context.Background(), []string{oldVolume.StorageID}, []device.ConnectedVolume{oldVolume})
+	if err != nil || len(observations) != 1 || observations[0].DiscoveryState != vocabulary.FolderDiscoveryScanning {
+		t.Fatalf("old source discovery did not start: observations=%+v err=%v", observations, err)
+	}
+	select {
+	case storageID := <-started:
+		if storageID != oldVolume.StorageID {
+			t.Fatalf("unexpected first scan: %s", storageID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("old source discovery did not enter the scanner")
+	}
+
+	observations, err = probe.Observe(context.Background(), []string{oldVolume.StorageID}, nil)
+	if err != nil || len(observations) != 0 {
+		t.Fatalf("detached source remained observable: observations=%+v err=%v", observations, err)
+	}
+	select {
+	case <-canceled:
+	case <-time.After(time.Second):
+		t.Fatal("detached source discovery was not canceled")
+	}
+
+	observations, err = probe.Observe(context.Background(), []string{newVolume.StorageID}, []device.ConnectedVolume{newVolume})
+	if err != nil || len(observations) != 1 || observations[0].StorageID != newVolume.StorageID || observations[0].DiscoveryState != vocabulary.FolderDiscoveryScanning {
+		t.Fatalf("new source did not receive an isolated scan: observations=%+v err=%v", observations, err)
+	}
+	observations = waitForDiscoveryState(t, probe, newVolume, vocabulary.FolderDiscoveryReady)
+	if observations[0].StorageID != newVolume.StorageID || observations[0].DiscoveryRevision != 88 ||
+		len(observations[0].Folders) != 1 || observations[0].Folders[0].Folder != "current" {
+		t.Fatalf("reused mount published stale source identity: %+v", observations)
+	}
+}
+
 func waitForDiscoveryState(t *testing.T, probe *AttachedProbe, volume device.ConnectedVolume, want vocabulary.FolderDiscoveryState) []worker.StorageObservation {
 	t.Helper()
 	deadline := time.Now().Add(time.Second)

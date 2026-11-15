@@ -31,6 +31,8 @@ Worker는 현재 연결된 외장 Volume의 두 역할 ID를 로컬 `StorageRoot
 
 폴더 탐색과 FFprobe 검사는 원본에 접근하는 Worker에서 실행한다. 선택 직후 folder inventory는 background에서 실행해 대용량 탐색 중에도 heartbeat와 자원 수용 판정을 멈추지 않는다. 지원 regular file만 즉시 상위 정규화 상대 폴더로 묶고, 보호·숨김 항목, symlink, junction·reparse 후보, irregular entry와 root 밖 대상은 따라가지 않는다. 실행 전 bounded heartbeat는 `FolderDiscoveryState`와 revision 집계만 보내고, 크기가 늘어나는 폴더·영상 inventory는 같은 snapshot ID의 별도 요청으로 보낸다. `SCANNING` 부분 집계는 작업 생성 화면에 점진적으로 표시하지만 선택 범위로 고정하지 않는다. `READY` 결과는 0이 아닌 전체 탐색 revision과 영상별 root-relative 경로·파일명·크기·filesystem 수정 시각을 포함하며 드라이브 상세의 폴더 구조에서 펼쳐 본다. `FAILED`는 빈 결과와 구분한다. 아카이브 실행 검사는 각 영상의 정규화한 기술정보를 추가한다. Control에는 Worker의 절대경로와 executable 경로를 보내지 않는다. `DEV-010~011`, `WRK-006`, `DSH-022`, `DSH-033`, `ORG-001`, `CFG-011`, `ORG-010`
 
+탐색 중 원본 Volume이 분리되거나 선택이 해제되면 Worker는 이전 scan context와 부분 inventory를 취소·제거한다. 같은 drive letter를 다른 Volume이 이어받아도 이전 scan은 늦은 batch를 게시하지 않고 새 stable Storage ID가 별도 탐색을 소유한다. 부분 snapshot의 전체 목록 복사는 첫 결과 뒤 기하급수적 간격으로 제한하고 완료 inventory는 생략하지 않는다. `DEV-014`
+
 탐색 결과는 단조 revision을 가진다. 일부 선택과 전체 선택 모두 시작 시점 revision의 폴더 ID 집합으로 고정한다. 이후 파일 추가·삭제가 감지되면 오래된 시작·override를 거부하고 원본 드라이브 상태를 “내용 바뀜”으로 투영한다. `ORG-011`, `APP-002`
 
 완료된 ArchiveRun은 최신 탐색 목록을 소비하지 않는다. 담당자는 같은 원본 revision의 폴더를 새 ArchiveRun ID로 다시 선택할 수 있다. 이때 checksum·상대경로가 같은 입력의 Observation과 OriginalAsset identity는 재사용하지만 새 검사는 새 MediaInspection으로 기록하고 OrganizationDecision·Folder Job·예상 출력은 새 ArchiveRun identity를 포함해 이전 실행과 분리한다. 최초 시작 멱등성 key는 ArchiveRun에 고정하며 같은 ArchiveRun ID와 같은 key의 재전송만 기존 receipt를 반환하고 다른 key는 충돌로 거부한다. `APP-002`, `ORG-012`
