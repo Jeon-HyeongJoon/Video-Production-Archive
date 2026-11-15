@@ -114,6 +114,51 @@ func TestArchiveRunRecallQueuesOneSystemTurnPerTriggerWhileHostIsOffline(t *test
 	}
 }
 
+func TestAdvisoryTurnPersistsPolicyAndDeduplicatesDriveFingerprintAcrossSessions(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 11, 15, 15, 0, 0, 0, time.UTC)
+	store, err := Open(filepath.Join(t.TempDir(), "archivist.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	hosts := archivistruntime.NewHostRegistry([]archivistruntime.HostDefinition{{
+		ID: "HOST-1", Enabled: true, CredentialRef: "secret://host",
+		AllowedBackends: map[vocabulary.RuntimeBackend]bool{vocabulary.RuntimeEmbeddedCore: true},
+		AllowedCLIIDs:   map[string]bool{"codex": true}, AllowedWorkspaceRootIDs: map[string]bool{"video-project": true},
+	}}, recallVerifier{}, time.Minute)
+	service, err := archivistcontrol.New(store, hosts, func() time.Time { return now }, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, sessionID := range []string{"SESSION-1", "SESSION-2"} {
+		if _, err := service.CreateSession(ctx, archivistruntime.SessionSpec{
+			ID: sessionID, ArchivistHostID: "HOST-1", Backend: vocabulary.RuntimeEmbeddedCore,
+			CLIID: "codex", WorkspaceRootID: "video-project",
+		}, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	event := archivistcontrol.AdvisoryEvent{
+		SessionID: "SESSION-1", Kind: archivistcontrol.AdvisoryNewDrive,
+		TriggerID: "VOLUME-NEW:4:7", Prompt: "inspect the new drive and prepare a proposal",
+	}
+	first, replayed, err := service.HandleAdvisoryEvent(ctx, event)
+	if err != nil || replayed {
+		t.Fatalf("first advisory was not created: record=%+v replayed=%v err=%v", first, replayed, err)
+	}
+	event.SessionID = "SESSION-2"
+	second, replayed, err := service.HandleAdvisoryEvent(ctx, event)
+	if err != nil || !replayed || second.Turn.ID != first.Turn.ID || second.Turn.SessionID != "SESSION-1" {
+		t.Fatalf("drive advisory was not globally deduplicated: first=%+v second=%+v replayed=%v err=%v", first, second, replayed, err)
+	}
+	stored, err := store.Turn(ctx, first.Turn.ID)
+	if err != nil || stored.Turn.ToolPolicy.Effective() != archivistruntime.ToolPolicyAdvisory ||
+		stored.Turn.SubmittedBy != vocabulary.ActorSystem || stored.Turn.DriveSelection != nil {
+		t.Fatalf("advisory policy was not durable: %+v err=%v", stored, err)
+	}
+}
+
 type recallVerifier struct{}
 
 func (recallVerifier) Verify(archivistHostID, credentialRef, presentedCredential string) bool {

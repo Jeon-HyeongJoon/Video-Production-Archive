@@ -19,6 +19,7 @@ import (
 	"videoarchive/internal/application/archivetranscription"
 	"videoarchive/internal/application/archiveworkspace"
 	"videoarchive/internal/application/archivistcontrol"
+	"videoarchive/internal/application/workdiagnostics"
 	"videoarchive/internal/core/archivistruntime"
 	"videoarchive/internal/core/catalog"
 	"videoarchive/internal/core/command"
@@ -30,6 +31,7 @@ import (
 const (
 	ToolJobsGet                   = "archive.jobs.get.v1"
 	ToolWorkReferenceGet          = "archive.work.reference.get.v1"
+	ToolWorkDiagnosticsGet        = "archive.work.diagnostics.get.v1"
 	ToolAssetsSearch              = "archive.assets.search.v1"
 	ToolJobsCreate                = "archive.jobs.create.v1"
 	ToolIntakeCandidatesSearch    = "archive.intake.candidates.search.v1"
@@ -57,6 +59,14 @@ type ArchivistRuntime interface {
 
 type CatalogReader interface {
 	Search(context.Context, catalog.SearchQuery) ([]catalog.SearchResult, error)
+}
+
+type WorkDiagnosticsReader interface {
+	Diagnose(context.Context, archivistruntime.WorkReference) (workdiagnostics.Snapshot, error)
+}
+
+type turnPolicyReader interface {
+	TurnToolPolicy(context.Context, string, string) (archivistruntime.ArchivistTurnToolPolicy, error)
 }
 
 type ArchiveWorkspaceReader interface {
@@ -93,6 +103,7 @@ type Configuration struct {
 	IntakeSelector        ArchiveIntakeSelector
 	ArchiveRuns           ArchiveRunStarter
 	ArchiveTranscriptions ArchiveTranscriptionStarter
+	WorkDiagnostics       WorkDiagnosticsReader
 }
 
 type Handler struct {
@@ -104,6 +115,7 @@ type Handler struct {
 	intakeSelector        ArchiveIntakeSelector
 	archiveRuns           ArchiveRunStarter
 	archiveTranscriptions ArchiveTranscriptionStarter
+	workDiagnostics       WorkDiagnosticsReader
 	router                http.Handler
 }
 
@@ -123,6 +135,7 @@ func New(configuration Configuration) (*Handler, error) {
 		archiveWorkspace: configuration.ArchiveWorkspace, commands: configuration.Commands,
 		drives: configuration.Drives, intakeSelector: configuration.IntakeSelector,
 		archiveRuns: configuration.ArchiveRuns, archiveTranscriptions: configuration.ArchiveTranscriptions,
+		workDiagnostics: configuration.WorkDiagnostics,
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /mcp/v1/tools", handler.tools)
@@ -149,6 +162,9 @@ func (handler *Handler) tools(writer http.ResponseWriter, _ *http.Request) {
 		{"name": ToolWorkReferenceGet, "action_class": string(vocabulary.ActionRead)},
 		{"name": ToolAssetsSearch, "action_class": string(vocabulary.ActionRead)},
 		{"name": ToolJobsCreate, "action_class": string(vocabulary.ActionProcess)},
+	}
+	if handler.workDiagnostics != nil {
+		result = append(result, map[string]string{"name": ToolWorkDiagnosticsGet, "action_class": string(vocabulary.ActionRead)})
 	}
 	if handler.drives != nil && handler.archiveRuns != nil && handler.archiveTranscriptions != nil {
 		result = append(result,
@@ -189,12 +205,27 @@ func (handler *Handler) call(writer http.ResponseWriter, request *http.Request) 
 		writeError(writer, http.StatusConflict, "MCP_TURN_CONTEXT_INVALID")
 		return
 	}
+	policy := archivistruntime.ToolPolicyStandard
+	if reader, ok := handler.archivists.(turnPolicyReader); ok {
+		resolved, err := reader.TurnToolPolicy(request.Context(), payload.SessionID, payload.TurnID)
+		if err != nil {
+			writeError(writer, http.StatusConflict, "MCP_TURN_CONTEXT_INVALID")
+			return
+		}
+		policy = resolved
+	}
 	if payload.Tool != ToolJobsGet && payload.Tool != ToolWorkReferenceGet && payload.Tool != ToolAssetsSearch && payload.Tool != ToolJobsCreate &&
+		payload.Tool != ToolWorkDiagnosticsGet &&
 		payload.Tool != ToolIntakeCandidatesSearch && payload.Tool != ToolIntakeSourceSelect && payload.Tool != ToolIntakeSelectionPin &&
 		payload.Tool != ToolDriveSelectionGet && payload.Tool != ToolArchiveRunStatus &&
 		payload.Tool != ToolOrganizationHoldsList && payload.Tool != ToolOrganizationHoldGet &&
 		payload.Tool != ToolOrganizationHoldClassify && payload.Tool != ToolArchiveRunStart && payload.Tool != ToolArchiveTranscriptionStart {
 		writeError(writer, http.StatusNotFound, "MCP_CAPABILITY_NOT_FOUND")
+		return
+	}
+	if policy == archivistruntime.ToolPolicyAdvisory && !advisoryToolAllowed(payload.Tool) {
+		_ = handler.archivists.RecordToolCall(request.Context(), payload.SessionID, payload.TurnID, payload.ToolCallID, payload.Tool, "", "FAILED")
+		writeError(writer, http.StatusForbidden, "MCP_ADVISORY_POLICY_DENIED")
 		return
 	}
 	if err := handler.archivists.RecordToolCall(request.Context(), payload.SessionID, payload.TurnID, payload.ToolCallID, payload.Tool, "", "RUNNING"); err != nil {
@@ -206,6 +237,8 @@ func (handler *Handler) call(writer http.ResponseWriter, request *http.Request) 
 		handler.getJob(writer, request, payload)
 	case ToolWorkReferenceGet:
 		handler.getWorkReference(writer, request, payload)
+	case ToolWorkDiagnosticsGet:
+		handler.getWorkDiagnostics(writer, request, payload)
 	case ToolAssetsSearch:
 		handler.searchAssets(writer, request, payload)
 	case ToolJobsCreate:
@@ -227,9 +260,21 @@ func (handler *Handler) call(writer http.ResponseWriter, request *http.Request) 
 	case ToolOrganizationHoldClassify:
 		handler.classifyOrganizationHold(writer, request, payload)
 	case ToolArchiveRunStart:
-		handler.startArchiveRun(writer, request, payload)
+		handler.startArchiveRun(writer, request, payload, policy)
 	case ToolArchiveTranscriptionStart:
 		handler.startArchiveTranscription(writer, request, payload)
+	}
+}
+
+func advisoryToolAllowed(tool string) bool {
+	switch tool {
+	case ToolJobsGet, ToolWorkReferenceGet, ToolWorkDiagnosticsGet, ToolAssetsSearch,
+		ToolIntakeCandidatesSearch, ToolIntakeSourceSelect, ToolIntakeSelectionPin,
+		ToolDriveSelectionGet, ToolArchiveRunStatus, ToolOrganizationHoldsList,
+		ToolOrganizationHoldGet, ToolArchiveRunStart:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -259,6 +304,32 @@ func (handler *Handler) getWorkReference(writer http.ResponseWriter, request *ht
 		Bound bool `json:"bound"`
 		archivistruntime.WorkReference
 	}{Bound: true, WorkReference: reference}})
+}
+
+func (handler *Handler) getWorkDiagnostics(writer http.ResponseWriter, request *http.Request, call callRequest) {
+	if handler.workDiagnostics == nil {
+		writeError(writer, http.StatusNotFound, "MCP_CAPABILITY_NOT_FOUND")
+		return
+	}
+	if !validEmptyInput(call.Input) {
+		_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, "", "FAILED")
+		writeError(writer, http.StatusBadRequest, "MCP_INPUT_INVALID")
+		return
+	}
+	reference, err := handler.archivists.TurnWorkReference(request.Context(), call.SessionID, call.TurnID)
+	if err != nil {
+		_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, "", "FAILED")
+		writeError(writer, http.StatusConflict, "MCP_WORK_REFERENCE_REQUIRED")
+		return
+	}
+	diagnostic, err := handler.workDiagnostics.Diagnose(request.Context(), reference)
+	if err != nil {
+		_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, reference.WorkID, "FAILED")
+		writeError(writer, http.StatusConflict, "MCP_WORK_DIAGNOSTICS_UNAVAILABLE")
+		return
+	}
+	_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, reference.WorkID, "COMPLETED")
+	writeJSON(writer, http.StatusOK, map[string]any{"data": workdiagnostics.Sanitize(diagnostic)})
 }
 
 func (handler *Handler) searchArchiveIntakeCandidates(writer http.ResponseWriter, request *http.Request, call callRequest) {
@@ -749,7 +820,7 @@ func holdDecisionID(call callRequest, folder archiveintakeworkspace.FolderView) 
 	return "DECISION-" + hex.EncodeToString(digest[:12])
 }
 
-func (handler *Handler) startArchiveRun(writer http.ResponseWriter, request *http.Request, call callRequest) {
+func (handler *Handler) startArchiveRun(writer http.ResponseWriter, request *http.Request, call callRequest, policy archivistruntime.ArchivistTurnToolPolicy) {
 	selection, err := handler.archiveIntakeSelection(request.Context(), call)
 	var input struct {
 		ArchiveRunID string `json:"archive_run_id"`
@@ -769,7 +840,7 @@ func (handler *Handler) startArchiveRun(writer http.ResponseWriter, request *htt
 		writeError(writer, http.StatusForbidden, "MCP_ARCHIVIST_POLICY_DENIED")
 		return
 	}
-	if route == archivistruntime.RouteActionCard {
+	if policy == archivistruntime.ToolPolicyAdvisory || route == archivistruntime.RouteActionCard {
 		handler.archiveRunActionCard(writer, request, call, strings.TrimSpace(input.ArchiveRunID), selection)
 		return
 	}

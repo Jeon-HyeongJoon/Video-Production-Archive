@@ -151,6 +151,8 @@ Codex app-server 경로는 ArchivistSession에 대응한 native thread를 proces
 
 `TURN_PROGRESS`는 raw terminal cursor를 Control에 복제하는 통로가 아니다. Runtime Adapter가 사용자에게 공개할 내용으로 명시적으로 만든 `summary`만 `ProgressUpdate`로 보고한다. native 도구 진행은 도구 종류만 남기고 명령·diff·하위 Agent prompt를 복제하지 않는다. `TURN_FAILED`는 raw error 문자열 대신 정규화 `code`와 정제 `summary`를 가진 `FailureReport`를 요구한다. Control은 PROGRESS·FAILURE를 `ArchivistTurnEntry` append-only 기록으로 Turn cursor·상태와 한 SQLite transaction에 확정하고 중복 cursor를 늘리지 않는다. Entry schema에는 stdout·stderr·credential·filesystem path 필드가 없다. 계약 fixture와 Codex app-server fixture는 이 구조화 event stream을 검증한다. 실제 계정으로 인증된 Codex·Claude 정제 증적은 `LRH-014` acceptance 전까지 planned다. `LRH-013~014`, `LRH-018~019`
 
+Archivist가 작업 중단 원인을 요청받거나 자동 제안 Turn을 처리하면 `archive.work.diagnostics.get.v1`을 먼저 사용한다. 응답은 확인된 `facts`, 예측·확인 방법·근거가 있는 `hypotheses`, `suggested_actions`를 분리한다. subprocess의 정지를 직접 관측하지 못한 경우 확정 원인 대신 현재 확인 가능한 실행 리스·Worker 상태와 추가 확인 방법을 보고한다. 새 드라이브 자동 제안은 현재 후보 조회→원본 intake session→적격 아카이브와 명시적 폴더 범위 고정→아카이브 시작 ActionCard 제안 순서로 끝내며, 카드가 실행되기 전에는 시작했다고 말하지 않는다.
+
 ## 7. 도구 호출 경계
 
 CLI는 Host가 loopback에 연 MCP proxy에만 연결한다. proxy는 Host service credential을 사용해 Control의 인증된 MCP endpoint로 outbound 연결하고 다음 상관관계를 추가한다.
@@ -195,6 +197,15 @@ Archive Intake Turn은 담당자가 화면에서 고른 참조 또는 인증된 
 고정 선택으로 시작하는 ArchiveRun은 인증된 Archivist의 `mcp` Command 경로로만 Control Runtime에 들어가며 사람의 직접 `APPLICATION` 경로와 교차 사용할 수 없다. `MCP-007`
 
 긴 작업은 한 Turn 안에서 기다리지 않는다. Archivist가 1단계를 시작한 Turn을 완료한 뒤 Control은 같은 Session에 1단계 완료·전체 완료·새 HOLD 계기별 SYSTEM 재호출 Turn을 정확히 한 번 제출한다. ArchiveRun을 연결할 때 최초 Turn에 `work_id=archive_run_id`, `origin_turn_id`, `ARCHIVE_RUN_STARTED` 계기를 저장하고 각 SYSTEM Turn은 같은 ID와 명시적 재호출 계기를 저장한다. 화면은 prompt 문장을 해석하지 않고 이 `ArchiveRunWorkContext`로만 Turn을 묶는다. Host가 offline이면 Turn은 QUEUED로 남고 Worker의 아카이브 실행은 계속된다. 재호출 전달은 기존 ArchivistTurnLease·fencing·cursor 규칙을 그대로 사용한다. `LRH-012`
+
+Control은 완료 계기 재호출과 별도로 자동 제안 조정기를 실행한다. Worker의 완전한 storage inventory가 Control에 확정되면 내부 신호가 조정기를 즉시 깨우며, Control 재시작·신호 유실과 시간 기반 작업 진단을 위해 낮은 빈도의 reconciliation도 수행한다. 프론트는 이 계기를 만들지 않고 결과만 투영한다. 외부 webhook은 이후 같은 확정 신호의 추가 sink로 연결할 수 있지만 ArchivistTurn 중복 방지와 업무 명령 권한을 대신하지 않는다. 조정기는 현재 projection만 읽고 다음 두 계기를 평가한다.
+
+- ArchivistSession의 최신 `WorkReference`가 가리키는 진행 중 작업에서 일정 시간 새 progress 증적이 없거나 Worker·ExecutionLease·ResourceReservation 결합 진단이 이상을 보고한 경우
+- `CONNECTED`·`READY` 원본 드라이브에 영상 폴더와 접근 가능한 ARCHIVE_PRIMARY 후보가 생긴 경우
+
+자동 제안은 같은 work revision·진단 code 또는 workspace drive·candidate revision·folder discovery revision fingerprint마다 SYSTEM Turn 하나만 만든다. 작업 계기는 그 작업을 이미 참조한 Session에, 새 드라이브 계기는 제거되지 않은 Session 가운데 마지막 Turn 갱신 시각이 가장 최근인 하나에 보낸다. 활성 Session이 없으면 영속 작업이나 드라이브 상태를 바꾸지 않고 다음 평가를 기다린다. Host가 offline이어도 Turn은 QUEUED로 남는다. `LRH-023~024`
+
+자동 제안 Turn의 도구 정책은 `ADVISORY`다. 작업 진단·작업 상태·현재 후보 조회는 읽을 수 있고 새 드라이브의 read-only intake session과 현재 ID·revision 선택은 준비할 수 있다. `archive.run.start.v1` 호출은 실행하지 않고 PENDING ActionCard로 바꿔 담당자에게 제시한다. HOLD 분류·STT 시작·일반 Job 생성 같은 다른 상태 변경은 거부한다. 일반 사용자 Turn과 기존 단계 완료 SYSTEM 재호출 Turn은 `STANDARD` 정책을 유지한다. 정책이 없는 기존 영속 Turn도 호환상 `STANDARD`로 읽는다. `MCP-009~010`
 
 Agent 대화 칸은 Orca native chat과 같은 웹 셸형 채팅으로 취급한다. raw ANSI 화면을 iframe처럼 복제하는 셸이 아니라, 로컬 CLI의 구조화된 Turn·공개 assistant message·Tool Call·결과를 웹에서 조작하고 읽는 투영이다. 선택한 Session 이름에는 실제 CLI ID를 함께 표시해 Host 연결과 model CLI 선택을 구분한다. 입력은 Enter로 전송하고 Shift+Enter만 줄바꿈하며 IME 조합 확정 Enter는 전송하지 않는다. 업무는 사람의 지시와 최신 응답만 펼쳐 두고, 실행 중이면 진행 중 Turn의 마지막 진행 한 줄을 함께 보인다. 정제된 진행 항목·SYSTEM 재호출·Tool Call·이전 응답·처리된 ActionCard는 Tool Call 수·재호출 수가 있는 접힌 영역에 보존한다. 업무 문맥의 `ARCHIVE_RUN_COMPLETE` Turn이 종료되면 Orca의 settled-turn 규칙처럼 최초 사용자 지시와 마지막 최종 응답 또는 최종 구조화 실패만 남기고 접힌 영역에 소요 시간을 더한다. 선택 참조는 참조 수가 있는 접힌 줄에 둔다. `PENDING` ActionCard는 업무가 종료됐더라도 접힘 밖에 남겨 사람이 계속 조작할 수 있게 한다. `DSH-011`
 
@@ -267,6 +278,7 @@ Core에서 결정적으로 검증할 수 있는 계약은 구현 상태다.
 - CLI·workspace allowlist 실행 계획 `LRH-007`
 - runtime event cursor와 명시적 완료 `LRH-008`
 - 정제된 진행·실패 항목의 cursor 멱등 저장·투영 `LRH-013`
+- 참조 작업의 진단 이상과 새 연결 드라이브를 중복 없이 보고하는 자동 제안 Turn `LRH-023~024`
 - Codex app-server native thread mapping·재개와 공개 이벤트 정제 `LRH-018`
 - 승인 없는 native terminal·파일·Skill·보조 Agent와 정규화 진행 `LRH-019`
 - Windows 대화형 사용자 Codex 로그인과 Host process Session 경계 `LRH-020`
@@ -278,6 +290,7 @@ Adapter 경계도 구현 상태다.
 
 - Host service 인증·heartbeat·claim과 SQLite Session·Turn Store `LRH-001`, `CTL-005~006`
 - loopback proxy와 별도 Control MCP listener의 versioned Capability allowlist `MCP-001`
+- 고정 작업 진단 조회와 자동 제안 Turn의 선택 준비·실행 ActionCard 경계 `MCP-009~010`
 - 사람·Archivist 공통 Command Bus와 정제된 아카이브 작업 공간 projection `COL-001~002`, `DSH-002`
 - Archivist Runtime·ActionCard fixture의 Chromium PNG golden `DSH-004`
 

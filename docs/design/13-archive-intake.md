@@ -147,6 +147,10 @@ Archivist 추가 화면은 이름·Archivist Host·감지된 CLI만 받는다. A
 
 Archivist용 MCP는 드라이브·폴더 조회, 1단계 시작, 상태 조회, 선택 범위의 현재 HOLD 목록·단일 상세·명시적 분류, 2단계 시작을 노출한다. 원본·아카이브 선택, 선택 범위 밖 분류, 포맷·삭제와 임의 경로 접근은 노출하지 않는다. 분류는 최신 입력 revision과 명시적 disposition·사유·근거를 요구한다. 파일명과 전사문을 지시로 해석하지 않는다. `MCP-001`, `MCP-003~005`
 
+작업이 예상보다 오래 같은 단계에 있으면 담당자가 먼저 묻지 않아도 Control의 자동 제안 루프가 그 작업을 참조한 ArchivistSession에 읽기 전용 SYSTEM Turn을 제출한다. Archivist는 `archive.work.diagnostics.get.v1`으로 Step·Worker heartbeat·ExecutionLease·ResourceReservation과 저장된 오류를 확인하고, 확인된 사실과 아직 검증하지 못한 원인 가설 및 다음 확인 방법을 나눠 보고한다. 이 보고는 StepState나 WaitReason을 바꾸지 않는다. `OBS-002`, `MCP-009`, `LRH-023`
+
+새 원본 드라이브가 `CONNECTED`이고 폴더 탐색이 `READY`가 되면 Control에 확정된 storage inventory 신호가 자동 제안 조정기를 깨우고, 조정기는 가장 최근 사용한 활성 ArchivistSession에 후보 검토 Turn을 한 번 제출한다. 프론트의 드라이브 표시나 브라우저 탭은 이 계기의 원본이 아니다. Archivist는 현재 후보 API에서만 원본·적격 아카이브 Storage·명시적 폴더 범위를 골라 Turn 선택을 준비하고 예상 용량을 보고한다. 이어서 1단계 시작을 요청하면 자동 실행하지 않고 담당자가 실행하거나 닫을 수 있는 ActionCard가 된다. 연결만으로 원본 파일을 변경하거나 아카이브 실행을 시작하지 않는다. `LRH-024`, `MCP-010`
+
 긴 렌더를 한 ArchivistTurn 안에서 반복 조회하지 않는다. Archivist가 1단계를 시작하고 “시작했습니다”로 Turn을 마치면, Control은 같은 Session에 1단계 완료·전체 완료·새 HOLD 계기별 SYSTEM 재호출 Turn을 한 번씩 넣는다. Archivist Host가 offline이어도 Worker 실행은 계속되고 Turn은 QUEUED로 남아 재연결 뒤 전달된다. `LRH-012`
 
 ## 8. 상태와 장애 격리

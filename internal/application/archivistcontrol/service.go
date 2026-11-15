@@ -62,6 +62,7 @@ type TurnProjection struct {
 	DriveSelection *archivistruntime.DriveSelection
 	WorkReference  *archivistruntime.WorkReference
 	WorkContext    *archivistruntime.ArchiveRunWorkContext
+	ToolPolicy     archivistruntime.ArchivistTurnToolPolicy
 }
 
 type ToolCallProjection struct {
@@ -176,6 +177,21 @@ type RecallEvent struct {
 	TriggerID    string
 	HoldCount    int
 	Selection    archivistruntime.DriveSelection
+}
+
+type AdvisoryKind string
+
+const (
+	AdvisoryWorkDiagnostic AdvisoryKind = "WORK_DIAGNOSTIC"
+	AdvisoryNewDrive       AdvisoryKind = "NEW_DRIVE"
+)
+
+type AdvisoryEvent struct {
+	SessionID string
+	Kind      AdvisoryKind
+	TriggerID string
+	Prompt    string
+	Work      *archivistruntime.WorkReference
 }
 
 func New(store Store, hosts *archivistruntime.HostRegistry, now func() time.Time, leaseTTL time.Duration) (*Service, error) {
@@ -339,6 +355,58 @@ func recallPrompt(event RecallEvent) string {
 	}
 }
 
+// HandleAdvisoryEvent queues one read-mostly SYSTEM Turn for one immutable
+// observation fingerprint. The Host may be offline; durable delivery happens
+// when that pinned Host reconnects.
+func (service *Service) HandleAdvisoryEvent(ctx context.Context, event AdvisoryEvent) (TurnRecord, bool, error) {
+	event.SessionID = strings.TrimSpace(event.SessionID)
+	event.TriggerID = strings.TrimSpace(event.TriggerID)
+	event.Prompt = strings.TrimSpace(event.Prompt)
+	if event.SessionID == "" || event.TriggerID == "" || event.Prompt == "" ||
+		(event.Kind != AdvisoryWorkDiagnostic && event.Kind != AdvisoryNewDrive) ||
+		(event.Kind == AdvisoryWorkDiagnostic && event.Work == nil) ||
+		(event.Kind == AdvisoryNewDrive && event.Work != nil) {
+		return TurnRecord{}, false, ErrInvalidRequest
+	}
+	session, err := service.store.Session(ctx, event.SessionID)
+	if err != nil {
+		return TurnRecord{}, false, err
+	}
+	if !session.RemovedAt.IsZero() {
+		return TurnRecord{}, true, nil
+	}
+	identity := event.SessionID + "\x00" + string(event.Kind) + "\x00" + event.TriggerID
+	if event.Kind == AdvisoryNewDrive {
+		identity = string(event.Kind) + "\x00" + event.TriggerID
+	}
+	digest := sha256.Sum256([]byte(identity))
+	turnID := "SYSTEM-ADVISORY-" + hex.EncodeToString(digest[:12])
+	if stored, loadErr := service.store.Turn(ctx, turnID); loadErr == nil {
+		if (event.Kind != AdvisoryNewDrive && stored.Turn.SessionID != event.SessionID) || stored.Turn.SubmittedBy != vocabulary.ActorSystem ||
+			stored.Turn.ToolPolicy.Effective() != archivistruntime.ToolPolicyAdvisory {
+			return TurnRecord{}, false, command.ErrIdempotencyConflict
+		}
+		return stored, true, nil
+	} else if !errors.Is(loadErr, ErrTurnNotFound) {
+		return TurnRecord{}, false, loadErr
+	}
+	turn, err := archivistruntime.NewAdvisorySystemTurn(turnID, event.SessionID, "REQUEST-"+turnID, event.Work)
+	if err != nil {
+		return TurnRecord{}, false, err
+	}
+	now := service.now().UTC()
+	record := TurnRecord{Turn: turn, Prompt: event.Prompt, CreatedAt: now, UpdatedAt: now}
+	if err := service.store.CreateTurn(ctx, record); err != nil {
+		stored, loadErr := service.store.Turn(ctx, turnID)
+		if loadErr == nil && (event.Kind == AdvisoryNewDrive || stored.Turn.SessionID == event.SessionID) &&
+			stored.Turn.ToolPolicy.Effective() == archivistruntime.ToolPolicyAdvisory {
+			return stored, true, nil
+		}
+		return TurnRecord{}, false, err
+	}
+	return record, false, nil
+}
+
 func (service *Service) TurnDriveSelection(ctx context.Context, sessionID, turnID string) (archivistruntime.DriveSelection, error) {
 	turn, err := service.store.Turn(ctx, strings.TrimSpace(turnID))
 	if err != nil {
@@ -455,6 +523,7 @@ func (service *Service) Projection(ctx context.Context) ([]SessionProjection, er
 				CreatedAt: turn.CreatedAt, UpdatedAt: turn.UpdatedAt,
 				FinalResponse: turn.Turn.FinalResponse, Entries: entries, ToolCalls: toolCalls,
 				DriveSelection: turn.Turn.DriveSelection, WorkReference: turn.Turn.WorkReference, WorkContext: turn.Turn.WorkContext,
+				ToolPolicy: turn.Turn.ToolPolicy.Effective(),
 			})
 		}
 		projection.ActionCards, err = service.store.ListActionCards(ctx, session.Session.ID)
@@ -596,4 +665,19 @@ func (service *Service) ValidateToolContext(ctx context.Context, archivistHostID
 		return archivistruntime.ErrInvalidRuntimeEvent
 	}
 	return nil
+}
+
+func (service *Service) TurnToolPolicy(ctx context.Context, sessionID, turnID string) (archivistruntime.ArchivistTurnToolPolicy, error) {
+	turn, err := service.store.Turn(ctx, strings.TrimSpace(turnID))
+	if err != nil {
+		return "", err
+	}
+	if turn.Turn.SessionID != strings.TrimSpace(sessionID) {
+		return "", ErrInvalidRequest
+	}
+	policy := turn.Turn.ToolPolicy.Effective()
+	if !policy.Valid() {
+		return "", ErrInvalidRequest
+	}
+	return policy, nil
 }

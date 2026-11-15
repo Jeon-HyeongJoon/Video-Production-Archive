@@ -141,6 +141,7 @@ If a turn has no fixed intake selection, search current candidates with the subj
 Destructive actions and approvals belong to a human. Never submit an arbitrary path, endpoint, credential, stale revision, or candidate that a current tool result did not return.
 When a long ArchiveRun or transcription is started, report that it started and end this turn; Control will recall you after a stage completes.
 If evidence is insufficient to classify a HOLD item, keep it on hold and state what evidence is missing.
+For an automatic advisory turn, report observed facts separately from hypotheses. A fresh lease heartbeat proves only that the Worker execution loop answered, not that its subprocess progressed. Prepare current drive selections when requested, but treat an archive start ActionCard as a proposal and never claim work started until the tool reports an executed ArchiveRun.
 Give a concise Korean final answer focused on the result or the next human action.`
 
 func (loop *Loop) Run(ctx context.Context, runtime RuntimeContext, prompt string) (Result, error) {
@@ -292,6 +293,7 @@ func ToolProgress(name string) string {
 	summaries := map[string]string{
 		"archive.jobs.get.v1": "작업 상태 확인", "archive.assets.search.v1": "아카이브 자료 조회",
 		"archive.jobs.create.v1": "작업 요청", "archive.work.reference.get.v1": "이어갈 작업 확인",
+		"archive.work.diagnostics.get.v1":     "작업 진단 확인",
 		"archive.intake.candidates.search.v1": "입고 후보 검색", "archive.intake.source.select.v1": "원본 선택",
 		"archive.intake.selection.pin.v1": "작업 범위 고정",
 		"archive.intake.selection.get.v1": "선택 범위 확인",
@@ -341,6 +343,10 @@ func knownTools() map[string]ToolDefinition {
 		},
 		"archive.work.reference.get.v1": {
 			Name: "archive.work.reference.get.v1", ProviderName: "archive_work_reference_get_v1", Description: "Read the persistent work kind, ID, and revision fixed to this turn for mid-work handoff. A successful result with bound=false means this new turn has no work reference.",
+			Parameters: objectSchema(map[string]any{}),
+		},
+		"archive.work.diagnostics.get.v1": {
+			Name: "archive.work.diagnostics.get.v1", ProviderName: "archive_work_diagnostics_get_v1", Description: "Read sanitized execution diagnostics for the persistent work fixed to this turn. Facts, hypotheses, and next checks are separate; this tool never changes work state.",
 			Parameters: objectSchema(map[string]any{}),
 		},
 		"archive.assets.search.v1": {

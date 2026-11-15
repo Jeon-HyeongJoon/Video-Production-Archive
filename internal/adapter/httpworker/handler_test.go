@@ -29,6 +29,36 @@ func (verifier testVerifier) Verify(_, _, presented string) bool {
 	return presented == string(verifier)
 }
 
+func TestCommittedStorageInventoryWakesControlAdvisoryCoordinator(t *testing.T) {
+	now := time.Date(2026, 11, 15, 8, 0, 0, 0, time.UTC)
+	registry := worker.NewRegistry([]worker.Definition{{
+		ID: "worker-windows", Enabled: true, CredentialRef: "secret-ref",
+		ProcessingKinds: map[vocabulary.ProcessingKind]bool{}, AllowedStorageIDs: map[string]bool{},
+	}}, testVerifier("service-secret"), time.Minute)
+	if err := registry.Connect("worker-windows", "service-secret", now, worker.Metrics{
+		SnapshotID: 1, ObservedAt: now, BusyPhysicalDeviceIDs: map[string]bool{},
+		AccessibleStorageIDs: map[string]bool{}, AcceptingWork: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	handler, err := New(registry, func() time.Time { return now })
+	if err != nil {
+		t.Fatal(err)
+	}
+	wakeups := 0
+	handler.SetInventoryObserved(func() { wakeups++ })
+	body := bytes.NewBufferString(`{"worker_id":"worker-windows","snapshot_id":1,"storage_observations":[]}`)
+	request := httptest.NewRequest(http.MethodPost, "/worker/v1/storage-inventory", body)
+	request.Header.Set("Authorization", "Bearer service-secret")
+	request.Header.Set("X-Worker-ID", "worker-windows")
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || wakeups != 1 {
+		t.Fatalf("committed inventory did not emit exactly one wake-up: status=%d wakeups=%d body=%s", response.Code, wakeups, response.Body.String())
+	}
+}
+
 // Requirement: WRK-010
 func TestWorkerClaimReturnsOnlyValidatedFencedStepExecutionSpec(t *testing.T) {
 	for _, scenario := range []struct {

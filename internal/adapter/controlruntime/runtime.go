@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -35,10 +36,12 @@ import (
 	"videoarchive/internal/application/archivetranscription"
 	"videoarchive/internal/application/archivework"
 	"videoarchive/internal/application/archiveworkspace"
+	"videoarchive/internal/application/archivistadvisory"
 	"videoarchive/internal/application/archivistcontrol"
 	"videoarchive/internal/application/archivisthostactivation"
 	"videoarchive/internal/application/dispatchcoordinator"
 	"videoarchive/internal/application/jobcontrol"
+	"videoarchive/internal/application/workdiagnostics"
 	"videoarchive/internal/application/workercapacity"
 	"videoarchive/internal/application/workercontrol"
 	"videoarchive/internal/core/archive"
@@ -86,6 +89,9 @@ type Runtime struct {
 	archiveIntake          *sqlitearchiveintake.Repository
 	archivists             *archivistcontrol.Service
 	archiveIntakeWorkspace *archiveintakeworkspace.Service
+	workDiagnostics        *workdiagnostics.Service
+	archivistAdvisories    *archivistadvisory.Service
+	advisorySignal         chan struct{}
 	workerExecution        *workercontrol.Service
 	handler                *httpcontrol.Handler
 	mcpHandler             *httpmcp.Handler
@@ -296,6 +302,23 @@ func OpenWithDependencies(ctx context.Context, configuration bootconfig.Configur
 		return fail(err)
 	}
 	runtime.archivists = archivists
+	workDiagnostics, err := workdiagnostics.New(workQueries, queries, workerCapacity, commandStore, dependencies.Now, 10*time.Minute)
+	if err != nil {
+		return fail(err)
+	}
+	runtime.workDiagnostics = workDiagnostics
+	archivistAdvisories, err := archivistadvisory.New(archivists, archiveIntakeWorkspace, workDiagnostics, archivists)
+	if err != nil {
+		return fail(err)
+	}
+	runtime.archivistAdvisories = archivistAdvisories
+	runtime.advisorySignal = make(chan struct{}, 1)
+	workerAPI.SetInventoryObserved(func() {
+		select {
+		case runtime.advisorySignal <- struct{}{}:
+		default:
+		}
+	})
 	hostStarter := dependencies.ArchivistHostStarter
 	if hostStarter == nil {
 		hostStarter, err = windowstask.New(configuration.ArchivistHostTasks, windowstask.OSCommandRunner{})
@@ -325,6 +348,7 @@ func OpenWithDependencies(ctx context.Context, configuration bootconfig.Configur
 		Archivists: archivists, Catalog: catalogStore, ArchiveWorkspace: queries, Commands: jobCommands,
 		Drives: mcpArchiveIntake, IntakeSelector: mcpArchiveIntakeSelector,
 		ArchiveRuns: mcpArchiveRuns, ArchiveTranscriptions: mcpArchiveTranscriptions,
+		WorkDiagnostics: workDiagnostics,
 	})
 	if err != nil {
 		return fail(err)
@@ -398,6 +422,7 @@ func (runtime *Runtime) Run(ctx context.Context) error {
 	go serve(controlServer, controlListener)
 	go serve(mcpServer, mcpListener)
 	go runtime.monitorArchiveRunRecalls(ctx)
+	go runtime.monitorArchivistAdvisories(ctx)
 	shutdown := func() error {
 		shutdownContext, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
@@ -412,6 +437,33 @@ func (runtime *Runtime) Run(ctx context.Context) error {
 	case err := <-result:
 		shutdownErr := shutdown()
 		return errors.Join(err, shutdownErr, <-result)
+	}
+}
+
+func (runtime *Runtime) monitorArchivistAdvisories(ctx context.Context) {
+	if runtime == nil || runtime.archivistAdvisories == nil {
+		return
+	}
+	evaluate := func() {
+		if err := runtime.archivistAdvisories.Evaluate(ctx); err != nil && ctx.Err() == nil {
+			slog.Warn("Archivist advisory evaluation failed", "error", err)
+		}
+	}
+	evaluate()
+	// Inventory commits wake this monitor immediately. The low-frequency tick
+	// reconciles missed signals after restarts and evaluates time-based work
+	// progress diagnostics without depending on an open browser.
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			evaluate()
+		case <-runtime.advisorySignal:
+			evaluate()
+		}
 	}
 }
 

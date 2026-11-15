@@ -453,6 +453,31 @@ func dispatchCommit(jobID, stepID, reservationID string, snapshotID, dispatchSeq
 	}
 }
 
+func TestActiveExecutionReadsReservationLeaseAndDeviceAsOneObservation(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 11, 15, 8, 0, 0, 0, time.UTC)
+	store, err := Open(t.TempDir() + "/command.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	jobID := "JOB-DIAGNOSTIC"
+	stepID := "render"
+	if err := store.Seed(ctx, command.Snapshot{TargetID: jobID, Revision: 1, State: json.RawMessage(`{"step_state":"QUEUED"}`)}); err != nil {
+		t.Fatal(err)
+	}
+	commit := dispatchCommit(jobID, jobID+"/"+stepID, "RES-DIAGNOSTIC", 11, 1, now)
+	if err := store.CommitDispatch("diagnostic-dispatch", commit); err != nil {
+		t.Fatal(err)
+	}
+	observation, found, err := store.ActiveExecution(ctx, jobID, stepID)
+	if err != nil || !found || observation.ReservationID != "RES-DIAGNOSTIC" || !observation.HasLease ||
+		observation.WorkerID != "worker-windows" || observation.FencingToken != 1 ||
+		len(observation.PhysicalDeviceIDs) != 1 || observation.PhysicalDeviceIDs[0] != "disk-"+jobID+"/"+stepID {
+		t.Fatalf("active execution observation is incomplete: found=%v value=%+v err=%v", found, observation, err)
+	}
+}
+
 func assertDispatchAbsent(t *testing.T, store *Store, jobID, stepID, reservationID string, revision uint64) {
 	t.Helper()
 	snapshot, err := store.Load(jobID)

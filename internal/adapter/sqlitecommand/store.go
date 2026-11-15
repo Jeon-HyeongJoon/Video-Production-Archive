@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"videoarchive/internal/adapter/sqlitebase"
+	"videoarchive/internal/application/workdiagnostics"
 	"videoarchive/internal/application/workercontrol"
 	"videoarchive/internal/core/command"
 	"videoarchive/internal/core/dispatch"
@@ -292,6 +293,80 @@ func (store *Store) ListActiveReservations() ([]dispatch.ResourceReservation, er
 		result = append(result, item.value)
 	}
 	return result, nil
+}
+
+func (store *Store) ActiveExecution(ctx context.Context, jobID, stepID string) (workdiagnostics.ExecutionObservation, bool, error) {
+	jobID = strings.TrimSpace(jobID)
+	stepID = strings.TrimSpace(stepID)
+	if jobID == "" || stepID == "" {
+		return workdiagnostics.ExecutionObservation{}, false, command.ErrInvalidChange
+	}
+	var value workdiagnostics.ExecutionObservation
+	var resourceClass, reservedAt string
+	var memoryBytes, scratchBytes int64
+	var leaseOwner, leaseAcquired, leaseHeartbeat, leaseExpires sql.NullString
+	var fencingToken sql.NullInt64
+	err := store.db.QueryRowContext(ctx, `
+		SELECT r.reservation_id, r.worker_id, r.resource_class, r.memory_bytes, r.scratch_bytes, r.created_at,
+			l.owner_worker_id, l.acquired_at, l.heartbeat_at, l.expires_at, l.fencing_token
+		FROM resource_reservations r
+		LEFT JOIN execution_leases l ON l.reservation_id = r.reservation_id
+		WHERE r.job_id = ? AND r.step_id = ? AND r.released_at IS NULL
+		ORDER BY r.created_at DESC, r.reservation_id DESC
+		LIMIT 1
+	`, jobID, jobID+"/"+stepID).Scan(
+		&value.ReservationID, &value.WorkerID, &resourceClass, &memoryBytes, &scratchBytes, &reservedAt,
+		&leaseOwner, &leaseAcquired, &leaseHeartbeat, &leaseExpires, &fencingToken,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return workdiagnostics.ExecutionObservation{}, false, nil
+	}
+	if err != nil {
+		return workdiagnostics.ExecutionObservation{}, false, err
+	}
+	if memoryBytes < 0 || scratchBytes < 0 {
+		return workdiagnostics.ExecutionObservation{}, false, dispatch.ErrInvalidReservation
+	}
+	value.ResourceClass = vocabulary.ResourceClass(resourceClass)
+	value.MemoryBytes = uint64(memoryBytes)
+	value.ScratchBytes = uint64(scratchBytes)
+	value.ReservedAt, err = time.Parse(time.RFC3339Nano, reservedAt)
+	if err != nil || !value.ResourceClass.Valid() {
+		return workdiagnostics.ExecutionObservation{}, false, dispatch.ErrInvalidReservation
+	}
+	if leaseOwner.Valid {
+		value.HasLease = true
+		value.WorkerID = leaseOwner.String
+		value.LeaseAcquiredAt, err = time.Parse(time.RFC3339Nano, leaseAcquired.String)
+		if err == nil {
+			value.LeaseHeartbeatAt, err = time.Parse(time.RFC3339Nano, leaseHeartbeat.String)
+		}
+		if err == nil {
+			value.LeaseExpiresAt, err = time.Parse(time.RFC3339Nano, leaseExpires.String)
+		}
+		if err != nil || !fencingToken.Valid || fencingToken.Int64 <= 0 {
+			return workdiagnostics.ExecutionObservation{}, false, workflow.ErrStaleFencingToken
+		}
+		value.FencingToken = uint64(fencingToken.Int64)
+	}
+	rows, err := store.db.QueryContext(ctx, `
+		SELECT physical_device_id FROM resource_reservation_devices WHERE reservation_id = ? ORDER BY physical_device_id
+	`, value.ReservationID)
+	if err != nil {
+		return workdiagnostics.ExecutionObservation{}, false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var deviceID string
+		if err := rows.Scan(&deviceID); err != nil {
+			return workdiagnostics.ExecutionObservation{}, false, err
+		}
+		value.PhysicalDeviceIDs = append(value.PhysicalDeviceIDs, deviceID)
+	}
+	if err := rows.Err(); err != nil {
+		return workdiagnostics.ExecutionObservation{}, false, err
+	}
+	return value, true, nil
 }
 
 func (store *Store) FindReceipt(idempotencyKey string) (command.Receipt, bool, error) {

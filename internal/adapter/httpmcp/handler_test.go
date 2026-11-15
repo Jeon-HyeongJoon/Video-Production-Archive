@@ -19,6 +19,7 @@ import (
 	"videoarchive/internal/application/archiveworkspace"
 	"videoarchive/internal/application/archivistcontrol"
 	"videoarchive/internal/application/archivistloop"
+	"videoarchive/internal/application/workdiagnostics"
 	coreintake "videoarchive/internal/core/archiveintake"
 	"videoarchive/internal/core/archivistruntime"
 	"videoarchive/internal/core/catalog"
@@ -281,6 +282,97 @@ func TestMCPReadsStructuredWorkReferenceForMidWorkHandoff(t *testing.T) {
 	}
 }
 
+type fixedWorkDiagnostics struct{ snapshot workdiagnostics.Snapshot }
+
+func (fixture fixedWorkDiagnostics) Diagnose(context.Context, archivistruntime.WorkReference) (workdiagnostics.Snapshot, error) {
+	return fixture.snapshot, nil
+}
+
+// Requirement: MCP-009
+func TestMCPReadsBoundWorkDiagnosticsWithoutRawLogsOrPaths(t *testing.T) {
+	reference := archivistruntime.WorkReference{Kind: archivistruntime.WorkJob, WorkID: "JOB-DIAGNOSTIC-1", Revision: 3}
+	handler, err := New(Configuration{
+		Archivists: fixtureArchivistRuntime{work: &reference}, Catalog: fixtureCatalog{},
+		ArchiveWorkspace: fixtureArchiveWorkspace{}, Commands: fixtureCommands{},
+		WorkDiagnostics: fixedWorkDiagnostics{snapshot: workdiagnostics.Snapshot{
+			WorkKind: reference.Kind, WorkID: reference.WorkID, WorkRevision: reference.Revision,
+			ObservedAt: time.Date(2026, 11, 15, 10, 0, 0, 0, time.UTC), ShouldReport: true, Fingerprint: "diagnostic-fingerprint",
+			Jobs: []workdiagnostics.JobDiagnostic{{
+				JobID: reference.WorkID, StepID: "render", LogReference: `C:\private\token-secret.log`,
+			}},
+			Facts:      []workdiagnostics.Fact{{Code: "LEASE_HEARTBEAT_OBSERVED", Summary: "Worker loop renewed its lease", ObservedAt: time.Date(2026, 11, 15, 9, 59, 50, 0, time.UTC)}},
+			Hypotheses: []workdiagnostics.Hypothesis{{Code: "PROGRESS_UNOBSERVED", Statement: "subprocess state is not confirmed", NextCheck: "read the next structured progress sample"}},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := mcpTestRequest(handler, http.MethodPost, "/mcp/v1/call",
+		archiveToolCall("CALL-DIAGNOSTIC", ToolWorkDiagnosticsGet, `{}`), "secret")
+	body := response.Body.String()
+	if response.Code != http.StatusOK || !strings.Contains(body, `"work_id":"JOB-DIAGNOSTIC-1"`) ||
+		!strings.Contains(body, `"code":"PROGRESS_UNOBSERVED"`) || !strings.Contains(body, `"next_check"`) {
+		t.Fatalf("bound diagnostic was not returned: %d %s", response.Code, body)
+	}
+	for _, forbidden := range []string{`C:\private`, "token-secret", "password", "credential"} {
+		if strings.Contains(strings.ToLower(body), strings.ToLower(forbidden)) {
+			t.Fatalf("diagnostic exposed raw log or secret material: %s", body)
+		}
+	}
+}
+
+// Requirement: MCP-010
+func TestAdvisoryTurnPreparesSelectionAndConvertsArchiveStartToActionCard(t *testing.T) {
+	var pinned archivistruntime.DriveSelection
+	var cards []archivistcontrol.ActionCardProjection
+	runs := &fixtureArchiveRuns{}
+	state := &holdReviewState{view: archiveintakeworkspace.DriveView{
+		WorkspaceDriveID: "VOLUME-NEW", ConnectionState: vocabulary.VolumeConnected, ConnectionWorkerID: "WORKER-1",
+		CandidateRevision: 4, FolderDiscoveryRevision: 7, FolderDiscoveryState: vocabulary.FolderDiscoveryReady,
+		SelectionSessionID: "INTAKE-NEW", WorkerID: "WORKER-1", SourceVolumeID: "VOLUME-NEW", SourceStorageID: "SOURCE-NEW",
+		DiscoveredFolders: []archiveintakeworkspace.FolderView{{Folder: "recordings", VideoCount: 2, EstimatedOutputBytes: 1_000}},
+		StorageCandidates: []archiveintakeworkspace.StorageView{{StorageID: "ARCHIVE-1", Role: vocabulary.StorageArchivePrimary, Accessible: true, FreeBytes: 1 << 30}},
+	}}
+	handler, err := New(Configuration{
+		Archivists: fixtureArchivistRuntime{
+			selectionErr: true, selectionTarget: &pinned, cards: &cards, policy: archivistruntime.ToolPolicyAdvisory,
+		},
+		Catalog: fixtureCatalog{}, ArchiveWorkspace: fixtureArchiveWorkspace{}, Commands: fixtureCommands{},
+		Drives: fixtureDrives{state: state}, IntakeSelector: fixtureIntakeSelector{},
+		ArchiveRuns: runs, ArchiveTranscriptions: &fixtureArchiveTranscriptions{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	search := mcpTestRequest(handler, http.MethodPost, "/mcp/v1/call",
+		archiveToolCall("CALL-ADVISORY-SEARCH", ToolIntakeCandidatesSearch, `{"query":"","limit":10}`), "secret")
+	if search.Code != http.StatusOK {
+		t.Fatalf("advisory candidate read failed: %d %s", search.Code, search.Body.String())
+	}
+	selectSource := mcpTestRequest(handler, http.MethodPost, "/mcp/v1/call",
+		archiveToolCall("CALL-ADVISORY-SOURCE", ToolIntakeSourceSelect, `{"workspace_drive_id":"VOLUME-NEW","expected_candidate_revision":4}`), "secret")
+	if selectSource.Code != http.StatusOK {
+		t.Fatalf("advisory source preparation failed: %d %s", selectSource.Code, selectSource.Body.String())
+	}
+	pin := mcpTestRequest(handler, http.MethodPost, "/mcp/v1/call",
+		archiveToolCall("CALL-ADVISORY-PIN", ToolIntakeSelectionPin, `{"workspace_drive_id":"VOLUME-NEW","worker_id":"WORKER-1","intake_session_id":"INTAKE-NEW","source_storage_id":"SOURCE-NEW","archive_storage_id":"ARCHIVE-1","candidate_revision":4,"folder_discovery_revision":7,"folder_ids":["recordings"]}`), "secret")
+	if pin.Code != http.StatusOK || pinned.WorkspaceDriveID == "" {
+		t.Fatalf("advisory selection was not fixed: %d %s selection=%+v", pin.Code, pin.Body.String(), pinned)
+	}
+	runID := stableToolTarget("ARCHIVE-RUN", "SESSION-1", "TURN-1", "recordings")
+	start := mcpTestRequest(handler, http.MethodPost, "/mcp/v1/call",
+		archiveToolCall("CALL-ADVISORY-START", ToolArchiveRunStart, `{"archive_run_id":"`+runID+`"}`), "secret")
+	if start.Code != http.StatusAccepted || runs.calls != 0 || len(cards) != 1 || cards[0].State != "PENDING" ||
+		cards[0].CommandType != archiveorganization.StartActionCardCommand {
+		t.Fatalf("advisory start bypassed human confirmation: %d %s runs=%d cards=%+v", start.Code, start.Body.String(), runs.calls, cards)
+	}
+	denied := mcpTestRequest(handler, http.MethodPost, "/mcp/v1/call",
+		archiveToolCall("CALL-ADVISORY-DENIED", ToolArchiveTranscriptionStart, `{}`), "secret")
+	if denied.Code != http.StatusForbidden || !strings.Contains(denied.Body.String(), "MCP_ADVISORY_POLICY_DENIED") {
+		t.Fatalf("advisory mutation was not denied: %d %s", denied.Code, denied.Body.String())
+	}
+}
+
 type driveMCPState struct {
 	runs           *fixtureArchiveRuns
 	transcriptions *fixtureArchiveTranscriptions
@@ -322,6 +414,7 @@ type fixtureArchivistRuntime struct {
 	work            *archivistruntime.WorkReference
 	selectionTarget *archivistruntime.DriveSelection
 	recordedCalls   *[]archivistcontrol.ToolCallProjection
+	policy          archivistruntime.ArchivistTurnToolPolicy
 }
 
 func (fixtureArchivistRuntime) Authenticate(hostID, credential string) error {
@@ -332,6 +425,10 @@ func (fixtureArchivistRuntime) Authenticate(hostID, credential string) error {
 }
 func (fixtureArchivistRuntime) ValidateToolContext(context.Context, string, string, string, uint64) error {
 	return nil
+}
+
+func (fixture fixtureArchivistRuntime) TurnToolPolicy(context.Context, string, string) (archivistruntime.ArchivistTurnToolPolicy, error) {
+	return fixture.policy.Effective(), nil
 }
 
 func (fixture fixtureArchivistRuntime) RecordToolCall(_ context.Context, _, _ string, callID, tool, target, state string) error {
@@ -349,6 +446,9 @@ func (fixture fixtureArchivistRuntime) RecordActionCard(_ context.Context, _ str
 	return nil
 }
 func (fixture fixtureArchivistRuntime) TurnDriveSelection(context.Context, string, string) (archivistruntime.DriveSelection, error) {
+	if fixture.selectionTarget != nil && fixture.selectionTarget.WorkspaceDriveID != "" {
+		return *fixture.selectionTarget, nil
+	}
 	if fixture.selectionErr {
 		return archivistruntime.DriveSelection{}, archivistcontrol.ErrDriveSelectionNotBound
 	}

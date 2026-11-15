@@ -88,6 +88,25 @@ type Turn struct {
 	WorkReference      *WorkReference
 	WorkContext        *ArchiveRunWorkContext
 	SubmittedBy        vocabulary.ActorType
+	ToolPolicy         ArchivistTurnToolPolicy
+}
+
+type ArchivistTurnToolPolicy string
+
+const (
+	ToolPolicyStandard ArchivistTurnToolPolicy = "STANDARD"
+	ToolPolicyAdvisory ArchivistTurnToolPolicy = "ADVISORY"
+)
+
+func (policy ArchivistTurnToolPolicy) Effective() ArchivistTurnToolPolicy {
+	if policy == "" {
+		return ToolPolicyStandard
+	}
+	return policy
+}
+
+func (policy ArchivistTurnToolPolicy) Valid() bool {
+	return policy == ToolPolicyStandard || policy == ToolPolicyAdvisory
 }
 
 type WorkKind string
@@ -233,7 +252,7 @@ func NewTurnWithDriveSelection(id, sessionID, requestID string, source *DriveSel
 func NewTurnWithReferences(id, sessionID, requestID string, source *DriveSelection, work *WorkReference) (Turn, error) {
 	turn := Turn{
 		ID: strings.TrimSpace(id), SessionID: strings.TrimSpace(sessionID), RequestID: strings.TrimSpace(requestID),
-		State: vocabulary.ArchivistTurnQueued, SubmittedBy: vocabulary.ActorHuman,
+		State: vocabulary.ArchivistTurnQueued, SubmittedBy: vocabulary.ActorHuman, ToolPolicy: ToolPolicyStandard,
 	}
 	if turn.ID == "" || turn.SessionID == "" || turn.RequestID == "" {
 		return Turn{}, ErrInvalidTurn
@@ -265,6 +284,16 @@ func NewSystemTurnWithReferences(id, sessionID, requestID string, source DriveSe
 		return Turn{}, err
 	}
 	turn.SubmittedBy = vocabulary.ActorSystem
+	return turn, nil
+}
+
+func NewAdvisorySystemTurn(id, sessionID, requestID string, work *WorkReference) (Turn, error) {
+	turn, err := NewTurnWithReferences(id, sessionID, requestID, nil, work)
+	if err != nil {
+		return Turn{}, err
+	}
+	turn.SubmittedBy = vocabulary.ActorSystem
+	turn.ToolPolicy = ToolPolicyAdvisory
 	return turn, nil
 }
 

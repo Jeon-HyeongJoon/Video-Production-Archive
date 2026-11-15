@@ -20,11 +20,12 @@ import (
 var ErrInvalidConfiguration = errors.New("worker HTTP configuration is invalid")
 
 type Handler struct {
-	registry   *worker.Registry
-	now        func() time.Time
-	dispatcher Dispatcher
-	execution  *workercontrol.Service
-	volumes    VolumeInventory
+	registry          *worker.Registry
+	now               func() time.Time
+	dispatcher        Dispatcher
+	execution         *workercontrol.Service
+	volumes           VolumeInventory
+	inventoryObserved func()
 }
 
 type Dispatcher interface {
@@ -78,6 +79,12 @@ func NewWithExecutionAndVolumes(registry *worker.Registry, now func() time.Time,
 		return nil, ErrInvalidConfiguration
 	}
 	return &Handler{registry: registry, now: now, dispatcher: dispatcher, execution: execution, volumes: volumes}, nil
+}
+
+// SetInventoryObserved installs the Control-owned wake-up signal used after a
+// complete storage inventory is committed. The callback must be non-blocking.
+func (handler *Handler) SetInventoryObserved(notify func()) {
+	handler.inventoryObserved = notify
 }
 
 func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
@@ -164,6 +171,9 @@ func (handler *Handler) storageInventory(writer http.ResponseWriter, request *ht
 		}
 		writeError(writer, http.StatusBadRequest, "INVALID_STORAGE_INVENTORY")
 		return
+	}
+	if handler.inventoryObserved != nil {
+		handler.inventoryObserved()
 	}
 	writeJSON(writer, http.StatusOK, map[string]any{"data": map[string]string{"state": "STORED"}})
 }
