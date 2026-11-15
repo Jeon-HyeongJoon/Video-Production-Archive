@@ -5,8 +5,7 @@ from playwright.sync_api import expect, sync_playwright
 
 
 def prepared(page, drive):
-    page.goto(sys.argv[1] + "/#/jobs", wait_until="networkidle")
-    page.locator("#new-job-open").click()
+    page.goto(sys.argv[1] + "/#/create", wait_until="networkidle")
     expect(page.locator('#new-work-kind [data-kind="ARCHIVE"]')).to_have_attribute("aria-pressed", "true")
     page.locator(f'#prep-drives [data-drive-id="{drive}"]').click()
     expect(page.locator("#archive-scope")).to_be_visible()
@@ -63,7 +62,7 @@ with sync_playwright() as playwright:
         broken = page.locator('#drive-problems .problem-panel[data-folder-id="broken"]')
         expect(broken).to_have_attribute("data-open", "true")
         broken.locator('[data-action="redo"]').click()
-        expect(page).to_have_url(sys.argv[1] + "/#/jobs")
+        expect(page).to_have_url(sys.argv[1] + "/#/create")
         expect(page.locator('#new-work-kind [data-kind="ARCHIVE"]')).to_have_attribute("aria-pressed", "true")
         expect(page.locator('#prep-drives [data-drive-id="VOLUME-1"]')).to_have_attribute("aria-pressed", "true")
         expect(page.locator('#prep-folders [data-folder-id="broken"] input[type="checkbox"]')).to_be_checked()
@@ -76,8 +75,8 @@ with sync_playwright() as playwright:
         expect(page.locator('#drive-problems .problem-panel[data-folder-id="broken"] [data-action="redo"]')).to_be_disabled()
 
         # A running ArchiveRun is not a source choice for another new work.
-        page.goto(sys.argv[1] + "/#/jobs", wait_until="networkidle")
-        page.locator("#new-job-open").click()
+        page.goto(sys.argv[1] + "/#/create", wait_until="networkidle")
+        expect(page.locator("#new-work-kind")).to_be_visible()
         expect(page.locator('#prep-drives [data-drive-id="VOLUME-1"]')).to_have_count(0)
         expect(page.locator("#archive-scope, #start-archive-run")).to_have_count(0)
 

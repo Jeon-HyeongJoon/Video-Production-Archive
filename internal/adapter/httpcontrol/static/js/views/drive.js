@@ -283,7 +283,7 @@ function FaultBody({ drive: current, folder, problem }) {
   const running = isRunning(current);
   const redo = () => {
     openNewWork(current.workspace_drive_id, [folder.folder], current.archive_storage_id || "");
-    go("#/jobs");
+    go("#/create");
   };
   return html`<div class="problem-body">
     <span class="muted" title=${hover}>${label("stage", stage.stage_id)} 단계 실패 · 영상 ${formatCount(folder.video_count)} · ${label("disposition", folder.disposition)}</span>
@@ -648,7 +648,7 @@ export function DriveScreen({ id }) {
       <div class="page-actions">
         ${runHref ? html`<a class="btn" href=${runHref}>최근 작업 보기</a>` : null}
         ${!current.archive_run_id && current.connection_state === "CONNECTED"
-          ? html`<button type="button" class="btn" id="open-new-work" onClick=${() => { openNewWork(current.workspace_drive_id); go("#/jobs"); }}>이 드라이브 처리</button>` : null}
+          ? html`<button type="button" class="btn" id="open-new-work" onClick=${() => { openNewWork(current.workspace_drive_id); go("#/create"); }}>이 드라이브 처리</button>` : null}
         <${SttButton} drive=${current} />
       </div>
     </div>`,

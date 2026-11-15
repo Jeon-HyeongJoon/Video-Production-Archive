@@ -1,5 +1,5 @@
 // The frame every screen sits in: the sidebar on the left (search and alerts
-// on top, the two menus, the list of unfinished work, settings at the foot),
+// on top, the top-level menus, the list of unfinished work, settings at the foot),
 // the screen in the middle and the Agent on the right. Problems a person must
 // see from anywhere live in the bell; one that appears after the screen was
 // opened also rises as a toast. While refreshes fail, one line says so and
@@ -14,7 +14,7 @@ import {
 import { route, menus, go, shared, onRoute } from "./router.js";
 import { StatusIcon, Glyph, GLYPH, Swap, IssueTags, cssName } from "./ui.js";
 import { AgentPane, openAgentCard } from "./agent.js";
-import { JobsScreen } from "./views/jobs.js";
+import { JobsScreen, NewWorkScreen } from "./views/jobs.js";
 import { RunScreen } from "./views/run.js";
 import { JobScreen } from "./views/job.js";
 import { DriveScreen } from "./views/drive.js";
@@ -189,6 +189,7 @@ const BootScreen = () => html`<div class="boot-view" aria-busy="true"><span clas
 function Screen() {
   const now = route.value;
   if (!store.ready.value) return html`<${BootScreen} />`;
+  if (now.name === "create") return html`<${NewWorkScreen} />`;
   if (now.name === "jobs") return html`<${JobsScreen} />`;
   if (now.name === "run") return html`<${RunScreen} key=${now.workID} id=${now.workID} />`;
   if (now.name === "job") return html`<${JobScreen} key=${now.jobID} id=${now.jobID} />`;

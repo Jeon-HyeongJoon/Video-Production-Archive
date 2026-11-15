@@ -7,7 +7,7 @@ from typing import Any
 from playwright.sync_api import expect, sync_playwright
 
 # Per-scene projection facts the screens must show without inference.
-MENUS = ["작업", "장비·에이전트"]
+MENUS = ["작업 생성", "작업 관리", "장비·에이전트"]
 DRIVE = "#/drives/VOLUME-1"
 SCENES: dict[str, dict[str, Any]] = {
     "pre-run": {"route": DRIVE, "problems": ("3", "fault"), "phase": "intake", "stages": ["todo", "todo", "todo"]},
@@ -35,7 +35,7 @@ SCENES: dict[str, dict[str, Any]] = {
     # DSH-004/025: grouped work management and one addressable ArchiveRun detail.
     "jobs": {"route": "#/jobs", "menu": "jobs", "problems": ("6", "fault"), "rows": 3},
     "job-detail": {"route": "#/runs/ARCHIVE-RUN-1", "menu": "jobs", "problems": ("6", "fault")},
-    "output-preview": {"route": "#/jobs", "menu": "jobs", "problems": ("3", "fault")},
+    "output-preview": {"route": "#/create", "menu": "create", "problems": ("3", "fault")},
 }
 
 
@@ -188,8 +188,8 @@ def check_drive(page, scene) -> None:
 
 def check_jobs(page, scene) -> None:
     expect(page.locator("#jobs-title ~ .num")).to_have_count(0)
-    expect(page.locator("#new-job-open")).to_have_text("새 작업")
-    expect(page.locator("#new-job-open")).to_have_attribute("aria-expanded", "false")
+    expect(page.locator("#jobs-title")).to_have_text("작업 관리")
+    expect(page.locator("#new-job-open, #new-job-form, #new-job")).to_have_count(0)
     expect(page.locator("#new-job-form")).to_have_count(0)
     expect(page.locator(".job-cols span")).to_have_text(["작업", "상태", "진행", "추가", ""])
     running = page.locator('#active-jobs .work-row[data-work-id="JOB-RUNNING"]')
@@ -238,7 +238,7 @@ def check_job_detail(page, _scene) -> None:
 
 
 def check_output_preview(page, _scene) -> None:
-    page.locator("#new-job-open").click()
+    expect(page.locator("#create-title")).to_have_text("작업 생성")
     page.locator('#prep-drives [data-drive-id="VOLUME-1"]').click()
     page.locator('#prep-folders [data-folder-id="event-a"] input').check()
     page.locator('#prep-folders [data-folder-id="source-a"] input').check()

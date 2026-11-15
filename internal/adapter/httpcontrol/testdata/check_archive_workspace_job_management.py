@@ -10,10 +10,12 @@ with sync_playwright() as playwright:
     page.goto(sys.argv[1], wait_until="networkidle")
 
     links = page.locator("#menu .menu-link")
-    expect(links).to_have_count(2)
-    expect(links.locator(".menu-label")).to_have_text(["작업", "장비·에이전트"])
-    expect(links.first).to_have_attribute("data-menu", "jobs")
-    expect(links.first).to_have_attribute("aria-current", "page")
+    expect(links).to_have_count(3)
+    expect(links.locator(".menu-label")).to_have_text(["작업 생성", "작업 관리", "장비·에이전트"])
+    expect(links.first).to_have_attribute("data-menu", "create")
+    expect(links.nth(1)).to_have_attribute("data-menu", "jobs")
+    expect(links.nth(1)).to_have_attribute("aria-current", "page")
+    expect(page.locator("#new-job, #new-job-form")).to_have_count(0)
 
     # One multi-folder ArchiveRun is a single user-facing work item. Its
     # internal folder Jobs are not flattened beside the standalone Job.

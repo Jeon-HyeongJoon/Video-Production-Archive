@@ -22,9 +22,9 @@ with sync_playwright() as playwright:
 
     expect(page.locator("#prepare-run, #drive-prep, #start-archive-run, #archive-scope")).to_have_count(0)
 
-    # The only way on is 작업's new-work surface, opened with this drive chosen.
+    # The only way on is the top-level work creation surface, opened with this drive chosen.
     page.locator("#open-new-work").click()
-    expect(page).to_have_url(sys.argv[1] + "/#/jobs")
+    expect(page).to_have_url(sys.argv[1] + "/#/create")
     expect(page.locator('#prep-drives [data-drive-id="VOLUME-1"]')).to_have_attribute("aria-pressed", "true")
     expect(page.locator("#archive-scope")).to_be_visible()
     browser.close()

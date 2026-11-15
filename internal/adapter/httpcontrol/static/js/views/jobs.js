@@ -31,16 +31,23 @@ const laneItems = (lane) => {
 };
 
 export function JobsScreen() {
-  const draft = ui.newWork.value;
   return [
     html`<div key="head" class="page-head">
-      <div class="page-title"><h1 id="jobs-title">작업</h1></div>
-      <button type="button" class="btn" id="new-job-open" aria-expanded=${draft ? "true" : "false"} onClick=${() => (draft ? (ui.newWork.value = null) : openNewWork())}>
-        <${Glyph} d=${GLYPH.plus} />새 작업</button>
+      <div class="page-title"><h1 id="jobs-title">작업 관리</h1></div>
     </div>`,
-    html`<${Fold} key="new" open=${!!draft}>${draft ? html`<${NewWork} draft=${draft} />` : null}<//>`,
     html`<div key="cols" class="job-cols with-chev" aria-hidden="true"><span>작업</span><span>상태</span><span>진행</span><span>추가</span><span></span></div>`,
     ...LANES.map(([lane, id, title, empty]) => html`<${Lane} key=${lane} lane=${lane} id=${id} title=${title} empty=${empty} />`),
+  ];
+}
+
+export function NewWorkScreen() {
+  const draft = ui.newWork.value;
+  useEffect(() => {
+    if (!ui.newWork.peek()) openNewWork();
+  }, []);
+  return [
+    html`<div key="head" class="page-head"><div class="page-title"><h1 id="create-title">작업 생성</h1></div></div>`,
+    draft ? html`<${NewWork} key="new" draft=${draft} />` : html`<${Skeleton} key="loading" n=${2} cls="skel-child" />`,
   ];
 }
 
@@ -211,7 +218,7 @@ function TemplateForm({ draft }) {
     </div>
     <div class="new-work-foot">
       ${draft.error ? html`<span class="summary" id="new-job-status" role="status">${draft.error}</span>` : null}
-      <button type="button" class="btn" disabled=${draft.pending} onClick=${() => { ui.newWork.value = null; }}>취소</button>
+      <button type="button" class="btn" disabled=${draft.pending} onClick=${() => { ui.newWork.value = null; go("#/jobs"); }}>취소</button>
       <button type="submit" class="btn primary" id="new-job-submit" data-action="create" disabled=${!ready || stale.value}>${draft.pending ? "추가 중…" : "작업 추가"}</button>
     </div>
   </form>`;
@@ -294,7 +301,7 @@ function ArchiveScope({ draft }) {
     <div class="new-work-foot start-bar">
       <span class="summary num" id="selection-summary">${selected.length} 폴더 · ${formatCount(videos)} 영상 · ${formatBytes(bytes)}</span>
       <span class="start-reason" id="start-reason">${draft.error || blocker}</span>
-      <button type="button" class="btn" disabled=${draft.starting} onClick=${() => { ui.newWork.value = null; }}>취소</button>
+      <button type="button" class="btn" disabled=${draft.starting} onClick=${() => { ui.newWork.value = null; go("#/jobs"); }}>취소</button>
       <button type="button" class="btn primary" id="start-archive-run" data-action="create" disabled=${Boolean(blocker) || draft.starting || stale.value} onClick=${start}>${draft.starting ? "추가 중…" : "작업 추가"}</button>
     </div>`;
 }

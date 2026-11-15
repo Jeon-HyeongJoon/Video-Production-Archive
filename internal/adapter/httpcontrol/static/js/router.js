@@ -1,7 +1,8 @@
 // Hash routes keep every screen addressable without server-side routing:
+//   #/create                          새 작업 생성
 //   #/connections                     작업 PC, 드라이브, 에이전트 관리
 //   #/drives/<drive>[?folder=<f>]     드라이브 상세, 그 폴더의 문제를 펼침
-//   #/jobs                            작업
+//   #/jobs                            작업 관리
 //   #/jobs/<job>                      영속 작업 상세
 //   #/runs/<archive-run>[?result=<p>] 아카이브 작업 화면
 //   #/search[?q=<text>]               검색 결과
@@ -13,7 +14,8 @@ import { signal } from "./lib.js";
 import { transition, settle } from "./motion.js";
 
 export const menus = [
-  { id: "jobs", label: "작업", path: "#/jobs" },
+  { id: "create", label: "작업 생성", path: "#/create" },
+  { id: "jobs", label: "작업 관리", path: "#/jobs" },
   { id: "connections", label: "장비·에이전트", path: "#/connections" },
 ];
 
@@ -24,6 +26,7 @@ export function parseRoute(hash) {
   const query = new URLSearchParams(queryPart);
   const menu = parts[0] || "jobs";
   const full = `#${raw}`;
+  if (menu === "create") return { menu: "create", name: "create", query, full };
   if (menu === "drives" && parts[1]) return { menu: "connections", name: "drive", driveID: parts[1], query, full };
   if (menu === "jobs" && parts[1]) return { menu: "jobs", name: "job", jobID: parts[1], query, full };
   if (menu === "runs" && parts[1]) return { menu: "jobs", name: "run", workID: parts[1], query, full };
@@ -41,7 +44,7 @@ export const route = signal(parseRoute(location.hash));
 // destination heading carry one view-transition name and move as one title.
 export const shared = signal(null);
 
-const DEPTH = { jobs: 1, connections: 1, search: 1, settings: 1, run: 2, drive: 2, job: 3 };
+const DEPTH = { create: 1, jobs: 1, connections: 1, search: 1, settings: 1, run: 2, drive: 2, job: 3 };
 const moved = new Set();
 const repeated = new Set();
 

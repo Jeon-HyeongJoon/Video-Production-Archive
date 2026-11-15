@@ -116,7 +116,7 @@ function ProblemAction({ linked }) {
   if (problem?.kind !== "fault") return null;
   const redo = () => {
     openNewWork(linked.drive.workspace_drive_id, [linked.folder.folder], linked.drive.archive_storage_id || "");
-    go("#/jobs");
+    go("#/create");
   };
   return html`<button type="button" class="btn" data-action="redo" disabled=${isRunning(linked.drive) || stale.value} title=${isRunning(linked.drive) ? "현재 작업이 끝나면 다시 처리할 수 있음" : ""} onClick=${redo}>이 폴더 다시 처리</button>`;
 }

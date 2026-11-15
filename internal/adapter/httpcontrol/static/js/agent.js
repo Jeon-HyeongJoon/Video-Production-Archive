@@ -122,7 +122,7 @@ function AskCard({ card }) {
       <div class="ask-actions">
         ${selection
           ? [html`<button type="button" key="close" class="btn btn-sm" data-action="card-reject" disabled=${stale.value} onClick=${() => decideCard(card.action_card_id, "reject", "선택 요청 닫음")}>닫기</button>`,
-            html`<button type="button" key="select" class="btn btn-sm primary" onClick=${() => { openNewWork(); go("#/jobs"); }}>작업 대상 선택</button>`]
+            html`<button type="button" key="select" class="btn btn-sm primary" onClick=${() => { openNewWork(); go("#/create"); }}>작업 대상 선택</button>`]
           : [html`<button type="button" key="reject" class="btn btn-sm" data-action="card-reject" disabled=${stale.value} onClick=${() => decideCard(card.action_card_id, "reject")}>하지 않기</button>`,
             html`<button type="button" key="run" class="btn btn-sm primary" data-action="card-execute" disabled=${stale.value} onClick=${() => decideCard(card.action_card_id, "execute")}>${card.approval_required ? "승인" : "진행"}</button>`]}
       </div>
@@ -272,7 +272,7 @@ function Composer({ session, enabled, reason, canWake, waking, wake, selectSessi
   const input = useRef();
   useEffect(() => { setUseScreen(true); setPicked(null); setPicker(false); }, [now.full]);
   const screenDrive = now.name === "drive" ? driveView(now.driveID)
-    : now.name === "jobs" && draft?.kind === "ARCHIVE" && draft.driveID ? driveView(draft.driveID) : null;
+    : now.name === "create" && draft?.kind === "ARCHIVE" && draft.driveID ? driveView(draft.driveID) : null;
   const selection = useScreen ? driveSelection(screenDrive, draft) : null;
   const work = useScreen || picked ? workReference(now, selection, picked) : null;
   const refs = referenceLabels(selection, work);

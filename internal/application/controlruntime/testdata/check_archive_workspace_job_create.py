@@ -11,10 +11,9 @@ with sync_playwright() as playwright:
     created = []
     page.on("request", lambda request: created.append(request) if request.method == "POST" and request.url.endswith("/api/v1/jobs") else None)
 
-    page.goto(base_url + "/#/jobs", wait_until="networkidle")
+    page.goto(base_url + "/#/create", wait_until="networkidle")
+    expect(page.locator('#menu [data-menu="create"]')).to_have_attribute("aria-current", "page")
     expect(page.locator("#new-job-form")).to_have_count(0)
-    page.locator("#new-job-open").click()
-    expect(page.locator("#new-job-open")).to_have_attribute("aria-expanded", "true")
     page.locator('#new-work-kind [data-kind="TEMPLATE"]').click()
     expect(page.locator("#new-job-template option")).to_have_count(4)
     page.locator("#new-job-title").fill("2026 가을 행사 기록")

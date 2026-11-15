@@ -11,7 +11,8 @@ with sync_playwright() as playwright:
 
     page.goto(base_url + "/#/jobs", wait_until="networkidle")
     expect(page.locator('#menu [data-menu="jobs"]')).to_have_attribute("aria-current", "page")
-    expect(page.locator('#menu [data-menu="jobs"] .menu-label')).to_have_text("작업")
+    expect(page.locator('#menu [data-menu="jobs"] .menu-label')).to_have_text("작업 관리")
+    expect(page.locator('#menu [data-menu="create"] .menu-label')).to_have_text("작업 생성")
     expect(page.locator('#menu [data-menu="status"]')).to_have_count(0)
     expect(page.locator("#menu .menu-count")).to_have_count(0)
     expect(page.locator('#active-jobs .work-row[data-work-id="JOB-RUNNING"]')).to_have_count(1)

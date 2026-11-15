@@ -6,8 +6,7 @@ from playwright.sync_api import expect, sync_playwright
 with sync_playwright() as playwright:
     browser = playwright.chromium.launch()
     page = browser.new_page(viewport={"width": 1440, "height": 900}, color_scheme="dark", locale="ko-KR")
-    page.goto(sys.argv[1] + "/#/jobs", wait_until="networkidle")
-    page.locator("#new-job-open").click()
+    page.goto(sys.argv[1] + "/#/create", wait_until="networkidle")
     page.locator('#prep-drives [data-drive-id="VOLUME-1"]').click()
     page.locator('#prep-folders [data-folder-id="event-a"] input').check()
     page.locator('#prep-folders [data-folder-id="source-a"] input').check()
