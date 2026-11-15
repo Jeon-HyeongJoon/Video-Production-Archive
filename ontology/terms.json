@@ -1204,6 +1204,47 @@
       "decided": "2026-11-01"
     },
     {
+      "id": "archive-output-preview",
+      "layer": "product",
+      "kind": "component",
+      "name": {
+        "ko": "예상 결과 위치",
+        "en": "Archive Output Preview"
+      },
+      "code_name": "ArchiveOutputPreview",
+      "definition": "새 ArchiveRun을 만들기 전에 고른 Storage와 폴더 범위에서 생길 root-relative flat 결과 폴더 패턴·결과 수 범위·파일 구성·필요 용량을 보여주는 읽기 전용 projection.",
+      "rules": [
+        "예상 결과 위치는 Storage 표시명만 쓰고 절대 root, endpoint, credential을 노출하지 않는다.",
+        "분류 전에는 통합 결과 하나와 영상별 결과 최대 개수를 함께 보여주며 immutable ArchivePackage identity 자리에는 12자리 placeholder를 쓴다.",
+        "예상 결과 위치는 파일시스템 예약이나 확정 경로가 아니며 실제 Package identity와 결과 수는 검사·분류 뒤 고정된다.",
+        "용량은 선택 범위 예상 출력, 안전 여유, 필요한 합계와 Storage 현재 여유를 같은 projection으로 표시한다."
+      ],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "archive-package"
+        },
+        {
+          "type": "refers-to",
+          "target": "storage"
+        },
+        {
+          "type": "part-of",
+          "target": "archive-workspace"
+        }
+      ],
+      "sources": [
+        "사용자 결정 2026-11-15: 원본·작업 범위 선택 뒤 예상 작업 결과 디렉터리를 화면에 표시",
+        "requirements DSH-043",
+        "docs/design/09-archive-workspace.md"
+      ],
+      "decided": "2026-11-15"
+    },
+    {
       "id": "archive-tray",
       "layer": "product",
       "kind": "component",

@@ -29,6 +29,7 @@ type FolderView struct {
 	Videos               []SourceVideoView
 	VideoCount           int
 	EstimatedOutputBytes uint64
+	ExpectedResult       archive.FlatPackagePreview
 	JobID                string
 	TranscriptionJobID   string
 	CurrentStepID        string

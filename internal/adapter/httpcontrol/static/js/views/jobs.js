@@ -9,7 +9,7 @@ import { label, formatCount, formatBytes, shortTime, dayTime, mutation, newID } 
 import {
   ui, store, stale, refresh, allWork, allDrives, workLane, workTitle, workScopeText, workText, workKind, workIssues, workDrive, workDetail,
   jobDetail, jobOf, driveView, folderKey, folderState, folderProblem, folderProgress, driveName, isRunning, archiveCandidates,
-  folderDiscoveryReady, folderDiscoveryText, startBlocker, openNewWork, prepareDrive, syncDraft, setDraft, resetRunIntent,
+  folderDiscoveryReady, folderDiscoveryText, startBlocker, archiveCapacityEstimate, openNewWork, prepareDrive, syncDraft, setDraft, resetRunIntent,
 } from "../store.js";
 import { route, go, shared } from "../router.js";
 import { StatusIcon, Glyph, GLYPH, Chevron, Swap, Meter, Fold, IssueTags, Empty, Skeleton, useLinger, cssName } from "../ui.js";
@@ -237,6 +237,7 @@ function ArchiveScope({ draft }) {
   const picked = draft.folders;
   const selected = folders.filter((folder) => picked.has(folder.folder));
   const candidates = archiveCandidates(current);
+  const archive = candidates.find((storage) => storage.storage_id === draft.archiveID);
   const videos = selected.reduce((sum, folder) => sum + (folder.video_count || 0), 0);
   const bytes = selected.reduce((sum, folder) => sum + (folder.estimated_output_bytes || 0), 0);
   const blocker = startBlocker(current, draft, selected);
@@ -289,10 +290,50 @@ function ArchiveScope({ draft }) {
         </div>
       </div>
     </div>
+    <${ExpectedResults} selected=${selected} archive=${archive} />
     <div class="new-work-foot start-bar">
       <span class="summary num" id="selection-summary">${selected.length} 폴더 · ${formatCount(videos)} 영상 · ${formatBytes(bytes)}</span>
       <span class="start-reason" id="start-reason">${draft.error || blocker}</span>
       <button type="button" class="btn" disabled=${draft.starting} onClick=${() => { ui.newWork.value = null; }}>취소</button>
       <button type="button" class="btn primary" id="start-archive-run" data-action="create" disabled=${Boolean(blocker) || draft.starting || stale.value} onClick=${start}>${draft.starting ? "추가 중…" : "작업 추가"}</button>
     </div>`;
+}
+
+function ExpectedResults({ selected, archive }) {
+  if (!archive || !selected.length) return null;
+  const plans = selected.filter((folder) => folder.expected_result);
+  if (!plans.length) return null;
+  const { estimated, reserve, required } = archiveCapacityEstimate(selected);
+  const minimum = plans.reduce((sum, folder) => sum + folder.expected_result.minimum_result_count, 0);
+  const maximum = plans.reduce((sum, folder) => sum + folder.expected_result.maximum_result_count, 0);
+  const resultCount = minimum === maximum ? `${formatCount(minimum)}개` : `${formatCount(minimum)}~${formatCount(maximum)}개`;
+  const storageName = archive.label || archive.storage_id;
+  const rows = plans.slice(0, 4);
+  return html`<section class="expected-results" id="expected-results" aria-label="예상 결과 위치">
+    <div class="expected-results-head">
+      <span>예상 결과 위치</span>
+      <b>${storageName}</b>
+      <small>${resultCount} 결과 폴더</small>
+    </div>
+    <div class="expected-result-list">
+      ${rows.map((folder) => {
+        const preview = folder.expected_result;
+        const multiple = preview.maximum_result_count > 1;
+        return html`<div class="expected-result-row" key=${folder.folder} data-folder-id=${folder.folder}>
+          <span class="expected-source">${folder.folder}</span>
+          <code>${preview.combined_directory_pattern}/</code>
+          <small>${multiple ? `통합 1개 또는 영상별 최대 ${formatCount(preview.maximum_result_count)}개 · ${preview.first_individual_directory_pattern}/` : preview.combined_video_file_name}</small>
+        </div>`;
+      })}
+      ${plans.length > rows.length ? html`<span class="expected-more">외 ${formatCount(plans.length - rows.length)}개 폴더</span>` : null}
+    </div>
+    <div class="expected-result-files">
+      <span><b>각 결과 폴더</b> 결과 영상 · video-info.csv · .archive-package.json</span>
+      <span><b>자막·텍스트 후</b> transcript.txt · subtitle.srt</span>
+      <span><b>저장 위치 최상단</b> archive-catalog.csv</span>
+    </div>
+    <div class="expected-capacity num">
+      <span>예상 ${formatBytes(estimated)}</span><span>안전 여유 ${formatBytes(reserve)}</span><span>필요 ${formatBytes(required)}</span><span>현재 여유 ${formatBytes(archive.free_bytes)}</span>
+    </div>
+  </section>`;
 }

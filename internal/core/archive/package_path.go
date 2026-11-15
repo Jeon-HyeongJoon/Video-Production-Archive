@@ -35,6 +35,64 @@ type PackagePresentation struct {
 	PackageDirectory string
 }
 
+// FlatPackagePreview describes the human-visible part of the compact layout
+// before inspection has produced the immutable package identity and decided
+// whether multiple source videos stay separate or become one sequence.
+type FlatPackagePreview struct {
+	ArchiveDate                     string
+	MinimumResultCount              int
+	MaximumResultCount              int
+	CombinedDirectoryPattern        string
+	CombinedVideoFileName           string
+	FirstIndividualDirectoryPattern string
+	FirstIndividualVideoFileName    string
+}
+
+// PreviewFlatPackage projects only root-relative names. XXXXXXXXXXXX occupies
+// the twelve hexadecimal characters that the immutable package identity adds
+// after classification; it is deliberately not a filesystem reservation.
+func PreviewFlatPackage(archiveDate, mediaFolder string, originalNames []string, sourceCount int) (FlatPackagePreview, error) {
+	archiveDate = strings.TrimSpace(archiveDate)
+	if _, err := time.Parse("2006-01-02", archiveDate); err != nil || sourceCount <= 0 || sourceCount < len(originalNames) {
+		return FlatPackagePreview{}, ErrInvalidPackagePresentation
+	}
+	folder, ok := normalizePackageRelative(mediaFolder)
+	if !ok {
+		return FlatPackagePreview{}, ErrInvalidPackagePresentation
+	}
+	names := make([]string, 0, len(originalNames))
+	for _, originalName := range originalNames {
+		name := strings.TrimSpace(originalName)
+		if name == "" || name != path.Base(strings.ReplaceAll(name, "\\", "/")) {
+			return FlatPackagePreview{}, ErrInvalidPackagePresentation
+		}
+		names = append(names, name)
+	}
+	firstName := path.Base(folder) + ".mp4"
+	if len(names) > 0 {
+		firstName = names[0]
+	}
+	individualStem := safeWindowsFileStem(strings.TrimSuffix(firstName, path.Ext(firstName)))
+	if individualStem == "" {
+		individualStem = "video"
+	}
+	combinedStem := individualStem
+	if sourceCount > 1 {
+		combinedStem = safeWindowsFileStem(path.Base(folder))
+		if combinedStem == "" {
+			combinedStem = "video"
+		}
+	}
+	directoryPattern := func(stem string) string {
+		return safeWindowsFileStem(archiveDate+"_"+stem) + "__XXXXXXXXXXXX"
+	}
+	return FlatPackagePreview{
+		ArchiveDate: archiveDate, MinimumResultCount: 1, MaximumResultCount: sourceCount,
+		CombinedDirectoryPattern: directoryPattern(combinedStem), CombinedVideoFileName: combinedStem + ".mp4",
+		FirstIndividualDirectoryPattern: directoryPattern(individualStem), FirstIndividualVideoFileName: individualStem + ".mp4",
+	}, nil
+}
+
 func PresentPackage(packageID, mediaFolder string, originalNames []string) (PackagePresentation, error) {
 	directory, archiveDate, err := packageDirectory(packageID)
 	if err != nil {

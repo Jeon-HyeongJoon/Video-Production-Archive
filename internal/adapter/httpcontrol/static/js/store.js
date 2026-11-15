@@ -617,9 +617,7 @@ export function startBlocker(current, draft, selected) {
   const worker = store.workers.peek().find((item) => item.worker_id === current.worker_id);
   const source = (current.storage_candidates || []).find((item) => item.storage_id === current.source_storage_id);
   const archive = archiveCandidates(current).find((item) => item.storage_id === draft.archiveID);
-  const estimated = selected.reduce((sum, folder) => sum + (folder.estimated_output_bytes || 0), 0);
-  const capacityReserve = Math.max(ARCHIVE_CAPACITY_MINIMUM_RESERVE_BYTES, Math.ceil(estimated / 20));
-  const requiredCapacity = estimated + capacityReserve;
+  const { required: requiredCapacity } = archiveCapacityEstimate(selected);
   if (current.connection_state === "DISCONNECTED") return "드라이브 연결 해제됨";
   if (current.connection_state !== "CONNECTED") return "드라이브 연결 확인 불가";
   if (isRunning(current)) return "이 드라이브에서 작업 진행 중";
@@ -634,6 +632,12 @@ export function startBlocker(current, draft, selected) {
   if (!worker || worker.state === "OFFLINE" || worker.state === "DISABLED") return "작업 PC가 연결되지 않음";
   if (!current.source_volume_id) return "원본 정보 없음";
   return "";
+}
+
+export function archiveCapacityEstimate(selected) {
+  const estimated = selected.reduce((sum, folder) => sum + (folder.estimated_output_bytes || 0), 0);
+  const reserve = Math.max(ARCHIVE_CAPACITY_MINIMUM_RESERVE_BYTES, Math.ceil(estimated / 20));
+  return { estimated, reserve, required: estimated + reserve };
 }
 
 function freshRunIntent() {

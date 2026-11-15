@@ -318,6 +318,16 @@ func TestArchivistSelectionAndAddStartOfflineLocalHostWithoutTerminal(t *testing
 	})
 }
 
+// Requirement: DSH-043
+func TestNewArchiveWorkShowsExpectedRelativeOutputLayoutBeforeStart(t *testing.T) {
+	testControlHTTPScene(t, scenePreRun, func(t *testing.T, handler http.Handler) {
+		assertArchiveWorkspaceScript(t, handler, "check_archive_workspace_output_preview.py")
+		if runtime.GOOS == "darwin" {
+			assertArchiveWorkspaceGolden(t, handler, sceneOutputPreview)
+		}
+	})
+}
+
 // Requirement: DSH-014
 func TestWorkspaceShowsReservationAdjustedWorkerCapacity(t *testing.T) {
 	testControlHTTPWorkspace(t, func(t *testing.T, handler http.Handler) {
@@ -869,6 +879,7 @@ const (
 	sceneComplete      archiveWorkspaceScene = "complete"
 	sceneJobs          archiveWorkspaceScene = "jobs"
 	sceneJobDetail     archiveWorkspaceScene = "job-detail"
+	sceneOutputPreview archiveWorkspaceScene = "output-preview"
 )
 
 var archiveWorkspaceScenes = []archiveWorkspaceScene{scenePreRun, sceneStageOne, sceneTranscription, sceneComplete}
@@ -1225,6 +1236,11 @@ func (workspace *archiveIntakeWorkspaceFixture) Projection(context.Context) ([]a
 			{RelativePath: folders[index].Folder + "/C0001.MP4", FileName: "C0001.MP4", SizeBytes: 3 << 30, ModifiedAt: now.Add(-2 * time.Hour)},
 			{RelativePath: folders[index].Folder + "/C0002.MOV", FileName: "C0002.MOV", SizeBytes: 2 << 30, ModifiedAt: now.Add(-time.Hour)},
 		}
+		preview, err := archive.PreviewFlatPackage("2026-10-30", folders[index].Folder, []string{"C0001.MP4", "C0002.MOV"}, folders[index].VideoCount)
+		if err != nil {
+			return nil, err
+		}
+		folders[index].ExpectedResult = preview
 	}
 	drive.Folders = folders
 	drive.DiscoveredFolders = append([]archiveintakeworkspace.FolderView(nil), folders...)

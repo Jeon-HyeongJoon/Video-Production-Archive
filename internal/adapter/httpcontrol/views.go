@@ -171,29 +171,40 @@ type driveStorageView struct {
 }
 
 type driveFolderView struct {
-	Folder               string                  `json:"folder"`
-	DecisionID           string                  `json:"decision_id"`
-	InputRevision        uint64                  `json:"input_revision"`
-	DecisionSequence     uint64                  `json:"decision_sequence"`
-	Disposition          string                  `json:"disposition"`
-	ProfileReference     string                  `json:"profile_reference,omitempty"`
-	HoldReasons          []string                `json:"hold_reasons"`
-	WorkOptions          []driveWorkOptionView   `json:"work_options"`
-	Videos               []driveSourceVideoView  `json:"videos"`
-	VideoCount           int                     `json:"video_count"`
-	EstimatedOutputBytes uint64                  `json:"estimated_output_bytes"`
-	JobID                string                  `json:"job_id,omitempty"`
-	TranscriptionJobID   string                  `json:"transcription_job_id,omitempty"`
-	CurrentStepID        string                  `json:"current_step_id"`
-	StepState            string                  `json:"step_state"`
-	Stages               []driveStageView        `json:"stages"`
-	ArchivePackageID     string                  `json:"archive_package_id,omitempty"`
-	ArchiveDate          string                  `json:"archive_date,omitempty"`
-	ArchiveDisplayName   string                  `json:"archive_display_name,omitempty"`
-	ArchiveVideoFileName string                  `json:"archive_video_file_name,omitempty"`
-	ArchiveState         string                  `json:"archive_state,omitempty"`
-	CanAddTranscription  bool                    `json:"can_add_transcription"`
-	TranscriptQualities  []transcriptQualityView `json:"transcript_qualities"`
+	Folder               string                   `json:"folder"`
+	DecisionID           string                   `json:"decision_id"`
+	InputRevision        uint64                   `json:"input_revision"`
+	DecisionSequence     uint64                   `json:"decision_sequence"`
+	Disposition          string                   `json:"disposition"`
+	ProfileReference     string                   `json:"profile_reference,omitempty"`
+	HoldReasons          []string                 `json:"hold_reasons"`
+	WorkOptions          []driveWorkOptionView    `json:"work_options"`
+	Videos               []driveSourceVideoView   `json:"videos"`
+	VideoCount           int                      `json:"video_count"`
+	EstimatedOutputBytes uint64                   `json:"estimated_output_bytes"`
+	ExpectedResult       *driveExpectedResultView `json:"expected_result,omitempty"`
+	JobID                string                   `json:"job_id,omitempty"`
+	TranscriptionJobID   string                   `json:"transcription_job_id,omitempty"`
+	CurrentStepID        string                   `json:"current_step_id"`
+	StepState            string                   `json:"step_state"`
+	Stages               []driveStageView         `json:"stages"`
+	ArchivePackageID     string                   `json:"archive_package_id,omitempty"`
+	ArchiveDate          string                   `json:"archive_date,omitempty"`
+	ArchiveDisplayName   string                   `json:"archive_display_name,omitempty"`
+	ArchiveVideoFileName string                   `json:"archive_video_file_name,omitempty"`
+	ArchiveState         string                   `json:"archive_state,omitempty"`
+	CanAddTranscription  bool                     `json:"can_add_transcription"`
+	TranscriptQualities  []transcriptQualityView  `json:"transcript_qualities"`
+}
+
+type driveExpectedResultView struct {
+	ArchiveDate                     string `json:"archive_date"`
+	MinimumResultCount              int    `json:"minimum_result_count"`
+	MaximumResultCount              int    `json:"maximum_result_count"`
+	CombinedDirectoryPattern        string `json:"combined_directory_pattern"`
+	CombinedVideoFileName           string `json:"combined_video_file_name"`
+	FirstIndividualDirectoryPattern string `json:"first_individual_directory_pattern"`
+	FirstIndividualVideoFileName    string `json:"first_individual_video_file_name"`
 }
 
 type driveSourceVideoView struct {

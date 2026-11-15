@@ -108,7 +108,7 @@ func projectDriveFolder(folder archiveintakeworkspace.FolderView) driveFolderVie
 			SizeBytes: video.SizeBytes, ModifiedAt: video.ModifiedAt,
 		})
 	}
-	return driveFolderView{
+	projected := driveFolderView{
 		Folder: folder.Folder, DecisionID: folder.DecisionID, InputRevision: folder.InputRevision,
 		DecisionSequence: folder.DecisionSequence, Disposition: string(folder.Disposition),
 		ProfileReference: folder.ProfileReference, HoldReasons: holdReasons, WorkOptions: workOptions, Videos: videos, VideoCount: folder.VideoCount,
@@ -120,6 +120,15 @@ func projectDriveFolder(folder archiveintakeworkspace.FolderView) driveFolderVie
 		CanAddTranscription: folder.CanAddTranscription,
 		TranscriptQualities: qualities,
 	}
+	preview := folder.ExpectedResult
+	if preview.ArchiveDate != "" && preview.MinimumResultCount > 0 && preview.MaximumResultCount >= preview.MinimumResultCount {
+		projected.ExpectedResult = &driveExpectedResultView{
+			ArchiveDate: preview.ArchiveDate, MinimumResultCount: preview.MinimumResultCount, MaximumResultCount: preview.MaximumResultCount,
+			CombinedDirectoryPattern: preview.CombinedDirectoryPattern, CombinedVideoFileName: preview.CombinedVideoFileName,
+			FirstIndividualDirectoryPattern: preview.FirstIndividualDirectoryPattern, FirstIndividualVideoFileName: preview.FirstIndividualVideoFileName,
+		}
+	}
+	return projected
 }
 
 type driveOverrideRequest struct {

@@ -515,7 +515,9 @@ func (service *Service) mergeInventory(ctx context.Context, drives map[string]*p
 	if err != nil {
 		return err
 	}
-	statuses := service.workers.Statuses(service.now().UTC())
+	projectionTime := service.now().UTC()
+	statuses := service.workers.Statuses(projectionTime)
+	previewDate := projectionTime.Format("2006-01-02")
 	var sessions []archiveintake.Session
 	if service.intakeSessions != nil {
 		sessions, err = service.intakeSessions.ListSessions(ctx)
@@ -582,15 +584,20 @@ func (service *Service) mergeInventory(ctx context.Context, drives map[string]*p
 		state.view.DiscoveredFileCount = 0
 		for _, folder := range observation.Folders {
 			videos := make([]SourceVideoView, 0, len(folder.Videos))
+			originalNames := make([]string, 0, len(folder.Videos))
 			for _, video := range folder.Videos {
 				videos = append(videos, SourceVideoView{
 					RelativePath: video.RelativePath, FileName: video.FileName,
 					SizeBytes: video.SizeBytes, ModifiedAt: video.ModifiedAt,
 				})
+				originalNames = append(originalNames, video.FileName)
 			}
 			view := FolderView{
 				Folder: folder.Folder, InputRevision: observation.DiscoveryRevision,
 				VideoCount: folder.VideoCount, EstimatedOutputBytes: folder.InputBytes, Videos: videos,
+			}
+			if preview, previewErr := archive.PreviewFlatPackage(previewDate, folder.Folder, originalNames, folder.VideoCount); previewErr == nil {
+				view.ExpectedResult = preview
 			}
 			state.discoveredFolders[folder.Folder] = view
 			if scoped, exists := state.folders[folder.Folder]; exists && state.view.ArchiveRunID != "" {

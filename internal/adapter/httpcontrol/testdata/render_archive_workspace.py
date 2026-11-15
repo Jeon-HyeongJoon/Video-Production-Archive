@@ -35,6 +35,7 @@ SCENES: dict[str, dict[str, Any]] = {
     # DSH-004/025: grouped work management and one addressable ArchiveRun detail.
     "jobs": {"route": "#/jobs", "menu": "jobs", "problems": ("6", "fault"), "rows": 3},
     "job-detail": {"route": "#/runs/ARCHIVE-RUN-1", "menu": "jobs", "problems": ("6", "fault")},
+    "output-preview": {"route": "#/jobs", "menu": "jobs", "problems": ("3", "fault")},
 }
 
 
@@ -236,6 +237,29 @@ def check_job_detail(page, _scene) -> None:
     expect(result).to_contain_text("archive-main")
 
 
+def check_output_preview(page, _scene) -> None:
+    page.locator("#new-job-open").click()
+    page.locator('#prep-drives [data-drive-id="VOLUME-1"]').click()
+    page.locator('#prep-folders [data-folder-id="event-a"] input').check()
+    page.locator('#prep-folders [data-folder-id="source-a"] input').check()
+    page.locator('#prep-archives [data-storage-id="archive-main"]').click()
+    preview = page.locator("#expected-results")
+    expect(preview).to_be_visible()
+    expect(preview.locator(".expected-results-head")).to_contain_text("archive-main")
+    expect(preview.locator(".expected-results-head")).to_contain_text("2~191개 결과 폴더")
+    expect(preview.locator('.expected-result-row[data-folder-id="event-a"] code')).to_have_text("2026-10-30_event-a__XXXXXXXXXXXX/")
+    expect(preview.locator('.expected-result-row[data-folder-id="event-a"] small')).to_contain_text("2026-10-30_C0001__XXXXXXXXXXXX/")
+    expect(preview.locator('.expected-result-row[data-folder-id="source-a"] code')).to_have_text("2026-10-30_source-a__XXXXXXXXXXXX/")
+    expect(preview.locator(".expected-result-files")).to_contain_text("video-info.csv")
+    expect(preview.locator(".expected-result-files")).to_contain_text("transcript.txt")
+    expect(preview.locator(".expected-result-files")).to_contain_text("subtitle.srt")
+    expect(preview.locator(".expected-result-files")).to_contain_text("archive-catalog.csv")
+    expect(preview.locator(".expected-capacity")).to_have_text("예상 70 GB안전 여유 3.5 GB필요 74 GB현재 여유 860 GB")
+    visible = preview.inner_text()
+    if any(value in visible for value in ("C:\\", "/Volumes/", "storage_root")):
+        raise AssertionError(f"expected output preview exposed an absolute root: {visible}")
+
+
 def main() -> None:
     if len(sys.argv) != 4 or sys.argv[3] not in SCENES:
         raise SystemExit("usage: render_archive_workspace.py URL OUTPUT.png SCENE")
@@ -275,6 +299,8 @@ def main() -> None:
             check_jobs(page, scene)
         elif scene_name == "job-detail":
             check_job_detail(page, scene)
+        elif scene_name == "output-preview":
+            check_output_preview(page, scene)
         else:
             check_drive(page, scene)
         check_contract(page)
