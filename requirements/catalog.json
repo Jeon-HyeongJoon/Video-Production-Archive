@@ -3722,6 +3722,18 @@
       "level": "integration"
     },
     {
+      "id": "WRK-016",
+      "design": "worker-failure-evidence-ledger",
+      "statement": "Worker의 성공하지 못한 Step 결과는 재시도마다 출처·시각·실행 경계와 정제된 실패 내용을 가진 변경 불가능한 실패 증적으로 Job 원장에 누적되어야 한다.",
+      "given": "실행 리스와 fencing token을 가진 Worker Step, process exit code를 포함한 정제된 오류 보고 및 결과 영수증 저장 실패가 있다.",
+      "when": "Worker 실패 결과를 정산하고 같은 결과를 다시 전송한다.",
+      "then": "Worker·Step·operation·fencing token·실패 순서·workflow 시도·failure class·WaitReason·오류와 원인 code·정제 summary·process exit code·안전한 log reference·관측 시각·결과 상태가 StepFailureEvidence와 Domain Event에 결과 영수증 및 상태 전이와 같은 transaction으로 한 번 저장되고 재전송은 증적을 중복하지 않으며 후속 성공은 현재 오류만 비우고 과거 증적을 유지하고 원문 process 출력·실행 인수·credential·절대경로는 저장되지 않는다.",
+      "test_file": "internal/adapter/sqlitecommand/store_test.go",
+      "test_name": "TestWorkerFailureEvidenceCommitsAtomicallyAndSurvivesResultReplay",
+      "status": "implemented",
+      "level": "integration"
+    },
+    {
       "id": "OBS-002",
       "design": "work-execution-diagnostics",
       "statement": "진행 중인 영속 작업의 진단 읽기 모델은 현재 Step·Worker heartbeat·실행 리스·자원 예약·저장된 오류와 로그 참조를 같은 관측 시각으로 결합하고 확인된 증적과 미확인 가설을 구분해야 한다.",
@@ -3730,6 +3742,18 @@
       "then": "Step 상태와 저장된 WaitReason은 바꾸지 않은 채 Worker·리스·예약 사실, 마지막 진행 관측 시각, 진단 code와 다음 확인 방법을 반환하고 증적이 없는 subprocess 정지 원인은 확정하지 않는다.",
       "test_file": "internal/application/workdiagnostics/service_test.go",
       "test_name": "TestWorkDiagnosticsCorrelatesStepWorkerLeaseReservationAndSeparatesFactsFromHypotheses",
+      "status": "implemented",
+      "level": "unit"
+    },
+    {
+      "id": "OBS-003",
+      "design": "persisted-failure-evidence-diagnostics",
+      "statement": "작업 진단은 영속 Worker 실패 증적 이력을 증적 ID가 있는 확인된 사실로 제공하여 Archivist가 저장된 근거와 미확인 가설을 구분해 협업할 수 있어야 한다.",
+      "given": "같은 Step의 여러 재시도에서 저장된 정제 실패 증적과 원문 경로·비밀값처럼 보이는 입력이 있다.",
+      "when": "Job 또는 ArchiveRun의 작업 진단 스냅샷을 만든다.",
+      "then": "진단은 각 실패의 순서·operation·Worker·fencing token·오류와 원인 code·정제 summary·process exit code·관측 시각을 원래 증적 ID와 함께 사실로 반환하고 가설의 basis는 증적 ID를 참조하며 원문 stdout·stderr·credential·절대경로는 반환하지 않는다.",
+      "test_file": "internal/application/workdiagnostics/service_test.go",
+      "test_name": "TestWorkDiagnosticsExposePersistedFailureEvidenceAsFactsWithoutRawProcessData",
       "status": "implemented",
       "level": "unit"
     },

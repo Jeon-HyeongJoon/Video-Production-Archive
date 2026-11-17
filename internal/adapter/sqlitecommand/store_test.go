@@ -184,6 +184,190 @@ func TestWorkerCompletionOutboxSurvivesRestartAndResultReplay(t *testing.T) {
 	}
 }
 
+// Requirement: WRK-016
+func TestWorkerFailureEvidenceCommitsAtomicallyAndSurvivesResultReplay(t *testing.T) {
+	ctx := context.Background()
+	store, err := Open(t.TempDir() + "/failure-evidence.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	now := time.Date(2026, 11, 17, 5, 0, 0, 0, time.UTC)
+	assignment := seedClaimedWorkerStep(t, store, now, "JOB-FAILURE-EVIDENCE")
+	before, err := store.Load(assignment.JobID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var eventsBefore int
+	if err := store.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM domain_events WHERE target_id = ?`, assignment.JobID).Scan(&eventsBefore); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.ExecContext(ctx, `
+		CREATE TRIGGER reject_worker_failure_receipt
+		BEFORE INSERT ON worker_result_receipts
+		BEGIN
+			SELECT RAISE(ABORT, 'injected receipt failure');
+		END;
+	`); err != nil {
+		t.Fatal(err)
+	}
+	exitCode := 23
+	report := workercontrol.Result{
+		WorkerID: "worker-windows", JobID: assignment.JobID, StepID: assignment.StepID, FencingToken: assignment.FencingToken,
+		FailureClass: workflow.FailureTransient, ErrorClass: "STEP_EXECUTION_FAILED", CauseCode: "PROCESS_EXIT_NONZERO",
+		ErrorSummary: "Archive media organization operation failed", ProcessExitCode: &exitCode,
+		LogReference: "worker://operation-failed",
+	}
+	if _, err := store.SettleWorkerStep(ctx, report, now.Add(2*time.Second)); err == nil {
+		t.Fatal("injected Worker receipt failure did not roll back settlement")
+	}
+	afterRollback, err := store.Load(assignment.JobID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var eventsAfterRollback int
+	if err := store.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM domain_events WHERE target_id = ?`, assignment.JobID).Scan(&eventsAfterRollback); err != nil {
+		t.Fatal(err)
+	}
+	if afterRollback.Revision != before.Revision || string(afterRollback.State) != string(before.State) || eventsAfterRollback != eventsBefore {
+		t.Fatalf("failure evidence escaped rolled back settlement: before=%+v after=%+v events=%d/%d", before, afterRollback, eventsBefore, eventsAfterRollback)
+	}
+	if _, err := store.db.ExecContext(ctx, `DROP TRIGGER reject_worker_failure_receipt`); err != nil {
+		t.Fatal(err)
+	}
+	settled, err := store.SettleWorkerStep(ctx, report, now.Add(3*time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(settled.Steps) != 1 || len(settled.Steps[0].FailureEvidence) != 1 {
+		t.Fatalf("failure evidence was not retained in Job state: %+v", settled)
+	}
+	evidence := settled.Steps[0].FailureEvidence[0]
+	if evidence.EvidenceID == "" || evidence.StepID != assignment.StepID || evidence.Operation != execution.OperationOrganizeMedia ||
+		evidence.FailureSequence != 1 || evidence.WorkflowAttempt != 1 || evidence.WorkerID != report.WorkerID ||
+		evidence.FencingToken != assignment.FencingToken || evidence.CauseCode != report.CauseCode ||
+		evidence.ProcessExitCode == nil || *evidence.ProcessExitCode != exitCode || evidence.Summary != report.ErrorSummary ||
+		evidence.LogReference != report.LogReference || evidence.ResultingState != workflow.Queued {
+		t.Fatalf("persisted failure evidence is incomplete: %+v", evidence)
+	}
+	var eventPayload []byte
+	if err := store.db.QueryRowContext(ctx, `
+		SELECT payload FROM domain_events WHERE target_id = ? ORDER BY rowid DESC LIMIT 1
+	`, assignment.JobID).Scan(&eventPayload); err != nil {
+		t.Fatal(err)
+	}
+	var event command.Event
+	if err := json.Unmarshal(eventPayload, &event); err != nil {
+		t.Fatal(err)
+	}
+	encodedEvidence, _ := json.Marshal(event.Payload["failure_evidence"])
+	if !strings.Contains(string(encodedEvidence), evidence.EvidenceID) || !strings.Contains(string(encodedEvidence), report.CauseCode) {
+		t.Fatalf("domain event did not carry the same failure evidence: %+v", event.Payload)
+	}
+	replayed, err := store.SettleWorkerStep(ctx, report, now.Add(4*time.Second))
+	if err != nil || replayed.Revision != settled.Revision || len(replayed.Steps[0].FailureEvidence) != 1 {
+		t.Fatalf("result replay duplicated or lost failure evidence: state=%+v err=%v", replayed, err)
+	}
+	retry := reserveRetryWorkerStep(t, store, settled, now.Add(5*time.Second))
+	outputRecord, err := execution.NewStepOutputRecord(
+		retry.ExecutionSpec, retry.FencingToken, report.WorkerID, now.Add(7*time.Second),
+		[]execution.StepOutput{{
+			ID: "OUTPUT-1", Kind: execution.OutputOrganizedMedia, StorageID: "archive",
+			RelativePath: "packages/output.mp4", Checksum: strings.Repeat("b", 64),
+		}}, []string{"worker://verified"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	completed, err := store.SettleWorkerStep(ctx, workercontrol.Result{
+		WorkerID: report.WorkerID, JobID: retry.JobID, StepID: retry.StepID, FencingToken: retry.FencingToken,
+		Success: true, LogReference: "worker://operation-completed", OutputRecord: &outputRecord,
+	}, now.Add(7*time.Second))
+	if err != nil || completed.Steps[0].Workflow.State != workflow.Completed || completed.Steps[0].ErrorClass != "" ||
+		len(completed.Steps[0].FailureEvidence) != 1 || completed.Steps[0].FailureEvidence[0].EvidenceID != evidence.EvidenceID {
+		t.Fatalf("successful retry did not clear the current error while retaining failure evidence: state=%+v err=%v", completed, err)
+	}
+}
+
+func reserveRetryWorkerStep(t *testing.T, store *Store, failed job.State, now time.Time) workercontrol.Assignment {
+	t.Helper()
+	ctx := context.Background()
+	encoded, err := json.Marshal(failed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var reserved job.State
+	if err := json.Unmarshal(encoded, &reserved); err != nil {
+		t.Fatal(err)
+	}
+	step := &reserved.Steps[0]
+	compositeStepID := reserved.ID + "/" + step.Workflow.ID
+	fencingToken, err := store.NextFencingToken(compositeStepID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dispatchSequence, err := store.NextDispatchSequence()
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease := workflow.ExecutionLease{
+		OwnerWorkerID: "worker-windows", AcquiredAt: now, HeartbeatAt: now,
+		ExpiresAt: now.Add(time.Minute), FencingToken: fencingToken,
+	}
+	beforeRevision := failed.Revision
+	reserved.Revision = beforeRevision + 1
+	step.Workflow.State = workflow.Reserved
+	step.Workflow.WaitReason = ""
+	step.Workflow.ExecutionLease = &lease
+	step.Workflow.LastFencingToken = fencingToken
+	step.WorkerID = "worker-windows"
+	reservedPayload, err := json.Marshal(reserved)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reservationID := "RES-FAILURE-EVIDENCE-RETRY"
+	commandID := reservationID + ":command"
+	event := command.Event{
+		EventID: reservationID + ":event", EventType: "StepReserved", CommandID: commandID,
+		Actor: command.Actor{Type: command.SystemActor, ID: "dispatch-coordinator"}, RequestedVia: "dispatch_coordinator",
+		TargetID: reserved.ID, BeforeRevision: beforeRevision, AfterRevision: reserved.Revision, Reason: "dispatch retry Step",
+		Payload: map[string]any{"step_id": compositeStepID, "worker_id": "worker-windows"},
+	}
+	envelope := command.Envelope{
+		CommandID: commandID, CommandType: "step.reserve",
+		Actor: command.Actor{Type: command.SystemActor, ID: "dispatch-coordinator"}, RequestedVia: "dispatch_coordinator",
+		TargetID: reserved.ID, ExpectedRevision: beforeRevision, IdempotencyKey: reserved.ID + ":retry-dispatch", Reason: "dispatch retry Step",
+	}
+	commit := command.DispatchCommit{
+		Commit: command.Commit{
+			ExpectedRevision: &beforeRevision,
+			NextState:        &command.Snapshot{TargetID: reserved.ID, Revision: reserved.Revision, State: reservedPayload},
+			Record:           command.CommandRecord{Envelope: envelope, Accepted: true}, Events: []command.Event{event},
+			Receipt: &command.Receipt{Digest: reservationID + ":digest", Result: command.Result{
+				CommandID: commandID, TargetID: reserved.ID, Revision: reserved.Revision, Events: []command.Event{event},
+			}},
+		},
+		Reservation: dispatch.ResourceReservation{
+			ID: reservationID, JobID: reserved.ID, StepID: compositeStepID, WorkerID: "worker-windows", SnapshotID: 2,
+			ResourceClass: vocabulary.ResourceHeavy, MemoryBytes: 1024, ScratchBytes: 1024,
+			PhysicalDeviceIDs: []string{"disk-retry"}, CreatedAt: now,
+		},
+		Lease: lease,
+		Capacity: dispatch.Capacity{
+			AvailableMemoryBytes: 4096, ScratchFreeBytes: 4096, MaxHeavy: 1, MaxLight: 1,
+		},
+		DispatchSequence: dispatchSequence,
+	}
+	if err := store.CommitDispatch(envelope.IdempotencyKey, commit); err != nil {
+		t.Fatal(err)
+	}
+	assignment, _, err := store.ClaimWorkerStep(ctx, "worker-windows", now.Add(time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return assignment
+}
+
 // Requirement: WRK-013
 func TestWorkerLeaseHeartbeatExtendsSameFenceWithoutDuplicateExecution(t *testing.T) {
 	ctx := context.Background()

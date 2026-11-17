@@ -168,6 +168,8 @@ profile reference와 operation별 typed parameter
 
 운영 executor는 checksum·명세 불일치를 영구 `INPUT`, 일반 subprocess·일시 I/O 실패를 `TRANSIENT`, 접근 불가 또는 용량 부족 Storage를 대상 ID가 있는 `DEVICE` 대기로 보고한다. `DISK`는 PhysicalDevice I/O 충돌 예약에만 쓴다. Storage 대기는 사람이 복구할 때까지 실행 시도 횟수를 소비하지 않는다. `WRK-015`
 
+성공하지 못한 Worker 결과는 현재 오류 한 칸을 덮어쓰는 대신 재시도별 `StepFailureEvidence`를 Job 원장에 추가한다. 이 기록은 Worker·Step·typed operation·fencing token·실패 순서·workflow 시도·failure class·WaitReason과 대상 Storage ID·정규화 오류와 원인 code·정제 summary·process exit code·안전한 log reference·Control 관측 시각·결과 StepState를 가진다. 원문 stdout·stderr, 실행 인수, credential과 절대경로는 필드 자체를 두지 않는다. staged Job state, 같은 증적을 담은 Domain Event, Worker 결과 영수증, 예약·리스 해제는 한 transaction에서 확정하고 같은 결과 재전송은 최초 상태를 반환하므로 증적도 중복하지 않는다. 이후 성공해 현재 오류를 비워도 과거 실패 증적은 유지한다. `WRK-016`
+
 권장 상태:
 
 ```text

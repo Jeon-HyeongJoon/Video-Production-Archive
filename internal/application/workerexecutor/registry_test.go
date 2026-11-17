@@ -481,7 +481,8 @@ func TestProductionExecutorClassifiesInputTransientAndStorageFailures(t *testing
 	}
 	assignment := workerclient.Assignment{JobID: spec.JobID, StepID: spec.StepID, FencingToken: 1, ExecutionSpec: spec}
 	transient := transientRegistry.Execute(context.Background(), assignment)
-	if transient.FailureClass != workflow.FailureTransient || transient.ErrorClass != "STEP_EXECUTION_FAILED" {
+	if transient.FailureClass != workflow.FailureTransient || transient.ErrorClass != "STEP_EXECUTION_FAILED" ||
+		transient.CauseCode != "ORGANIZE_MEDIA_FAILED" || transient.ErrorSummary == "" {
 		t.Fatalf("temporary Adapter error was not retryable: %+v", transient)
 	}
 	badChecksum := spec
@@ -493,7 +494,8 @@ func TestProductionExecutorClassifiesInputTransientAndStorageFailures(t *testing
 	}
 	assignment.ExecutionSpec = badChecksum
 	permanent := transientRegistry.Execute(context.Background(), assignment)
-	if permanent.FailureClass != workflow.FailureInput || permanent.ErrorClass != "INPUT_CHECKSUM_MISMATCH" {
+	if permanent.FailureClass != workflow.FailureInput || permanent.ErrorClass != "INPUT_CHECKSUM_MISMATCH" ||
+		permanent.CauseCode != "INPUT_CHECKSUM_MISMATCH" || permanent.ErrorSummary == "" {
 		t.Fatalf("invalid input was not permanent: %+v", permanent)
 	}
 	if err := os.Remove(filepath.Join(sourcePath, "clip.mov")); err != nil {
@@ -502,12 +504,12 @@ func TestProductionExecutorClassifiesInputTransientAndStorageFailures(t *testing
 	assignment.ExecutionSpec = spec
 	deviceWait := transientRegistry.Execute(context.Background(), assignment)
 	if deviceWait.FailureClass != workflow.FailureResource || deviceWait.WaitReason != vocabulary.WaitDevice ||
-		deviceWait.WaitTargetStorageID != "source" {
+		deviceWait.WaitTargetStorageID != "source" || deviceWait.CauseCode != "STORAGE_UNAVAILABLE" || deviceWait.ErrorSummary == "" {
 		t.Fatalf("unavailable Storage did not wait without consuming an attempt: %+v", deviceWait)
 	}
 	diskWait, classified := storageFailure(errors.Join(archive.ErrStorageFull), "archive")
 	if !classified || diskWait.FailureClass != workflow.FailureResource || diskWait.WaitReason != vocabulary.WaitDevice ||
-		diskWait.WaitTargetStorageID != "archive" {
+		diskWait.WaitTargetStorageID != "archive" || diskWait.CauseCode != "STORAGE_FULL" || diskWait.ErrorSummary == "" {
 		t.Fatalf("full Storage did not become a targeted device wait: %+v classified=%v", diskWait, classified)
 	}
 }

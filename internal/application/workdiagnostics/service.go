@@ -14,6 +14,7 @@ import (
 	"videoarchive/internal/application/archivework"
 	"videoarchive/internal/application/archiveworkspace"
 	"videoarchive/internal/core/archivistruntime"
+	corejob "videoarchive/internal/core/job"
 	"videoarchive/internal/core/vocabulary"
 	"videoarchive/internal/core/worker"
 	"videoarchive/internal/core/workflow"
@@ -55,6 +56,7 @@ type ExecutionObservation struct {
 }
 
 type Fact struct {
+	EvidenceID string    `json:"evidence_id"`
 	Code       string    `json:"code"`
 	Summary    string    `json:"summary"`
 	ObservedAt time.Time `json:"observed_at"`
@@ -84,17 +86,18 @@ type WorkerSnapshot struct {
 }
 
 type JobDiagnostic struct {
-	JobID          string                `json:"job_id"`
-	JobRevision    uint64                `json:"job_revision"`
-	StepID         string                `json:"step_id"`
-	StepState      workflow.StepState    `json:"step_state"`
-	Progress       float64               `json:"progress"`
-	WaitReason     vocabulary.WaitReason `json:"wait_reason,omitempty"`
-	ErrorClass     string                `json:"error_class,omitempty"`
-	LogReference   string                `json:"log_reference,omitempty"`
-	LastProgressAt time.Time             `json:"last_progress_at"`
-	Worker         *WorkerSnapshot       `json:"worker,omitempty"`
-	Execution      *ExecutionObservation `json:"execution,omitempty"`
+	JobID           string                        `json:"job_id"`
+	JobRevision     uint64                        `json:"job_revision"`
+	StepID          string                        `json:"step_id"`
+	StepState       workflow.StepState            `json:"step_state"`
+	Progress        float64                       `json:"progress"`
+	WaitReason      vocabulary.WaitReason         `json:"wait_reason,omitempty"`
+	ErrorClass      string                        `json:"error_class,omitempty"`
+	LogReference    string                        `json:"log_reference,omitempty"`
+	LastProgressAt  time.Time                     `json:"last_progress_at"`
+	Worker          *WorkerSnapshot               `json:"worker,omitempty"`
+	Execution       *ExecutionObservation         `json:"execution,omitempty"`
+	FailureEvidence []corejob.StepFailureEvidence `json:"failure_evidence,omitempty"`
 }
 
 type Snapshot struct {
@@ -184,7 +187,26 @@ func (service *Service) diagnoseJob(ctx context.Context, view archiveworkspace.J
 		Progress: summary.Progress, WaitReason: summary.WaitReason, ErrorClass: strings.TrimSpace(summary.ErrorClass),
 		LogReference: safeLogReference(summary.LogReference), LastProgressAt: summary.LastEventAt,
 	}
-	facts := []Fact{{Code: "STEP_STATE_OBSERVED", Summary: "Step " + summary.CurrentStepID + " is " + string(summary.StepState), ObservedAt: summary.LastEventAt}}
+	for _, step := range view.Steps {
+		for _, evidence := range step.FailureEvidence {
+			item.FailureEvidence = append(item.FailureEvidence, sanitizeFailureEvidence(evidence))
+		}
+	}
+	sort.SliceStable(item.FailureEvidence, func(i, j int) bool {
+		if item.FailureEvidence[i].ObservedAt.Equal(item.FailureEvidence[j].ObservedAt) {
+			return item.FailureEvidence[i].FailureSequence < item.FailureEvidence[j].FailureSequence
+		}
+		return item.FailureEvidence[i].ObservedAt.Before(item.FailureEvidence[j].ObservedAt)
+	})
+	stateFact := diagnosticFact("STEP_STATE_OBSERVED", "Step "+summary.CurrentStepID+" is "+string(summary.StepState), summary.LastEventAt,
+		summary.JobID, strconv.FormatUint(summary.Revision, 10), summary.CurrentStepID, string(summary.StepState))
+	facts := []Fact{stateFact}
+	for _, evidence := range item.FailureEvidence {
+		facts = append(facts, Fact{
+			EvidenceID: evidence.EvidenceID, Code: "WORKER_FAILURE_RECORDED",
+			Summary: evidence.Summary + " (" + evidence.CauseCode + ")", ObservedAt: evidence.ObservedAt,
+		})
+	}
 	if status, ok := workers[summary.WorkerID]; ok && summary.WorkerID != "" {
 		item.Worker = &WorkerSnapshot{
 			WorkerID: status.WorkerID, State: status.State, LastHeartbeat: status.LastHeartbeat,
@@ -192,7 +214,8 @@ func (service *Service) diagnoseJob(ctx context.Context, view archiveworkspace.J
 			AvailableMemoryBytes:   status.Capacity.AvailableMemoryBytes, ScratchFreeBytes: status.Capacity.ScratchFreeBytes,
 			ReportedHeavyRunning: status.Metrics.HeavyRunning, ReportedLightRunning: status.Metrics.LightRunning,
 		}
-		facts = append(facts, Fact{Code: "WORKER_STATE_OBSERVED", Summary: "Worker " + status.WorkerID + " is " + status.State, ObservedAt: now})
+		facts = append(facts, diagnosticFact("WORKER_STATE_OBSERVED", "Worker "+status.WorkerID+" is "+status.State, now,
+			summary.JobID, status.WorkerID, status.State, now.Format(time.RFC3339Nano)))
 	}
 	execution, found, err := service.executions.ActiveExecution(ctx, summary.JobID, summary.CurrentStepID)
 	if err != nil {
@@ -200,9 +223,11 @@ func (service *Service) diagnoseJob(ctx context.Context, view archiveworkspace.J
 	}
 	if found {
 		item.Execution = &execution
-		facts = append(facts, Fact{Code: "RESOURCE_RESERVED", Summary: "The current Step has an active resource reservation", ObservedAt: execution.ReservedAt})
+		facts = append(facts, diagnosticFact("RESOURCE_RESERVED", "The current Step has an active resource reservation", execution.ReservedAt,
+			summary.JobID, summary.CurrentStepID, execution.ReservationID))
 		if execution.HasLease {
-			facts = append(facts, Fact{Code: "LEASE_HEARTBEAT_OBSERVED", Summary: "The Worker execution loop renewed its lease", ObservedAt: execution.LeaseHeartbeatAt})
+			facts = append(facts, diagnosticFact("LEASE_HEARTBEAT_OBSERVED", "The Worker execution loop renewed its lease", execution.LeaseHeartbeatAt,
+				summary.JobID, summary.CurrentStepID, strconv.FormatUint(execution.FencingToken, 10), execution.LeaseHeartbeatAt.Format(time.RFC3339Nano)))
 		}
 	}
 	var hypotheses []Hypothesis
@@ -211,51 +236,122 @@ func (service *Service) diagnoseJob(ctx context.Context, view archiveworkspace.J
 	active := summary.StepState == workflow.Reserved || summary.StepState == workflow.Running || summary.StepState == workflow.Verifying
 	if summary.StepState == workflow.Failed || item.ErrorClass != "" {
 		report = true
-		facts = append(facts, Fact{Code: "REPORTED_FAILURE", Summary: "The Step reported " + item.ErrorClass, ObservedAt: summary.LastEventAt})
+		facts = append(facts, diagnosticFact("REPORTED_FAILURE", "The Step reported "+item.ErrorClass, summary.LastEventAt,
+			summary.JobID, summary.CurrentStepID, item.ErrorClass, summary.LastEventAt.Format(time.RFC3339Nano)))
 		actions = append(actions, SuggestedAction{Code: "INSPECT_FAILURE", Summary: "Review the structured error and safe log reference before retrying"})
 	}
 	if summary.StepState == workflow.Waiting {
 		report = summary.WaitReason == vocabulary.WaitInput || summary.WaitReason == vocabulary.WaitApproval || summary.WaitReason == vocabulary.WaitDevice
-		facts = append(facts, Fact{Code: "REPORTED_WAIT", Summary: "The Step is waiting for " + string(summary.WaitReason), ObservedAt: summary.LastEventAt})
+		facts = append(facts, diagnosticFact("REPORTED_WAIT", "The Step is waiting for "+string(summary.WaitReason), summary.LastEventAt,
+			summary.JobID, summary.CurrentStepID, string(summary.WaitReason), summary.LastEventAt.Format(time.RFC3339Nano)))
 		if report {
 			actions = append(actions, SuggestedAction{Code: "RESOLVE_WAIT", Summary: "Show the persisted wait target and ask for the required human action"})
 		}
 	}
 	if active && (!found || !execution.HasLease) {
 		report = true
-		facts = append(facts, Fact{Code: "EXECUTION_LEASE_MISSING", Summary: "The active Step has no current execution lease", ObservedAt: now})
+		facts = append(facts, diagnosticFact("EXECUTION_LEASE_MISSING", "The active Step has no current execution lease", now,
+			summary.JobID, summary.CurrentStepID, now.Format(time.RFC3339Nano)))
 		actions = append(actions, SuggestedAction{Code: "RECONCILE_EXECUTION", Summary: "Reconcile the Step lifecycle before assigning duplicate work"})
 	} else if active && !now.Before(execution.LeaseExpiresAt) {
 		report = true
-		facts = append(facts, Fact{Code: "EXECUTION_LEASE_EXPIRED", Summary: "The active Step execution lease expired", ObservedAt: execution.LeaseExpiresAt})
+		facts = append(facts, diagnosticFact("EXECUTION_LEASE_EXPIRED", "The active Step execution lease expired", execution.LeaseExpiresAt,
+			summary.JobID, summary.CurrentStepID, execution.LeaseExpiresAt.Format(time.RFC3339Nano)))
 		actions = append(actions, SuggestedAction{Code: "RECONCILE_EXECUTION", Summary: "Confirm the Worker process state and recover the expired lease"})
 	}
 	if found && execution.HasLease && item.Worker != nil && (summary.StepState == workflow.Running || summary.StepState == workflow.Verifying) &&
 		((execution.ResourceClass == vocabulary.ResourceHeavy && item.Worker.ReportedHeavyRunning == 0) ||
 			(execution.ResourceClass == vocabulary.ResourceLight && item.Worker.ReportedLightRunning == 0)) {
 		report = true
-		facts = append(facts, Fact{Code: "RESERVATION_LOAD_MISMATCH", Summary: "Control has an active execution reservation that the latest Worker load snapshot does not report", ObservedAt: now})
+		mismatchFact := diagnosticFact("RESERVATION_LOAD_MISMATCH", "Control has an active execution reservation that the latest Worker load snapshot does not report", now,
+			summary.JobID, summary.CurrentStepID, summary.WorkerID, now.Format(time.RFC3339Nano))
+		facts = append(facts, mismatchFact)
 		hypotheses = append(hypotheses, Hypothesis{
 			Code: "WORKER_LOAD_NOT_REPORTED", Statement: "The Worker snapshot may lag or the subprocess may no longer be registered as running",
-			Basis:     []string{"An active reservation and lease exist while the matching Worker running count is zero"},
+			Basis:     []string{mismatchFact.EvidenceID},
 			NextCheck: "Read the next Worker heartbeat and structured operation progress event",
 		})
 	}
 	if active && item.Worker != nil && (item.Worker.State == "OFFLINE" || item.Worker.State == "DISABLED") {
 		report = true
-		facts = append(facts, Fact{Code: "WORKER_UNAVAILABLE", Summary: "The assigned Worker is " + item.Worker.State, ObservedAt: now})
+		facts = append(facts, diagnosticFact("WORKER_UNAVAILABLE", "The assigned Worker is "+item.Worker.State, now,
+			summary.JobID, summary.WorkerID, item.Worker.State, now.Format(time.RFC3339Nano)))
 		actions = append(actions, SuggestedAction{Code: "RESTORE_WORKER", Summary: "Restore the assigned Worker connection before changing the work"})
 	}
 	if active && !summary.LastEventAt.IsZero() && now.Sub(summary.LastEventAt) >= service.staleAfter {
 		report = true
 		hypotheses = append(hypotheses, Hypothesis{
 			Code: "PROGRESS_UNOBSERVED", Statement: "The subprocess may still be running or may be stalled; current evidence cannot distinguish them",
-			Basis:     []string{"No new persisted Step progress since " + summary.LastEventAt.UTC().Format(time.RFC3339)},
+			Basis:     []string{stateFact.EvidenceID},
 			NextCheck: "Read the Worker's next structured progress sample or sanitized operation log event",
 		})
 		actions = append(actions, SuggestedAction{Code: "OBSERVE_PROGRESS", Summary: "Request a new structured Worker progress sample before retrying or cancelling"})
 	}
 	return item, facts, hypotheses, dedupeActions(actions), report, nil
+}
+
+func diagnosticFact(code, summary string, observedAt time.Time, identity ...string) Fact {
+	source := strings.Join(append([]string{code}, identity...), "\x00")
+	digest := sha256.Sum256([]byte(source))
+	return Fact{EvidenceID: "EVD-DIAGNOSTIC-" + strings.ToUpper(hex.EncodeToString(digest[:8])), Code: code, Summary: summary, ObservedAt: observedAt}
+}
+
+func sanitizeFailureEvidence(source corejob.StepFailureEvidence) corejob.StepFailureEvidence {
+	result := source
+	result.EvidenceID = safeEvidenceID(source.EvidenceID, source.StepID+"\x00"+strconv.FormatUint(source.FencingToken, 10))
+	result.ErrorClass = safeDiagnosticCode(source.ErrorClass, "WORKER_REPORTED_FAILURE")
+	result.CauseCode = safeDiagnosticCode(source.CauseCode, result.ErrorClass)
+	result.LogReference = safeLogReference(source.LogReference)
+	result.Summary = safeDiagnosticSummary(source.Summary)
+	if result.ProcessExitCode != nil {
+		value := *result.ProcessExitCode
+		if value < 0 {
+			result.ProcessExitCode = nil
+		} else {
+			result.ProcessExitCode = &value
+		}
+	}
+	return result
+}
+
+func safeEvidenceID(value, fallbackSeed string) string {
+	value = strings.TrimSpace(value)
+	valid := value != "" && len(value) <= 128
+	for _, character := range value {
+		if (character < 'A' || character > 'Z') && (character < '0' || character > '9') && character != '_' && character != '-' {
+			valid = false
+			break
+		}
+	}
+	if valid {
+		return value
+	}
+	digest := sha256.Sum256([]byte(fallbackSeed))
+	return "EVD-REDACTED-" + strings.ToUpper(hex.EncodeToString(digest[:8]))
+}
+
+func safeDiagnosticCode(value, fallback string) string {
+	value = strings.TrimSpace(value)
+	if value == "" || len(value) > 96 {
+		return fallback
+	}
+	for _, character := range value {
+		if (character < 'A' || character > 'Z') && (character < '0' || character > '9') && character != '_' {
+			return fallback
+		}
+	}
+	return value
+}
+
+func safeDiagnosticSummary(value string) string {
+	value = strings.TrimSpace(value)
+	lower := strings.ToLower(value)
+	if value == "" || len(value) > 256 || strings.ContainsAny(value, "\r\n\\/") ||
+		strings.Contains(lower, "password") || strings.Contains(lower, "credential") || strings.Contains(lower, "token") ||
+		strings.Contains(lower, "secret") || strings.Contains(value, "@") {
+		return "Worker failure detail was withheld by the evidence boundary"
+	}
+	return value
 }
 
 func safeLogReference(value string) string {
@@ -295,13 +391,34 @@ func Sanitize(snapshot Snapshot) Snapshot {
 			copy.PhysicalDeviceIDs = append([]string(nil), copy.PhysicalDeviceIDs...)
 			result.Jobs[index].Execution = &copy
 		}
+		result.Jobs[index].FailureEvidence = append([]corejob.StepFailureEvidence(nil), snapshot.Jobs[index].FailureEvidence...)
+		for evidenceIndex := range result.Jobs[index].FailureEvidence {
+			result.Jobs[index].FailureEvidence[evidenceIndex] = sanitizeFailureEvidence(result.Jobs[index].FailureEvidence[evidenceIndex])
+		}
 	}
 	result.Facts = append([]Fact(nil), snapshot.Facts...)
+	for index := range result.Facts {
+		result.Facts[index].EvidenceID = safeEvidenceID(result.Facts[index].EvidenceID,
+			result.Facts[index].Code+"\x00"+result.Facts[index].ObservedAt.UTC().Format(time.RFC3339Nano))
+		result.Facts[index].Code = safeDiagnosticCode(result.Facts[index].Code, "DIAGNOSTIC_FACT")
+		result.Facts[index].Summary = safeDiagnosticSummary(result.Facts[index].Summary)
+	}
 	result.Hypotheses = append([]Hypothesis(nil), snapshot.Hypotheses...)
 	for index := range result.Hypotheses {
+		result.Hypotheses[index].Code = safeDiagnosticCode(result.Hypotheses[index].Code, "DIAGNOSTIC_HYPOTHESIS")
+		result.Hypotheses[index].Statement = safeDiagnosticSummary(result.Hypotheses[index].Statement)
+		result.Hypotheses[index].NextCheck = safeDiagnosticSummary(result.Hypotheses[index].NextCheck)
 		result.Hypotheses[index].Basis = append([]string(nil), result.Hypotheses[index].Basis...)
+		for basisIndex := range result.Hypotheses[index].Basis {
+			result.Hypotheses[index].Basis[basisIndex] = safeEvidenceID(result.Hypotheses[index].Basis[basisIndex],
+				result.Hypotheses[index].Code+"\x00"+strconv.Itoa(basisIndex))
+		}
 	}
 	result.SuggestedActions = append([]SuggestedAction(nil), snapshot.SuggestedActions...)
+	for index := range result.SuggestedActions {
+		result.SuggestedActions[index].Code = safeDiagnosticCode(result.SuggestedActions[index].Code, "DIAGNOSTIC_ACTION")
+		result.SuggestedActions[index].Summary = safeDiagnosticSummary(result.SuggestedActions[index].Summary)
+	}
 	return result
 }
 
@@ -331,6 +448,9 @@ func fingerprint(snapshot Snapshot) string {
 		}
 		if item.Execution != nil {
 			source.WriteString("/lease=" + boolString(item.Execution.HasLease))
+		}
+		for _, evidence := range item.FailureEvidence {
+			source.WriteString("/failure=" + evidence.EvidenceID + ":" + evidence.CauseCode)
 		}
 	}
 	for _, value := range snapshot.Facts {

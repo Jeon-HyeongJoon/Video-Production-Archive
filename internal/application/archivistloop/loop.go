@@ -141,7 +141,7 @@ If a turn has no fixed intake selection, search current candidates with the subj
 Destructive actions and approvals belong to a human. Never submit an arbitrary path, endpoint, credential, stale revision, or candidate that a current tool result did not return.
 When a long ArchiveRun or transcription is started, report that it started and end this turn; Control will recall you after a stage completes.
 If evidence is insufficient to classify a HOLD item, keep it on hold and state what evidence is missing.
-For an automatic advisory turn, report observed facts separately from hypotheses. A fresh lease heartbeat proves only that the Worker execution loop answered, not that its subprocess progressed. Prepare current drive selections when requested, but treat an archive start ActionCard as a proposal and never claim work started until the tool reports an executed ArchiveRun.
+For an automatic advisory turn, cite persisted evidence IDs for confirmed statements and report observed facts separately from hypotheses. Never turn a hypothesis into a fact. A fresh lease heartbeat proves only that the Worker execution loop answered, not that its subprocess progressed. Prepare current drive selections when requested, but treat an archive start ActionCard as a proposal and never claim work started until the tool reports an executed ArchiveRun.
 Give a concise Korean final answer focused on the result or the next human action.`
 
 func (loop *Loop) Run(ctx context.Context, runtime RuntimeContext, prompt string) (Result, error) {
@@ -346,7 +346,7 @@ func knownTools() map[string]ToolDefinition {
 			Parameters: objectSchema(map[string]any{}),
 		},
 		"archive.work.diagnostics.get.v1": {
-			Name: "archive.work.diagnostics.get.v1", ProviderName: "archive_work_diagnostics_get_v1", Description: "Read sanitized execution diagnostics for the persistent work fixed to this turn. Facts, hypotheses, and next checks are separate; this tool never changes work state.",
+			Name: "archive.work.diagnostics.get.v1", ProviderName: "archive_work_diagnostics_get_v1", Description: "Read sanitized execution diagnostics and persisted failure evidence IDs for the persistent work fixed to this turn. Confirmed facts, hypotheses with evidence-ID basis, and next checks are separate; this tool never changes work state.",
 			Parameters: objectSchema(map[string]any{}),
 		},
 		"archive.assets.search.v1": {

@@ -2,12 +2,16 @@ package workdiagnostics
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
 	"videoarchive/internal/application/archivework"
 	"videoarchive/internal/application/archiveworkspace"
 	"videoarchive/internal/core/archivistruntime"
+	"videoarchive/internal/core/execution"
+	corejob "videoarchive/internal/core/job"
 	"videoarchive/internal/core/vocabulary"
 	"videoarchive/internal/core/worker"
 	"videoarchive/internal/core/workflow"
@@ -17,6 +21,62 @@ type fixedWorkReader struct{}
 
 func (fixedWorkReader) Detail(context.Context, string) (archivework.View, error) {
 	return archivework.View{}, archivework.ErrWorkNotFound
+}
+
+// Requirement: OBS-003
+func TestWorkDiagnosticsExposePersistedFailureEvidenceAsFactsWithoutRawProcessData(t *testing.T) {
+	now := time.Date(2026, 11, 17, 12, 0, 0, 0, time.UTC)
+	exitCode := 1
+	view := archiveworkspace.JobView{
+		Summary: archiveworkspace.JobSummary{
+			JobID: "JOB-FAILED", Revision: 11, CurrentStepID: "organize", StepState: workflow.Failed,
+			ErrorClass: "STEP_EXECUTION_FAILED", LastEventAt: now.Add(-time.Minute),
+		},
+		Steps: []archiveworkspace.StepStatus{{
+			ID: "organize", State: workflow.Failed, LastEventAt: now.Add(-time.Minute),
+			ExecutorKind: vocabulary.ExecutorWorker,
+			FailureEvidence: []corejob.StepFailureEvidence{
+				{EvidenceID: "EVD-WORKER-FIRST", StepID: "organize", Operation: execution.OperationOrganizeMedia,
+					FailureSequence: 1, WorkflowAttempt: 1, WorkerID: "WORKER-1", FencingToken: 4,
+					FailureClass: workflow.FailureTransient, ErrorClass: "STEP_EXECUTION_FAILED", CauseCode: "ORGANIZE_MEDIA_FAILED",
+					Summary: "Archive media organization operation failed", ObservedAt: now.Add(-3 * time.Minute), ResultingState: workflow.Queued},
+				{EvidenceID: "EVD-WORKER-SECOND", StepID: "organize", Operation: execution.OperationOrganizeMedia,
+					FailureSequence: 2, WorkflowAttempt: 2, WorkerID: "WORKER-1", FencingToken: 5,
+					FailureClass: workflow.FailureTransient, ErrorClass: "STEP_EXECUTION_FAILED", CauseCode: "PROCESS_EXIT_NONZERO",
+					Summary: `C:\private\token-secret.log`, ProcessExitCode: &exitCode, LogReference: `C:\private\token-secret.log`,
+					ObservedAt: now.Add(-time.Minute), ResultingState: workflow.Failed},
+			},
+		}},
+	}
+	service, err := New(
+		fixedWorkReader{}, fixedJobReader{view: view}, fixedWorkerReader{},
+		fixedExecutionReader{}, func() time.Time { return now }, 10*time.Minute,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	diagnostic, err := service.Diagnose(context.Background(), archivistruntime.WorkReference{
+		Kind: archivistruntime.WorkJob, WorkID: "JOB-FAILED", Revision: 11,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !diagnostic.ShouldReport || len(diagnostic.Jobs) != 1 || len(diagnostic.Jobs[0].FailureEvidence) != 2 ||
+		diagnostic.Jobs[0].FailureEvidence[0].EvidenceID != "EVD-WORKER-FIRST" ||
+		diagnostic.Jobs[0].FailureEvidence[1].ProcessExitCode == nil || *diagnostic.Jobs[0].FailureEvidence[1].ProcessExitCode != exitCode ||
+		!hasFactEvidence(diagnostic.Facts, "WORKER_FAILURE_RECORDED", "EVD-WORKER-FIRST") ||
+		!hasFactEvidence(diagnostic.Facts, "WORKER_FAILURE_RECORDED", "EVD-WORKER-SECOND") {
+		t.Fatalf("persisted failure evidence was not projected as facts: %+v", diagnostic)
+	}
+	payload, err := json.Marshal(diagnostic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{`C:\private`, "token-secret", "password", "credential"} {
+		if strings.Contains(strings.ToLower(string(payload)), strings.ToLower(forbidden)) {
+			t.Fatalf("diagnostic exposed raw process data: %s", payload)
+		}
+	}
 }
 
 type fixedJobReader struct{ view archiveworkspace.JobView }
@@ -86,6 +146,15 @@ func TestWorkDiagnosticsCorrelatesStepWorkerLeaseReservationAndSeparatesFactsFro
 func hasFact(values []Fact, code string) bool {
 	for _, value := range values {
 		if value.Code == code {
+			return true
+		}
+	}
+	return false
+}
+
+func hasFactEvidence(values []Fact, code, evidenceID string) bool {
+	for _, value := range values {
+		if value.Code == code && value.EvidenceID == evidenceID {
 			return true
 		}
 	}

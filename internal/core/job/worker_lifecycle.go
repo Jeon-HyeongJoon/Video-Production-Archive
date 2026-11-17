@@ -1,7 +1,11 @@
 package job
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"path"
+	"strconv"
 	"strings"
 	"time"
 
@@ -34,6 +38,9 @@ type SettleWorkerStepParameters struct {
 	WaitReason          vocabulary.WaitReason       `json:"wait_reason,omitempty"`
 	WaitTargetStorageID string                      `json:"wait_target_storage_id,omitempty"`
 	ErrorClass          string                      `json:"error_class,omitempty"`
+	CauseCode           string                      `json:"cause_code,omitempty"`
+	ErrorSummary        string                      `json:"error_summary,omitempty"`
+	ProcessExitCode     *int                        `json:"process_exit_code,omitempty"`
 	LogReference        string                      `json:"log_reference,omitempty"`
 	OutputRecord        *execution.StepOutputRecord `json:"output_record,omitempty"`
 }
@@ -170,21 +177,102 @@ func (handler *WorkerLifecycleHandler) settle(
 			return command.Change{}, err
 		}
 		step.WaitTargetStorageID = strings.TrimSpace(parameters.WaitTargetStorageID)
-		step.ErrorClass = strings.TrimSpace(parameters.ErrorClass)
+		step.ErrorClass = safeFailureCode(parameters.ErrorClass, "WORKER_REPORTED_FAILURE")
+		failureEvidence := StepFailureEvidence{
+			EvidenceID: failureEvidenceID(state.ID, step.Workflow.ID, parameters.FencingToken),
+			StepID:     step.Workflow.ID, Operation: step.ExecutionSpec.Operation,
+			FailureSequence: uint64(len(step.FailureEvidence) + 1), WorkflowAttempt: step.Workflow.Attempt,
+			WorkerID: envelope.Actor.ID, FencingToken: parameters.FencingToken,
+			FailureClass: parameters.FailureClass, WaitReason: parameters.WaitReason,
+			WaitTargetStorageID: step.WaitTargetStorageID,
+			ErrorClass:          step.ErrorClass, CauseCode: safeFailureCode(parameters.CauseCode, step.ErrorClass),
+			Summary: safeFailureSummary(parameters.ErrorSummary), ProcessExitCode: cloneExitCode(parameters.ProcessExitCode),
+			LogReference: safeFailureLogReference(parameters.LogReference), ObservedAt: now,
+			ResultingState: step.Workflow.State,
+		}
+		step.FailureEvidence = append(step.FailureEvidence, failureEvidence)
 		eventType = "StepFailed"
 		if step.Workflow.State == workflow.Queued || step.Workflow.State == workflow.Waiting {
 			eventType = "StepRetryScheduled"
 		}
 	}
 	step.Workflow.ExecutionLease = nil
-	step.LogReference = strings.TrimSpace(parameters.LogReference)
+	if parameters.Success {
+		step.ErrorClass = ""
+		step.LogReference = strings.TrimSpace(parameters.LogReference)
+	} else {
+		step.LogReference = step.FailureEvidence[len(step.FailureEvidence)-1].LogReference
+	}
 	step.LastEventAt = now
 	activateNextReadyStep(&state, now)
 	state.Revision = snapshot.Revision + 1
-	return stateChange(envelope, state, eventType, map[string]any{
+	payload := map[string]any{
 		"step_id": step.Workflow.ID, "fencing_token": parameters.FencingToken,
 		"success": parameters.Success, "output_ids": workerStepOutputIDs(step.OutputRecord),
-	})
+	}
+	if !parameters.Success {
+		payload["failure_evidence"] = step.FailureEvidence[len(step.FailureEvidence)-1]
+	}
+	return stateChange(envelope, state, eventType, payload)
+}
+
+func failureEvidenceID(jobID, stepID string, fencingToken uint64) string {
+	digest := sha256.Sum256([]byte(jobID + "\x00" + stepID + "\x00" + strconv.FormatUint(fencingToken, 10)))
+	return "EVD-WORKER-" + strings.ToUpper(hex.EncodeToString(digest[:8]))
+}
+
+func safeFailureCode(value, fallback string) string {
+	value = strings.TrimSpace(value)
+	if value == "" || len(value) > 96 {
+		return fallback
+	}
+	for _, character := range value {
+		if (character < 'A' || character > 'Z') && (character < '0' || character > '9') && character != '_' {
+			return fallback
+		}
+	}
+	return value
+}
+
+func safeFailureSummary(value string) string {
+	value = strings.TrimSpace(value)
+	lower := strings.ToLower(value)
+	if value == "" || len(value) > 256 || strings.ContainsAny(value, "\r\n\\/") ||
+		strings.Contains(lower, "password") || strings.Contains(lower, "credential") || strings.Contains(lower, "token") ||
+		strings.Contains(lower, "secret") || strings.Contains(value, "@") {
+		return "Worker reported a structured execution failure"
+	}
+	return value
+}
+
+func safeFailureLogReference(value string) string {
+	value = strings.TrimSpace(value)
+	lower := strings.ToLower(value)
+	if value == "" || len(value) > 256 || strings.HasPrefix(value, "/") || strings.Contains(value, "\\") ||
+		strings.Contains(lower, "password") || strings.Contains(lower, "credential") || strings.Contains(lower, "token") ||
+		strings.Contains(lower, "secret") || strings.Contains(value, "@") {
+		return ""
+	}
+	if strings.Contains(value, "://") {
+		scheme := strings.SplitN(value, "://", 2)[0]
+		if scheme == "worker" || scheme == "media" || scheme == "archive" || scheme == "fixture" {
+			return value
+		}
+		return ""
+	}
+	clean := path.Clean(value)
+	if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") || clean != value {
+		return ""
+	}
+	return value
+}
+
+func cloneExitCode(value *int) *int {
+	if value == nil || *value < 0 {
+		return nil
+	}
+	copy := *value
+	return &copy
 }
 
 func (handler *WorkerLifecycleHandler) settleCancellation(

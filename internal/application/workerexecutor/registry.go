@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	osexec "os/exec"
 	"path"
 	"sort"
 	"time"
@@ -122,7 +123,9 @@ func (registry *Registry) ExecuteOperation(ctx context.Context, spec execution.S
 			return failure
 		}
 		return workerclient.ExecutionResult{
-			FailureClass: workflow.FailureTransient, ErrorClass: "OUTPUT_LOCK_UNAVAILABLE", LogReference: "media://output-lock-failed",
+			FailureClass: workflow.FailureTransient, ErrorClass: "OUTPUT_LOCK_UNAVAILABLE",
+			CauseCode: "OUTPUT_LOCK_UNAVAILABLE", ErrorSummary: "The media output lock could not be acquired",
+			LogReference: "media://output-lock-failed",
 		}
 	}
 	defer releaseOutputLocks()
@@ -145,8 +148,11 @@ func (registry *Registry) ExecuteOperation(ctx context.Context, spec execution.S
 		if failure, classified := storageFailure(err, operationStorageID(spec)); classified {
 			return failure
 		}
+		causeCode, summary, exitCode := operationFailureDetails(spec.Operation, err)
 		return workerclient.ExecutionResult{
-			FailureClass: workflow.FailureTransient, ErrorClass: "STEP_EXECUTION_FAILED", LogReference: "worker://operation-failed",
+			FailureClass: workflow.FailureTransient, ErrorClass: "STEP_EXECUTION_FAILED",
+			CauseCode: causeCode, ErrorSummary: summary, ProcessExitCode: exitCode,
+			LogReference: "worker://operation-failed",
 		}
 	}
 	validationWorkerID := "registry-validation"
@@ -231,13 +237,15 @@ func storageFailure(err error, storageID string) (workerclient.ExecutionResult, 
 	if errors.Is(err, archive.ErrStorageFull) && storageID != "" {
 		return workerclient.ExecutionResult{
 			FailureClass: workflow.FailureResource, WaitReason: vocabulary.WaitDevice, WaitTargetStorageID: storageID,
-			ErrorClass: "STORAGE_FULL", LogReference: "worker://storage-full",
+			ErrorClass: "STORAGE_FULL", CauseCode: "STORAGE_FULL", ErrorSummary: "The target Storage has insufficient free space",
+			LogReference: "worker://storage-full",
 		}, true
 	}
 	if errors.Is(err, archive.ErrStorageUnavailable) && storageID != "" {
 		return workerclient.ExecutionResult{
 			FailureClass: workflow.FailureResource, WaitReason: vocabulary.WaitDevice, WaitTargetStorageID: storageID,
-			ErrorClass: "STORAGE_UNAVAILABLE", LogReference: "worker://storage-unavailable",
+			ErrorClass: "STORAGE_UNAVAILABLE", CauseCode: "STORAGE_UNAVAILABLE", ErrorSummary: "The required Storage is unavailable",
+			LogReference: "worker://storage-unavailable",
 		}, true
 	}
 	return workerclient.ExecutionResult{}, false
@@ -281,5 +289,37 @@ func temporaryOutputPathForToken(published string, fencingToken uint64) string {
 }
 
 func inputFailure(errorClass string) workerclient.ExecutionResult {
-	return workerclient.ExecutionResult{FailureClass: workflow.FailureInput, ErrorClass: errorClass, LogReference: "worker://input-rejected"}
+	return workerclient.ExecutionResult{
+		FailureClass: workflow.FailureInput, ErrorClass: errorClass, CauseCode: errorClass,
+		ErrorSummary: "The Worker rejected the typed execution input", LogReference: "worker://input-rejected",
+	}
+}
+
+func operationFailureDetails(operation execution.Operation, err error) (string, string, *int) {
+	code := string(operation) + "_FAILED"
+	summary := map[execution.Operation]string{
+		execution.OperationInspectMedia:          "Media inspection operation failed",
+		execution.OperationRenderRecording:       "Recording render operation failed",
+		execution.OperationRenderSourceSequence:  "Source sequence render operation failed",
+		execution.OperationQCRendition:           "Rendition quality verification failed",
+		execution.OperationOrganizeMedia:         "Archive media organization operation failed",
+		execution.OperationExtractSpeechAudio:    "Speech audio extraction operation failed",
+		execution.OperationTranscribeAudio:       "Speech transcription operation failed",
+		execution.OperationWriteSubtitle:         "Subtitle publication operation failed",
+		execution.OperationWriteTranscriptText:   "Transcript text publication operation failed",
+		execution.OperationReviseArchivePackage:  "Archive package revision operation failed",
+		execution.OperationWriteArchiveCatalog:   "Archive Catalog publication operation failed",
+		execution.OperationVerifyArchiveCatalog:  "Archive Catalog verification operation failed",
+		execution.OperationRebuildArchiveCatalog: "Archive Catalog rebuild operation failed",
+	}[operation]
+	if summary == "" {
+		code = "MEDIA_OPERATION_FAILED"
+		summary = "Media operation failed"
+	}
+	var exitError *osexec.ExitError
+	if errors.As(err, &exitError) {
+		exitCode := exitError.ExitCode()
+		return "PROCESS_EXIT_NONZERO", summary, &exitCode
+	}
+	return code, summary, nil
 }

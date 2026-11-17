@@ -50,6 +50,9 @@ type Result struct {
 	WaitReason          vocabulary.WaitReason
 	WaitTargetStorageID string
 	ErrorClass          string
+	CauseCode           string
+	ErrorSummary        string
+	ProcessExitCode     *int
 	LogReference        string
 	OutputRecord        *execution.StepOutputRecord
 }

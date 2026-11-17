@@ -6,6 +6,7 @@ import (
 	"sort"
 	"time"
 
+	corejob "videoarchive/internal/core/job"
 	"videoarchive/internal/core/vocabulary"
 	"videoarchive/internal/core/workflow"
 )
@@ -33,17 +34,18 @@ type Job struct {
 }
 
 type StepStatus struct {
-	ID            string
-	State         workflow.StepState
-	Progress      float64
-	ExecutorKind  vocabulary.ExecutorKind
-	ActorID       string
-	WorkerID      string
-	WaitReason    vocabulary.WaitReason
-	ErrorClass    string
-	LogReference  string
-	LastEventAt   time.Time
-	DependencyIDs []string
+	ID              string
+	State           workflow.StepState
+	Progress        float64
+	ExecutorKind    vocabulary.ExecutorKind
+	ActorID         string
+	WorkerID        string
+	WaitReason      vocabulary.WaitReason
+	ErrorClass      string
+	LogReference    string
+	LastEventAt     time.Time
+	DependencyIDs   []string
+	FailureEvidence []corejob.StepFailureEvidence
 }
 
 type ArchivistAction struct {
@@ -117,7 +119,7 @@ func Project(input ProjectionInput) (JobView, error) {
 		return JobView{}, ErrInvalidProjection
 	}
 
-	steps := append([]StepStatus(nil), input.Steps...)
+	steps := cloneSteps(input.Steps)
 	var current *StepStatus
 	for index := range steps {
 		if !validStep(steps[index]) {
@@ -205,6 +207,21 @@ func cloneWorkers(source []WorkerResource) []WorkerResource {
 		workers[index].AccessibleStorageIDs = append([]string(nil), workers[index].AccessibleStorageIDs...)
 	}
 	return workers
+}
+
+func cloneSteps(source []StepStatus) []StepStatus {
+	steps := append([]StepStatus(nil), source...)
+	for index := range steps {
+		steps[index].DependencyIDs = append([]string(nil), steps[index].DependencyIDs...)
+		steps[index].FailureEvidence = append([]corejob.StepFailureEvidence(nil), steps[index].FailureEvidence...)
+		for evidenceIndex := range steps[index].FailureEvidence {
+			if steps[index].FailureEvidence[evidenceIndex].ProcessExitCode != nil {
+				value := *steps[index].FailureEvidence[evidenceIndex].ProcessExitCode
+				steps[index].FailureEvidence[evidenceIndex].ProcessExitCode = &value
+			}
+		}
+	}
+	return steps
 }
 
 type Reader interface {

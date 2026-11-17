@@ -202,6 +202,8 @@
       "rules": [
         "작업 진단을 만들 때 StepState·WaitReason·ExecutionLease·ResourceReservation를 바꾸지 않는다.",
         "관측된 값만 사실로 기록하고 원인이 확인되지 않은 설명은 가설로 기록한다.",
+        "사실은 증적 ID를 가지며 가설의 basis는 설명문이 아니라 관련 증적 ID를 참조한다.",
+        "영속 Step Failure Evidence는 재시도 순서를 보존한 확인된 사실로 제공한다.",
         "원문 stdout·stderr, credential과 절대경로는 포함하지 않는다.",
         "새 ExecutionLease heartbeat는 Worker 실행 루프가 응답했다는 사실이며 subprocess 진행을 증명하지 않는다."
       ],
@@ -225,11 +227,15 @@
         {
           "type": "refers-to",
           "target": "resource-reservation"
+        },
+        {
+          "type": "refers-to",
+          "target": "step-failure-evidence"
         }
       ],
       "sources": [
         "docs/design/10-capabilities-observability.md §4",
-        "requirements OBS-002, MCP-009"
+        "requirements OBS-002~003, MCP-009"
       ],
       "decided": "2026-11-15"
     },
@@ -672,6 +678,53 @@
         "requirements WRK-009"
       ],
       "decided": "2026-11-06"
+    },
+    {
+      "id": "step-failure-evidence",
+      "layer": "product",
+      "kind": "record",
+      "name": {
+        "ko": "단계 실패 증적",
+        "en": "Step Failure Evidence"
+      },
+      "code_name": "StepFailureEvidence",
+      "definition": "Worker의 성공하지 못한 Step 결과 하나를 실행 경계와 정제된 실패 내용에 묶어 재시도별로 보존하는 변경 불가능한 증적 기록.",
+      "rules": [
+        "Worker·Step·typed operation·fencing token·실패 순서·workflow 시도·failure class와 결과 StepState를 기록한다.",
+        "정규화 오류와 원인 code·정제 summary·process exit code·Wait Reason과 대상 Storage ID·안전한 log reference·Control 관측 시각만 기록한다.",
+        "원문 stdout·stderr, executable 인수, credential과 절대경로를 기록하지 않는다.",
+        "Job 상태·Domain Event·Worker Result Receipt·예약과 리스 해제와 같은 transaction에서 추가하고 동일 결과 재전송으로 중복하지 않는다.",
+        "후속 재시도 성공으로 현재 오류가 비워져도 이전 실패 증적은 유지한다."
+      ],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "evidence"
+        },
+        {
+          "type": "part-of",
+          "target": "step"
+        },
+        {
+          "type": "refers-to",
+          "target": "worker-result-receipt"
+        },
+        {
+          "type": "refers-to",
+          "target": "fencing-token"
+        }
+      ],
+      "sources": [
+        "docs/design/07-worker-fleet.md §4.1",
+        "docs/design/10-capabilities-observability.md §3",
+        "requirements WRK-016, OBS-003",
+        "사용자 결정 2026-11-17: 시스템 실행 근거를 영속화하고 Archivist가 근거로 협업"
+      ],
+      "decided": "2026-11-17"
     },
     {
       "id": "worker-completion-outbox",

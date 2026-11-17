@@ -70,9 +70,11 @@ input/output ID와 검증 증적 참조
 
 Domain Event는 업무 상태 변경 사실이고, progress·metric·process log는 증적이다. 둘을 같은 것으로 취급하지 않는다. 완료·실패 상태와 CommandRecord·Event는 DB 원장에 남고, 고빈도 metric과 원문 로그는 회전 저장하며 DB에는 요약과 참조만 남긴다. 모든 Capability를 한 Evidence Sink로 묶는 요구사항은 `OBS-001` planned다.
 
-공통 Evidence Sink 완성 전에도 진행 중 작업의 원인을 묻는 경로에는 현재 원장에 이미 있는 증적을 한 번에 읽는 `WorkDiagnostic` projection을 둔다. 이 projection은 Job·Step과 최신 Worker resource snapshot, 활성 ResourceReservation·ExecutionLease, 저장된 WaitReason·error class·안전한 log reference를 같은 관측 시각으로 결합한다. 실행 리스 heartbeat는 Worker 실행 루프가 살아 있다는 증적이지 subprocess가 계속 전진한다는 증적은 아니므로, 진행률 관측이 없는 장시간 RUNNING을 곧바로 실패나 정지로 바꾸지 않는다. 확인된 값은 `facts`, 아직 확인되지 않은 인과 설명은 예측·확인 방법·근거를 가진 `hypotheses`로 나눠 반환한다. `OBS-002`
+공통 Evidence Sink 완성 전에도 진행 중 작업의 원인을 묻는 경로에는 현재 원장에 이미 있는 증적을 한 번에 읽는 `WorkDiagnostic` projection을 둔다. 이 projection은 Job·Step과 최신 Worker resource snapshot, 활성 ResourceReservation·ExecutionLease, 저장된 WaitReason·error class·안전한 log reference를 같은 관측 시각으로 결합한다. 실행 리스 heartbeat는 Worker 실행 루프가 살아 있다는 증적이지 subprocess가 계속 전진한다는 증적은 아니므로, 진행률 관측이 없는 장시간 RUNNING을 곧바로 실패나 정지로 바꾸지 않는다. 확인된 값은 증적 ID가 있는 `facts`, 아직 확인되지 않은 인과 설명은 예측·확인 방법과 증적 ID `basis`를 가진 `hypotheses`로 나눠 반환한다. `OBS-002`
 
 `WorkDiagnostic`은 읽기 모델이며 StepState·WaitReason·ExecutionLease·ResourceReservation을 고치지 않는다. Worker heartbeat 만료, 실행 리스 누락·만료, 저장된 WAITING·FAILED, 새 progress 증적이 없는 장시간 RUNNING과 Control 예약·Worker 관측 load 불일치를 구조화된 진단 code와 다음 확인 방법으로 나타낸다. 원문 stdout·stderr, credential, 실행 인수와 절대경로는 진단 응답에 넣지 않는다. 작업 공간과 Archivist MCP에는 정규화 code·관측 시각·정제 summary·안전한 log reference만 제공한다. 고빈도 FFmpeg·STT 세부 진행과 정제된 log tail을 모든 실행기에 연결하는 일은 계속 `OBS-001`의 후속 범위다.
+
+Worker가 보고한 각 실패는 `StepFailureEvidence`로 Job 원장에 남으므로 진단은 현재 오류뿐 아니라 이전 retry의 실패 순서·operation·Worker·fencing token·원인 code·process exit code까지 원래 증적 ID로 제공한다. Archivist는 이 ID가 붙은 항목만 확인된 사실로 설명하고, 기록에 없는 원인은 가설로 남겨 다음 확인 방법을 함께 제안한다. MCP 경계는 같은 정제 함수를 한 번 더 적용해 원문 process 데이터나 경로가 Worker 입력에 섞여도 외부로 내보내지 않는다. `WRK-016`, `OBS-003`, `MCP-009`
 
 ## 4. 요구사항 테스트와 증적 묶음
 

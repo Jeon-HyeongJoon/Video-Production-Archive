@@ -77,7 +77,7 @@ func (service *Service) Evaluate(ctx context.Context) error {
 		_, _, queueErr := service.turns.HandleAdvisoryEvent(ctx, archivistcontrol.AdvisoryEvent{
 			SessionID: session.Session.ID, Kind: archivistcontrol.AdvisoryWorkDiagnostic,
 			TriggerID: diagnostic.Fingerprint, Work: reference,
-			Prompt: "Inspect the current bound work with archive.work.diagnostics.get.v1. Report observed facts separately from hypotheses, explain why progress needs attention, and suggest the safest next action. Do not retry, cancel, classify, or start another stage automatically.",
+			Prompt: "Inspect the current bound work with archive.work.diagnostics.get.v1. Base confirmed statements on persisted evidence IDs, report observed facts separately from hypotheses, explain why progress needs attention, and suggest the safest next action. Do not retry, cancel, classify, or start another stage automatically.",
 		})
 		if queueErr != nil {
 			combined = errors.Join(combined, queueErr)

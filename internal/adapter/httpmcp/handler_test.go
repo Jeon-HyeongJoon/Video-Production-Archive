@@ -24,6 +24,7 @@ import (
 	"videoarchive/internal/core/archivistruntime"
 	"videoarchive/internal/core/catalog"
 	"videoarchive/internal/core/command"
+	corejob "videoarchive/internal/core/job"
 	"videoarchive/internal/core/mediaanalysis"
 	"videoarchive/internal/core/organization"
 	"videoarchive/internal/core/vocabulary"
@@ -299,8 +300,12 @@ func TestMCPReadsBoundWorkDiagnosticsWithoutRawLogsOrPaths(t *testing.T) {
 			ObservedAt: time.Date(2026, 11, 15, 10, 0, 0, 0, time.UTC), ShouldReport: true, Fingerprint: "diagnostic-fingerprint",
 			Jobs: []workdiagnostics.JobDiagnostic{{
 				JobID: reference.WorkID, StepID: "render", LogReference: `C:\private\token-secret.log`,
+				FailureEvidence: []corejob.StepFailureEvidence{{
+					EvidenceID: "EVD-WORKER-BOUND", StepID: "render", ErrorClass: "STEP_EXECUTION_FAILED",
+					CauseCode: "PROCESS_EXIT_NONZERO", Summary: `C:\private\token-secret.log`, LogReference: `C:\private\token-secret.log`,
+				}},
 			}},
-			Facts:      []workdiagnostics.Fact{{Code: "LEASE_HEARTBEAT_OBSERVED", Summary: "Worker loop renewed its lease", ObservedAt: time.Date(2026, 11, 15, 9, 59, 50, 0, time.UTC)}},
+			Facts:      []workdiagnostics.Fact{{EvidenceID: "EVD-DIAGNOSTIC-LEASE", Code: "LEASE_HEARTBEAT_OBSERVED", Summary: "Worker loop renewed its lease", ObservedAt: time.Date(2026, 11, 15, 9, 59, 50, 0, time.UTC)}},
 			Hypotheses: []workdiagnostics.Hypothesis{{Code: "PROGRESS_UNOBSERVED", Statement: "subprocess state is not confirmed", NextCheck: "read the next structured progress sample"}},
 		}},
 	})
@@ -311,7 +316,8 @@ func TestMCPReadsBoundWorkDiagnosticsWithoutRawLogsOrPaths(t *testing.T) {
 		archiveToolCall("CALL-DIAGNOSTIC", ToolWorkDiagnosticsGet, `{}`), "secret")
 	body := response.Body.String()
 	if response.Code != http.StatusOK || !strings.Contains(body, `"work_id":"JOB-DIAGNOSTIC-1"`) ||
-		!strings.Contains(body, `"code":"PROGRESS_UNOBSERVED"`) || !strings.Contains(body, `"next_check"`) {
+		!strings.Contains(body, `"code":"PROGRESS_UNOBSERVED"`) || !strings.Contains(body, `"next_check"`) ||
+		!strings.Contains(body, `"evidence_id":"EVD-WORKER-BOUND"`) || !strings.Contains(body, `"cause_code":"PROCESS_EXIT_NONZERO"`) {
 		t.Fatalf("bound diagnostic was not returned: %d %s", response.Code, body)
 	}
 	for _, forbidden := range []string{`C:\private`, "token-secret", "password", "credential"} {

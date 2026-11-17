@@ -151,7 +151,7 @@ Codex app-server 경로는 ArchivistSession에 대응한 native thread를 proces
 
 `TURN_PROGRESS`는 raw terminal cursor를 Control에 복제하는 통로가 아니다. Runtime Adapter가 사용자에게 공개할 내용으로 명시적으로 만든 `summary`만 `ProgressUpdate`로 보고한다. native 도구 진행은 도구 종류만 남기고 명령·diff·하위 Agent prompt를 복제하지 않는다. `TURN_FAILED`는 raw error 문자열 대신 정규화 `code`와 정제 `summary`를 가진 `FailureReport`를 요구한다. Control은 PROGRESS·FAILURE를 `ArchivistTurnEntry` append-only 기록으로 Turn cursor·상태와 한 SQLite transaction에 확정하고 중복 cursor를 늘리지 않는다. Entry schema에는 stdout·stderr·credential·filesystem path 필드가 없다. 계약 fixture와 Codex app-server fixture는 이 구조화 event stream을 검증한다. 실제 계정으로 인증된 Codex·Claude 정제 증적은 `LRH-014` acceptance 전까지 planned다. `LRH-013~014`, `LRH-018~019`
 
-Archivist가 작업 중단 원인을 요청받거나 자동 제안 Turn을 처리하면 `archive.work.diagnostics.get.v1`을 먼저 사용한다. 응답은 확인된 `facts`, 예측·확인 방법·근거가 있는 `hypotheses`, `suggested_actions`를 분리한다. subprocess의 정지를 직접 관측하지 못한 경우 확정 원인 대신 현재 확인 가능한 실행 리스·Worker 상태와 추가 확인 방법을 보고한다. 새 드라이브 자동 제안은 현재 후보 조회→원본 intake session→적격 아카이브와 명시적 폴더 범위 고정→아카이브 시작 ActionCard 제안 순서로 끝내며, 카드가 실행되기 전에는 시작했다고 말하지 않는다.
+Archivist가 작업 중단 원인을 요청받거나 자동 제안 Turn을 처리하면 `archive.work.diagnostics.get.v1`을 먼저 사용한다. 응답은 증적 ID가 있는 확인된 `facts`, 예측·확인 방법과 증적 ID basis가 있는 `hypotheses`, `suggested_actions`를 분리한다. Archivist는 확정 진술에 해당 증적 ID를 근거로 사용하고 가설을 사실로 바꾸지 않는다. subprocess의 정지를 직접 관측하지 못한 경우 확정 원인 대신 현재 확인 가능한 실행 리스·Worker 상태와 추가 확인 방법을 보고한다. 새 드라이브 자동 제안은 현재 후보 조회→원본 intake session→적격 아카이브와 명시적 폴더 범위 고정→아카이브 시작 ActionCard 제안 순서로 끝내며, 카드가 실행되기 전에는 시작했다고 말하지 않는다.
 
 ## 7. 도구 호출 경계
 

@@ -302,6 +302,9 @@ type resultRequest struct {
 	WaitReason          vocabulary.WaitReason       `json:"wait_reason"`
 	WaitTargetStorageID string                      `json:"wait_target_storage_id"`
 	ErrorClass          string                      `json:"error_class"`
+	CauseCode           string                      `json:"cause_code"`
+	ErrorSummary        string                      `json:"error_summary"`
+	ProcessExitCode     *int                        `json:"process_exit_code"`
 	LogReference        string                      `json:"log_reference"`
 	OutputRecord        *execution.StepOutputRecord `json:"output_record"`
 }
@@ -339,7 +342,9 @@ func (handler *Handler) result(writer http.ResponseWriter, request *http.Request
 		WorkerID: workerID, JobID: payload.JobID, StepID: payload.StepID, FencingToken: payload.FencingToken,
 		Success: payload.Success, FailureClass: payload.FailureClass, WaitReason: payload.WaitReason,
 		WaitTargetStorageID: strings.TrimSpace(payload.WaitTargetStorageID),
-		ErrorClass:          strings.TrimSpace(payload.ErrorClass), LogReference: strings.TrimSpace(payload.LogReference), OutputRecord: payload.OutputRecord,
+		ErrorClass:          strings.TrimSpace(payload.ErrorClass), CauseCode: strings.TrimSpace(payload.CauseCode),
+		ErrorSummary: strings.TrimSpace(payload.ErrorSummary), ProcessExitCode: payload.ProcessExitCode,
+		LogReference: strings.TrimSpace(payload.LogReference), OutputRecord: payload.OutputRecord,
 	})
 	if errors.Is(err, workflow.ErrStaleFencingToken) {
 		writeError(writer, http.StatusConflict, "STALE_FENCING_TOKEN")

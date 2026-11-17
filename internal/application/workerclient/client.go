@@ -65,6 +65,9 @@ type ExecutionResult struct {
 	WaitReason             vocabulary.WaitReason
 	WaitTargetStorageID    string
 	ErrorClass             string
+	CauseCode              string
+	ErrorSummary           string
+	ProcessExitCode        *int
 	LogReference           string
 	Outputs                []execution.StepOutput
 	VerificationReferences []string
@@ -690,7 +693,8 @@ func (client *Client) reportResult(ctx context.Context, assignment Assignment, r
 		"job_id": assignment.JobID, "step_id": assignment.StepID, "fencing_token": assignment.FencingToken,
 		"success": result.Success, "failure_class": result.FailureClass, "wait_reason": result.WaitReason,
 		"wait_target_storage_id": result.WaitTargetStorageID,
-		"error_class":            result.ErrorClass, "log_reference": result.LogReference, "output_record": outputRecord,
+		"error_class":            result.ErrorClass, "cause_code": result.CauseCode, "error_summary": result.ErrorSummary,
+		"process_exit_code": result.ProcessExitCode, "log_reference": result.LogReference, "output_record": outputRecord,
 	})
 	if err != nil {
 		return err
