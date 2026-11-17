@@ -29,6 +29,7 @@ import (
 	"videoarchive/internal/adapter/workerconfig"
 	"videoarchive/internal/application/archiveorganization"
 	"videoarchive/internal/application/archivistcontrol"
+	"videoarchive/internal/application/workdiagnostics"
 	"videoarchive/internal/application/workerclient"
 	"videoarchive/internal/core/archive"
 	"videoarchive/internal/core/asset"
@@ -1035,6 +1036,89 @@ func TestControlMCPExposesOnlyAuthenticatedVersionedBusinessCapabilities(t *test
 	response := mcpRequest(proxy, http.MethodPost, "/mcp/v1/call", unsafe, "local-cli-does-not-receive-service-secret")
 	if response.Code != http.StatusNotFound || !strings.Contains(response.Body.String(), "MCP_CAPABILITY_NOT_FOUND") {
 		t.Fatalf("unsafe MCP capability returned %d: %s", response.Code, response.Body.String())
+	}
+}
+
+func TestArchivistDiagnosesAndDirectlyRecoversExpiredExecutionVertically(t *testing.T) {
+	configuration := runtimeTestConfiguration(t)
+	clock := time.Date(2026, 11, 17, 7, 0, 0, 0, time.UTC)
+	runtime, err := controlruntime.OpenWithDependencies(context.Background(), configuration, "v1-test", controlruntime.Dependencies{
+		Secrets: runtimeSecret("service-secret"), Now: func() time.Time { return clock },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer runtime.Close()
+	cookie, token := runtimeSession(t, runtime.Handler())
+	createRunningWorkerJob(t, runtime.Handler(), configuration.DatabasePath, cookie, token, "JOB-DIRECT-RECOVERY", 1, clock)
+	clock = clock.Add(2 * time.Minute)
+	origin := "http://127.0.0.1:8080"
+	session := `{"session_id":"SESSION-DIRECT-RECOVERY","name":"Recovery Archivist","archivist_host_id":"archivist-windows","cli_id":"codex"}`
+	if response := runtimeRequest(runtime.Handler(), http.MethodPost, "/api/v1/archivist-sessions", session, cookie, token, origin); response.Code != http.StatusCreated {
+		t.Fatalf("session create returned %d: %s", response.Code, response.Body.String())
+	}
+	turn := `{"turn_id":"TURN-DIRECT-RECOVERY","request_id":"REQUEST-DIRECT-RECOVERY","prompt":"stalled work recovery","work_reference":{"kind":"JOB","work_id":"JOB-DIRECT-RECOVERY","revision":3}}`
+	if response := runtimeRequest(runtime.Handler(), http.MethodPost, "/api/v1/archivist-sessions/SESSION-DIRECT-RECOVERY/turns", turn, cookie, token, origin); response.Code != http.StatusCreated {
+		t.Fatalf("turn create returned %d: %s", response.Code, response.Body.String())
+	}
+	if response := archivistHostRequest(runtime.Handler(), http.MethodPost, "/archivist/v1/heartbeat", "", "service-secret"); response.Code != http.StatusOK {
+		t.Fatalf("host heartbeat returned %d: %s", response.Code, response.Body.String())
+	}
+	if response := archivistHostRequest(runtime.Handler(), http.MethodPost, "/archivist/v1/turns/claim", "", "service-secret"); response.Code != http.StatusOK {
+		t.Fatalf("turn claim returned %d: %s", response.Code, response.Body.String())
+	}
+	delivery := `{"fencing_token":1,"request_id":"REQUEST-DIRECT-RECOVERY"}`
+	if response := archivistHostRequest(runtime.Handler(), http.MethodPost, "/archivist/v1/turns/TURN-DIRECT-RECOVERY/delivery", delivery, "service-secret"); response.Code != http.StatusOK {
+		t.Fatalf("turn delivery returned %d: %s", response.Code, response.Body.String())
+	}
+	for cursor, kind := range []string{"INPUT_ACCEPTED", "TURN_STARTED"} {
+		event := fmt.Sprintf(`{"fencing_token":1,"cursor":%d,"request_id":"REQUEST-DIRECT-RECOVERY","kind":%q}`, cursor+1, kind)
+		if response := archivistHostRequest(runtime.Handler(), http.MethodPost, "/archivist/v1/turns/TURN-DIRECT-RECOVERY/events", event, "service-secret"); response.Code != http.StatusOK {
+			t.Fatalf("runtime event %s returned %d: %s", kind, response.Code, response.Body.String())
+		}
+	}
+	diagnosticCall := `{"session_id":"SESSION-DIRECT-RECOVERY","turn_id":"TURN-DIRECT-RECOVERY","fencing_token":1,"tool_call_id":"CALL-DIRECT-DIAGNOSTIC","command_id":"COMMAND-DIRECT-DIAGNOSTIC","idempotency_key":"CALL-DIRECT-DIAGNOSTIC","input_digest":"sha256:direct-diagnostic","tool":"archive.work.diagnostics.get.v1","input":{}}`
+	diagnosticResponse := mcpRequest(runtime.MCPHandler(), http.MethodPost, "/mcp/v1/call", diagnosticCall, "service-secret")
+	var diagnostic struct {
+		Data struct {
+			Fingerprint     string                           `json:"fingerprint"`
+			RecoveryActions []workdiagnostics.RecoveryAction `json:"recovery_actions"`
+		} `json:"data"`
+	}
+	if diagnosticResponse.Code != http.StatusOK || json.Unmarshal(diagnosticResponse.Body.Bytes(), &diagnostic) != nil ||
+		len(diagnostic.Data.RecoveryActions) != 1 {
+		t.Fatalf("expired execution diagnostic did not expose one recovery: %d %s", diagnosticResponse.Code, diagnosticResponse.Body.String())
+	}
+	action := diagnostic.Data.RecoveryActions[0]
+	input, _ := json.Marshal(map[string]any{
+		"action_code": action.ActionCode, "job_id": action.JobID, "expected_job_revision": action.JobRevision,
+		"step_id": action.StepID, "reservation_id": action.ReservationID, "fencing_token": action.FencingToken,
+		"diagnostic_fingerprint": diagnostic.Data.Fingerprint, "basis": action.Basis,
+		"reason": "recover the expired execution from current persisted evidence",
+	})
+	recoveryCall, _ := json.Marshal(map[string]any{
+		"session_id": "SESSION-DIRECT-RECOVERY", "turn_id": "TURN-DIRECT-RECOVERY", "fencing_token": 1,
+		"tool_call_id": "CALL-DIRECT-RECOVERY", "command_id": "COMMAND-DIRECT-RECOVERY",
+		"idempotency_key": "CALL-DIRECT-RECOVERY", "input_digest": "sha256:direct-recovery",
+		"tool": "archive.work.recovery.apply.v1", "input": json.RawMessage(input),
+	})
+	recoveryResponse := mcpRequest(runtime.MCPHandler(), http.MethodPost, "/mcp/v1/call", string(recoveryCall), "service-secret")
+	if recoveryResponse.Code != http.StatusOK || !strings.Contains(recoveryResponse.Body.String(), `"evidence_id":"EVD-RECOVERY-`) ||
+		!strings.Contains(recoveryResponse.Body.String(), `"resulting_state":"QUEUED"`) {
+		t.Fatalf("Archivist direct recovery failed: %d %s", recoveryResponse.Code, recoveryResponse.Body.String())
+	}
+	detail := runtimeRequest(runtime.Handler(), http.MethodGet, "/api/v1/jobs/JOB-DIRECT-RECOVERY", "", nil, "", "")
+	if detail.Code != http.StatusOK || !strings.Contains(detail.Body.String(), `"step_state":"QUEUED"`) {
+		t.Fatalf("recovered Job was not projected: %d %s", detail.Code, detail.Body.String())
+	}
+	ledger := openLedger(t, configuration.DatabasePath)
+	defer ledger.Close()
+	var reservations, leases, recoveryEvents int
+	ledger.QueryRow(`SELECT COUNT(*) FROM resource_reservations WHERE job_id = ? AND released_at IS NULL`, "JOB-DIRECT-RECOVERY").Scan(&reservations)
+	ledger.QueryRow(`SELECT COUNT(*) FROM execution_leases WHERE step_id LIKE ?`, "JOB-DIRECT-RECOVERY/%").Scan(&leases)
+	ledger.QueryRow(`SELECT COUNT(*) FROM domain_events WHERE target_id = ? AND CAST(payload AS TEXT) LIKE '%StepRecoveryApplied%'`, "JOB-DIRECT-RECOVERY").Scan(&recoveryEvents)
+	if reservations != 0 || leases != 0 || recoveryEvents != 1 {
+		t.Fatalf("vertical recovery did not settle its execution boundary: reservations=%d leases=%d events=%d", reservations, leases, recoveryEvents)
 	}
 }
 

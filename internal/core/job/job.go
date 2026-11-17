@@ -2,6 +2,8 @@
 package job
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,8 +20,9 @@ import (
 )
 
 const (
-	CreateCommand = "job.create"
-	CancelCommand = "job.cancel"
+	CreateCommand                  = "job.create"
+	CancelCommand                  = "job.cancel"
+	RecoverExpiredExecutionCommand = "job.recover_expired_execution"
 )
 
 var (
@@ -50,6 +53,7 @@ type Step struct {
 	ExecutionSpec           *execution.StepExecutionSpec `json:"execution_spec,omitempty"`
 	OutputRecord            *execution.StepOutputRecord  `json:"output_record,omitempty"`
 	FailureEvidence         []StepFailureEvidence        `json:"failure_evidence,omitempty"`
+	RecoveryEvidence        []StepRecoveryEvidence       `json:"recovery_evidence,omitempty"`
 }
 
 // StepFailureEvidence is the immutable, transport-safe observation retained for
@@ -73,6 +77,32 @@ type StepFailureEvidence struct {
 	LogReference        string                `json:"log_reference,omitempty"`
 	ObservedAt          time.Time             `json:"observed_at"`
 	ResultingState      workflow.StepState    `json:"resulting_state"`
+}
+
+// StepRecoveryEvidence is the immutable reason and execution boundary for one
+// evidence-bound recovery. A recovery never erases the failure evidence that
+// caused it and never stores raw process output or filesystem paths.
+type StepRecoveryEvidence struct {
+	EvidenceID            string               `json:"evidence_id"`
+	ActionCode            string               `json:"action_code"`
+	StepID                string               `json:"step_id"`
+	ReservationID         string               `json:"reservation_id"`
+	FencingToken          uint64               `json:"fencing_token"`
+	DiagnosticFingerprint string               `json:"diagnostic_fingerprint"`
+	Basis                 []string             `json:"basis"`
+	ActorType             vocabulary.ActorType `json:"actor_type"`
+	ActorID               string               `json:"actor_id"`
+	AppliedAt             time.Time            `json:"applied_at"`
+	ResultingState        workflow.StepState   `json:"resulting_state"`
+}
+
+type RecoverExpiredExecutionParameters struct {
+	ActionCode            string   `json:"action_code"`
+	StepID                string   `json:"step_id"`
+	ReservationID         string   `json:"reservation_id"`
+	FencingToken          uint64   `json:"fencing_token"`
+	DiagnosticFingerprint string   `json:"diagnostic_fingerprint"`
+	Basis                 []string `json:"basis"`
 }
 
 type State struct {
@@ -112,9 +142,89 @@ func (handler *Handler) Handle(envelope command.Envelope, snapshot command.Snaps
 		return handler.create(envelope, snapshot)
 	case CancelCommand:
 		return handler.cancel(envelope, snapshot)
+	case RecoverExpiredExecutionCommand:
+		return handler.recoverExpiredExecution(envelope, snapshot)
 	default:
 		return command.Change{}, command.DeterministicFailure("UNSUPPORTED_JOB_COMMAND", ErrUnsupportedType)
 	}
+}
+
+func (handler *Handler) recoverExpiredExecution(envelope command.Envelope, snapshot command.Snapshot) (command.Change, error) {
+	if envelope.Actor.Type != command.ArchivistActor || envelope.RequestedVia != "mcp" {
+		return command.Change{}, command.DeterministicFailure("RECOVERY_NOT_AUTHORIZED", ErrInvalidJob)
+	}
+	var parameters RecoverExpiredExecutionParameters
+	if decodeParameters(envelope.Parameters, &parameters) != nil || !validRecoveryParameters(parameters) {
+		return command.Change{}, command.DeterministicFailure("INVALID_RECOVERY", ErrInvalidJob)
+	}
+	state, err := decodeState(snapshot)
+	if err != nil {
+		return command.Change{}, err
+	}
+	step := state.step(parameters.StepID)
+	now := handler.now().UTC()
+	if step == nil || step.Workflow.ExecutionLease == nil || step.Workflow.ExecutionLease.FencingToken != parameters.FencingToken ||
+		now.Before(step.Workflow.ExecutionLease.ExpiresAt) {
+		return command.Change{}, command.DeterministicFailure("RECOVERY_EVIDENCE_STALE", command.ErrRevisionConflict)
+	}
+	switch step.Workflow.State {
+	case workflow.Reserved:
+		if step.Workflow.Transition(workflow.Queued) != nil {
+			return command.Change{}, command.DeterministicFailure("RECOVERY_NOT_SAFE", workflow.ErrIllegalTransition)
+		}
+	case workflow.Running:
+		if !step.Workflow.RecoverExpiredLease(now) {
+			return command.Change{}, command.DeterministicFailure("RECOVERY_NOT_SAFE", workflow.ErrIllegalTransition)
+		}
+	default:
+		return command.Change{}, command.DeterministicFailure("RECOVERY_NOT_SAFE", workflow.ErrIllegalTransition)
+	}
+	step.Workflow.ExecutionLease = nil
+	step.WorkerID = ""
+	step.ReadyAt = now
+	step.LastEventAt = now
+	recovery := StepRecoveryEvidence{
+		EvidenceID: recoveryEvidenceID(envelope.CommandID), ActionCode: parameters.ActionCode,
+		StepID: step.Workflow.ID, ReservationID: parameters.ReservationID, FencingToken: parameters.FencingToken,
+		DiagnosticFingerprint: parameters.DiagnosticFingerprint, Basis: append([]string(nil), parameters.Basis...),
+		ActorType: envelope.Actor.Type, ActorID: envelope.Actor.ID, AppliedAt: now, ResultingState: step.Workflow.State,
+	}
+	step.RecoveryEvidence = append(step.RecoveryEvidence, recovery)
+	state.CurrentStepID = step.Workflow.ID
+	state.Revision = snapshot.Revision + 1
+	return stateChange(envelope, state, "StepRecoveryApplied", map[string]any{
+		"step_id": step.Workflow.ID, "recovery_evidence": recovery,
+	})
+}
+
+func validRecoveryParameters(parameters RecoverExpiredExecutionParameters) bool {
+	if parameters.ActionCode != "RECONCILE_EXPIRED_EXECUTION" || strings.TrimSpace(parameters.StepID) == "" ||
+		strings.TrimSpace(parameters.ReservationID) == "" || parameters.FencingToken == 0 ||
+		len(parameters.DiagnosticFingerprint) != 24 || len(parameters.Basis) == 0 || len(parameters.Basis) > 32 {
+		return false
+	}
+	for _, character := range parameters.DiagnosticFingerprint {
+		if (character < '0' || character > '9') && (character < 'a' || character > 'f') {
+			return false
+		}
+	}
+	for _, value := range parameters.Basis {
+		value = strings.TrimSpace(value)
+		if value == "" || len(value) > 128 || !strings.HasPrefix(value, "EVD-") {
+			return false
+		}
+		for _, character := range value {
+			if (character < 'A' || character > 'Z') && (character < '0' || character > '9') && character != '_' && character != '-' {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func recoveryEvidenceID(commandID string) string {
+	digest := sha256.Sum256([]byte(commandID))
+	return "EVD-RECOVERY-" + strings.ToUpper(hex.EncodeToString(digest[:8]))
 }
 
 func (handler *Handler) create(envelope command.Envelope, snapshot command.Snapshot) (command.Change, error) {

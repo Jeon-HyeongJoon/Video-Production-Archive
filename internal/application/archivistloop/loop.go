@@ -141,7 +141,7 @@ If a turn has no fixed intake selection, search current candidates with the subj
 Destructive actions and approvals belong to a human. Never submit an arbitrary path, endpoint, credential, stale revision, or candidate that a current tool result did not return.
 When a long ArchiveRun or transcription is started, report that it started and end this turn; Control will recall you after a stage completes.
 If evidence is insufficient to classify a HOLD item, keep it on hold and state what evidence is missing.
-For an automatic advisory turn, cite persisted evidence IDs for confirmed statements and report observed facts separately from hypotheses. Never turn a hypothesis into a fact. A fresh lease heartbeat proves only that the Worker execution loop answered, not that its subprocess progressed. Prepare current drive selections when requested, but treat an archive start ActionCard as a proposal and never claim work started until the tool reports an executed ArchiveRun.
+For an automatic advisory turn, cite persisted evidence IDs for confirmed statements and report observed facts separately from hypotheses. Never turn a hypothesis into a fact. A fresh lease heartbeat proves only that the Worker execution loop answered, not that its subprocess progressed. If diagnostics returns a recovery_actions entry, you may call only archive.work.recovery.apply.v1 with every field copied exactly, then read diagnostics again and cite the returned recovery evidence ID. Never invent a recovery, retry a terminal failure, cancel work, or substitute a different revision. Prepare current drive selections when requested, but treat an archive start ActionCard as a proposal and never claim work started until the tool reports an executed ArchiveRun.
 Give a concise Korean final answer focused on the result or the next human action.`
 
 func (loop *Loop) Run(ctx context.Context, runtime RuntimeContext, prompt string) (Result, error) {
@@ -294,6 +294,7 @@ func ToolProgress(name string) string {
 		"archive.jobs.get.v1": "작업 상태 확인", "archive.assets.search.v1": "아카이브 자료 조회",
 		"archive.jobs.create.v1": "작업 요청", "archive.work.reference.get.v1": "이어갈 작업 확인",
 		"archive.work.diagnostics.get.v1":     "작업 진단 확인",
+		"archive.work.recovery.apply.v1":      "안전 복구 실행",
 		"archive.intake.candidates.search.v1": "입고 후보 검색", "archive.intake.source.select.v1": "원본 선택",
 		"archive.intake.selection.pin.v1": "작업 범위 고정",
 		"archive.intake.selection.get.v1": "선택 범위 확인",
@@ -348,6 +349,17 @@ func knownTools() map[string]ToolDefinition {
 		"archive.work.diagnostics.get.v1": {
 			Name: "archive.work.diagnostics.get.v1", ProviderName: "archive_work_diagnostics_get_v1", Description: "Read sanitized execution diagnostics and persisted failure evidence IDs for the persistent work fixed to this turn. Confirmed facts, hypotheses with evidence-ID basis, and next checks are separate; this tool never changes work state.",
 			Parameters: objectSchema(map[string]any{}),
+		},
+		"archive.work.recovery.apply.v1": {
+			Name: "archive.work.recovery.apply.v1", ProviderName: "archive_work_recovery_apply_v1", Description: "Apply exactly one evidence-bound recovery action returned by the current work diagnostic, then return persisted recovery evidence and the post-action diagnostic. This is not a generic retry or cancel tool.",
+			Parameters: objectSchema(map[string]any{
+				"action_code": stringProperty("Exact recovery action code"), "job_id": stringProperty("Exact job ID"),
+				"expected_job_revision": integerProperty("Current job revision"), "step_id": stringProperty("Exact step ID"),
+				"reservation_id": stringProperty("Exact active reservation ID"), "fencing_token": integerProperty("Exact execution fencing token"),
+				"diagnostic_fingerprint": stringProperty("Exact current diagnostic fingerprint"),
+				"basis":                  map[string]any{"type": "array", "items": stringProperty("Persisted evidence ID"), "minItems": 1},
+				"reason":                 stringProperty("Concise recovery reason grounded in the basis evidence"),
+			}, "action_code", "job_id", "expected_job_revision", "step_id", "reservation_id", "fencing_token", "diagnostic_fingerprint", "basis", "reason"),
 		},
 		"archive.assets.search.v1": {
 			Name: "archive.assets.search.v1", ProviderName: "archive_assets_search_v1", Description: "Search archived assets by text, codec, and duration range.",

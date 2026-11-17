@@ -91,7 +91,7 @@ export const labels = {
   turn: { QUEUED: "시작 대기", LEASED: "전달 중", SUBMITTED: "전달됨", RUNNING: "처리 중", WAITING: "대기", COMPLETED: "완료", FAILED: "실패", CANCELLED: "취소" },
   tool: {
     "archive.intake.selection.get.v1": "선택 내용 확인", "archive.run.status.v1": "진행 상황 확인", "archive.run.start.v1": "영상 정리·보관 시작",
-    "archive.run.transcription.start.v1": "자막·텍스트 만들기", "archive.jobs.get.v1": "작업 확인", "archive.work.reference.get.v1": "이어갈 작업 확인",
+    "archive.run.transcription.start.v1": "자막·텍스트 만들기", "archive.jobs.get.v1": "작업 확인", "archive.work.reference.get.v1": "이어갈 작업 확인", "archive.work.recovery.apply.v1": "안전 복구 실행",
     "archive.assets.search.v1": "보관 영상 검색", "archive.jobs.create.v1": "작업 추가",
   },
   call: { COMPLETED: "완료", ACTION_CARD: "결정 요청", FAILED: "실패", RUNNING: "처리 중" },

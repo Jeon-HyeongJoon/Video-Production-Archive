@@ -20,6 +20,7 @@ import (
 	"videoarchive/internal/application/archiveworkspace"
 	"videoarchive/internal/application/archivistcontrol"
 	"videoarchive/internal/application/workdiagnostics"
+	"videoarchive/internal/application/workrecovery"
 	"videoarchive/internal/core/archivistruntime"
 	"videoarchive/internal/core/catalog"
 	"videoarchive/internal/core/command"
@@ -32,6 +33,7 @@ const (
 	ToolJobsGet                   = "archive.jobs.get.v1"
 	ToolWorkReferenceGet          = "archive.work.reference.get.v1"
 	ToolWorkDiagnosticsGet        = "archive.work.diagnostics.get.v1"
+	ToolWorkRecoveryApply         = "archive.work.recovery.apply.v1"
 	ToolAssetsSearch              = "archive.assets.search.v1"
 	ToolJobsCreate                = "archive.jobs.create.v1"
 	ToolIntakeCandidatesSearch    = "archive.intake.candidates.search.v1"
@@ -63,6 +65,10 @@ type CatalogReader interface {
 
 type WorkDiagnosticsReader interface {
 	Diagnose(context.Context, archivistruntime.WorkReference) (workdiagnostics.Snapshot, error)
+}
+
+type WorkRecoveryExecutor interface {
+	Apply(context.Context, archivistruntime.WorkReference, command.Envelope) (workrecovery.Result, error)
 }
 
 type turnPolicyReader interface {
@@ -104,6 +110,7 @@ type Configuration struct {
 	ArchiveRuns           ArchiveRunStarter
 	ArchiveTranscriptions ArchiveTranscriptionStarter
 	WorkDiagnostics       WorkDiagnosticsReader
+	WorkRecovery          WorkRecoveryExecutor
 }
 
 type Handler struct {
@@ -116,6 +123,7 @@ type Handler struct {
 	archiveRuns           ArchiveRunStarter
 	archiveTranscriptions ArchiveTranscriptionStarter
 	workDiagnostics       WorkDiagnosticsReader
+	workRecovery          WorkRecoveryExecutor
 	router                http.Handler
 }
 
@@ -127,6 +135,7 @@ func New(configuration Configuration) (*Handler, error) {
 		}
 	}
 	if configuration.Archivists == nil || configuration.Catalog == nil || configuration.ArchiveWorkspace == nil || configuration.Commands == nil ||
+		(configuration.WorkRecovery != nil && configuration.WorkDiagnostics == nil) ||
 		(driveCount != 0 && driveCount != 4) {
 		return nil, errors.New("MCP adapter configuration is incomplete")
 	}
@@ -136,6 +145,7 @@ func New(configuration Configuration) (*Handler, error) {
 		drives: configuration.Drives, intakeSelector: configuration.IntakeSelector,
 		archiveRuns: configuration.ArchiveRuns, archiveTranscriptions: configuration.ArchiveTranscriptions,
 		workDiagnostics: configuration.WorkDiagnostics,
+		workRecovery:    configuration.WorkRecovery,
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /mcp/v1/tools", handler.tools)
@@ -165,6 +175,9 @@ func (handler *Handler) tools(writer http.ResponseWriter, _ *http.Request) {
 	}
 	if handler.workDiagnostics != nil {
 		result = append(result, map[string]string{"name": ToolWorkDiagnosticsGet, "action_class": string(vocabulary.ActionRead)})
+	}
+	if handler.workDiagnostics != nil && handler.workRecovery != nil {
+		result = append(result, map[string]string{"name": ToolWorkRecoveryApply, "action_class": string(vocabulary.ActionProcess)})
 	}
 	if handler.drives != nil && handler.archiveRuns != nil && handler.archiveTranscriptions != nil {
 		result = append(result,
@@ -216,6 +229,7 @@ func (handler *Handler) call(writer http.ResponseWriter, request *http.Request) 
 	}
 	if payload.Tool != ToolJobsGet && payload.Tool != ToolWorkReferenceGet && payload.Tool != ToolAssetsSearch && payload.Tool != ToolJobsCreate &&
 		payload.Tool != ToolWorkDiagnosticsGet &&
+		payload.Tool != ToolWorkRecoveryApply &&
 		payload.Tool != ToolIntakeCandidatesSearch && payload.Tool != ToolIntakeSourceSelect && payload.Tool != ToolIntakeSelectionPin &&
 		payload.Tool != ToolDriveSelectionGet && payload.Tool != ToolArchiveRunStatus &&
 		payload.Tool != ToolOrganizationHoldsList && payload.Tool != ToolOrganizationHoldGet &&
@@ -226,6 +240,11 @@ func (handler *Handler) call(writer http.ResponseWriter, request *http.Request) 
 	if policy == archivistruntime.ToolPolicyAdvisory && !advisoryToolAllowed(payload.Tool) {
 		_ = handler.archivists.RecordToolCall(request.Context(), payload.SessionID, payload.TurnID, payload.ToolCallID, payload.Tool, "", "FAILED")
 		writeError(writer, http.StatusForbidden, "MCP_ADVISORY_POLICY_DENIED")
+		return
+	}
+	if policy == archivistruntime.ToolPolicyRemediation && !remediationToolAllowed(payload.Tool) {
+		_ = handler.archivists.RecordToolCall(request.Context(), payload.SessionID, payload.TurnID, payload.ToolCallID, payload.Tool, "", "FAILED")
+		writeError(writer, http.StatusForbidden, "MCP_REMEDIATION_POLICY_DENIED")
 		return
 	}
 	if err := handler.archivists.RecordToolCall(request.Context(), payload.SessionID, payload.TurnID, payload.ToolCallID, payload.Tool, "", "RUNNING"); err != nil {
@@ -239,6 +258,8 @@ func (handler *Handler) call(writer http.ResponseWriter, request *http.Request) 
 		handler.getWorkReference(writer, request, payload)
 	case ToolWorkDiagnosticsGet:
 		handler.getWorkDiagnostics(writer, request, payload)
+	case ToolWorkRecoveryApply:
+		handler.applyWorkRecovery(writer, request, hostID, payload)
 	case ToolAssetsSearch:
 		handler.searchAssets(writer, request, payload)
 	case ToolJobsCreate:
@@ -263,6 +284,15 @@ func (handler *Handler) call(writer http.ResponseWriter, request *http.Request) 
 		handler.startArchiveRun(writer, request, payload, policy)
 	case ToolArchiveTranscriptionStart:
 		handler.startArchiveTranscription(writer, request, payload)
+	}
+}
+
+func remediationToolAllowed(tool string) bool {
+	switch tool {
+	case ToolJobsGet, ToolWorkReferenceGet, ToolWorkDiagnosticsGet, ToolArchiveRunStatus, ToolWorkRecoveryApply:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -330,6 +360,79 @@ func (handler *Handler) getWorkDiagnostics(writer http.ResponseWriter, request *
 	}
 	_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, reference.WorkID, "COMPLETED")
 	writeJSON(writer, http.StatusOK, map[string]any{"data": workdiagnostics.Sanitize(diagnostic)})
+}
+
+func (handler *Handler) applyWorkRecovery(writer http.ResponseWriter, request *http.Request, hostID string, call callRequest) {
+	if handler.workRecovery == nil || handler.workDiagnostics == nil {
+		writeError(writer, http.StatusNotFound, "MCP_CAPABILITY_NOT_FOUND")
+		return
+	}
+	var input struct {
+		ActionCode            string   `json:"action_code"`
+		JobID                 string   `json:"job_id"`
+		ExpectedJobRevision   uint64   `json:"expected_job_revision"`
+		StepID                string   `json:"step_id"`
+		ReservationID         string   `json:"reservation_id"`
+		FencingToken          uint64   `json:"fencing_token"`
+		DiagnosticFingerprint string   `json:"diagnostic_fingerprint"`
+		Basis                 []string `json:"basis"`
+		Reason                string   `json:"reason"`
+	}
+	if !decodeToolInput(call.Input, &input) {
+		handler.failRecoveryTool(writer, request, call, http.StatusBadRequest, "MCP_INPUT_INVALID", "")
+		return
+	}
+	input.ActionCode = strings.TrimSpace(input.ActionCode)
+	input.JobID = strings.TrimSpace(input.JobID)
+	input.StepID = strings.TrimSpace(input.StepID)
+	input.ReservationID = strings.TrimSpace(input.ReservationID)
+	input.DiagnosticFingerprint = strings.TrimSpace(input.DiagnosticFingerprint)
+	input.Reason = strings.TrimSpace(input.Reason)
+	if input.ActionCode != "RECONCILE_EXPIRED_EXECUTION" || input.JobID == "" || input.ExpectedJobRevision == 0 ||
+		input.StepID == "" || input.ReservationID == "" || input.FencingToken == 0 || input.DiagnosticFingerprint == "" ||
+		len(input.Basis) == 0 || input.Reason == "" || len(input.Reason) > 256 {
+		handler.failRecoveryTool(writer, request, call, http.StatusBadRequest, "MCP_INPUT_INVALID", input.JobID)
+		return
+	}
+	reference, err := handler.archivists.TurnWorkReference(request.Context(), call.SessionID, call.TurnID)
+	if err != nil {
+		handler.failRecoveryTool(writer, request, call, http.StatusConflict, "MCP_WORK_REFERENCE_REQUIRED", input.JobID)
+		return
+	}
+	decision, err := archivistruntime.PrepareToolCall(archivistruntime.ToolCallRequest{
+		ID: call.ToolCallID, CommandID: call.CommandID, ArchivistHostID: hostID,
+		ArchivistSessionID: call.SessionID, ArchivistTurnID: call.TurnID, ArchivistID: "archivist:" + call.SessionID,
+		FencingToken: call.FencingToken, ToolName: job.RecoverExpiredExecutionCommand,
+		InputDigest: call.InputDigest, IdempotencyKey: call.IdempotencyKey,
+		TargetID: input.JobID, ExpectedRevision: input.ExpectedJobRevision, Reason: input.Reason,
+		Parameters: map[string]any{
+			"action_code": input.ActionCode, "step_id": input.StepID, "reservation_id": input.ReservationID,
+			"fencing_token": input.FencingToken, "diagnostic_fingerprint": input.DiagnosticFingerprint,
+			"basis": append([]string(nil), input.Basis...),
+		},
+	}, nil)
+	if err != nil || decision.Command == nil {
+		handler.failRecoveryTool(writer, request, call, http.StatusBadRequest, "MCP_INPUT_INVALID", input.JobID)
+		return
+	}
+	result, err := handler.workRecovery.Apply(request.Context(), reference, *decision.Command)
+	if err != nil {
+		status := http.StatusConflict
+		code := "MCP_WORK_RECOVERY_REJECTED"
+		if !errors.Is(err, workrecovery.ErrRecoveryNotSafe) && !errors.Is(err, command.ErrRevisionConflict) &&
+			!errors.Is(err, command.ErrIdempotencyConflict) {
+			status, code = http.StatusInternalServerError, "MCP_WORK_RECOVERY_FAILED"
+		}
+		handler.failRecoveryTool(writer, request, call, status, code, input.JobID)
+		return
+	}
+	_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, input.JobID, "COMPLETED")
+	writeJSON(writer, http.StatusOK, map[string]any{"data": result})
+}
+
+func (handler *Handler) failRecoveryTool(writer http.ResponseWriter, request *http.Request, call callRequest, status int, code, targetID string) {
+	_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, strings.TrimSpace(targetID), "FAILED")
+	writeError(writer, status, code)
 }
 
 func (handler *Handler) searchArchiveIntakeCandidates(writer http.ResponseWriter, request *http.Request, call callRequest) {

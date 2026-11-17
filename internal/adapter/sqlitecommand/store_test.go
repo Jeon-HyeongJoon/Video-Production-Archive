@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -594,6 +595,121 @@ func TestExpiredRunningLeaseReturnsStepToQueue(t *testing.T) {
 	}
 	if activeReservations != 0 || activeLeases != 0 {
 		t.Fatalf("expired execution rows remain active: reservations=%d leases=%d", activeReservations, activeLeases)
+	}
+}
+
+// Requirement: WFL-014
+func TestEvidenceBoundExpiredExecutionRecoveryCommitsStateEvidenceAndResourceReleaseAtomically(t *testing.T) {
+	ctx := context.Background()
+	store, err := Open(t.TempDir() + "/archivist-recovery.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	expiredAt := time.Date(2026, 11, 17, 6, 0, 0, 0, time.UTC)
+	now := expiredAt.Add(time.Minute)
+	jobID, stepID, reservationID := "JOB-ARCHIVIST-RECOVERY", "inspect", "RES-ARCHIVIST-RECOVERY"
+	queued := job.State{
+		ID: jobID, Revision: 1, TemplateName: "archive-intake-inspection", TargetTitle: "selected folder", CurrentStepID: stepID,
+		Steps: []job.Step{{Workflow: workflow.Step{ID: stepID, State: workflow.Queued, MaxAttempts: 3}, ReadyAt: expiredAt.Add(-time.Minute)}},
+	}
+	queuedPayload, _ := json.Marshal(queued)
+	if err := store.Seed(ctx, command.Snapshot{TargetID: jobID, Revision: 1, State: queuedPayload}); err != nil {
+		t.Fatal(err)
+	}
+	lease := workflow.ExecutionLease{
+		OwnerWorkerID: "worker-windows", AcquiredAt: expiredAt.Add(-time.Minute), HeartbeatAt: expiredAt.Add(-time.Minute),
+		ExpiresAt: expiredAt, FencingToken: 1,
+	}
+	running := queued
+	running.Revision = 2
+	running.Steps[0].Workflow.State = workflow.Running
+	running.Steps[0].Workflow.ExecutionLease = &lease
+	running.Steps[0].Workflow.LastFencingToken = 1
+	running.Steps[0].WorkerID = "worker-windows"
+	runningPayload, _ := json.Marshal(running)
+	dispatch := dispatchCommit(jobID, jobID+"/"+stepID, reservationID, 92, 1, expiredAt.Add(-time.Minute))
+	dispatch.NextState = &command.Snapshot{TargetID: jobID, Revision: 2, State: runningPayload}
+	dispatch.Lease = lease
+	if err := store.CommitDispatch("archivist-recovery:dispatch", dispatch); err != nil {
+		t.Fatal(err)
+	}
+	handler, err := job.NewHandler(func() time.Time { return now })
+	if err != nil {
+		t.Fatal(err)
+	}
+	executor := command.NewAuthorizedExecutor(store, func(command.Envelope) error { return nil }, handler.Handle)
+	basis := []string{"EVD-DIAGNOSTIC-0123456789ABCDEF"}
+	envelope := command.Envelope{
+		CommandID: "COMMAND-ARCHIVIST-RECOVERY", CommandType: job.RecoverExpiredExecutionCommand,
+		Actor: command.Actor{Type: command.ArchivistActor, ID: "archivist:SESSION-1"}, RequestedVia: "mcp",
+		TargetID: jobID, ExpectedRevision: 2, IdempotencyKey: "CALL-ARCHIVIST-RECOVERY", Reason: "recover the evidence-bound expired execution",
+		Parameters: map[string]any{
+			"action_code": "RECONCILE_EXPIRED_EXECUTION", "step_id": stepID, "reservation_id": reservationID,
+			"fencing_token": uint64(1), "diagnostic_fingerprint": "0123456789abcdef01234567", "basis": basis,
+		},
+	}
+	if _, err := store.db.ExecContext(ctx, `
+		CREATE TRIGGER reject_recovery_release
+		BEFORE UPDATE OF released_at ON resource_reservations
+		WHEN NEW.reservation_id = 'RES-ARCHIVIST-RECOVERY'
+		BEGIN
+			SELECT RAISE(ABORT, 'injected recovery release failure');
+		END;
+	`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := executor.Execute(envelope); err == nil {
+		t.Fatal("injected recovery release failure did not roll back the command")
+	}
+	rolledBack, err := store.Load(jobID)
+	if err != nil || rolledBack.Revision != 2 {
+		t.Fatalf("recovery state escaped rollback: snapshot=%+v err=%v", rolledBack, err)
+	}
+	var activeReservations, activeLeases, recoveryEvents, receipts int
+	store.db.QueryRow(`SELECT COUNT(*) FROM resource_reservations WHERE reservation_id = ? AND released_at IS NULL`, reservationID).Scan(&activeReservations)
+	store.db.QueryRow(`SELECT COUNT(*) FROM execution_leases WHERE reservation_id = ?`, reservationID).Scan(&activeLeases)
+	store.db.QueryRow(`SELECT COUNT(*) FROM domain_events WHERE target_id = ? AND CAST(payload AS TEXT) LIKE '%StepRecoveryApplied%'`, jobID).Scan(&recoveryEvents)
+	store.db.QueryRow(`SELECT COUNT(*) FROM idempotency_receipts WHERE idempotency_key = ?`, envelope.IdempotencyKey).Scan(&receipts)
+	if activeReservations != 1 || activeLeases != 1 || recoveryEvents != 0 || receipts != 0 {
+		t.Fatalf("recovery UoW partially committed: reservations=%d leases=%d events=%d receipts=%d", activeReservations, activeLeases, recoveryEvents, receipts)
+	}
+	if _, err := store.db.ExecContext(ctx, `DROP TRIGGER reject_recovery_release`); err != nil {
+		t.Fatal(err)
+	}
+	result, err := executor.Execute(envelope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, ok := result.Value.(job.State)
+	if !ok || state.Revision != 3 || state.Steps[0].Workflow.State != workflow.Queued || state.Steps[0].Workflow.ExecutionLease != nil ||
+		state.Steps[0].WorkerID != "" || len(state.Steps[0].RecoveryEvidence) != 1 {
+		t.Fatalf("expired execution was not recovered with immutable evidence: %+v", result.Value)
+	}
+	evidence := state.Steps[0].RecoveryEvidence[0]
+	if evidence.EvidenceID == "" || evidence.ActionCode != "RECONCILE_EXPIRED_EXECUTION" || evidence.ReservationID != reservationID ||
+		evidence.FencingToken != 1 || evidence.DiagnosticFingerprint != "0123456789abcdef01234567" ||
+		!slices.Equal(evidence.Basis, basis) || evidence.ActorType != command.ArchivistActor || evidence.ResultingState != workflow.Queued {
+		t.Fatalf("recovery evidence is incomplete: %+v", evidence)
+	}
+	replayed, err := executor.Execute(envelope)
+	if err != nil || replayed.Revision != result.Revision {
+		t.Fatalf("recovery receipt did not replay: result=%+v err=%v", replayed, err)
+	}
+	snapshot, err := store.Load(jobID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	final, err := job.Decode(snapshot)
+	if err != nil || len(final.Steps[0].RecoveryEvidence) != 1 {
+		t.Fatalf("recovery replay duplicated evidence: state=%+v err=%v", final, err)
+	}
+	store.db.QueryRow(`SELECT COUNT(*) FROM resource_reservations WHERE reservation_id = ? AND released_at IS NULL`, reservationID).Scan(&activeReservations)
+	store.db.QueryRow(`SELECT COUNT(*) FROM execution_leases WHERE reservation_id = ?`, reservationID).Scan(&activeLeases)
+	store.db.QueryRow(`SELECT COUNT(*) FROM domain_events WHERE target_id = ? AND CAST(payload AS TEXT) LIKE '%StepRecoveryApplied%'`, jobID).Scan(&recoveryEvents)
+	store.db.QueryRow(`SELECT COUNT(*) FROM idempotency_receipts WHERE idempotency_key = ?`, envelope.IdempotencyKey).Scan(&receipts)
+	if activeReservations != 0 || activeLeases != 0 || recoveryEvents != 1 || receipts != 1 {
+		t.Fatalf("recovery records are not singular: reservations=%d leases=%d events=%d receipts=%d", activeReservations, activeLeases, recoveryEvents, receipts)
 	}
 }
 

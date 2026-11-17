@@ -76,6 +76,8 @@ Domain Event는 업무 상태 변경 사실이고, progress·metric·process log
 
 Worker가 보고한 각 실패는 `StepFailureEvidence`로 Job 원장에 남으므로 진단은 현재 오류뿐 아니라 이전 retry의 실패 순서·operation·Worker·fencing token·원인 code·process exit code까지 원래 증적 ID로 제공한다. Archivist는 이 ID가 붙은 항목만 확인된 사실로 설명하고, 기록에 없는 원인은 가설로 남겨 다음 확인 방법을 함께 제안한다. MCP 경계는 같은 정제 함수를 한 번 더 적용해 원문 process 데이터나 경로가 Worker 입력에 섞여도 외부로 내보내지 않는다. `WRK-016`, `OBS-003`, `MCP-009`
 
+진단은 설명용 `suggested_actions`와 실행 가능한 `recovery_actions`를 구분한다. 후자는 Control이 현재 저장된 실행 경계를 확인해 안전하다고 판정한 만료 리스 조정만 Job revision·Step·reservation·fencing token·진단 fingerprint·basis 증적 ID와 함께 반환한다. Archivist가 실행하면 `StepRecoveryEvidence`가 원래 실패 증적을 보존한 채 추가되고, 복구 뒤 진단은 이 증적 ID와 결과 StepState를 확인된 사실로 제공한다. fingerprint나 실행 경계가 달라진 요청은 상태 변경 전에 거부한다. `WFL-014`, `MCP-011`
+
 ## 4. 요구사항 테스트와 증적 묶음
 
 테스트는 private 구현 호출 횟수가 아니라 공개 Capability 또는 Core 계약의 상태, 오류, CommandRecord, Event와 Artifact를 관찰한다.

@@ -159,6 +159,40 @@ func TestAdvisoryTurnPersistsPolicyAndDeduplicatesDriveFingerprintAcrossSessions
 	}
 }
 
+func TestWorkDiagnosticAdvisoryPersistsRemediationPolicy(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 11, 17, 8, 0, 0, 0, time.UTC)
+	store, err := Open(filepath.Join(t.TempDir(), "archivist.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	hosts := archivistruntime.NewHostRegistry([]archivistruntime.HostDefinition{{
+		ID: "HOST-1", Enabled: true, CredentialRef: "secret://host",
+		AllowedBackends: map[vocabulary.RuntimeBackend]bool{vocabulary.RuntimeEmbeddedCore: true},
+		AllowedCLIIDs:   map[string]bool{"codex": true}, AllowedWorkspaceRootIDs: map[string]bool{"video-project": true},
+	}}, recallVerifier{}, time.Minute)
+	service, err := archivistcontrol.New(store, hosts, func() time.Time { return now }, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.CreateSession(ctx, archivistruntime.SessionSpec{
+		ID: "SESSION-RECOVERY", ArchivistHostID: "HOST-1", Backend: vocabulary.RuntimeEmbeddedCore,
+		CLIID: "codex", WorkspaceRootID: "video-project",
+	}, ""); err != nil {
+		t.Fatal(err)
+	}
+	reference := archivistruntime.WorkReference{Kind: archivistruntime.WorkJob, WorkID: "JOB-RECOVERY", Revision: 4}
+	record, replayed, err := service.HandleAdvisoryEvent(ctx, archivistcontrol.AdvisoryEvent{
+		SessionID: "SESSION-RECOVERY", Kind: archivistcontrol.AdvisoryWorkDiagnostic,
+		TriggerID: "diagnostic-fingerprint", Prompt: "diagnose, recover current evidence, and verify", Work: &reference,
+	})
+	if err != nil || replayed || record.Turn.ToolPolicy != archivistruntime.ToolPolicyRemediation ||
+		record.Turn.SubmittedBy != vocabulary.ActorSystem || record.Turn.WorkReference == nil || record.Turn.WorkReference.WorkID != reference.WorkID {
+		t.Fatalf("work diagnostic advisory did not persist remediation authority: record=%+v replayed=%v err=%v", record, replayed, err)
+	}
+}
+
 type recallVerifier struct{}
 
 func (recallVerifier) Verify(archivistHostID, credentialRef, presentedCredential string) bool {

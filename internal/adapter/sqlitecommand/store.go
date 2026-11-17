@@ -457,6 +457,11 @@ func applyCommit(tx *sql.Tx, idempotencyKey string, commit command.Commit) error
 		if commit.ExpectedRevision == nil {
 			return command.ErrInvalidChange
 		}
+		if commit.Record.Envelope.CommandType == job.RecoverExpiredExecutionCommand {
+			if err := verifyJobRecovery(tx, commit.Record.Envelope); err != nil {
+				return err
+			}
+		}
 		if commit.CreateTarget {
 			if *commit.ExpectedRevision != 0 || commit.NextState.Revision != 1 {
 				return command.ErrInvalidChange
@@ -506,6 +511,11 @@ func applyCommit(tx *sql.Tx, idempotencyKey string, commit command.Commit) error
 				return err
 			}
 		}
+		if commit.Record.Envelope.CommandType == job.RecoverExpiredExecutionCommand {
+			if err := applyJobRecovery(tx, commit.Record.Envelope, *commit.NextState); err != nil {
+				return err
+			}
+		}
 	}
 
 	recordPayload, err := json.Marshal(commit.Record)
@@ -540,6 +550,97 @@ func applyCommit(tx *sql.Tx, idempotencyKey string, commit command.Commit) error
 		}
 	}
 	return nil
+}
+
+func verifyJobRecovery(tx *sql.Tx, envelope command.Envelope) error {
+	parameters, err := recoverExecutionParameters(envelope)
+	if err != nil {
+		return err
+	}
+	var jobID, stepID string
+	var fencingToken uint64
+	err = tx.QueryRow(`
+		SELECT r.job_id, r.step_id, l.fencing_token
+		FROM resource_reservations r
+		JOIN execution_leases l ON l.reservation_id = r.reservation_id
+		WHERE r.reservation_id = ? AND r.released_at IS NULL
+	`, parameters.ReservationID).Scan(&jobID, &stepID, &fencingToken)
+	if errors.Is(err, sql.ErrNoRows) {
+		return command.ErrRevisionConflict
+	}
+	if err != nil {
+		return err
+	}
+	if jobID != envelope.TargetID || stepID != envelope.TargetID+"/"+parameters.StepID || fencingToken != parameters.FencingToken {
+		return command.ErrRevisionConflict
+	}
+	return nil
+}
+
+func applyJobRecovery(tx *sql.Tx, envelope command.Envelope, next command.Snapshot) error {
+	parameters, err := recoverExecutionParameters(envelope)
+	if err != nil {
+		return err
+	}
+	state, err := job.Decode(next)
+	if err != nil {
+		return err
+	}
+	var appliedAt time.Time
+	for _, step := range state.Steps {
+		if step.Workflow.ID != parameters.StepID || len(step.RecoveryEvidence) == 0 {
+			continue
+		}
+		evidence := step.RecoveryEvidence[len(step.RecoveryEvidence)-1]
+		if evidence.ReservationID != parameters.ReservationID || evidence.FencingToken != parameters.FencingToken ||
+			evidence.DiagnosticFingerprint != parameters.DiagnosticFingerprint {
+			return command.ErrInvalidChange
+		}
+		appliedAt = evidence.AppliedAt
+		break
+	}
+	if appliedAt.IsZero() {
+		return command.ErrInvalidChange
+	}
+	if _, err := tx.Exec(`DELETE FROM resource_reservation_devices WHERE reservation_id = ?`, parameters.ReservationID); err != nil {
+		return err
+	}
+	result, err := tx.Exec(`DELETE FROM execution_leases WHERE reservation_id = ? AND fencing_token = ?`, parameters.ReservationID, parameters.FencingToken)
+	if err != nil {
+		return err
+	}
+	if changed, err := result.RowsAffected(); err != nil || changed != 1 {
+		if err != nil {
+			return err
+		}
+		return command.ErrRevisionConflict
+	}
+	result, err = tx.Exec(`
+		UPDATE resource_reservations SET released_at = ?
+		WHERE reservation_id = ? AND released_at IS NULL
+	`, formatTime(appliedAt), parameters.ReservationID)
+	if err != nil {
+		return err
+	}
+	if changed, err := result.RowsAffected(); err != nil || changed != 1 {
+		if err != nil {
+			return err
+		}
+		return command.ErrRevisionConflict
+	}
+	return nil
+}
+
+func recoverExecutionParameters(envelope command.Envelope) (job.RecoverExpiredExecutionParameters, error) {
+	payload, err := json.Marshal(envelope.Parameters)
+	if err != nil {
+		return job.RecoverExpiredExecutionParameters{}, err
+	}
+	var parameters job.RecoverExpiredExecutionParameters
+	if json.Unmarshal(payload, &parameters) != nil || parameters.StepID == "" || parameters.ReservationID == "" || parameters.FencingToken == 0 {
+		return job.RecoverExpiredExecutionParameters{}, command.ErrInvalidChange
+	}
+	return parameters, nil
 }
 
 func applyJobCancellation(tx *sql.Tx, state job.State, envelope command.Envelope) error {

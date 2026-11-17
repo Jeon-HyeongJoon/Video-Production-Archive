@@ -2,6 +2,7 @@ package archivistadvisory
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -55,7 +56,7 @@ func (fixture *recordingTurns) HandleAdvisoryEvent(_ context.Context, event arch
 }
 
 // Requirement: LRH-023
-func TestAdvisoryLoopQueuesOneReadOnlyTurnForStaleReferencedWork(t *testing.T) {
+func TestAdvisoryLoopQueuesOneRecoveryLimitedTurnForStaleReferencedWork(t *testing.T) {
 	now := time.Date(2026, 11, 15, 12, 0, 0, 0, time.UTC)
 	normal := archivistruntime.WorkReference{Kind: archivistruntime.WorkJob, WorkID: "JOB-NORMAL", Revision: 1}
 	stale := archivistruntime.WorkReference{Kind: archivistruntime.WorkJob, WorkID: "JOB-STALE", Revision: 4}
@@ -81,7 +82,9 @@ func TestAdvisoryLoopQueuesOneReadOnlyTurnForStaleReferencedWork(t *testing.T) {
 	}
 	if len(turns.events) != 1 || turns.events[0].SessionID != "SESSION-STALE" ||
 		turns.events[0].Kind != archivistcontrol.AdvisoryWorkDiagnostic || turns.events[0].Work == nil ||
-		turns.events[0].Work.WorkID != "JOB-STALE" || turns.events[0].TriggerID != "stale-render-v1" {
+		turns.events[0].Work.WorkID != "JOB-STALE" || turns.events[0].TriggerID != "stale-render-v1" ||
+		!strings.Contains(turns.events[0].Prompt, "archive.work.recovery.apply.v1") ||
+		!strings.Contains(turns.events[0].Prompt, "read diagnostics again") {
 		t.Fatalf("stale work advisory was not deduplicated and bound: %+v", turns.events)
 	}
 }

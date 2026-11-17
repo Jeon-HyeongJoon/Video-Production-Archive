@@ -20,6 +20,7 @@ import (
 	"videoarchive/internal/application/archivistcontrol"
 	"videoarchive/internal/application/archivistloop"
 	"videoarchive/internal/application/workdiagnostics"
+	"videoarchive/internal/application/workrecovery"
 	coreintake "videoarchive/internal/core/archiveintake"
 	"videoarchive/internal/core/archivistruntime"
 	"videoarchive/internal/core/catalog"
@@ -28,6 +29,7 @@ import (
 	"videoarchive/internal/core/mediaanalysis"
 	"videoarchive/internal/core/organization"
 	"videoarchive/internal/core/vocabulary"
+	"videoarchive/internal/core/workflow"
 )
 
 // Requirement: MCP-001
@@ -289,6 +291,21 @@ func (fixture fixedWorkDiagnostics) Diagnose(context.Context, archivistruntime.W
 	return fixture.snapshot, nil
 }
 
+type capturingRecoveryCommands struct {
+	calls    []command.Envelope
+	evidence corejob.StepRecoveryEvidence
+}
+
+func (fixture *capturingRecoveryCommands) Execute(_ context.Context, envelope command.Envelope) (command.Result, error) {
+	fixture.calls = append(fixture.calls, envelope)
+	state := corejob.State{
+		ID: envelope.TargetID, Revision: envelope.ExpectedRevision + 1, TemplateName: "archive-intake-inspection",
+		TargetTitle: "selected folder", CurrentStepID: "inspect",
+		Steps: []corejob.Step{{Workflow: workflow.Step{ID: "inspect", State: workflow.Queued}, RecoveryEvidence: []corejob.StepRecoveryEvidence{fixture.evidence}}},
+	}
+	return command.Result{CommandID: envelope.CommandID, TargetID: envelope.TargetID, Revision: state.Revision, Value: state}, nil
+}
+
 // Requirement: MCP-009
 func TestMCPReadsBoundWorkDiagnosticsWithoutRawLogsOrPaths(t *testing.T) {
 	reference := archivistruntime.WorkReference{Kind: archivistruntime.WorkJob, WorkID: "JOB-DIAGNOSTIC-1", Revision: 3}
@@ -376,6 +393,58 @@ func TestAdvisoryTurnPreparesSelectionAndConvertsArchiveStartToActionCard(t *tes
 		archiveToolCall("CALL-ADVISORY-DENIED", ToolArchiveTranscriptionStart, `{}`), "secret")
 	if denied.Code != http.StatusForbidden || !strings.Contains(denied.Body.String(), "MCP_ADVISORY_POLICY_DENIED") {
 		t.Fatalf("advisory mutation was not denied: %d %s", denied.Code, denied.Body.String())
+	}
+}
+
+// Requirement: MCP-011
+func TestRemediationTurnAppliesOnlyCurrentBoundDiagnosticRecovery(t *testing.T) {
+	reference := archivistruntime.WorkReference{Kind: archivistruntime.WorkJob, WorkID: "JOB-RECOVERY-1", Revision: 3}
+	fingerprint := "0123456789abcdef01234567"
+	basis := []string{"EVD-DIAGNOSTIC-RECOVERY"}
+	diagnostics := fixedWorkDiagnostics{snapshot: workdiagnostics.Snapshot{
+		WorkKind: reference.Kind, WorkID: reference.WorkID, WorkRevision: reference.Revision, Fingerprint: fingerprint,
+		Jobs: []workdiagnostics.JobDiagnostic{{JobID: reference.WorkID, JobRevision: 3, StepID: "inspect", StepState: workflow.Running}},
+		RecoveryActions: []workdiagnostics.RecoveryAction{{
+			ActionCode: "RECONCILE_EXPIRED_EXECUTION", JobID: reference.WorkID, JobRevision: 3, StepID: "inspect",
+			ReservationID: "RES-RECOVERY-1", FencingToken: 7, DiagnosticFingerprint: fingerprint, Basis: basis,
+		}},
+	}}
+	commands := &capturingRecoveryCommands{evidence: corejob.StepRecoveryEvidence{
+		EvidenceID: "EVD-RECOVERY-1", ActionCode: "RECONCILE_EXPIRED_EXECUTION", StepID: "inspect",
+		ReservationID: "RES-RECOVERY-1", FencingToken: 7, DiagnosticFingerprint: fingerprint, Basis: basis,
+		ActorType: vocabulary.ActorArchivist, ActorID: "archivist:SESSION-1", ResultingState: workflow.Queued,
+	}}
+	recovery, err := workrecovery.New(diagnostics, commands)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler, err := New(Configuration{
+		Archivists: fixtureArchivistRuntime{work: &reference, policy: archivistruntime.ToolPolicyRemediation},
+		Catalog:    fixtureCatalog{}, ArchiveWorkspace: fixtureArchiveWorkspace{}, Commands: fixtureCommands{},
+		WorkDiagnostics: diagnostics, WorkRecovery: recovery,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tools := mcpTestRequest(handler, http.MethodGet, "/mcp/v1/tools", "", "secret")
+	if tools.Code != http.StatusOK || !strings.Contains(tools.Body.String(), ToolWorkRecoveryApply) {
+		t.Fatalf("recovery capability was not advertised: %d %s", tools.Code, tools.Body.String())
+	}
+	input := `{"action_code":"RECONCILE_EXPIRED_EXECUTION","job_id":"JOB-RECOVERY-1","expected_job_revision":3,"step_id":"inspect","reservation_id":"RES-RECOVERY-1","fencing_token":7,"diagnostic_fingerprint":"` + fingerprint + `","basis":["EVD-DIAGNOSTIC-RECOVERY"],"reason":"recover expired evidence-bound execution"}`
+	response := mcpTestRequest(handler, http.MethodPost, "/mcp/v1/call", archiveToolCall("CALL-RECOVERY", ToolWorkRecoveryApply, input), "secret")
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"evidence_id":"EVD-RECOVERY-1"`) || len(commands.calls) != 1 ||
+		commands.calls[0].TargetID != reference.WorkID || commands.calls[0].ExpectedRevision != 3 {
+		t.Fatalf("current bound recovery did not execute: %d %s calls=%+v", response.Code, response.Body.String(), commands.calls)
+	}
+	stale := strings.Replace(input, fingerprint, "aaaaaaaaaaaaaaaaaaaaaaaa", 1)
+	response = mcpTestRequest(handler, http.MethodPost, "/mcp/v1/call", archiveToolCall("CALL-RECOVERY-STALE", ToolWorkRecoveryApply, stale), "secret")
+	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "MCP_WORK_RECOVERY_REJECTED") || len(commands.calls) != 1 {
+		t.Fatalf("stale diagnostic recovery reached the command path: %d %s calls=%d", response.Code, response.Body.String(), len(commands.calls))
+	}
+	denied := mcpTestRequest(handler, http.MethodPost, "/mcp/v1/call", archiveToolCall("CALL-RECOVERY-DENIED", ToolJobsCreate,
+		`{"job_id":"JOB-OTHER","template_name":"final-edit","target_title":"other","reason":"not recovery"}`), "secret")
+	if denied.Code != http.StatusForbidden || !strings.Contains(denied.Body.String(), "MCP_REMEDIATION_POLICY_DENIED") {
+		t.Fatalf("remediation Turn exposed unrelated mutation: %d %s", denied.Code, denied.Body.String())
 	}
 }
 

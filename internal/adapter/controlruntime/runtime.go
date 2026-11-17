@@ -44,6 +44,7 @@ import (
 	"videoarchive/internal/application/workdiagnostics"
 	"videoarchive/internal/application/workercapacity"
 	"videoarchive/internal/application/workercontrol"
+	"videoarchive/internal/application/workrecovery"
 	"videoarchive/internal/core/archive"
 	"videoarchive/internal/core/archiverun"
 	"videoarchive/internal/core/archivistruntime"
@@ -90,6 +91,7 @@ type Runtime struct {
 	archivists             *archivistcontrol.Service
 	archiveIntakeWorkspace *archiveintakeworkspace.Service
 	workDiagnostics        *workdiagnostics.Service
+	workRecovery           *workrecovery.Service
 	archivistAdvisories    *archivistadvisory.Service
 	advisorySignal         chan struct{}
 	workerExecution        *workercontrol.Service
@@ -307,6 +309,11 @@ func OpenWithDependencies(ctx context.Context, configuration bootconfig.Configur
 		return fail(err)
 	}
 	runtime.workDiagnostics = workDiagnostics
+	workRecovery, err := workrecovery.New(workDiagnostics, jobCommands)
+	if err != nil {
+		return fail(err)
+	}
+	runtime.workRecovery = workRecovery
 	archivistAdvisories, err := archivistadvisory.New(archivists, archiveIntakeWorkspace, workDiagnostics, archivists)
 	if err != nil {
 		return fail(err)
@@ -349,6 +356,7 @@ func OpenWithDependencies(ctx context.Context, configuration bootconfig.Configur
 		Drives: mcpArchiveIntake, IntakeSelector: mcpArchiveIntakeSelector,
 		ArchiveRuns: mcpArchiveRuns, ArchiveTranscriptions: mcpArchiveTranscriptions,
 		WorkDiagnostics: workDiagnostics,
+		WorkRecovery:    workRecovery,
 	})
 	if err != nil {
 		return fail(err)

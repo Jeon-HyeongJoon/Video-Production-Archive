@@ -151,7 +151,7 @@ Codex app-server 경로는 ArchivistSession에 대응한 native thread를 proces
 
 `TURN_PROGRESS`는 raw terminal cursor를 Control에 복제하는 통로가 아니다. Runtime Adapter가 사용자에게 공개할 내용으로 명시적으로 만든 `summary`만 `ProgressUpdate`로 보고한다. native 도구 진행은 도구 종류만 남기고 명령·diff·하위 Agent prompt를 복제하지 않는다. `TURN_FAILED`는 raw error 문자열 대신 정규화 `code`와 정제 `summary`를 가진 `FailureReport`를 요구한다. Control은 PROGRESS·FAILURE를 `ArchivistTurnEntry` append-only 기록으로 Turn cursor·상태와 한 SQLite transaction에 확정하고 중복 cursor를 늘리지 않는다. Entry schema에는 stdout·stderr·credential·filesystem path 필드가 없다. 계약 fixture와 Codex app-server fixture는 이 구조화 event stream을 검증한다. 실제 계정으로 인증된 Codex·Claude 정제 증적은 `LRH-014` acceptance 전까지 planned다. `LRH-013~014`, `LRH-018~019`
 
-Archivist가 작업 중단 원인을 요청받거나 자동 제안 Turn을 처리하면 `archive.work.diagnostics.get.v1`을 먼저 사용한다. 응답은 증적 ID가 있는 확인된 `facts`, 예측·확인 방법과 증적 ID basis가 있는 `hypotheses`, `suggested_actions`를 분리한다. Archivist는 확정 진술에 해당 증적 ID를 근거로 사용하고 가설을 사실로 바꾸지 않는다. subprocess의 정지를 직접 관측하지 못한 경우 확정 원인 대신 현재 확인 가능한 실행 리스·Worker 상태와 추가 확인 방법을 보고한다. 새 드라이브 자동 제안은 현재 후보 조회→원본 intake session→적격 아카이브와 명시적 폴더 범위 고정→아카이브 시작 ActionCard 제안 순서로 끝내며, 카드가 실행되기 전에는 시작했다고 말하지 않는다.
+Archivist가 작업 중단 원인을 요청받거나 자동 복구 Turn을 처리하면 `archive.work.diagnostics.get.v1`을 먼저 사용한다. 응답은 증적 ID가 있는 확인된 `facts`, 예측·확인 방법과 증적 ID basis가 있는 `hypotheses`, 설명용 `suggested_actions`, 실행 가능한 `recovery_actions`를 분리한다. Archivist는 확정 진술에 해당 증적 ID를 근거로 사용하고 가설을 사실로 바꾸지 않는다. `recovery_actions`가 있으면 필드를 바꾸지 않고 `archive.work.recovery.apply.v1`에 제출한 뒤 진단을 다시 읽어 복구 증적 ID와 결과 상태를 보고한다. 목록에 없는 retry·cancel·분류·단계 시작을 복구로 대신하지 않는다. subprocess의 정지를 직접 관측하지 못한 경우 확정 원인 대신 현재 확인 가능한 실행 리스·Worker 상태와 추가 확인 방법을 보고한다. 새 드라이브 자동 제안은 현재 후보 조회→원본 intake session→적격 아카이브와 명시적 폴더 범위 고정→아카이브 시작 ActionCard 제안 순서로 끝내며, 카드가 실행되기 전에는 시작했다고 말하지 않는다.
 
 ## 7. 도구 호출 경계
 
@@ -205,7 +205,7 @@ Control은 완료 계기 재호출과 별도로 자동 제안 조정기를 실�
 
 자동 제안은 같은 work revision·진단 code 또는 workspace drive·candidate revision·folder discovery revision fingerprint마다 SYSTEM Turn 하나만 만든다. 작업 계기는 그 작업을 이미 참조한 Session에, 새 드라이브 계기는 제거되지 않은 Session 가운데 마지막 Turn 갱신 시각이 가장 최근인 하나에 보낸다. 활성 Session이 없으면 영속 작업이나 드라이브 상태를 바꾸지 않고 다음 평가를 기다린다. Host가 offline이어도 Turn은 QUEUED로 남는다. `LRH-023~024`
 
-자동 제안 Turn의 도구 정책은 `ADVISORY`다. 작업 진단·작업 상태·현재 후보 조회는 읽을 수 있고 새 드라이브의 read-only intake session과 현재 ID·revision 선택은 준비할 수 있다. `archive.run.start.v1` 호출은 실행하지 않고 PENDING ActionCard로 바꿔 담당자에게 제시한다. HOLD 분류·STT 시작·일반 Job 생성 같은 다른 상태 변경은 거부한다. 일반 사용자 Turn과 기존 단계 완료 SYSTEM 재호출 Turn은 `STANDARD` 정책을 유지한다. 정책이 없는 기존 영속 Turn도 호환상 `STANDARD`로 읽는다. `MCP-009~010`
+SYSTEM Turn은 계기별 도구 정책을 고정한다. 새 드라이브 제안은 `ADVISORY`로 작업 진단·작업 상태·현재 후보 조회와 read-only intake session·현재 ID/revision 선택 준비만 허용하고, `archive.run.start.v1`은 PENDING ActionCard로 바꾼다. 작업 이상은 `REMEDIATION`으로 고정 작업 조회와 현재 진단의 `archive.work.recovery.apply.v1`만 허용한다. 복구 도구는 fingerprint·Job revision·reservation·fencing token·basis가 모두 같은 경우에만 만료 실행을 조정하며 취소·HOLD 분류·STT 시작·종결 실패 retry·일반 Job 생성을 거부한다. 일반 사용자 Turn과 기존 단계 완료 SYSTEM 재호출 Turn은 `STANDARD` 정책을 유지하고 정책이 없는 기존 영속 Turn도 호환상 `STANDARD`로 읽는다. `MCP-009~011`
 
 Agent 대화 칸은 Orca native chat과 같은 웹 셸형 채팅으로 취급한다. raw ANSI 화면을 iframe처럼 복제하는 셸이 아니라, 로컬 CLI의 구조화된 Turn·공개 assistant message·Tool Call·결과를 웹에서 조작하고 읽는 투영이다. 선택한 Session 이름에는 실제 CLI ID를 함께 표시해 Host 연결과 model CLI 선택을 구분한다. 입력은 Enter로 전송하고 Shift+Enter만 줄바꿈하며 IME 조합 확정 Enter는 전송하지 않는다. 업무는 사람의 지시와 최신 응답만 펼쳐 두고, 실행 중이면 진행 중 Turn의 마지막 진행 한 줄을 함께 보인다. 정제된 진행 항목·SYSTEM 재호출·Tool Call·이전 응답·처리된 ActionCard는 Tool Call 수·재호출 수가 있는 접힌 영역에 보존한다. 업무 문맥의 `ARCHIVE_RUN_COMPLETE` Turn이 종료되면 Orca의 settled-turn 규칙처럼 최초 사용자 지시와 마지막 최종 응답 또는 최종 구조화 실패만 남기고 접힌 영역에 소요 시간을 더한다. 선택 참조는 참조 수가 있는 접힌 줄에 둔다. `PENDING` ActionCard는 업무가 종료됐더라도 접힘 밖에 남겨 사람이 계속 조작할 수 있게 한다. `DSH-011`
 
@@ -290,7 +290,7 @@ Adapter 경계도 구현 상태다.
 
 - Host service 인증·heartbeat·claim과 SQLite Session·Turn Store `LRH-001`, `CTL-005~006`
 - loopback proxy와 별도 Control MCP listener의 versioned Capability allowlist `MCP-001`
-- 고정 작업 진단 조회와 자동 제안 Turn의 선택 준비·실행 ActionCard 경계 `MCP-009~010`
+- 고정 작업 진단 조회, 새 드라이브 제안의 선택 준비·실행 ActionCard 경계와 작업 이상 Turn의 증거 기반 직접 복구 `MCP-009~011`
 - 사람·Archivist 공통 Command Bus와 정제된 아카이브 작업 공간 projection `COL-001~002`, `DSH-002`
 - Archivist Runtime·ActionCard fixture의 Chromium PNG golden `DSH-004`
 

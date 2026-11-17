@@ -74,6 +74,19 @@ type SuggestedAction struct {
 	Summary string `json:"summary"`
 }
 
+// RecoveryAction is an executable, evidence-bound action. SuggestedAction is
+// explanatory; only this shape may cross into the recovery command path.
+type RecoveryAction struct {
+	ActionCode            string   `json:"action_code"`
+	JobID                 string   `json:"job_id"`
+	JobRevision           uint64   `json:"job_revision"`
+	StepID                string   `json:"step_id"`
+	ReservationID         string   `json:"reservation_id"`
+	FencingToken          uint64   `json:"fencing_token"`
+	DiagnosticFingerprint string   `json:"diagnostic_fingerprint,omitempty"`
+	Basis                 []string `json:"basis"`
+}
+
 type WorkerSnapshot struct {
 	WorkerID               string    `json:"worker_id"`
 	State                  string    `json:"state"`
@@ -86,18 +99,19 @@ type WorkerSnapshot struct {
 }
 
 type JobDiagnostic struct {
-	JobID           string                        `json:"job_id"`
-	JobRevision     uint64                        `json:"job_revision"`
-	StepID          string                        `json:"step_id"`
-	StepState       workflow.StepState            `json:"step_state"`
-	Progress        float64                       `json:"progress"`
-	WaitReason      vocabulary.WaitReason         `json:"wait_reason,omitempty"`
-	ErrorClass      string                        `json:"error_class,omitempty"`
-	LogReference    string                        `json:"log_reference,omitempty"`
-	LastProgressAt  time.Time                     `json:"last_progress_at"`
-	Worker          *WorkerSnapshot               `json:"worker,omitempty"`
-	Execution       *ExecutionObservation         `json:"execution,omitempty"`
-	FailureEvidence []corejob.StepFailureEvidence `json:"failure_evidence,omitempty"`
+	JobID            string                         `json:"job_id"`
+	JobRevision      uint64                         `json:"job_revision"`
+	StepID           string                         `json:"step_id"`
+	StepState        workflow.StepState             `json:"step_state"`
+	Progress         float64                        `json:"progress"`
+	WaitReason       vocabulary.WaitReason          `json:"wait_reason,omitempty"`
+	ErrorClass       string                         `json:"error_class,omitempty"`
+	LogReference     string                         `json:"log_reference,omitempty"`
+	LastProgressAt   time.Time                      `json:"last_progress_at"`
+	Worker           *WorkerSnapshot                `json:"worker,omitempty"`
+	Execution        *ExecutionObservation          `json:"execution,omitempty"`
+	FailureEvidence  []corejob.StepFailureEvidence  `json:"failure_evidence,omitempty"`
+	RecoveryEvidence []corejob.StepRecoveryEvidence `json:"recovery_evidence,omitempty"`
 }
 
 type Snapshot struct {
@@ -109,6 +123,7 @@ type Snapshot struct {
 	Facts            []Fact                    `json:"facts"`
 	Hypotheses       []Hypothesis              `json:"hypotheses"`
 	SuggestedActions []SuggestedAction         `json:"suggested_actions"`
+	RecoveryActions  []RecoveryAction          `json:"recovery_actions,omitempty"`
 	ShouldReport     bool                      `json:"should_report"`
 	Fingerprint      string                    `json:"fingerprint"`
 }
@@ -166,7 +181,7 @@ func (service *Service) Diagnose(ctx context.Context, reference archivistruntime
 		if loadErr != nil {
 			return Snapshot{}, loadErr
 		}
-		jobDiagnostic, facts, hypotheses, actions, report, diagnosticErr := service.diagnoseJob(ctx, view, byWorker, now)
+		jobDiagnostic, facts, hypotheses, actions, recoveries, report, diagnosticErr := service.diagnoseJob(ctx, view, byWorker, now)
 		if diagnosticErr != nil {
 			return Snapshot{}, diagnosticErr
 		}
@@ -174,13 +189,17 @@ func (service *Service) Diagnose(ctx context.Context, reference archivistruntime
 		result.Facts = append(result.Facts, facts...)
 		result.Hypotheses = append(result.Hypotheses, hypotheses...)
 		result.SuggestedActions = append(result.SuggestedActions, actions...)
+		result.RecoveryActions = append(result.RecoveryActions, recoveries...)
 		result.ShouldReport = result.ShouldReport || report
 	}
 	result.Fingerprint = fingerprint(result)
+	for index := range result.RecoveryActions {
+		result.RecoveryActions[index].DiagnosticFingerprint = result.Fingerprint
+	}
 	return result, nil
 }
 
-func (service *Service) diagnoseJob(ctx context.Context, view archiveworkspace.JobView, workers map[string]worker.Status, now time.Time) (JobDiagnostic, []Fact, []Hypothesis, []SuggestedAction, bool, error) {
+func (service *Service) diagnoseJob(ctx context.Context, view archiveworkspace.JobView, workers map[string]worker.Status, now time.Time) (JobDiagnostic, []Fact, []Hypothesis, []SuggestedAction, []RecoveryAction, bool, error) {
 	summary := view.Summary
 	item := JobDiagnostic{
 		JobID: summary.JobID, JobRevision: summary.Revision, StepID: summary.CurrentStepID, StepState: summary.StepState,
@@ -190,6 +209,9 @@ func (service *Service) diagnoseJob(ctx context.Context, view archiveworkspace.J
 	for _, step := range view.Steps {
 		for _, evidence := range step.FailureEvidence {
 			item.FailureEvidence = append(item.FailureEvidence, sanitizeFailureEvidence(evidence))
+		}
+		for _, evidence := range step.RecoveryEvidence {
+			item.RecoveryEvidence = append(item.RecoveryEvidence, sanitizeRecoveryEvidence(evidence))
 		}
 	}
 	sort.SliceStable(item.FailureEvidence, func(i, j int) bool {
@@ -207,6 +229,13 @@ func (service *Service) diagnoseJob(ctx context.Context, view archiveworkspace.J
 			Summary: evidence.Summary + " (" + evidence.CauseCode + ")", ObservedAt: evidence.ObservedAt,
 		})
 	}
+	for _, evidence := range item.RecoveryEvidence {
+		facts = append(facts, Fact{
+			EvidenceID: evidence.EvidenceID, Code: "WORK_RECOVERY_RECORDED",
+			Summary:    "Recovery " + evidence.ActionCode + " changed Step " + evidence.StepID + " to " + string(evidence.ResultingState),
+			ObservedAt: evidence.AppliedAt,
+		})
+	}
 	if status, ok := workers[summary.WorkerID]; ok && summary.WorkerID != "" {
 		item.Worker = &WorkerSnapshot{
 			WorkerID: status.WorkerID, State: status.State, LastHeartbeat: status.LastHeartbeat,
@@ -219,7 +248,7 @@ func (service *Service) diagnoseJob(ctx context.Context, view archiveworkspace.J
 	}
 	execution, found, err := service.executions.ActiveExecution(ctx, summary.JobID, summary.CurrentStepID)
 	if err != nil {
-		return JobDiagnostic{}, nil, nil, nil, false, err
+		return JobDiagnostic{}, nil, nil, nil, nil, false, err
 	}
 	if found {
 		item.Execution = &execution
@@ -232,6 +261,7 @@ func (service *Service) diagnoseJob(ctx context.Context, view archiveworkspace.J
 	}
 	var hypotheses []Hypothesis
 	var actions []SuggestedAction
+	var recoveries []RecoveryAction
 	report := false
 	active := summary.StepState == workflow.Reserved || summary.StepState == workflow.Running || summary.StepState == workflow.Verifying
 	if summary.StepState == workflow.Failed || item.ErrorClass != "" {
@@ -258,6 +288,12 @@ func (service *Service) diagnoseJob(ctx context.Context, view archiveworkspace.J
 		facts = append(facts, diagnosticFact("EXECUTION_LEASE_EXPIRED", "The active Step execution lease expired", execution.LeaseExpiresAt,
 			summary.JobID, summary.CurrentStepID, execution.LeaseExpiresAt.Format(time.RFC3339Nano)))
 		actions = append(actions, SuggestedAction{Code: "RECONCILE_EXECUTION", Summary: "Confirm the Worker process state and recover the expired lease"})
+		basis := facts[len(facts)-1].EvidenceID
+		recoveries = append(recoveries, RecoveryAction{
+			ActionCode: "RECONCILE_EXPIRED_EXECUTION", JobID: summary.JobID, JobRevision: summary.Revision,
+			StepID: summary.CurrentStepID, ReservationID: execution.ReservationID, FencingToken: execution.FencingToken,
+			Basis: []string{basis},
+		})
 	}
 	if found && execution.HasLease && item.Worker != nil && (summary.StepState == workflow.Running || summary.StepState == workflow.Verifying) &&
 		((execution.ResourceClass == vocabulary.ResourceHeavy && item.Worker.ReportedHeavyRunning == 0) ||
@@ -287,7 +323,22 @@ func (service *Service) diagnoseJob(ctx context.Context, view archiveworkspace.J
 		})
 		actions = append(actions, SuggestedAction{Code: "OBSERVE_PROGRESS", Summary: "Request a new structured Worker progress sample before retrying or cancelling"})
 	}
-	return item, facts, hypotheses, dedupeActions(actions), report, nil
+	return item, facts, hypotheses, dedupeActions(actions), recoveries, report, nil
+}
+
+func sanitizeRecoveryEvidence(source corejob.StepRecoveryEvidence) corejob.StepRecoveryEvidence {
+	result := source
+	result.EvidenceID = safeEvidenceID(source.EvidenceID, source.StepID+"\x00"+strconv.FormatUint(source.FencingToken, 10))
+	result.ActionCode = safeDiagnosticCode(source.ActionCode, "WORK_RECOVERY")
+	result.DiagnosticFingerprint = strings.TrimSpace(source.DiagnosticFingerprint)
+	if len(result.DiagnosticFingerprint) != 24 {
+		result.DiagnosticFingerprint = ""
+	}
+	result.Basis = append([]string(nil), source.Basis...)
+	for index := range result.Basis {
+		result.Basis[index] = safeEvidenceID(result.Basis[index], result.EvidenceID+"\x00"+strconv.Itoa(index))
+	}
+	return result
 }
 
 func diagnosticFact(code, summary string, observedAt time.Time, identity ...string) Fact {
@@ -395,6 +446,10 @@ func Sanitize(snapshot Snapshot) Snapshot {
 		for evidenceIndex := range result.Jobs[index].FailureEvidence {
 			result.Jobs[index].FailureEvidence[evidenceIndex] = sanitizeFailureEvidence(result.Jobs[index].FailureEvidence[evidenceIndex])
 		}
+		result.Jobs[index].RecoveryEvidence = append([]corejob.StepRecoveryEvidence(nil), snapshot.Jobs[index].RecoveryEvidence...)
+		for evidenceIndex := range result.Jobs[index].RecoveryEvidence {
+			result.Jobs[index].RecoveryEvidence[evidenceIndex] = sanitizeRecoveryEvidence(result.Jobs[index].RecoveryEvidence[evidenceIndex])
+		}
 	}
 	result.Facts = append([]Fact(nil), snapshot.Facts...)
 	for index := range result.Facts {
@@ -418,6 +473,15 @@ func Sanitize(snapshot Snapshot) Snapshot {
 	for index := range result.SuggestedActions {
 		result.SuggestedActions[index].Code = safeDiagnosticCode(result.SuggestedActions[index].Code, "DIAGNOSTIC_ACTION")
 		result.SuggestedActions[index].Summary = safeDiagnosticSummary(result.SuggestedActions[index].Summary)
+	}
+	result.RecoveryActions = append([]RecoveryAction(nil), snapshot.RecoveryActions...)
+	for index := range result.RecoveryActions {
+		result.RecoveryActions[index].ActionCode = safeDiagnosticCode(result.RecoveryActions[index].ActionCode, "WORK_RECOVERY")
+		result.RecoveryActions[index].Basis = append([]string(nil), result.RecoveryActions[index].Basis...)
+		for basisIndex := range result.RecoveryActions[index].Basis {
+			result.RecoveryActions[index].Basis[basisIndex] = safeEvidenceID(result.RecoveryActions[index].Basis[basisIndex],
+				result.RecoveryActions[index].JobID+"\x00"+result.RecoveryActions[index].StepID+"\x00"+strconv.Itoa(basisIndex))
+		}
 	}
 	return result
 }
@@ -451,6 +515,9 @@ func fingerprint(snapshot Snapshot) string {
 		}
 		for _, evidence := range item.FailureEvidence {
 			source.WriteString("/failure=" + evidence.EvidenceID + ":" + evidence.CauseCode)
+		}
+		for _, evidence := range item.RecoveryEvidence {
+			source.WriteString("/recovery=" + evidence.EvidenceID + ":" + evidence.ActionCode)
 		}
 	}
 	for _, value := range snapshot.Facts {

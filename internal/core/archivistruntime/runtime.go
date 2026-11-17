@@ -94,8 +94,9 @@ type Turn struct {
 type ArchivistTurnToolPolicy string
 
 const (
-	ToolPolicyStandard ArchivistTurnToolPolicy = "STANDARD"
-	ToolPolicyAdvisory ArchivistTurnToolPolicy = "ADVISORY"
+	ToolPolicyStandard    ArchivistTurnToolPolicy = "STANDARD"
+	ToolPolicyAdvisory    ArchivistTurnToolPolicy = "ADVISORY"
+	ToolPolicyRemediation ArchivistTurnToolPolicy = "REMEDIATION"
 )
 
 func (policy ArchivistTurnToolPolicy) Effective() ArchivistTurnToolPolicy {
@@ -106,7 +107,7 @@ func (policy ArchivistTurnToolPolicy) Effective() ArchivistTurnToolPolicy {
 }
 
 func (policy ArchivistTurnToolPolicy) Valid() bool {
-	return policy == ToolPolicyStandard || policy == ToolPolicyAdvisory
+	return policy == ToolPolicyStandard || policy == ToolPolicyAdvisory || policy == ToolPolicyRemediation
 }
 
 type WorkKind string
@@ -294,6 +295,19 @@ func NewAdvisorySystemTurn(id, sessionID, requestID string, work *WorkReference)
 	}
 	turn.SubmittedBy = vocabulary.ActorSystem
 	turn.ToolPolicy = ToolPolicyAdvisory
+	return turn, nil
+}
+
+// NewRemediationSystemTurn creates a SYSTEM Turn that may inspect its fixed
+// work and apply only the evidence-bound recovery capability. It deliberately
+// remains distinct from both ordinary user authority and new-drive advice.
+func NewRemediationSystemTurn(id, sessionID, requestID string, work *WorkReference) (Turn, error) {
+	turn, err := NewTurnWithReferences(id, sessionID, requestID, nil, work)
+	if err != nil {
+		return Turn{}, err
+	}
+	turn.SubmittedBy = vocabulary.ActorSystem
+	turn.ToolPolicy = ToolPolicyRemediation
 	return turn, nil
 }
 

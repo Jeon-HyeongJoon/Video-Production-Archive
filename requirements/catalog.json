@@ -986,6 +986,18 @@
       "level": "unit"
     },
     {
+      "id": "WFL-014",
+      "design": "evidence-bound-execution-recovery",
+      "statement": "Archivist의 직접 복구는 현재 진단이 실행 가능으로 제시한 만료 실행 경계만 정확한 Job revision·reservation·fencing token·진단 fingerprint·증적 ID로 조정하고 복구 근거와 자원 해제를 원자적으로 영속화해야 한다.",
+      "given": "만료된 실행 리스와 활성 자원 예약이 있는 RUNNING Step, 현재 진단 fingerprint와 증적 ID 및 복구 저장 중 주입된 실패가 있다.",
+      "when": "Archivist가 같은 복구 요청을 실패 뒤 재시도하고 성공 뒤 다시 전송한다.",
+      "then": "실패한 Unit of Work는 상태·복구 증적·Event·receipt·리스·예약을 모두 원상 유지하고 성공한 요청만 Step을 QUEUED로 바꾸면서 immutable StepRecoveryEvidence, Domain Event, receipt와 리스·예약 해제를 한 transaction에 한 번 저장하며 재전송은 중복하지 않는다.",
+      "test_file": "internal/adapter/sqlitecommand/store_test.go",
+      "test_name": "TestEvidenceBoundExpiredExecutionRecoveryCommitsStateEvidenceAndResourceReleaseAtomically",
+      "status": "implemented",
+      "level": "integration"
+    },
+    {
       "id": "PIP-006",
       "design": "templates",
       "statement": "행사 요약은 Archivist Gateway가 수행하고 AI 사용 불가 시 사람 폴백을 가지며 QC 전에 별도 ContentReview를 거쳐야 한다.",
@@ -3782,14 +3794,26 @@
       "level": "integration"
     },
     {
+      "id": "MCP-011",
+      "design": "archivist-evidence-bound-recovery-capability",
+      "statement": "복구 제한 ArchivistTurn은 현재 Turn에 고정된 작업의 진단이 반환한 실행 가능 복구만 MCP로 직접 적용하고 다른 상태 변경과 오래되거나 변조된 복구 입력을 거부해야 한다.",
+      "given": "WorkReference와 REMEDIATION 정책이 고정된 Turn, 현재 또는 오래된 진단 fingerprint·Job revision·reservation·fencing token·증적 ID 및 일반 Job 생성 요청이 있다.",
+      "when": "Archivist가 작업 복구 Capability와 관련 없는 상태 변경 Capability를 호출한다.",
+      "then": "현재 진단의 recovery action과 모든 필드가 일치할 때만 복구 Command를 한 번 실행해 영속 복구 증적과 사후 진단을 반환하고 오래된 입력과 관련 없는 상태 변경은 Command 경계 전에 거부한다.",
+      "test_file": "internal/adapter/httpmcp/handler_test.go",
+      "test_name": "TestRemediationTurnAppliesOnlyCurrentBoundDiagnosticRecovery",
+      "status": "implemented",
+      "level": "integration"
+    },
+    {
       "id": "LRH-023",
       "design": "archivist-stalled-work-advisory-loop",
-      "statement": "Control의 자동 제안 루프는 ArchivistSession에 고정된 진행 중 작업에서 일정 시간 새 진행 증적이 없거나 실행 경계 이상 진단이 생기면 같은 진단 fingerprint의 읽기 전용 SYSTEM Turn을 정확히 한 번 제출해야 한다.",
+      "statement": "Control의 자동 제안 루프는 ArchivistSession에 고정된 진행 중 작업에서 일정 시간 새 진행 증적이 없거나 실행 경계 이상 진단이 생기면 같은 진단 fingerprint의 복구 제한 SYSTEM Turn을 정확히 한 번 제출해야 한다.",
       "given": "같은 Session이 참조하는 정상 진행 작업, 오래된 진행 관측 작업과 같은 진단 fingerprint의 반복 projection이 있다.",
       "when": "자동 제안 루프가 작업 진단을 반복 평가한다.",
-      "then": "정상 진행 작업에는 Turn을 만들지 않고 보고가 필요한 작업에는 WorkReference와 자동 제안 정책이 있는 SYSTEM Turn 하나만 제출하며 Worker 실행과 StepState는 바꾸지 않는다.",
+      "then": "정상 진행 작업에는 Turn을 만들지 않고 보고가 필요한 작업에는 WorkReference와 REMEDIATION 정책이 있는 SYSTEM Turn 하나만 제출하며 진단의 실행 가능 복구가 있으면 정확한 근거로 복구한 뒤 진단을 다시 읽고 그 밖의 재시도·취소·분류·단계 시작은 요청하지 않는다.",
       "test_file": "internal/application/archivistadvisory/service_test.go",
-      "test_name": "TestAdvisoryLoopQueuesOneReadOnlyTurnForStaleReferencedWork",
+      "test_name": "TestAdvisoryLoopQueuesOneRecoveryLimitedTurnForStaleReferencedWork",
       "status": "implemented",
       "level": "unit"
     },

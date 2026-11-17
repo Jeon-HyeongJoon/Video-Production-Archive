@@ -99,7 +99,7 @@ func (service *Service) Execute(ctx context.Context, envelope command.Envelope) 
 	if err := service.projection.Replace(ctx, view); err != nil {
 		return command.Result{}, err
 	}
-	if envelope.CommandType == job.CreateCommand && service.dispatcher != nil {
+	if (envelope.CommandType == job.CreateCommand || envelope.CommandType == job.RecoverExpiredExecutionCommand) && service.dispatcher != nil {
 		if err := service.dispatcher.DispatchAvailable(ctx); err != nil {
 			return command.Result{}, err
 		}
@@ -115,7 +115,8 @@ func Project(state job.State) (archiveworkspace.JobView, error) {
 			ExecutorKind: step.ExecutorKind, ActorID: step.ActorID, WorkerID: step.WorkerID,
 			WaitReason: step.Workflow.WaitReason, ErrorClass: step.ErrorClass, LogReference: step.LogReference,
 			LastEventAt: step.LastEventAt, DependencyIDs: append([]string(nil), step.Workflow.Dependencies...),
-			FailureEvidence: append([]job.StepFailureEvidence(nil), step.FailureEvidence...),
+			FailureEvidence:  append([]job.StepFailureEvidence(nil), step.FailureEvidence...),
+			RecoveryEvidence: append([]job.StepRecoveryEvidence(nil), step.RecoveryEvidence...),
 		})
 	}
 	return archiveworkspace.Project(archiveworkspace.ProjectionInput{

@@ -34,18 +34,19 @@ type Job struct {
 }
 
 type StepStatus struct {
-	ID              string
-	State           workflow.StepState
-	Progress        float64
-	ExecutorKind    vocabulary.ExecutorKind
-	ActorID         string
-	WorkerID        string
-	WaitReason      vocabulary.WaitReason
-	ErrorClass      string
-	LogReference    string
-	LastEventAt     time.Time
-	DependencyIDs   []string
-	FailureEvidence []corejob.StepFailureEvidence
+	ID               string
+	State            workflow.StepState
+	Progress         float64
+	ExecutorKind     vocabulary.ExecutorKind
+	ActorID          string
+	WorkerID         string
+	WaitReason       vocabulary.WaitReason
+	ErrorClass       string
+	LogReference     string
+	LastEventAt      time.Time
+	DependencyIDs    []string
+	FailureEvidence  []corejob.StepFailureEvidence
+	RecoveryEvidence []corejob.StepRecoveryEvidence
 }
 
 type ArchivistAction struct {
@@ -219,6 +220,10 @@ func cloneSteps(source []StepStatus) []StepStatus {
 				value := *steps[index].FailureEvidence[evidenceIndex].ProcessExitCode
 				steps[index].FailureEvidence[evidenceIndex].ProcessExitCode = &value
 			}
+		}
+		steps[index].RecoveryEvidence = append([]corejob.StepRecoveryEvidence(nil), steps[index].RecoveryEvidence...)
+		for evidenceIndex := range steps[index].RecoveryEvidence {
+			steps[index].RecoveryEvidence[evidenceIndex].Basis = append([]string(nil), steps[index].RecoveryEvidence[evidenceIndex].Basis...)
 		}
 	}
 	return steps

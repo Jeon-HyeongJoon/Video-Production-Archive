@@ -204,6 +204,8 @@
         "관측된 값만 사실로 기록하고 원인이 확인되지 않은 설명은 가설로 기록한다.",
         "사실은 증적 ID를 가지며 가설의 basis는 설명문이 아니라 관련 증적 ID를 참조한다.",
         "영속 Step Failure Evidence는 재시도 순서를 보존한 확인된 사실로 제공한다.",
+        "실행 가능한 복구는 현재 진단 fingerprint와 증적 ID에 묶인 구조화된 Recovery Action으로만 제공한다.",
+        "영속 Step Recovery Evidence는 실행된 복구와 사후 상태를 확인된 사실로 제공한다.",
         "원문 stdout·stderr, credential과 절대경로는 포함하지 않는다.",
         "새 ExecutionLease heartbeat는 Worker 실행 루프가 응답했다는 사실이며 subprocess 진행을 증명하지 않는다."
       ],
@@ -231,11 +233,15 @@
         {
           "type": "refers-to",
           "target": "step-failure-evidence"
+        },
+        {
+          "type": "refers-to",
+          "target": "step-recovery-evidence"
         }
       ],
       "sources": [
         "docs/design/10-capabilities-observability.md §4",
-        "requirements OBS-002~003, MCP-009"
+        "requirements OBS-002~003, MCP-009, MCP-011"
       ],
       "decided": "2026-11-15"
     },
@@ -723,6 +729,57 @@
         "docs/design/10-capabilities-observability.md §3",
         "requirements WRK-016, OBS-003",
         "사용자 결정 2026-11-17: 시스템 실행 근거를 영속화하고 Archivist가 근거로 협업"
+      ],
+      "decided": "2026-11-17"
+    },
+    {
+      "id": "step-recovery-evidence",
+      "layer": "product",
+      "kind": "record",
+      "name": {
+        "ko": "단계 복구 증적",
+        "en": "Step Recovery Evidence"
+      },
+      "code_name": "StepRecoveryEvidence",
+      "definition": "현재 작업 진단이 실행 가능으로 확정한 안전 복구 하나를 진단 fingerprint·근거 증적과 실제 실행 경계에 묶어 보존하는 변경 불가능한 기록.",
+      "rules": [
+        "action code·Job과 Step·ResourceReservation·fencing token·진단 fingerprint·basis 증적 ID·실행자·시각·결과 StepState를 기록한다.",
+        "복구 전 실패 증적을 수정하거나 삭제하지 않는다.",
+        "Job 상태·Domain Event·idempotency receipt·ResourceReservation과 ExecutionLease 해제를 같은 transaction에서 확정한다.",
+        "같은 멱등 key의 재전송으로 복구 증적이나 상태 변경을 중복하지 않는다.",
+        "원문 process 출력·실행 인수·credential·절대경로를 기록하지 않는다."
+      ],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "evidence"
+        },
+        {
+          "type": "part-of",
+          "target": "step"
+        },
+        {
+          "type": "refers-to",
+          "target": "work-diagnostic"
+        },
+        {
+          "type": "refers-to",
+          "target": "resource-reservation"
+        },
+        {
+          "type": "refers-to",
+          "target": "fencing-token"
+        }
+      ],
+      "sources": [
+        "docs/design/03-domain-workflow.md §6",
+        "docs/design/10-capabilities-observability.md §3",
+        "requirements WFL-014, MCP-011",
+        "사용자 결정 2026-11-17: Archivist가 안전한 복구를 직접 수행"
       ],
       "decided": "2026-11-17"
     },
@@ -2062,7 +2119,7 @@
         "Control에 QUEUED 상태를 확정한 뒤 Archivist Host에 전달한다.",
         "terminal idle이나 화면 문자열로 완료를 추론하지 않는다.",
         "중간 화면 표시는 raw terminal이 아니라 정제된 ArchivistTurnEntry만 사용한다.",
-        "SYSTEM 자동 제안 Turn은 ArchivistTurnToolPolicy.ADVISORY를 고정하고 일반 사용자 Turn과 단계 완료 재호출 Turn은 STANDARD를 사용한다."
+        "새 드라이브 자동 제안 Turn은 ArchivistTurnToolPolicy.ADVISORY, 작업 이상 자동 복구 Turn은 REMEDIATION을 고정하고 일반 사용자 Turn과 단계 완료 재호출 Turn은 STANDARD를 사용한다."
       ],
       "forbidden": {
         "words": [],
@@ -2103,12 +2160,18 @@
         {
           "id": "ADVISORY",
           "description": "자동 제안 Turn이 읽기·현재 후보 선택 준비만 직접 수행하고 아카이브 실행은 ActionCard로만 제안한다."
+        },
+        {
+          "id": "REMEDIATION",
+          "description": "작업 이상 SYSTEM Turn이 고정 작업을 읽고 현재 진단이 반환한 증거 기반 안전 복구 하나만 직접 수행한 뒤 사후 진단한다."
         }
       ],
       "rules": [
         "정책이 없는 이전 영속 Turn은 STANDARD로 읽는다.",
         "ADVISORY는 보류 판정·전사 시작·일반 Job 생성을 직접 실행하지 않는다.",
-        "ADVISORY의 아카이브 실행 요청은 PENDING ActionCard를 만들고 업무 실행은 시작하지 않는다."
+        "ADVISORY의 아카이브 실행 요청은 PENDING ActionCard를 만들고 업무 실행은 시작하지 않는다.",
+        "REMEDIATION은 고정 작업의 읽기와 현재 Work Diagnostic이 반환한 evidence-bound recovery만 허용한다.",
+        "REMEDIATION은 취소·보류 분류·종결 실패 재시도·단계 시작·일반 Job 생성을 거부한다."
       ],
       "forbidden": {
         "words": [],
@@ -2122,11 +2185,19 @@
         {
           "type": "refers-to",
           "target": "action-card"
+        },
+        {
+          "type": "refers-to",
+          "target": "work-diagnostic"
+        },
+        {
+          "type": "refers-to",
+          "target": "step-recovery-evidence"
         }
       ],
       "sources": [
         "docs/design/11-archivist-host.md §7",
-        "requirements MCP-010, LRH-023, LRH-024"
+        "requirements MCP-010~011, LRH-023~024"
       ],
       "decided": "2026-11-15"
     },
