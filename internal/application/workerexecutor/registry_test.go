@@ -475,14 +475,14 @@ func TestProductionExecutorClassifiesInputTransientAndStorageFailures(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	transientRegistry, err := New(roots, errorHandler{err: errors.New("temporary subprocess failure")})
+	transientRegistry, err := New(roots, errorHandler{err: errors.Join(ErrProductionExecution, archivebundle.ErrPackageExists)})
 	if err != nil {
 		t.Fatal(err)
 	}
 	assignment := workerclient.Assignment{JobID: spec.JobID, StepID: spec.StepID, FencingToken: 1, ExecutionSpec: spec}
 	transient := transientRegistry.Execute(context.Background(), assignment)
 	if transient.FailureClass != workflow.FailureTransient || transient.ErrorClass != "STEP_EXECUTION_FAILED" ||
-		transient.CauseCode != "ORGANIZE_MEDIA_FAILED" || transient.ErrorSummary == "" {
+		transient.CauseCode != "ARCHIVE_PACKAGE_ALREADY_EXISTS" || transient.ErrorSummary != "The Archive Package already exists" {
 		t.Fatalf("temporary Adapter error was not retryable: %+v", transient)
 	}
 	badChecksum := spec

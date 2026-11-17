@@ -11,6 +11,14 @@ import (
 	"sort"
 	"time"
 
+	"videoarchive/internal/adapter/archivebundle"
+	"videoarchive/internal/adapter/archivecatalog"
+	"videoarchive/internal/adapter/ffmpeg"
+	"videoarchive/internal/adapter/ffprobe"
+	"videoarchive/internal/adapter/organizedmedia"
+	"videoarchive/internal/adapter/subtitlefile"
+	"videoarchive/internal/adapter/transcripttext"
+	"videoarchive/internal/adapter/whispercpp"
 	"videoarchive/internal/adapter/workerconfig"
 	"videoarchive/internal/application/workerclient"
 	"videoarchive/internal/core/archive"
@@ -321,5 +329,44 @@ func operationFailureDetails(operation execution.Operation, err error) (string, 
 		exitCode := exitError.ExitCode()
 		return "PROCESS_EXIT_NONZERO", summary, &exitCode
 	}
+	if causeCode, causeSummary, classified := typedFailureCause(err); classified {
+		return causeCode, causeSummary, nil
+	}
 	return code, summary, nil
+}
+
+func typedFailureCause(err error) (string, string, bool) {
+	type classification struct {
+		target  error
+		code    string
+		summary string
+	}
+	classifications := []classification{
+		{archivebundle.ErrPackageExists, "ARCHIVE_PACKAGE_ALREADY_EXISTS", "The Archive Package already exists"},
+		{archivebundle.ErrPackageState, "ARCHIVE_PACKAGE_STATE_INVALID", "The Archive Package state does not permit this operation"},
+		{archivebundle.ErrInvalidRequest, "ARCHIVE_PACKAGE_REQUEST_INVALID", "The Archive Package request failed validation"},
+		{archivecatalog.ErrCatalogReconciliation, "ARCHIVE_CATALOG_RECONCILIATION_FAILED", "Archive Catalog reconciliation failed"},
+		{archivecatalog.ErrInvalidRequest, "ARCHIVE_CATALOG_REQUEST_INVALID", "The Archive Catalog request failed validation"},
+		{archivecatalog.ErrPublishFailed, "ARCHIVE_CATALOG_PUBLISH_FAILED", "Archive Catalog publication failed"},
+		{organizedmedia.ErrInvalidRequest, "ORGANIZED_MEDIA_REQUEST_INVALID", "The organized media request failed validation"},
+		{organizedmedia.ErrPublishFailed, "ORGANIZED_MEDIA_PUBLISH_FAILED", "Organized media publication failed"},
+		{ffmpeg.ErrInvalidRequest, "FFMPEG_REQUEST_INVALID", "The FFmpeg request failed validation"},
+		{ffmpeg.ErrRenderFailed, "FFMPEG_RENDER_FAILED", "FFmpeg rendering failed"},
+		{ffmpeg.ErrAudioExtractionFailed, "FFMPEG_AUDIO_EXTRACTION_FAILED", "FFmpeg audio extraction failed"},
+		{ffprobe.ErrInvalidRequest, "FFPROBE_REQUEST_INVALID", "The FFprobe request failed validation"},
+		{ffprobe.ErrProbeFailed, "FFPROBE_EXECUTION_FAILED", "FFprobe execution failed"},
+		{ffprobe.ErrInvalidOutput, "FFPROBE_OUTPUT_INVALID", "FFprobe returned invalid structured output"},
+		{whispercpp.ErrInvalidRequest, "WHISPER_REQUEST_INVALID", "The speech transcription request failed validation"},
+		{whispercpp.ErrTranscriptionFailed, "WHISPER_TRANSCRIPTION_FAILED", "Speech transcription failed"},
+		{subtitlefile.ErrInvalidRequest, "SUBTITLE_REQUEST_INVALID", "The subtitle request failed validation"},
+		{subtitlefile.ErrPublishFailed, "SUBTITLE_PUBLISH_FAILED", "Subtitle publication failed"},
+		{transcripttext.ErrInvalidRequest, "TRANSCRIPT_TEXT_REQUEST_INVALID", "The transcript text request failed validation"},
+		{transcripttext.ErrPublishFailed, "TRANSCRIPT_TEXT_PUBLISH_FAILED", "Transcript text publication failed"},
+	}
+	for _, candidate := range classifications {
+		if errors.Is(err, candidate.target) {
+			return candidate.code, candidate.summary, true
+		}
+	}
+	return "", "", false
 }
