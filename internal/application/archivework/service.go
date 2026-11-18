@@ -55,6 +55,7 @@ const (
 
 type Summary struct {
 	WorkID           string
+	Revision         uint64
 	Kind             Kind
 	State            State
 	CreatedAt        time.Time
@@ -609,7 +610,7 @@ func sortChildren(children []ChildJob) {
 
 func summarizeRun(run archiverun.State, children []ChildJob, drive archiveintakeworkspace.DriveView, current bool, completed []archiveintakeworkspace.CompletedWorkView) Summary {
 	summary := Summary{
-		WorkID: run.ID, Kind: ArchiveRunWork, CreatedAt: run.CreatedAt, LastEventAt: run.CreatedAt,
+		WorkID: run.ID, Revision: run.Revision, Kind: ArchiveRunWork, CreatedAt: run.CreatedAt, LastEventAt: run.CreatedAt,
 		WorkerID: run.WorkerID, SourceVolumeID: run.SourceVolumeID, SourceStorageID: run.SourceStorageID,
 		ArchiveStorageID: run.ArchiveStorageID, FolderCount: len(run.FolderIDs), ChildJobCount: len(children),
 		ResultCount: len(completed),
@@ -646,7 +647,7 @@ func summarizeProjectedRun(runID string, drive archiveintakeworkspace.DriveView,
 		}
 	}
 	summary := Summary{
-		WorkID: runID, Kind: ArchiveRunWork, CreatedAt: createdAt, LastEventAt: createdAt,
+		WorkID: runID, Revision: drive.ArchiveRunRevision, Kind: ArchiveRunWork, CreatedAt: createdAt, LastEventAt: createdAt,
 		WorkerID: drive.WorkerID, SourceVolumeID: drive.SourceVolumeID, SourceStorageID: drive.SourceStorageID,
 		ArchiveStorageID: drive.ArchiveStorageID, FolderCount: drive.FolderCount, HoldCount: drive.HoldCount,
 		ChildJobCount: len(children), ResultCount: len(completed),
@@ -673,7 +674,7 @@ func summarizeProjectedRun(runID string, drive archiveintakeworkspace.DriveView,
 
 func summarizeStandalone(job archiveworkspace.JobSummary) Summary {
 	return Summary{
-		WorkID: job.JobID, Kind: StandaloneJob, State: stateFromJob(job), CreatedAt: job.LastEventAt,
+		WorkID: job.JobID, Revision: job.Revision, Kind: StandaloneJob, State: stateFromJob(job), CreatedAt: job.LastEventAt,
 		LastEventAt: job.LastEventAt, WorkerID: job.WorkerID, ChildJobCount: 1, Progress: job.Progress, Title: job.TargetTitle,
 	}
 }

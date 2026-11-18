@@ -16,9 +16,11 @@ import (
 	"videoarchive/internal/application/archiveintakeworkspace"
 	"videoarchive/internal/application/archiveorganization"
 	"videoarchive/internal/application/archivetranscription"
+	"videoarchive/internal/application/archivework"
 	"videoarchive/internal/application/archiveworkspace"
 	"videoarchive/internal/application/archivistcontrol"
 	"videoarchive/internal/application/archivistloop"
+	"videoarchive/internal/application/systemstatus"
 	"videoarchive/internal/application/workdiagnostics"
 	"videoarchive/internal/application/workrecovery"
 	coreintake "videoarchive/internal/core/archiveintake"
@@ -29,6 +31,7 @@ import (
 	"videoarchive/internal/core/mediaanalysis"
 	"videoarchive/internal/core/organization"
 	"videoarchive/internal/core/vocabulary"
+	"videoarchive/internal/core/worker"
 	"videoarchive/internal/core/workflow"
 )
 
@@ -289,6 +292,101 @@ type fixedWorkDiagnostics struct{ snapshot workdiagnostics.Snapshot }
 
 func (fixture fixedWorkDiagnostics) Diagnose(context.Context, archivistruntime.WorkReference) (workdiagnostics.Snapshot, error) {
 	return fixture.snapshot, nil
+}
+
+type systemStatusWorks []archivework.Summary
+
+func (fixture systemStatusWorks) Inbox(context.Context) ([]archivework.Summary, error) {
+	return append([]archivework.Summary(nil), fixture...), nil
+}
+
+type systemStatusWorkers []worker.Status
+
+func (fixture systemStatusWorkers) Statuses(context.Context) ([]worker.Status, error) {
+	return append([]worker.Status(nil), fixture...), nil
+}
+
+type systemStatusHosts []archivistruntime.HostStatus
+
+func (fixture systemStatusHosts) HostStatuses() []archivistruntime.HostStatus {
+	return append([]archivistruntime.HostStatus(nil), fixture...)
+}
+
+type systemStatusDiagnostics map[string]workdiagnostics.Snapshot
+
+func (fixture systemStatusDiagnostics) Diagnose(_ context.Context, reference archivistruntime.WorkReference) (workdiagnostics.Snapshot, error) {
+	return fixture[reference.WorkID], nil
+}
+
+// Requirement: MCP-012
+func TestMCPReadsArchiveWideStatusWithoutSelectionAndKeepsEvidenceSanitized(t *testing.T) {
+	now := time.Date(2026, 11, 18, 11, 0, 0, 0, time.UTC)
+	diagnostics := systemStatusDiagnostics{
+		"RUN-ACTIVE": {
+			WorkKind: archivistruntime.WorkArchiveRun, WorkID: "RUN-ACTIVE", WorkRevision: 2, ObservedAt: now,
+			ShouldReport: true, Fingerprint: "active-diagnostic-fp",
+			Facts: []workdiagnostics.Fact{{EvidenceID: "EVD-LEASE-EXPIRED", Code: "EXECUTION_LEASE_EXPIRED", Summary: "execution lease expired", ObservedAt: now}},
+		},
+		"JOB-FAILED": {
+			WorkKind: archivistruntime.WorkJob, WorkID: "JOB-FAILED", WorkRevision: 3, ObservedAt: now,
+			ShouldReport: true, Fingerprint: "failed-diagnostic-fp",
+			Jobs: []workdiagnostics.JobDiagnostic{{
+				JobID: "JOB-FAILED", JobRevision: 3, StepID: "render", StepState: workflow.Failed,
+				FailureEvidence: []corejob.StepFailureEvidence{{
+					EvidenceID: "EVD-WORKER-FAILED", StepID: "render", ErrorClass: "STEP_EXECUTION_FAILED",
+					CauseCode: "PROCESS_EXIT_NONZERO", Summary: `C:\private\token-secret.log`, LogReference: `C:\private\token-secret.log`,
+				}},
+			}},
+			Facts: []workdiagnostics.Fact{{EvidenceID: "EVD-WORKER-FAILED", Code: "WORKER_FAILURE_RECORDED", Summary: `C:\private\token-secret.log`, ObservedAt: now}},
+		},
+	}
+	status, err := systemstatus.New(
+		systemStatusWorks{
+			{WorkID: "RUN-ACTIVE", Revision: 2, Kind: archivework.ArchiveRunWork, State: archivework.StateActive, WorkerID: "worker-windows", LastEventAt: now.Add(-20 * time.Minute)},
+			{WorkID: "JOB-FAILED", Revision: 3, Kind: archivework.StandaloneJob, State: archivework.StateFailed, WorkerID: "worker-windows", LastEventAt: now.Add(-time.Hour)},
+			{WorkID: "RUN-HOLD", Revision: 1, Kind: archivework.ArchiveRunWork, State: archivework.StateAttention, WorkerID: "worker-windows", HoldCount: 2, LastEventAt: now.Add(-30 * time.Minute)},
+			{WorkID: "RUN-DONE", Revision: 1, Kind: archivework.ArchiveRunWork, State: archivework.StateCompleted, LastEventAt: now.Add(-2 * time.Hour)},
+			{WorkID: "RUN-REPLACED", Revision: 1, Kind: archivework.ArchiveRunWork, State: archivework.StateFailed, ReplacementWorkID: "RUN-DONE", LastEventAt: now.Add(-3 * time.Hour)},
+		},
+		systemStatusWorkers{{
+			WorkerID: "worker-windows", State: "ONLINE", LastHeartbeat: now.Add(-time.Second),
+			Metrics:  worker.Metrics{ObservedAt: now.Add(-time.Second), AverageCPU5m: 12.5, AcceptingWork: true},
+			Capacity: worker.Capacity{AvailableMemoryBytes: 8 << 30, ScratchFreeBytes: 300 << 30, HeavySlotsMaximum: 1, LightSlotsMaximum: 2, AdditionalWorkPossible: true},
+		}},
+		systemStatusHosts{{ArchivistHostID: "archivist-windows", State: "ONLINE", LastHeartbeat: now.Add(-2 * time.Second)}},
+		diagnostics, func() time.Time { return now },
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler, err := New(Configuration{
+		Archivists: fixtureArchivistRuntime{selectionErr: true}, Catalog: fixtureCatalog{},
+		ArchiveWorkspace: fixtureArchiveWorkspace{}, Commands: fixtureCommands{}, SystemStatus: status,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tools := mcpTestRequest(handler, http.MethodGet, "/mcp/v1/tools", "", "secret")
+	if tools.Code != http.StatusOK || !strings.Contains(tools.Body.String(), ToolSystemStatusGet) {
+		t.Fatalf("system status capability is not advertised: %d %s", tools.Code, tools.Body.String())
+	}
+	response := mcpTestRequest(handler, http.MethodPost, "/mcp/v1/call", archiveToolCall("CALL-SYSTEM-STATUS", ToolSystemStatusGet, `{}`), "secret")
+	body := response.Body.String()
+	for _, expected := range []string{
+		`"worker_id":"worker-windows"`, `"archivist_host_id":"archivist-windows"`,
+		`"active":1`, `"attention":1`, `"failed":1`, `"completed":2`,
+		`"work_id":"RUN-ACTIVE"`, `"work_id":"JOB-FAILED"`, `"work_id":"RUN-HOLD"`,
+		`"evidence_id":"EVD-LEASE-EXPIRED"`, `"evidence_id":"EVD-WORKER-FAILED"`,
+	} {
+		if response.Code != http.StatusOK || !strings.Contains(body, expected) {
+			t.Fatalf("archive-wide status is incomplete, missing %s: %d %s", expected, response.Code, body)
+		}
+	}
+	for _, forbidden := range []string{`C:\private`, "token-secret", "credential", "password"} {
+		if strings.Contains(strings.ToLower(body), strings.ToLower(forbidden)) {
+			t.Fatalf("system status exposed private process data: %s", body)
+		}
+	}
 }
 
 type capturingRecoveryCommands struct {

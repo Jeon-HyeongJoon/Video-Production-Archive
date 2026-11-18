@@ -295,6 +295,7 @@ func ToolProgress(name string) string {
 		"archive.jobs.create.v1": "작업 요청", "archive.work.reference.get.v1": "이어갈 작업 확인",
 		"archive.work.diagnostics.get.v1":     "작업 진단 확인",
 		"archive.work.recovery.apply.v1":      "안전 복구 실행",
+		"archive.system.status.get.v1":        "전체 현황 확인",
 		"archive.intake.candidates.search.v1": "입고 후보 검색", "archive.intake.source.select.v1": "원본 선택",
 		"archive.intake.selection.pin.v1": "작업 범위 고정",
 		"archive.intake.selection.get.v1": "선택 범위 확인",
@@ -348,6 +349,10 @@ func knownTools() map[string]ToolDefinition {
 		},
 		"archive.work.diagnostics.get.v1": {
 			Name: "archive.work.diagnostics.get.v1", ProviderName: "archive_work_diagnostics_get_v1", Description: "Read sanitized execution diagnostics and persisted failure evidence IDs for the persistent work fixed to this turn. Confirmed facts, hypotheses with evidence-ID basis, and next checks are separate; this tool never changes work state.",
+			Parameters: objectSchema(map[string]any{}),
+		},
+		"archive.system.status.get.v1": {
+			Name: "archive.system.status.get.v1", ProviderName: "archive_system_status_get_v1", Description: "Read the current Archive-wide Worker and Archivist Host connection and capacity status, work counts, and unresolved or stalled work with sanitized evidence. No drive selection or work reference is required and this tool never changes state.",
 			Parameters: objectSchema(map[string]any{}),
 		},
 		"archive.work.recovery.apply.v1": {

@@ -19,6 +19,7 @@ import (
 	"videoarchive/internal/application/archivetranscription"
 	"videoarchive/internal/application/archiveworkspace"
 	"videoarchive/internal/application/archivistcontrol"
+	"videoarchive/internal/application/systemstatus"
 	"videoarchive/internal/application/workdiagnostics"
 	"videoarchive/internal/application/workrecovery"
 	"videoarchive/internal/core/archivistruntime"
@@ -34,6 +35,7 @@ const (
 	ToolWorkReferenceGet          = "archive.work.reference.get.v1"
 	ToolWorkDiagnosticsGet        = "archive.work.diagnostics.get.v1"
 	ToolWorkRecoveryApply         = "archive.work.recovery.apply.v1"
+	ToolSystemStatusGet           = "archive.system.status.get.v1"
 	ToolAssetsSearch              = "archive.assets.search.v1"
 	ToolJobsCreate                = "archive.jobs.create.v1"
 	ToolIntakeCandidatesSearch    = "archive.intake.candidates.search.v1"
@@ -69,6 +71,10 @@ type WorkDiagnosticsReader interface {
 
 type WorkRecoveryExecutor interface {
 	Apply(context.Context, archivistruntime.WorkReference, command.Envelope) (workrecovery.Result, error)
+}
+
+type SystemStatusReader interface {
+	Snapshot(context.Context) (systemstatus.Snapshot, error)
 }
 
 type turnPolicyReader interface {
@@ -111,6 +117,7 @@ type Configuration struct {
 	ArchiveTranscriptions ArchiveTranscriptionStarter
 	WorkDiagnostics       WorkDiagnosticsReader
 	WorkRecovery          WorkRecoveryExecutor
+	SystemStatus          SystemStatusReader
 }
 
 type Handler struct {
@@ -124,6 +131,7 @@ type Handler struct {
 	archiveTranscriptions ArchiveTranscriptionStarter
 	workDiagnostics       WorkDiagnosticsReader
 	workRecovery          WorkRecoveryExecutor
+	systemStatus          SystemStatusReader
 	router                http.Handler
 }
 
@@ -146,6 +154,7 @@ func New(configuration Configuration) (*Handler, error) {
 		archiveRuns: configuration.ArchiveRuns, archiveTranscriptions: configuration.ArchiveTranscriptions,
 		workDiagnostics: configuration.WorkDiagnostics,
 		workRecovery:    configuration.WorkRecovery,
+		systemStatus:    configuration.SystemStatus,
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /mcp/v1/tools", handler.tools)
@@ -175,6 +184,9 @@ func (handler *Handler) tools(writer http.ResponseWriter, _ *http.Request) {
 	}
 	if handler.workDiagnostics != nil {
 		result = append(result, map[string]string{"name": ToolWorkDiagnosticsGet, "action_class": string(vocabulary.ActionRead)})
+	}
+	if handler.systemStatus != nil {
+		result = append(result, map[string]string{"name": ToolSystemStatusGet, "action_class": string(vocabulary.ActionRead)})
 	}
 	if handler.workDiagnostics != nil && handler.workRecovery != nil {
 		result = append(result, map[string]string{"name": ToolWorkRecoveryApply, "action_class": string(vocabulary.ActionProcess)})
@@ -229,6 +241,7 @@ func (handler *Handler) call(writer http.ResponseWriter, request *http.Request) 
 	}
 	if payload.Tool != ToolJobsGet && payload.Tool != ToolWorkReferenceGet && payload.Tool != ToolAssetsSearch && payload.Tool != ToolJobsCreate &&
 		payload.Tool != ToolWorkDiagnosticsGet &&
+		payload.Tool != ToolSystemStatusGet &&
 		payload.Tool != ToolWorkRecoveryApply &&
 		payload.Tool != ToolIntakeCandidatesSearch && payload.Tool != ToolIntakeSourceSelect && payload.Tool != ToolIntakeSelectionPin &&
 		payload.Tool != ToolDriveSelectionGet && payload.Tool != ToolArchiveRunStatus &&
@@ -258,6 +271,8 @@ func (handler *Handler) call(writer http.ResponseWriter, request *http.Request) 
 		handler.getWorkReference(writer, request, payload)
 	case ToolWorkDiagnosticsGet:
 		handler.getWorkDiagnostics(writer, request, payload)
+	case ToolSystemStatusGet:
+		handler.getSystemStatus(writer, request, payload)
 	case ToolWorkRecoveryApply:
 		handler.applyWorkRecovery(writer, request, hostID, payload)
 	case ToolAssetsSearch:
@@ -289,7 +304,7 @@ func (handler *Handler) call(writer http.ResponseWriter, request *http.Request) 
 
 func remediationToolAllowed(tool string) bool {
 	switch tool {
-	case ToolJobsGet, ToolWorkReferenceGet, ToolWorkDiagnosticsGet, ToolArchiveRunStatus, ToolWorkRecoveryApply:
+	case ToolJobsGet, ToolWorkReferenceGet, ToolWorkDiagnosticsGet, ToolSystemStatusGet, ToolArchiveRunStatus, ToolWorkRecoveryApply:
 		return true
 	default:
 		return false
@@ -298,7 +313,7 @@ func remediationToolAllowed(tool string) bool {
 
 func advisoryToolAllowed(tool string) bool {
 	switch tool {
-	case ToolJobsGet, ToolWorkReferenceGet, ToolWorkDiagnosticsGet, ToolAssetsSearch,
+	case ToolJobsGet, ToolWorkReferenceGet, ToolWorkDiagnosticsGet, ToolSystemStatusGet, ToolAssetsSearch,
 		ToolIntakeCandidatesSearch, ToolIntakeSourceSelect, ToolIntakeSelectionPin,
 		ToolDriveSelectionGet, ToolArchiveRunStatus, ToolOrganizationHoldsList,
 		ToolOrganizationHoldGet, ToolArchiveRunStart:
@@ -360,6 +375,26 @@ func (handler *Handler) getWorkDiagnostics(writer http.ResponseWriter, request *
 	}
 	_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, reference.WorkID, "COMPLETED")
 	writeJSON(writer, http.StatusOK, map[string]any{"data": workdiagnostics.Sanitize(diagnostic)})
+}
+
+func (handler *Handler) getSystemStatus(writer http.ResponseWriter, request *http.Request, call callRequest) {
+	if handler.systemStatus == nil {
+		writeError(writer, http.StatusNotFound, "MCP_CAPABILITY_NOT_FOUND")
+		return
+	}
+	if !validEmptyInput(call.Input) {
+		_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, "", "FAILED")
+		writeError(writer, http.StatusBadRequest, "MCP_INPUT_INVALID")
+		return
+	}
+	snapshot, err := handler.systemStatus.Snapshot(request.Context())
+	if err != nil {
+		_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, "", "FAILED")
+		writeError(writer, http.StatusInternalServerError, "MCP_SYSTEM_STATUS_UNAVAILABLE")
+		return
+	}
+	_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, "", "COMPLETED")
+	writeJSON(writer, http.StatusOK, map[string]any{"data": snapshot})
 }
 
 func (handler *Handler) applyWorkRecovery(writer http.ResponseWriter, request *http.Request, hostID string, call callRequest) {

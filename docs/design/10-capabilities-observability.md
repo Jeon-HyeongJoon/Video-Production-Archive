@@ -74,7 +74,9 @@ Domain Event는 업무 상태 변경 사실이고, progress·metric·process log
 
 `WorkDiagnostic`은 읽기 모델이며 StepState·WaitReason·ExecutionLease·ResourceReservation을 고치지 않는다. Worker heartbeat 만료, 실행 리스 누락·만료, 저장된 WAITING·FAILED, 새 progress 증적이 없는 장시간 RUNNING과 Control 예약·Worker 관측 load 불일치를 구조화된 진단 code와 다음 확인 방법으로 나타낸다. 원문 stdout·stderr, credential, 실행 인수와 절대경로는 진단 응답에 넣지 않는다. 작업 공간과 Archivist MCP에는 정규화 code·관측 시각·정제 summary·안전한 log reference만 제공한다. 고빈도 FFmpeg·STT 세부 진행과 정제된 log tail을 모든 실행기에 연결하는 일은 계속 `OBS-001`의 후속 범위다.
 
-Worker가 보고한 각 실패는 `StepFailureEvidence`로 Job 원장에 남으므로 진단은 현재 오류뿐 아니라 이전 retry의 실패 순서·operation·Worker·fencing token·원인 code·process exit code까지 원래 증적 ID로 제공한다. Archivist는 이 ID가 붙은 항목만 확인된 사실로 설명하고, 기록에 없는 원인은 가설로 남겨 다음 확인 방법을 함께 제안한다. MCP 경계는 같은 정제 함수를 한 번 더 적용해 원문 process 데이터나 경로가 Worker 입력에 섞여도 외부로 내보내지 않는다. `WRK-016`, `OBS-003`, `MCP-009`
+작업 참조가 아직 없는 대화에서 전체 현황을 물을 때는 `SystemStatus` projection이 같은 WorkerCapacity·Archivist Host·관리 작업·WorkDiagnostic 읽기 모델을 조합한다. 이 projection은 Worker와 Host의 연결·최근 heartbeat, Worker의 예약 차감 자원과 추가 작업 가능 여부, 처리 중·시작 대기·직접 확인·실패·완료 작업 수를 반환한다. 아직 해결되지 않은 실패·직접 확인 작업과 진단상 보고가 필요한 처리 중 작업만 최근 순서로 최대 50건 포함하고, 처리된 과거 실패는 작업 공간과 같은 `replacement_work_id` 규칙으로 완료 이력에 센다. 각 문제는 정제된 진단과 증적 ID를 포함하지만 선택·WorkReference를 만들거나 업무 상태를 바꾸지 않는다. `MCP-012`
+
+Worker가 보고한 각 실패는 `StepFailureEvidence`로 Job 원장에 남으므로 진단은 현재 오류뿐 아니라 이전 retry의 실패 순서·operation·Worker·fencing token·원인 code·process exit code까지 원래 증적 ID로 제공한다. Archivist는 이 ID가 붙은 항목만 확인된 사실로 설명하고, 기록에 없는 원인은 가설로 남겨 다음 확인 방법을 함께 제안한다. MCP 경계는 같은 정제 함수를 한 번 더 적용해 원문 process 데이터나 경로가 Worker 입력에 섞여도 외부로 내보내지 않는다. `WRK-016`, `OBS-003`, `MCP-009`, `MCP-012`
 
 진단은 설명용 `suggested_actions`와 실행 가능한 `recovery_actions`를 구분한다. 후자는 Control이 현재 저장된 실행 경계를 확인해 안전하다고 판정한 만료 리스 조정만 Job revision·Step·reservation·fencing token·진단 fingerprint·basis 증적 ID와 함께 반환한다. Archivist가 실행하면 `StepRecoveryEvidence`가 원래 실패 증적을 보존한 채 추가되고, 복구 뒤 진단은 이 증적 ID와 결과 StepState를 확인된 사실로 제공한다. fingerprint나 실행 경계가 달라진 요청은 상태 변경 전에 거부한다. `WFL-014`, `MCP-011`
 

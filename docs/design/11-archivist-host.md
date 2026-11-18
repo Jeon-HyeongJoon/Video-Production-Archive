@@ -166,7 +166,7 @@ archivist_turn_lease_fencing_token
 idempotency_key
 ```
 
-Control의 MCP Adapter는 도구를 좁은 Application Service 입력으로 변환한다. 조회는 정제된 결과를 반환하고 상태 변경은 사람의 직접 명령과 같은 Command Bus를 통과한다. `archive.work.reference.get.v1`은 현재 Turn에 고정된 `WorkReference`만 반환해 작업 도중 이관 대상의 종류·ID·revision을 채팅 본문과 분리한다. 선택 범위 또는 `WorkReference`가 없는 유효한 Turn을 조회하면 `bound=false`를 반환하고 Tool Call을 `COMPLETED`로 기록한다. 잘못된 Turn 문맥과 Adapter 오류만 조회 실패이며, 선택을 요구하는 실행 Capability는 계속 ActionCard 또는 충돌로 차단한다. 모든 영속 업무를 서버 Adapter 없이 직접 실행하는 공통 Capability Registry는 `APP-001` planned 경계다. 제공 도구는 업무 의미 allowlist로 제한하며 `run_shell`, 임의 terminal 입력, 임의 path 읽기·이동·삭제를 제공하지 않는다. `COL-004`, `MCP-008`
+Control의 MCP Adapter는 도구를 좁은 Application Service 입력으로 변환한다. 조회는 정제된 결과를 반환하고 상태 변경은 사람의 직접 명령과 같은 Command Bus를 통과한다. `archive.work.reference.get.v1`은 현재 Turn에 고정된 `WorkReference`만 반환해 작업 도중 이관 대상의 종류·ID·revision을 채팅 본문과 분리한다. 선택 범위 또는 `WorkReference`가 없는 유효한 Turn을 조회하면 `bound=false`를 반환하고 Tool Call을 `COMPLETED`로 기록한다. `archive.system.status.get.v1`은 선택 없이 Worker·Archivist Host 연결과 자원, 작업 상태별 수, 미해결·정체 의심 작업의 정제 진단과 증적 ID를 반환하며 어떤 참조나 업무 상태도 만들지 않는다. 잘못된 Turn 문맥과 Adapter 오류만 조회 실패이며, 선택을 요구하는 실행 Capability는 계속 ActionCard 또는 충돌로 차단한다. 모든 영속 업무를 서버 Adapter 없이 직접 실행하는 공통 Capability Registry는 `APP-001` planned 경계다. 제공 도구는 업무 의미 allowlist로 제한하며 `run_shell`, 임의 terminal 입력, 임의 path 읽기·이동·삭제를 제공하지 않는다. `COL-004`, `MCP-008`, `MCP-012`
 
 ArchivistToolCall receipt가 이미 있으면 최초 결과를 반환한다. timeout이나 CLI 재개 뒤에도 같은 호출이 Command를 다시 만들지 않는다. 인증된 MCP Capability는 allowlist의 비파괴 `PROCESS` Command를 직접 실행할 수 있다. 파괴적 작업과 `GATED` 작업은 ActionCard를 만들 수만 있고, 별도의 사람 Approval과 최신 expected revision 없이 실행하지 않는다.
 

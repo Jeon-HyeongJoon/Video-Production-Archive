@@ -41,6 +41,7 @@ import (
 	"videoarchive/internal/application/archivisthostactivation"
 	"videoarchive/internal/application/dispatchcoordinator"
 	"videoarchive/internal/application/jobcontrol"
+	"videoarchive/internal/application/systemstatus"
 	"videoarchive/internal/application/workdiagnostics"
 	"videoarchive/internal/application/workercapacity"
 	"videoarchive/internal/application/workercontrol"
@@ -309,6 +310,10 @@ func OpenWithDependencies(ctx context.Context, configuration bootconfig.Configur
 		return fail(err)
 	}
 	runtime.workDiagnostics = workDiagnostics
+	systemStatus, err := systemstatus.New(workQueries, workerCapacity, archivists, workDiagnostics, dependencies.Now)
+	if err != nil {
+		return fail(err)
+	}
 	workRecovery, err := workrecovery.New(workDiagnostics, jobCommands)
 	if err != nil {
 		return fail(err)
@@ -357,6 +362,7 @@ func OpenWithDependencies(ctx context.Context, configuration bootconfig.Configur
 		ArchiveRuns: mcpArchiveRuns, ArchiveTranscriptions: mcpArchiveTranscriptions,
 		WorkDiagnostics: workDiagnostics,
 		WorkRecovery:    workRecovery,
+		SystemStatus:    systemStatus,
 	})
 	if err != nil {
 		return fail(err)

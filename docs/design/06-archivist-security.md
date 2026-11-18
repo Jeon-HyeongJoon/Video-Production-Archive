@@ -137,7 +137,7 @@ ArchiveRun Command 실행 권한은 사람의 직접 `APPLICATION` 요청과 인
 
 외부 Provider Router의 구조화된 좁은 allowlist 검증은 planned `AGT-012`, 완료 호출을 요약으로만 전달하고 미완료 호출만 재시도하는 Provider 폴백 문맥은 planned `AGT-013`이 소유한다. 현재 로컬 CLI 경로의 도구 allowlist와 완료 Tool Call 반복 방지는 아래 `MCP-*`, `LRH-006`이 소유한다.
 
-실제 MCP Adapter와 로컬 proxy 및 HOLD 검토·분류 계약은 `MCP-001~005`, runtime 재시작에서 완료 Tool Call을 반복하지 않는 계약은 `LRH-006`이 소유한다. 실행 중 표시는 raw terminal 수집이 아니라 Runtime Adapter가 명시적으로 생성한 정제된 ArchivistTurnEntry만 사용한다. 비공개 추론·stdout·stderr·credential·filesystem path를 항목 schema에 넣지 않고 정규화 실패는 code와 사용자용 summary만 남긴다. `LRH-013~014`
+실제 MCP Adapter와 로컬 proxy 및 HOLD 검토·분류 계약은 `MCP-001~005`, 선택 없는 전체 현황 조회는 `MCP-012`, runtime 재시작에서 완료 Tool Call을 반복하지 않는 계약은 `LRH-006`이 소유한다. 전체 현황은 현재 Worker·Archivist Host와 관리 작업 projection을 읽을 뿐 선택이나 WorkReference를 만들지 않고, 문제 작업의 원문 process 데이터·credential·절대경로 대신 정제된 진단과 증적 ID만 반환한다. 실행 중 표시는 raw terminal 수집이 아니라 Runtime Adapter가 명시적으로 생성한 정제된 ArchivistTurnEntry만 사용한다. 비공개 추론·stdout·stderr·credential·filesystem path를 항목 schema에 넣지 않고 정규화 실패는 code와 사용자용 summary만 남긴다. `LRH-013~014`
 
 Archivist가 시작한 긴 아카이브 실행은 같은 Turn에서 반복 조회하지 않는다. 1단계 완료·전체 완료·새 HOLD 계기에 같은 ArchivistSession으로 SYSTEM 재호출 Turn을 넣고, 최초 Turn과 재호출 Turn을 prompt가 아닌 ArchiveRunWorkContext로 묶는 계약은 `LRH-012`가 소유한다. Archivist Host offline은 Worker 실행을 중단하지 않는다.
 

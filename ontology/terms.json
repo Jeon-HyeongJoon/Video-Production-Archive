@@ -246,6 +246,49 @@
       "decided": "2026-11-15"
     },
     {
+      "id": "system-status",
+      "layer": "product",
+      "kind": "value",
+      "name": {
+        "ko": "시스템 현황",
+        "en": "System Status"
+      },
+      "code_name": "SystemStatus",
+      "definition": "작업 참조를 고르지 않은 상태에서도 현재 Worker·Archivist Host 연결과 자원, 관리 작업 집계 및 미해결·정체 의심 작업의 정제 진단을 한 관측 시각에 결합하는 읽기 모델.",
+      "rules": [
+        "Worker와 Archivist Host의 연결 상태 및 최근 heartbeat를 실제 projection에서 읽는다.",
+        "관리 작업의 처리 중·시작 대기·직접 확인·실패·완료 수를 전체 집합에서 계산한다.",
+        "후속 작업으로 넘긴 과거 실패는 작업 공간과 같은 규칙으로 완료 이력에 계산한다.",
+        "미해결 문제와 진단상 보고가 필요한 처리 중 작업만 정제된 증적 ID와 함께 제한된 목록으로 제공한다.",
+        "조회 중 선택·WorkReference·Command·업무 상태를 만들거나 바꾸지 않는다.",
+        "원문 stdout·stderr, credential, 절대경로를 포함하지 않는다."
+      ],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "work-diagnostic"
+        },
+        {
+          "type": "refers-to",
+          "target": "worker"
+        },
+        {
+          "type": "refers-to",
+          "target": "archivist-host"
+        }
+      ],
+      "sources": [
+        "사용자 결정 2026-11-18: Agent가 선택 없이 시스템 전체 연결·작업·실패 근거를 조회",
+        "docs/design/10-capabilities-observability.md §3",
+        "requirements MCP-012"
+      ],
+      "decided": "2026-11-18"
+    },
+    {
       "id": "template",
       "layer": "product",
       "kind": "entity",
