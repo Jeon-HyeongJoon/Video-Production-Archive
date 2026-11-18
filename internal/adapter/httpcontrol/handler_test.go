@@ -828,17 +828,12 @@ func newArchivistSceneFixture(scene archiveWorkspaceScene, at time.Time) fixedAr
 			"expected_workspace_drive_id": "VOLUME-1", "archive_storage_id": "archive-main", "folder_ids": sceneFolderIDs,
 		},
 	}
-	sttCard := archivistcontrol.ActionCardProjection{
-		ID: "ACTION-CALL-STT-1", ArchivistTurnID: "SYSTEM-RECALL-STAGE-1", CommandType: "archive_run.transcription.start",
-		TargetID: "ARCHIVE-RUN-1", ExpectedRevision: 1, State: "PENDING", ApprovalRequired: false,
-		Parameters: map[string]any{"expected_archive_run_revision": 1},
-	}
 	holdRecall := turn("SYSTEM-RECALL-HOLD-1", "COMPLETED", "보류 발생 · hold", vocabulary.ActorSystem, 30,
 		"hold 폴더 3개 영상이 보류되었습니다. 판정이 필요합니다.", call("CALL-STATUS-1", "archive.run.status.v1", "COMPLETED"))
 	attachWork(&holdRecall, archivistruntime.WorkNewHold)
 	stageRecall := turn("SYSTEM-RECALL-STAGE-1", "COMPLETED", "1단계 완료", vocabulary.ActorSystem, 40,
-		"1단계가 끝났습니다. STT 대상 4 폴더의 시작을 요청했습니다.",
-		call("CALL-STATUS-2", "archive.run.status.v1", "COMPLETED"), call("CALL-STT-1", "archive.run.transcription.start.v1", "ACTION_CARD"))
+		"1단계가 끝났습니다. 자막·텍스트 대상 4 폴더가 자동으로 이어서 시작되었습니다.",
+		call("CALL-STATUS-2", "archive.run.status.v1", "COMPLETED"))
 	attachWork(&stageRecall, archivistruntime.WorkStageOneComplete)
 	var turns []archivistcontrol.TurnProjection
 	cards := []archivistcontrol.ActionCardProjection{startCard}
@@ -850,15 +845,12 @@ func newArchivistSceneFixture(scene archiveWorkspaceScene, at time.Time) fixedAr
 		turns = []archivistcontrol.TurnProjection{start, holdRecall}
 	case sceneTranscription:
 		turns = []archivistcontrol.TurnProjection{start, holdRecall, stageRecall}
-		cards = append(cards, sttCard)
 	default:
-		sttCard.State = "COMPLETED"
 		completeRecall := turn("SYSTEM-RECALL-COMPLETE-1", "COMPLETED", "전체 완료", vocabulary.ActorSystem, 180,
 			"완료했습니다. 8 폴더 중 보관됨 5 · 확정됨 1 · 보류 1 · 실패 1입니다. STT 4 폴더와 CSV 795행을 archive-main에 기록했습니다. hold 폴더는 판정이 필요합니다.",
 			call("CALL-STATUS-3", "archive.run.status.v1", "COMPLETED"))
 		attachWork(&completeRecall, archivistruntime.WorkArchiveRunComplete)
 		turns = []archivistcontrol.TurnProjection{start, holdRecall, stageRecall, completeRecall}
-		cards = append(cards, sttCard)
 	}
 	return fixedArchivistWorkspace{
 		statuses: []archivistruntime.HostStatus{

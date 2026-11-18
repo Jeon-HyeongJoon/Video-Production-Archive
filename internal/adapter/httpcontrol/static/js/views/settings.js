@@ -13,6 +13,7 @@ export function SettingsScreen() {
   const hosts = store.hosts.value;
   const [form, setForm] = useState({ name: "", host: "", cli: "" });
   const [status, setStatus] = useState("");
+  const [adding, setAdding] = useState(false);
   const [removing, setRemoving] = useState("");
   const hostID = hosts.some((host) => host.archivist_host_id === form.host) ? form.host : hosts.find((host) => host.state !== "DISABLED")?.archivist_host_id || "";
   const clis = hosts.find((host) => host.archivist_host_id === hostID)?.detected_cli_ids || [];
@@ -21,7 +22,8 @@ export function SettingsScreen() {
   const add = async (event) => {
     event.preventDefault();
     const name = form.name.trim();
-    if (!name || !cli) return;
+    if (!name || !cli || adding) return;
+    setAdding(true);
     try {
       const created = await mutation("/api/v1/archivist-sessions", { session_id: newID("ARCHIVIST"), name, archivist_host_id: hostID, cli_id: cli });
       await startArchivistHost(created.archivist_host_id);
@@ -30,6 +32,8 @@ export function SettingsScreen() {
       await refresh();
     } catch (error) {
       setStatus(error.message);
+    } finally {
+      setAdding(false);
     }
   };
   const remove = async (session) => {
@@ -60,7 +64,7 @@ export function SettingsScreen() {
         <label class="field"><span>실행 도구</span><select id="archivist-cli-select" name="cli_id" required value=${cli} disabled=${!clis.length} onChange=${(event) => set({ cli: event.currentTarget.value })}>
           ${clis.length ? clis.map((value) => html`<option key=${value} value=${value}>${value}</option>`) : html`<option value="">사용 가능한 실행 도구 없음</option>`}
         </select></label>
-        <div class="form-actions"><button type="submit" class="btn primary" id="archivist-add-submit" data-action="archivist-add" disabled=${!clis.length || stale.value}>추가하고 켜기</button>
+        <div class="form-actions"><button type="submit" class="btn primary" id="archivist-add-submit" data-action="archivist-add" disabled=${adding || !clis.length || stale.value}>${adding ? "추가 중…" : "추가하고 켜기"}</button>
           <span id="archivist-add-status" class="muted" role="status">${status}</span></div>
       </form>
     </section>`,

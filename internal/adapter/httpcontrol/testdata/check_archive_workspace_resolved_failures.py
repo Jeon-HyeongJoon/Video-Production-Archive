@@ -50,11 +50,11 @@ with sync_playwright() as playwright:
     page.route("**/api/v1/work", work_projection)
     page.goto(sys.argv[1] + "/#/jobs", wait_until="networkidle")
 
-    # The unresolved old run is one actionable item everywhere. It is not lost
-    # merely because the drive projection now points at a newer ArchiveRun.
+    # The unresolved old run remains an actionable row in Task Management,
+    # but a failure does not occupy the short live workspace.
     attention = page.locator("#attention-jobs")
     expect(attention.locator(f'[data-work-id="{UNRESOLVED}"]')).to_have_count(2)
-    expect(page.locator(f'#tree [data-work-id="{UNRESOLVED}"]')).to_be_visible()
+    expect(page.locator(f'#tree [data-work-id="{UNRESOLVED}"]')).to_have_count(0)
     page.locator("#alert-button").click()
     expect(page.locator(f'#alert-panel [data-key="work:{UNRESOLVED}"]')).to_be_visible()
 

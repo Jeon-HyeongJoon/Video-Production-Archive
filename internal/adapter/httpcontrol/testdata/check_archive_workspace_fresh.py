@@ -53,6 +53,17 @@ with sync_playwright() as playwright:
     expect(page).to_have_url(sys.argv[1] + "/#/drives/VOLUME-1?folder=intro")
     expect(panel).to_be_hidden()
     expect(page.locator('#drive-problems .problem-panel[data-folder-id="intro"]')).to_have_attribute("data-open", "true")
+    # Opening an alert acknowledges that occurrence. The problem remains in
+    # its drive, but the bell no longer keeps notifying it.
+    expect(page.locator("#alert-count")).to_have_text("6")
+    button.click()
+    expect(panel.locator('.alert-item[data-key="fault:VOLUME-1:intro"]')).to_have_count(0)
+    button.click()
+    page.reload(wait_until="networkidle")
+    expect(page.locator("#alert-count")).to_have_text("6")
+    button.click()
+    expect(panel.locator('.alert-item[data-key="fault:VOLUME-1:intro"]')).to_have_count(0)
+    button.click()
 
     # The banner leads to the same place, or goes away without moving.
     page.unroute("**/api/v1/archive-intake")
@@ -62,6 +73,7 @@ with sync_playwright() as playwright:
     page.locator("#fresh-close").click()
     expect(banner).to_be_hidden()
     expect(page).to_have_url(sys.argv[1] + "/#/drives/VOLUME-1?folder=intro")
+    expect(page.locator("#alert-count")).to_have_text("6")
     page.unroute("**/api/v1/archive-intake")
     page.route("**/api/v1/archive-intake", failing("event-b"))
     page.clock.run_for(5_100)

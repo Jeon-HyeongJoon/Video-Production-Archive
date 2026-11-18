@@ -190,23 +190,29 @@ worker:
 		}
 		return true
 	})
-	transcription := runtimeRequest(
-		runtime.Handler(), http.MethodPost, "/api/v1/archive-runs/RUN-WINDOWS-RECORDING/transcription",
-		`{"idempotency_key":"windows-recording:transcription","expected_archive_run_revision":1}`,
-		cookie, csrfToken, "http://127.0.0.1:8080",
-	)
-	var transcriptionResult struct {
-		Data struct {
-			JobIDs        []string `json:"job_ids"`
-			EligibleCount int      `json:"eligible_count"`
-			HoldCount     int      `json:"hold_count"`
-		} `json:"data"`
-	}
-	if transcription.Code != http.StatusCreated || json.Unmarshal(transcription.Body.Bytes(), &transcriptionResult) != nil ||
-		len(transcriptionResult.Data.JobIDs) != 1 || transcriptionResult.Data.EligibleCount != 1 || transcriptionResult.Data.HoldCount != 0 {
-		t.Fatalf("start separate Windows transcription returned %d: %s", transcription.Code, transcription.Body.String())
-	}
-	transcriptionJobID := transcriptionResult.Data.JobIDs[0]
+	var transcriptionJobID string
+	waitForWindowsAcceptance(t, 20*time.Second, "Control automatic recording transcription continuation", func() bool {
+		jobs := runtimeRequest(runtime.Handler(), http.MethodGet, "/api/v1/jobs", "", nil, "", "")
+		if jobs.Code != http.StatusOK {
+			return false
+		}
+		var projection struct {
+			Data []struct {
+				JobID        string `json:"job_id"`
+				TemplateName string `json:"template_name"`
+			} `json:"data"`
+		}
+		if json.Unmarshal(jobs.Body.Bytes(), &projection) != nil {
+			return false
+		}
+		for _, projected := range projection.Data {
+			if projected.TemplateName == "archive-transcription" {
+				transcriptionJobID = projected.JobID
+				return transcriptionJobID != ""
+			}
+		}
+		return false
+	})
 	waitForWindowsAcceptance(t, 5*time.Minute, "recording stage-two STT, package revision, and catalog completion", func() bool {
 		detail := readDriveJob(t, runtime.Handler(), transcriptionJobID)
 		for _, stepID := range []string{"audio", "transcript", "subtitle", "transcript_text", "archive_package_revision", "archive_catalog"} {

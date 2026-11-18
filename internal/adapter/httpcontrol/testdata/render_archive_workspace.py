@@ -19,9 +19,9 @@ SCENES: dict[str, dict[str, Any]] = {
         "detail": ("broken", ["처리 방식 결정", "영상 변환"]),
     },
     "stt-ready": {
-        "route": DRIVE, "problems": ("6", "fault"), "phase": "stt", "stages": ["done", "ask", "part"],
+        "route": DRIVE, "problems": ("5", "fault"), "phase": "stt", "stages": ["done", "now", "part"],
         "stage_problems": [("fault", "영상 변환 1"), ("decide", "처리 방식 결정 1")],
-        "progress": ("6 / 8 폴더", "최근 작업 보관 790 / 795 영상", "최근 작업 폴더 6 / 8"), "stt": "자막·텍스트 만들기 · 4 폴더",
+        "progress": ("6 / 8 폴더", "최근 작업 보관 790 / 795 영상", "최근 작업 폴더 6 / 8"), "stt": None,
         "words": {"INPUT": "처리 방법 선택 필요"}, "panels": ["broken", "hold"], "stored": 5, "committed": 1,
         "detail": ("broken", ["처리 방식 결정", "영상 변환"]),
     },
@@ -136,12 +136,9 @@ def check_drive(page, scene) -> None:
     expect(hover).to_have_attribute("title", re.compile(re.escape(folders)))
     expect(hover).to_have_attribute("title", re.compile(re.escape("전체 발견 8 폴더")))
     expect(hover).to_have_attribute("title", re.compile(re.escape("작업 범위 r7 고정 · 8 폴더 · 795 영상 · 211 GB")))
-    # Only a button a person can press now sits beside the title.
-    if scene["stt"]:
-        expect(page.locator("#start-stt")).to_have_text(scene["stt"])
-        expect(page.locator("#start-stt")).to_be_enabled()
-    else:
-        expect(page.locator("#start-stt")).to_have_count(0)
+    # Stage two continues automatically; the title never asks for a second
+    # confirmation after the person already started the archive work.
+    expect(page.locator("#start-stt")).to_have_count(0)
     if "catalog" in scene:
         expect(hover).to_have_attribute("title", re.compile(re.escape(scene["catalog"])))
     # Problems a person resolves here come first; the failed one opens itself.

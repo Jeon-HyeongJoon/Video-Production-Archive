@@ -460,13 +460,16 @@ archive_organization:
 	if strings.Join(stageOneSteps, ",") != "render,qc,organize,archive_catalog" {
 		t.Fatalf("stage one was not split from transcription: %v", stageOneSteps)
 	}
-	stt := runtimeRequest(
-		runtime.Handler(), http.MethodPost, "/api/v1/archive-runs/RUN-DRIVE-1/transcription",
-		`{"idempotency_key":"drive:stt:1","expected_archive_run_revision":1}`, cookie, csrfToken, origin,
-	)
-	if stt.Code != http.StatusCreated || !strings.Contains(stt.Body.String(), `"eligible_count":1`) ||
-		!strings.Contains(stt.Body.String(), `"hold_count":0`) {
-		t.Fatalf("separate stage two start returned %d: %s", stt.Code, stt.Body.String())
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		jobs = runtimeRequest(runtime.Handler(), http.MethodGet, "/api/v1/jobs", "", nil, "", "")
+		if jobs.Code == http.StatusOK && strings.Count(jobs.Body.String(), `"template_name":"archive-transcription"`) == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("stage two did not continue automatically after stage one: %d %s", jobs.Code, jobs.Body.String())
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 	heartbeat = strings.Replace(heartbeat, `"snapshot_id":2`, `"snapshot_id":3`, 1)
 	if response := workerHeartbeatRequest(runtime.Handler(), heartbeat, "service-secret"); response.Code != http.StatusOK {
@@ -711,6 +714,12 @@ func TestArchivistAddAPIAcceptsOnlyNameRegisteredHostAndDetectedCLI(t *testing.T
 		!strings.Contains(created.Body.String(), `"workspace_root_id":"video-project"`) {
 		t.Fatalf("session create returned %d: %s", created.Code, created.Body.String())
 	}
+	duplicate := strings.Replace(payload, "SESSION-HTTP-1", "SESSION-HTTP-DUPLICATE", 1)
+	reused := runtimeRequest(runtime.Handler(), http.MethodPost, "/api/v1/archivist-sessions", duplicate, cookie, token, origin)
+	if reused.Code != http.StatusCreated || !strings.Contains(reused.Body.String(), `"session_id":"SESSION-HTTP-1"`) ||
+		strings.Contains(reused.Body.String(), "SESSION-HTTP-DUPLICATE") {
+		t.Fatalf("duplicate active Archivist was not reused: %d %s", reused.Code, reused.Body.String())
+	}
 	unsafe := strings.Replace(payload, `"cli_id":"codex"`, `"cli_id":"shell"`, 1)
 	if response := runtimeRequest(runtime.Handler(), http.MethodPost, "/api/v1/archivist-sessions", unsafe, cookie, token, origin); response.Code != http.StatusBadRequest {
 		t.Fatalf("unregistered runtime binding returned %d: %s", response.Code, response.Body.String())
@@ -733,7 +742,8 @@ func TestArchivistAddAPIAcceptsOnlyNameRegisteredHostAndDetectedCLI(t *testing.T
 	defer restarted.Close()
 	view := runtimeRequest(restarted.Handler(), http.MethodGet, "/api/v1/archivist-sessions", "", nil, "", "")
 	if view.Code != http.StatusOK || !strings.Contains(view.Body.String(), `"archivist_host_id":"archivist-windows"`) ||
-		!strings.Contains(view.Body.String(), `"workspace_root_id":"video-project"`) || strings.Contains(view.Body.String(), `"control_mode"`) {
+		!strings.Contains(view.Body.String(), `"workspace_root_id":"video-project"`) || strings.Contains(view.Body.String(), `"control_mode"`) ||
+		strings.Count(view.Body.String(), `"name":"Archive Archivist"`) != 1 {
 		t.Fatalf("durable pinned session response=%d %s", view.Code, view.Body.String())
 	}
 }

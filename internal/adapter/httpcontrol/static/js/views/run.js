@@ -11,7 +11,7 @@ import {
 } from "../store.js";
 import { route } from "../router.js";
 import { StatusIcon, Glyph, GLYPH, Chevron, Swap, Meter, Fold, Presence, Crumbs, Fact, Empty, Skeleton, useLinger } from "../ui.js";
-import { DriveOverview, Problems, SttButton, StatusLine, titleShared, useOpenProblem } from "./drive.js";
+import { DriveOverview, Problems, StatusLine, titleShared, useOpenProblem } from "./drive.js";
 import { MediaTable } from "./job.js";
 
 const ROLE = { INSPECTION: "원본 확인", FOLDER: "폴더 처리", TRANSCRIPTION: "자막·텍스트" };
@@ -202,7 +202,6 @@ export function RunScreen({ id }) {
       </div>
       <div class="page-actions">
         ${summary.source_volume_id ? html`<a class="btn" href=${`#/drives/${encodeURIComponent(summary.source_volume_id)}`}>드라이브 열기</a>` : null}
-        ${current ? html`<${SttButton} drive=${current} />` : null}
       </div>
     </div>`,
     current

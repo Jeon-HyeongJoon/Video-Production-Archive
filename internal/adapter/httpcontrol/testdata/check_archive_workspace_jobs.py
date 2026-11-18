@@ -7,12 +7,14 @@ with sync_playwright() as playwright:
     browser = playwright.chromium.launch()
     page = browser.new_page(viewport={"width": 1440, "height": 900}, color_scheme="light", locale="ko-KR")
     page.goto(sys.argv[1] + "/#/jobs", wait_until="networkidle")
-    # The sidebar indexes only unfinished user-facing work. The completed
-    # ArchiveRun stays in Task Management instead of occupying the workspace.
+    # The sidebar is a short live workspace: only work that is running or
+    # waiting for a person's decision. Queued, failed and completed history
+    # stays in Task Management.
     workspaces = page.locator("#tree .workspace-card")
-    expect(workspaces).to_have_count(3)
+    expect(workspaces).to_have_count(2)
     archive_run = page.locator('#tree .workspace-card[data-work-id="ARCHIVE-RUN-1"]')
     expect(archive_run).to_have_count(0)
+    expect(page.locator('#tree .workspace-card[data-work-id="JOB-QUEUED"]')).to_have_count(0)
     page.locator("#completed-jobs .lane-toggle").click()
     completed = page.locator('#completed-jobs .work-row[data-work-id="ARCHIVE-RUN-1"]')
     expect(completed).to_have_count(1)

@@ -267,7 +267,7 @@ function Composer({ session, enabled, reason, canWake, waking, wake, selectSessi
   const [useScreen, setUseScreen] = useState(true);
   const [picked, setPicked] = useState(null);
   const [picker, setPicker] = useState(false);
-  const [text, setText] = useState("");
+  const text = ui.agentDraft.value;
   const [sending, setSending] = useState(false);
   const input = useRef();
   useEffect(() => { setUseScreen(true); setPicked(null); setPicker(false); }, [now.full]);
@@ -287,7 +287,7 @@ function Composer({ session, enabled, reason, canWake, waking, wake, selectSessi
         turn_id: newID("TURN"), request_id: newID("REQUEST"), prompt: body,
         drive_selection: selection || undefined, work_reference: work || undefined,
       });
-      setText("");
+      ui.agentDraft.value = "";
       setPicked(null);
       await refresh();
     } catch (error) {
@@ -317,7 +317,7 @@ function Composer({ session, enabled, reason, canWake, waking, wake, selectSessi
         <button type="button" class="chip chip-add" aria-expanded=${picker ? "true" : "false"} onClick=${() => setPicker(!picker)}>+ 작업 첨부</button>
       </div>
       <textarea ref=${input} id="archivist-message" name="prompt" rows="1" aria-label="메시지" placeholder="할 일을 입력하세요"
-        value=${text} disabled=${!enabled} onInput=${(event) => setText(event.currentTarget.value)}
+        value=${text} disabled=${!enabled} onInput=${(event) => { ui.agentDraft.value = event.currentTarget.value; }}
         onKeyDown=${(event) => { if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); send(event.currentTarget.value); } }}></textarea>
       <div class="composer-foot">
         <select id="archivist-session-select" class="model" aria-label="에이전트 선택" value=${session?.session_id || ""} title=${session ? `${session.archivist_host_id} · ${session.cli_id}` : ""}

@@ -91,6 +91,8 @@ type Runtime struct {
 	archiveIntake          *sqlitearchiveintake.Repository
 	archivists             *archivistcontrol.Service
 	archiveIntakeWorkspace *archiveintakeworkspace.Service
+	archiveTranscriptions  *archivetranscription.Service
+	now                    func() time.Time
 	workDiagnostics        *workdiagnostics.Service
 	workRecovery           *workrecovery.Service
 	archivistAdvisories    *archivistadvisory.Service
@@ -117,7 +119,7 @@ func OpenWithDependencies(ctx context.Context, configuration bootconfig.Configur
 	if err != nil {
 		return nil, err
 	}
-	runtime := &Runtime{configuration: configuration, catalog: catalogStore}
+	runtime := &Runtime{configuration: configuration, catalog: catalogStore, now: dependencies.Now}
 	fail := func(cause error) (*Runtime, error) {
 		runtime.Close()
 		return nil, cause
@@ -167,6 +169,9 @@ func OpenWithDependencies(ctx context.Context, configuration bootconfig.Configur
 	}
 	executor := command.NewAuthorizedCreatingExecutor(commandStore, func(envelope command.Envelope) error {
 		if envelope.Actor.Type == vocabulary.ActorSystem && envelope.Actor.ID == "archive-intake-coordinator" && envelope.RequestedVia == "APPLICATION" {
+			return nil
+		}
+		if envelope.Actor.Type == vocabulary.ActorSystem && envelope.Actor.ID == archivetranscription.CoordinatorActorID && envelope.RequestedVia == "APPLICATION" {
 			return nil
 		}
 		if !security.Authorize(security.Request{
@@ -267,6 +272,7 @@ func OpenWithDependencies(ctx context.Context, configuration bootconfig.Configur
 	if projectionErr != nil {
 		return fail(projectionErr)
 	}
+	runtime.archiveTranscriptions = archiveTranscriptions
 	dispatcher, err := dispatchcoordinator.New(commandStore, workerRegistry, archiveWorkspaceStore, dependencies.Now, configuration.HeartbeatTTL, time.Minute)
 	if err != nil {
 		return fail(err)
@@ -388,6 +394,11 @@ func OpenWithDependencies(ctx context.Context, configuration bootconfig.Configur
 		defer runtime.backgroundWait.Done()
 		runtime.monitorWorkerCompletions(backgroundContext)
 	}()
+	runtime.backgroundWait.Add(1)
+	go func() {
+		defer runtime.backgroundWait.Done()
+		runtime.monitorArchiveRuns(backgroundContext)
+	}()
 	return runtime, nil
 }
 
@@ -435,7 +446,6 @@ func (runtime *Runtime) Run(ctx context.Context) error {
 	}
 	go serve(controlServer, controlListener)
 	go serve(mcpServer, mcpListener)
-	go runtime.monitorArchiveRunRecalls(ctx)
 	go runtime.monitorArchivistAdvisories(ctx)
 	shutdown := func() error {
 		shutdownContext, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -481,8 +491,8 @@ func (runtime *Runtime) monitorArchivistAdvisories(ctx context.Context) {
 	}
 }
 
-func (runtime *Runtime) monitorArchiveRunRecalls(ctx context.Context) {
-	if runtime == nil || runtime.archivists == nil || runtime.archiveIntakeWorkspace == nil {
+func (runtime *Runtime) monitorArchiveRuns(ctx context.Context) {
+	if runtime == nil || runtime.archiveIntakeWorkspace == nil || runtime.archiveTranscriptions == nil || runtime.now == nil {
 		return
 	}
 	project := func() {
@@ -494,16 +504,32 @@ func (runtime *Runtime) monitorArchiveRunRecalls(ctx context.Context) {
 			if view.ArchiveRunID == "" || view.ArchiveRunRevision == 0 {
 				continue
 			}
-			err := runtime.archivists.RecallArchiveRunProjection(
-				ctx, view.ArchiveRunID, view.ArchiveRunRevision, view.ArchiveRunState, view.HoldCount,
-			)
-			if err != nil && !errors.Is(err, archivistcontrol.ErrArchiveRunNotBound) {
+			// Preserve the stage-one completion recall before the automatic
+			// continuation makes TRANSCRIPTION_READY a transient state.
+			if runtime.archivists != nil {
+				err := runtime.archivists.RecallArchiveRunProjection(
+					ctx, view.ArchiveRunID, view.ArchiveRunRevision, view.ArchiveRunState, view.HoldCount,
+				)
+				if err != nil && !errors.Is(err, archivistcontrol.ErrArchiveRunNotBound) {
+					continue
+				}
+			}
+			if view.ArchiveRunState != "TRANSCRIPTION_READY" {
 				continue
+			}
+			_, err := runtime.archiveTranscriptions.Start(ctx, archivetranscription.StartRequest{
+				ArchiveRunID: view.ArchiveRunID, ExpectedArchiveRunRevision: view.ArchiveRunRevision,
+				IdempotencyKey: "archiveRun:transcription:auto:" + view.ArchiveRunID + ":" + fmt.Sprint(view.ArchiveRunRevision),
+				Actor:          command.Actor{Type: vocabulary.ActorSystem, ID: archivetranscription.CoordinatorActorID},
+				StartedAt:      runtime.now(),
+			})
+			if err != nil && !errors.Is(err, archivetranscription.ErrStageOneIncomplete) && ctx.Err() == nil {
+				slog.Warn("automatic archive transcription start failed", "archive_run_id", view.ArchiveRunID, "error", err)
 			}
 		}
 	}
 	project()
-	ticker := time.NewTicker(2 * time.Second)
+	ticker := time.NewTicker(250 * time.Millisecond)
 	defer ticker.Stop()
 	for {
 		select {

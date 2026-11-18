@@ -52,16 +52,12 @@ with sync_playwright() as playwright:
         expect(fold.locator(".turn-entry")).to_have_count(1)
         expect(fold.locator(".turn-trace .tool-row")).to_have_count(2)
     elif scene == "stt-ready":
-        expect(fold.locator("summary")).to_have_text("처리 내역 · 실행 5 · 자동 이어서 2")
+        expect(fold.locator("summary")).to_have_text("처리 내역 · 실행 4 · 자동 이어서 2")
         expect(thread.locator(".message.archivist > .message-body:visible")).to_contain_text("1단계가 끝났습니다")
         expect(thread.locator(".turn-live")).to_have_count(0)
         expect(page.locator("#archivist-availability")).to_have_text("요청 가능")
         expect(page.locator("#archivist-message")).to_be_enabled()
-        stt_card = thread.locator('[data-card-id="ACTION-CALL-STT-1"]')
-        expect(stt_card).to_contain_text("자막·텍스트 만들기")
-        expect(stt_card).to_contain_text("실행 전 확인 필요")
-        expect(stt_card).to_contain_text("ARCHIVE-RUN-1 · 대상 4 폴더")
-        expect(stt_card.locator("button")).to_have_count(2)
+        expect(thread.locator('[data-card-id="ACTION-CALL-STT-1"]')).to_have_count(0)
 
         # A message sent from persistent work detail pins its kind, ID, and
         # revision instead of relying on text in the prompt.
@@ -73,6 +69,21 @@ with sync_playwright() as playwright:
 
         page.route("**/api/v1/archivist-sessions/*/turns", capture_turn)
         message = page.locator("#archivist-message")
+        # A changed conversation projection must not replace the active editor
+        # or lose its controlled draft and caret.
+        sessions = page.request.get(sys.argv[1] + "/api/v1/archivist-sessions").json()
+        sessions["data"][0]["name"] = "Archive Archivist · 갱신"
+        page.route("**/api/v1/archivist-sessions", lambda route: route.fulfill(json=sessions))
+        message.fill("갱신 중 작성")
+        message.press("ArrowLeft")
+        selection = message.evaluate("element => [element.selectionStart, element.selectionEnd]")
+        page.evaluate("async () => { const store = await import('/assets/js/store.js'); await store.refresh(); }")
+        expect(message).to_be_focused()
+        expect(message).to_have_value("갱신 중 작성")
+        if message.evaluate("element => [element.selectionStart, element.selectionEnd]") != selection:
+            raise AssertionError("live refresh moved the Agent composer caret")
+        page.unroute("**/api/v1/archivist-sessions")
+
         message.fill("첫 줄")
         message.press("Shift+Enter")
         message.type("둘째 줄")
@@ -86,7 +97,7 @@ with sync_playwright() as playwright:
     else:
         # Completed work keeps the initial instruction and final report visible.
         # Progress, recalls, prior answers and settled cards remain inspectable.
-        expect(fold.locator("summary")).to_contain_text("처리 내역 · 실행 6 ·")
+        expect(fold.locator("summary")).to_contain_text("처리 내역 · 실행 5 ·")
         expect(thread.locator(".work-result > .message-body")).to_contain_text("완료했습니다")
         expect(fold.locator(".message.system").first).to_be_hidden()
         expect(fold.locator(".turn-entry")).to_have_count(4)

@@ -24,6 +24,21 @@ export const store = {
 
 export const stale = computed(() => store.failures.value >= STALE_AFTER);
 
+const ACKNOWLEDGED_PROBLEMS_KEY = "archive-workspace.acknowledged-problems.v1";
+
+function readAcknowledgedProblems() {
+  try {
+    const values = JSON.parse(localStorage.getItem(ACKNOWLEDGED_PROBLEMS_KEY) || "[]");
+    return new Set(Array.isArray(values) ? values.filter((value) => typeof value === "string") : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function writeAcknowledgedProblems(values) {
+  try { localStorage.setItem(ACKNOWLEDGED_PROBLEMS_KEY, JSON.stringify([...values])); } catch { /* unavailable storage */ }
+}
+
 // Screen-local choices that must survive the 5 second refresh.
 export const ui = {
   openProblem: signal(""), openFolder: signal(""), openSteps: signal(""), stagesOpen: signal(new Set()),
@@ -31,8 +46,8 @@ export const ui = {
   lanes: signal({ attention: true, done: false }), expanded: signal(new Set()), scopeOpen: signal(false),
   hold: signal(null), cancelConfirm: signal(""), status: signal(""),
   newWork: signal(null),
-  alertsOpen: signal(null), fresh: signal(""), newProblems: signal(new Set()),
-  sessionID: signal(""), focusCard: signal(""), agentOpen: signal(false),
+  alertsOpen: signal(null), fresh: signal(""), newProblems: signal(new Set()), acknowledgedProblems: signal(readAcknowledgedProblems()),
+  sessionID: signal(""), focusCard: signal(""), agentOpen: signal(false), agentDraft: signal(""),
 };
 
 // ─── Records ────────────────────────────────────────────────────────────────
@@ -193,12 +208,40 @@ function apply(answers) {
   write();
 }
 
+// The polling projection may replace a changed conversation subtree. Keep a
+// person who is composing in the same editor, at the same caret, instead of
+// letting a five-second refresh move focus back to the document.
+function captureComposerFocus() {
+  const element = document.activeElement;
+  if (!(element instanceof HTMLTextAreaElement) || element.id !== "archivist-message") return null;
+  return {
+    element,
+    start: element.selectionStart,
+    end: element.selectionEnd,
+    direction: element.selectionDirection,
+  };
+}
+
+function restoreComposerFocus(saved) {
+  if (!saved) return;
+  const element = document.getElementById("archivist-message");
+  if (!(element instanceof HTMLTextAreaElement) || element.disabled) return;
+  if (document.activeElement === element) return;
+  // Never steal focus if the person moved to another control while the
+  // network reads were in flight.
+  if (document.activeElement !== document.body && document.activeElement !== saved.element) return;
+  element.focus({ preventScroll: true });
+  element.setSelectionRange(saved.start, saved.end, saved.direction || "none");
+}
+
 export async function refresh() {
   const sequence = ++refreshSequence;
   try {
     const answers = await Promise.all(ENDPOINTS.map(read));
     if (sequence !== refreshSequence) return;
+    const composer = captureComposerFocus();
     await apply(answers);
+    restoreComposerFocus(composer);
     trackProblems();
   } catch (error) {
     if (sequence !== refreshSequence) return;
@@ -221,10 +264,10 @@ export function startPolling() {
 // ─── Drives ─────────────────────────────────────────────────────────────────
 
 const RUN_PHASE = { STAGE_ONE_RUNNING: "stage1", TRANSCRIPTION_READY: "stt", STAGE_TWO_RUNNING: "stage2", COMPLETED: "done" };
-export const PHASE_LABEL = { intake: "아직 작업 전", stage1: "영상 정리·저장 중", stt: "자막·텍스트 만들기 가능", stage2: "자막·텍스트 만드는 중", done: "최근 작업 완료" };
-// The status icon of each phase: running phases turn, the STT gate waits on a
-// person, a finished run is done.
-export const PHASE_ICON = { intake: "idle", stage1: "work", stt: "decide", stage2: "work", done: "done" };
+export const PHASE_LABEL = { intake: "아직 작업 전", stage1: "영상 정리·저장 중", stt: "자막·텍스트 자동 시작 중", stage2: "자막·텍스트 만드는 중", done: "최근 작업 완료" };
+// The transcription gate is a transient Control-owned continuation, not a
+// person decision.
+export const PHASE_ICON = { intake: "idle", stage1: "work", stt: "work", stage2: "work", done: "done" };
 
 export function drivePhase(current) {
   return current?.archive_run_id ? RUN_PHASE[current.archive_run_state] || "stage1" : "intake";
@@ -364,8 +407,6 @@ export const problemItems = computed(() => {
       const problem = folderProblem(folder);
       if (problem) items.push({ ...base, key: `${problem.kind}:${current.workspace_drive_id}:${folder.folder}`, kind: problem.kind, signal: problem.signal, title: problem.title, folder: folder.folder, target: problem.target || "" });
     }
-    const sttCard = cards.some(({ card }) => card.command_type === "archive_run.transcription.start" && card.target_id === current.archive_run_id);
-    if (current.archive_run_state === "TRANSCRIPTION_READY" && !sttCard) items.push({ ...base, key: `stt:${current.workspace_drive_id}`, kind: "stt", signal: "decide", title: "자막·텍스트 만들기 가능" });
   }
   for (const worker of store.workers.value) {
     if (stateSignal(worker.state) === "fault") items.push({ key: `worker:${worker.worker_id}`, kind: "worker", signal: "fault", title: "작업 PC 연결 끊김", workerID: worker.worker_id });
@@ -391,6 +432,30 @@ export const problemItems = computed(() => {
   }
   return items.sort((left, right) => SIGNAL_RANK[right.signal] - SIGNAL_RANK[left.signal]);
 });
+
+// Acknowledging an alert silences that occurrence without changing the work
+// or fault itself. The work remains available at its normal management
+// surface, and the key becomes eligible for notification again after the
+// underlying problem disappears.
+export const visibleProblems = computed(() => {
+  const acknowledged = ui.acknowledgedProblems.value;
+  return problemItems.value.filter((item) => !acknowledged.has(item.key));
+});
+
+export function acknowledgeProblem(key) {
+  key = String(key || "").trim();
+  if (!key) return;
+  const next = new Set(ui.acknowledgedProblems.peek());
+  next.add(key);
+  writeAcknowledgedProblems(next);
+  batch(() => {
+    ui.acknowledgedProblems.value = next;
+    const fresh = new Set(ui.newProblems.peek());
+    fresh.delete(key);
+    ui.newProblems.value = fresh;
+    if (ui.fresh.peek() === key) ui.fresh.value = "";
+  });
+}
 
 // problemSubject names one problem: the drive and folder, the Worker, the Job.
 export function problemSubject(item) {
@@ -420,7 +485,15 @@ let freshTimer = 0;
 // trackProblems marks problems that appeared after the first load; the newest
 // one rises as a toast for a few seconds.
 function trackProblems() {
-  const keys = problemItems.peek().map((item) => item.key);
+  const rawKeys = problemItems.peek().map((item) => item.key);
+  const current = new Set(rawKeys);
+  const acknowledged = new Set([...ui.acknowledgedProblems.peek()].filter((key) => current.has(key)));
+  if (acknowledged.size !== ui.acknowledgedProblems.peek().size) {
+    writeAcknowledgedProblems(acknowledged);
+    ui.acknowledgedProblems.value = acknowledged;
+  }
+  for (const key of [...seenProblems]) if (!current.has(key)) seenProblems.delete(key);
+  const keys = rawKeys.filter((key) => !acknowledged.has(key));
   if (!primed) {
     for (const key of keys) seenProblems.add(key);
     primed = true;
@@ -505,7 +578,7 @@ export function workIssues(work) {
 export const workHref = (work) => (work.kind === "ARCHIVE_RUN" ? `#/runs/${encodeURIComponent(work.work_id)}` : `#/jobs/${encodeURIComponent(work.work_id)}`);
 
 // The workspace list: unfinished work, what waits on a person first.
-export const workspaces = computed(() => allWork.value.filter((work) => workLane(work) !== "done").sort((left, right) => {
+export const workspaces = computed(() => allWork.value.filter((work) => ["work", "decide"].includes(workLane(work))).sort((left, right) => {
   const lane = LANE_RANK[workLane(right)] - LANE_RANK[workLane(left)];
   if (lane) return lane;
   const recent = new Date(right.last_event_at || 0) - new Date(left.last_event_at || 0);

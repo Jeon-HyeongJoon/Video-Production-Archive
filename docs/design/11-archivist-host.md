@@ -37,6 +37,8 @@ Control의 `archivist_session_id`와 `archivist_turn_id`만 영속 identity다. 
 
 Archivist 구성 화면은 이름·`archivist_host_id`·감지된 `cli_id`만 받아 Agent를 추가하고, 활성 Agent별 제거 조작을 둔다. 제거는 끝나지 않은 Turn과 결정 대기 ActionCard가 없을 때만 ArchivistSession을 활성 목록에서 제외하는 retirement이며 Session·Turn·Tool Call 이력을 삭제하지 않는다. 제거된 Session은 새 Turn과 SYSTEM 재호출을 받지 않지만 이미 시작된 ArchiveRun은 사람 조작 경로에서 계속된다. `runtime_backend`와 `workspace_root_id`는 사전 등록된 Host 설정에서 결정하고 화면이 임의 값을 받지 않는다. 고정된 Host가 offline이면 다른 PC로 자동 우회하지 않고, 같은 PC의 로컬 설정에 Windows 예약 작업이 고정돼 있을 때만 담당자의 Agent 추가·선택·다시 켜기에서 그 작업의 시작을 요청한다. 이 시작은 Session 재배정이 아니며 Host가 online이면 중복 process를 만들지 않는다. `CTL-006`, `CTL-008~009`, `DSH-012`, `DSH-042`
 
+같은 이름·`archivist_host_id`·`cli_id`의 활성 Archivist 추가 요청은 기술 Session ID가 달라도 최초 ArchivistSession을 재사용한다. 화면은 추가 요청이 끝날 때까지 제출을 잠가 빠른 이중 클릭을 막고, Control은 재전송을 최종 방어한다. 제거된 Session은 같은 구성의 새 추가를 막지 않는다. `CTL-006`, `DSH-012`
+
 ## 3. 최소 런타임 코어
 
 v1 기본 backend인 Embedded Core가 제공할 기능은 다음뿐이다.

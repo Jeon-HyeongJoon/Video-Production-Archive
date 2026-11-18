@@ -7,6 +7,7 @@ import (
 	"errors"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"videoarchive/internal/core/archivistruntime"
@@ -160,6 +161,7 @@ type Service struct {
 	hosts    *archivistruntime.HostRegistry
 	now      func() time.Time
 	leaseTTL time.Duration
+	createMu sync.Mutex
 }
 
 type RecallTrigger string
@@ -217,11 +219,26 @@ func (service *Service) CreateSession(ctx context.Context, spec archivistruntime
 }
 
 func (service *Service) CreateArchivist(ctx context.Context, sessionID, name, archivistHostID, cliID string) (SessionRecord, error) {
+	service.createMu.Lock()
+	defer service.createMu.Unlock()
 	spec, err := service.hosts.ConfiguredSessionSpec(
 		strings.TrimSpace(sessionID), strings.TrimSpace(name), strings.TrimSpace(archivistHostID), strings.TrimSpace(cliID),
 	)
 	if err != nil {
 		return SessionRecord{}, err
+	}
+	// The browser generates a fresh technical ID for each submission. Treat an
+	// exact active name/Host/CLI match as the same Agent so a double submit or
+	// retried response cannot create duplicate collaboration entries.
+	existing, err := service.store.ListSessions(ctx)
+	if err != nil {
+		return SessionRecord{}, err
+	}
+	for _, record := range existing {
+		if record.RemovedAt.IsZero() && record.Session.Name == spec.Name &&
+			record.Session.ArchivistHostID == spec.ArchivistHostID && record.Session.CLIID == spec.CLIID {
+			return record, nil
+		}
 	}
 	return service.CreateSession(ctx, spec, "")
 }

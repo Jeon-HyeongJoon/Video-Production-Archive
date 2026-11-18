@@ -74,7 +74,7 @@ export const finishedSteps = new Set(["COMPLETED", "FAILED", "CANCELLED"]);
 
 export const labels = {
   drive: { UNCLASSIFIED: "아직 처리 안 함", IN_PROGRESS: "처리 중", HAS_HOLD: "처리 방법 선택 필요", COMPLETED: "최근 작업 완료", CONTENT_CHANGED: "드라이브 내용 변경" },
-  run: { STAGE_ONE_RUNNING: "영상 정리·저장 중", TRANSCRIPTION_READY: "자막·텍스트 만들기 가능", STAGE_TWO_RUNNING: "자막·텍스트 만드는 중", COMPLETED: "작업 완료" },
+  run: { STAGE_ONE_RUNNING: "영상 정리·저장 중", TRANSCRIPTION_READY: "자막·텍스트 자동 시작 중", STAGE_TWO_RUNNING: "자막·텍스트 만드는 중", COMPLETED: "작업 완료" },
   disposition: { ORGANIZE_AS_IS: "원본 그대로 저장", RENDER_RECORDINGS: "영상별 변환", COMPILE_SOURCE_SEQUENCE: "여러 영상 합치기", HOLD: "처리 방법 선택 필요" },
   wait: { INPUT: "직접 입력", APPROVAL: "승인", DEVICE: "장비 연결", MEMORY: "메모리 여유", SCRATCH: "작업 공간", SLOT: "처리 순서", DISK: "디스크 여유", IDLE: "시작 시점", PRIORITY: "우선순위" },
   hold: {

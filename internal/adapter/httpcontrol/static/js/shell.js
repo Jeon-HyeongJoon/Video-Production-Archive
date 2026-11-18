@@ -8,7 +8,7 @@
 import { html, useEffect, useRef, useState, useComputed, effect } from "./lib.js";
 import { clockTime } from "./core.js";
 import {
-  store, ui, stale, problemItems, problemSubject, problemPath, workLane, workTitle, workDrive, driveNameOf, workspaces,
+  store, ui, stale, visibleProblems, acknowledgeProblem, problemSubject, problemPath, workLane, workTitle, workDrive, driveNameOf, workspaces,
   workText, workKind, workIssues, workHref, startVisit,
 } from "./store.js";
 import { route, menus, go, shared, onRoute } from "./router.js";
@@ -46,7 +46,7 @@ function WorkspaceCard({ work }) {
 
 function Sidebar() {
   const now = route.value;
-  const items = problemItems.value;
+  const items = visibleProblems.value;
   const faults = items.filter((item) => item.signal === "fault").length;
   const fresh = ui.newProblems.value.size;
   const [query, setQuery] = useState(now.name === "search" ? now.query.get("q") || "" : "");
@@ -118,9 +118,7 @@ function closeAlerts() {
 // in its drive, the Worker or Job, or the Agent's card for a decision it proposed.
 function resolve(item) {
   closeAlerts();
-  ui.fresh.value = "";
-  const next = new Set(ui.newProblems.peek());
-  if (next.delete(item.key)) ui.newProblems.value = next;
+  acknowledgeProblem(item.key);
   if (item.kind === "card") return openAgentCard(item.sessionID, item.cardID);
   go(problemPath(item));
 }
@@ -142,7 +140,7 @@ function AlertPanel() {
     return () => { document.removeEventListener("pointerdown", outside, true); document.removeEventListener("keydown", escape); };
   }, [!!at]);
   if (!at) return null;
-  const items = problemItems.value;
+  const items = visibleProblems.value;
   const faults = items.filter((item) => item.signal === "fault").length;
   const fresh = ui.newProblems.value;
   return html`<section ref=${panel} id="alert-panel" class="alert-panel" role="dialog" aria-label="알림" style=${`top:${at.top}px;left:${at.left}px`}>
@@ -161,7 +159,7 @@ function AlertPanel() {
 }
 
 function AlertToast() {
-  const item = useComputed(() => problemItems.value.find((entry) => entry.key === ui.fresh.value) || null).value;
+  const item = useComputed(() => visibleProblems.value.find((entry) => entry.key === ui.fresh.value) || null).value;
   const kept = useRef(null);
   if (item) kept.current = item;
   const shown = kept.current;
@@ -170,7 +168,7 @@ function AlertToast() {
       html`<${StatusIcon} key="icon" kind=${shown.signal} />`,
       html`<span key="text" class="toast-text"><b>새 ${shown.title}</b><small id="fresh-text">${problemSubject(shown)}</small></span>`,
       html`<button key="go" type="button" id="fresh-go" class="btn btn-sm" onClick=${() => resolve(shown)}>열기</button>`,
-      html`<button key="close" type="button" id="fresh-close" class="icon-btn" aria-label="알림 닫기" onClick=${() => { ui.fresh.value = ""; }}><${Glyph} d=${GLYPH.close} /></button>`,
+      html`<button key="close" type="button" id="fresh-close" class="icon-btn" aria-label="알림 확인" onClick=${() => { acknowledgeProblem(shown.key); }}><${Glyph} d=${GLYPH.close} /></button>`,
     ] : null}
   </div>`;
 }
@@ -207,7 +205,7 @@ onRoute(startVisit);
 export function App({ onView }) {
   const view = useRef();
   useEffect(() => { onView(view.current); }, []);
-  const waiting = useComputed(() => problemItems.value.some((item) => item.kind === "card")).value;
+  const waiting = useComputed(() => visibleProblems.value.some((item) => item.kind === "card")).value;
   return html`<div class="page">
     <div class="shell">
       <${Sidebar} />

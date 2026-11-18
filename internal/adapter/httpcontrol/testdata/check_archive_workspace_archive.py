@@ -13,7 +13,7 @@ with sync_playwright() as playwright:
     stored.click()
     detail = page.locator("#folder-detail")
     expect(detail.locator('.archive-badge[data-state="STORED"]')).to_have_text("저장 완료")
-    expect(detail.locator(".folder-note")).to_have_text("자막·텍스트 만들기 가능")
+    expect(detail.locator(".folder-note")).to_have_text("자막·텍스트 자동 시작 대상")
     committed = page.locator('#drive-folders .folder-row:has(.archive-badge[data-state="COMMITTED"])')
     expect(committed).to_have_count(1)
     expect(committed.locator(".archive-badge")).to_have_text("보존 완료")

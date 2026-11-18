@@ -33,7 +33,7 @@ const INFO = {
   render: ["1080p 변환 · 영상별 6Mbps(선택 시 20Mbps) · 여러 영상은 20Mbps로 합침", "영상별 변환 · 여러 영상 합치기"],
   qc: ["결과 영상을 원본 기술정보·변환 설정과 대조하는 검사", "처리 방법 선택이 필요한 폴더를 뺀 모든 폴더"],
   archive: ["결과 저장 위치에 복사 · checksum 검증 뒤 저장 완료", "처리 방법 선택이 필요한 폴더를 뺀 모든 폴더"],
-  gate: ["영상 정리·저장에 남은 작업이 없으면 열림 · 담당자가 자막·텍스트 만들기 선택", "저장 완료된 원본 그대로 저장 · 영상별 변환"],
+  gate: ["영상 정리·저장에 남은 작업이 없으면 Control이 자막·텍스트 작업을 자동으로 이어서 시작", "저장 완료된 원본 그대로 저장 · 영상별 변환"],
   audio: ["음성 인식용 16kHz mono 오디오 준비", "자막·텍스트 대상"],
   transcript: ["음성을 시간 구간 텍스트로 인식", "자막·텍스트 대상"],
   subtitle: ["인식한 시간 구간으로 SRT 자막 생성 · 텍스트 파일과 동시 진행", "자막·텍스트 대상"],
@@ -49,7 +49,7 @@ const GROUPS = [
 ];
 const WORDS = { todo: "아직", part: "일부 지남", now: "지금 진행", done: "모두 지남", closed: "닫힘", ask: "시작 선택", skip: "대상 없음" };
 const PROBLEM_STEPS = ["classification", "markers", "render", "qc", "archive", "audio", "transcript", "subtitle", "transcript_text", "add"];
-const STAGE_STATES = { intake: ["todo", "todo"], stage1: ["now", "todo"], stt: ["done", "ask"], stage2: ["done", "now"], done: ["done", "done"] };
+const STAGE_STATES = { intake: ["todo", "todo"], stage1: ["now", "todo"], stt: ["done", "now"], stage2: ["done", "now"], done: ["done", "done"] };
 const STAGE_ICON = { todo: "idle", part: "part", now: "work", ask: "decide", done: "done", skip: "idle" };
 
 // tally counts the drive's folders at one step by stored StepState and
@@ -83,7 +83,7 @@ function tallyLines(counts) {
 
 function gateState(current) {
   const state = current.archive_run_state;
-  if (state === "TRANSCRIPTION_READY") return ["ask", `대상 ${formatCount(current.eligible_transcription_count)} 폴더`];
+  if (state === "TRANSCRIPTION_READY") return ["now", `자동 시작 준비 · 대상 ${formatCount(current.eligible_transcription_count)} 폴더`];
   if (state === "STAGE_TWO_RUNNING" || (state === "COMPLETED" && current.eligible_transcription_count > 0)) return ["done", "시작됨"];
   if (state === "COMPLETED") return ["skip", "대상 없음"];
   if (current.archive_run_id) return ["closed", `영상 정리·저장 ${formatCount(current.stage_one_remaining)} 폴더 남음`];
@@ -379,7 +379,7 @@ function FolderDetail({ folder, current }) {
       <span class="detail-facts num muted">${folder.disposition ? label("disposition", folder.disposition) : "미처리"} · ${formatCount(folder.video_count)} 영상 · ${formatBytes(folder.estimated_output_bytes)}</span>
       ${folder.archive_state || folder.can_add_transcription || (folder.transcription_job_id && folder.step_state === "COMPLETED") ? html`<span class="detail-notes">
         ${folder.archive_state ? archiveBadge(folder.archive_state) : null}
-        ${folder.can_add_transcription ? html`<span class="note-tag folder-note">자막·텍스트 만들기 가능</span>` : null}
+        ${folder.can_add_transcription ? html`<span class="note-tag folder-note">자막·텍스트 자동 시작 대상</span>` : null}
         ${folder.transcription_job_id && folder.step_state === "COMPLETED" ? html`<span class="note-tag folder-note">자막·텍스트 완료</span>` : null}
       </span>` : null}
     </div>
@@ -606,29 +606,6 @@ export function CompletedWork({ items }) {
   </section>`;
 }
 
-// ─── STT gate ───────────────────────────────────────────────────────────────
-
-// SttButton is the STT gate while it is open. Before and after that, the
-// overview's state and stage summary say where the run is.
-export function SttButton({ drive: current }) {
-  const [pending, setPending] = useState(false);
-  if (current.archive_run_state !== "TRANSCRIPTION_READY" || !current.archive_run_revision) return null;
-  const start = async () => {
-    setPending(true);
-    try {
-      const result = await mutation(`/api/v1/archive-runs/${encodeURIComponent(current.archive_run_id)}/transcription`, { idempotency_key: newID("STT"), expected_archive_run_revision: current.archive_run_revision });
-      ui.status.value = `자막·텍스트 만들기 시작 · ${result.eligible_count} 폴더`;
-      await refresh();
-    } catch (error) {
-      ui.status.value = error.message;
-    } finally {
-      setPending(false);
-    }
-  };
-  return html`<button type="button" class="btn" id="start-stt" data-action="stt" data-signal=${pending ? null : "decide"} disabled=${pending || stale.value} onClick=${start}>
-    ${pending ? "시작 중…" : `자막·텍스트 만들기 · ${formatCount(current.eligible_transcription_count)} 폴더`}</button>`;
-}
-
 export const StatusLine = () => (ui.status.value ? html`<p class="status-line" role="status" id="command-status">${ui.status.value}</p>` : null);
 
 export const titleShared = (key) => shared.value?.key === key && route.value.full === key;
@@ -650,7 +627,6 @@ export function DriveScreen({ id }) {
         ${runHref ? html`<a class="btn" href=${runHref}>최근 작업 보기</a>` : null}
         ${!current.archive_run_id && current.connection_state === "CONNECTED"
           ? html`<button type="button" class="btn" id="open-new-work" onClick=${() => { openNewWork(current.workspace_drive_id); go("#/create"); }}>이 드라이브 처리</button>` : null}
-        <${SttButton} drive=${current} />
       </div>
     </div>`,
     html`<${DriveOverview} key="overview" drive=${current} id="drive-overview" progressID="drive-progress" />`,

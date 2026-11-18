@@ -29,6 +29,10 @@ var (
 
 const StartActionCardCommand = "archive_run.transcription.start"
 
+// CoordinatorActorID is the Control-owned actor that continues an ArchiveRun
+// into its separate transcription Jobs when the stage-one gate opens.
+const CoordinatorActorID = "archive-transcription-coordinator"
+
 type ArchiveRunStore interface {
 	Load(string) (command.Snapshot, error)
 }
@@ -92,7 +96,8 @@ func (service *Service) Start(ctx context.Context, request StartRequest) (Result
 	request.IdempotencyKey = strings.TrimSpace(request.IdempotencyKey)
 	request.Actor.ID = strings.TrimSpace(request.Actor.ID)
 	if request.ArchiveRunID == "" || request.ExpectedArchiveRunRevision == 0 || request.IdempotencyKey == "" ||
-		(request.Actor.Type != vocabulary.ActorHuman && request.Actor.Type != vocabulary.ActorArchivist) ||
+		(request.Actor.Type != vocabulary.ActorHuman && request.Actor.Type != vocabulary.ActorArchivist &&
+			(request.Actor.Type != vocabulary.ActorSystem || request.Actor.ID != CoordinatorActorID)) ||
 		request.Actor.ID == "" || request.StartedAt.IsZero() {
 		return Result{}, ErrInvalidRequest
 	}

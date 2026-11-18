@@ -686,13 +686,13 @@ func summarizeState(children []ChildJob, drive archiveintakeworkspace.DriveView,
 		}
 	}
 	if current {
-		if drive.HoldCount > 0 || drive.ArchiveRunState == "TRANSCRIPTION_READY" || driveNeedsReview(drive) {
+		if drive.HoldCount > 0 || driveNeedsReview(drive) {
 			return StateAttention
 		}
 		if drive.ArchiveRunState == "COMPLETED" {
 			return StateCompleted
 		}
-		if drive.ArchiveRunState == "STAGE_ONE_RUNNING" || drive.ArchiveRunState == "STAGE_TWO_RUNNING" {
+		if drive.ArchiveRunState == "STAGE_ONE_RUNNING" || drive.ArchiveRunState == "TRANSCRIPTION_READY" || drive.ArchiveRunState == "STAGE_TWO_RUNNING" {
 			return StateActive
 		}
 	}

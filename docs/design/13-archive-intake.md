@@ -9,7 +9,7 @@
 - 아카이브 저장소는 `StorageRole.ARCHIVE_PRIMARY`다. 현장 표현인 “백업 하드”도 이 뜻이다. 기술적 복제본은 `BACKUP_OFFSITE`에만 둔다.
 - 화면 이름은 “아카이브”이며 검색 화면과 같은 기록물을 가리킨다.
 - 로컬 Storage, 연결된 네트워크 공유, 원본과 다른 새 외장 드라이브 및 검증된 FTP·SFTP 원격 파일 서비스 Storage를 허용한다. SMTP는 아카이브 저장소가 아니라 전달 채널이다.
-- 담당자만 Worker·원본 드라이브·아카이브 저장소·폴더 범위·STT 시작 시점을 고른다. Archivist와 자동 정책은 Storage나 처리 범위를 고르지 않는다. 담당자가 고정한 범위 안의 HOLD는 Archivist가 구조화된 근거로 명시적으로 분류할 수 있다.
+- 담당자만 Worker·원본 드라이브·아카이브 저장소·폴더 범위를 고르고 영상 정리·보관을 한 번 시작한다. Archivist와 자동 정책은 Storage나 처리 범위를 고르지 않는다. 1단계 게이트가 열리면 Control이 별도 STT Job을 자동으로 이어서 시작한다. 담당자가 고정한 범위 안의 HOLD는 Archivist가 구조화된 근거로 명시적으로 분류할 수 있다.
 - ARCHIVE_PRIMARY에 한 벌을 검증해 게시하면 “보관됨”이다. `ARC-004`의 복제본 검증과 사람 승인을 충족하면 “확정됨”이다.
 - 기록물은 중앙 DB 없이 복원 가능한 ArchivePackage 형식을 따른다. 패키지 게시 형식은 현재 수직 경로에 연결되어 있지만, 패키지만으로 DB를 복원하는 명령과 acceptance test인 `ARC-007`은 planned다.
 - 원본 드라이브 분리와 네트워크 아카이브 저장소 끊김은 `WaitReason.DEVICE`다. 기다리는 동안 실행 시도 횟수를 소비하지 않는다.
@@ -76,7 +76,7 @@ Worker는 외부 subprocess에 executable과 argument 배열만 넘기고 Storag
 
 ## 5. 2단계: STT
 
-STT 시작은 별도 Command다. 해당 ArchiveRun ID에 속한 최신 판정과 결정적 Folder Job만 투영해, 1단계에 실행 중이거나 재시도 예정인 작업이 없을 때만 받는다. HOLD는 명시적 분류 입력을 기다리므로 남은 실행 가능 작업 수와 2단계 대상에서 제외한다. 다른 ArchiveRun와 시스템 전체 queue는 이 게이트에 포함하지 않고 자원 경합은 Scheduler가 처리한다. `PIP-008`
+STT 시작은 내부적으로 별도 Command다. Control 조정기는 해당 ArchiveRun ID에 속한 최신 판정과 결정적 Folder Job만 투영해 1단계에 실행 중이거나 재시도 예정인 작업이 없을 때 결정적 멱등성 key로 이 Command를 자동 제출한다. 사용자는 영상 정리·보관을 시작한 뒤 두 번째 시작 조작을 하지 않는다. HOLD는 명시적 분류 입력을 기다리므로 남은 실행 가능 작업 수와 2단계 대상에서 제외한다. 다른 ArchiveRun와 시스템 전체 queue는 이 게이트에 포함하지 않고 자원 경합은 Scheduler가 처리한다. 기존 HTTP·MCP 시작 Capability는 재전송·복구 호환 경계로 유지한다. `PIP-008`, `APP-008`, `DSH-006`
 
 대상은 1단계에서 보관됨이 되고 원본 기술정보에 오디오가 있는 `ORGANIZE_AS_IS`·`RENDER_RECORDINGS` 녹화영상뿐이다. 무음 영상, 소스 시퀀스, HOLD, 실패 입력은 제외한다. `ORG-007`
 
@@ -137,7 +137,7 @@ layout v1의 상태 후보는 분류됨·보류·처리 중·보관됨·STT 완�
 
 담당자는 화면에서 Worker·원본·아카이브 저장소·폴더 범위를 먼저 고른다. 이 참조는 ID와 revision으로 ArchivistTurn에 고정하며 메시지 본문에서 추론하지 않는다. 참조가 없거나 오래됐으면 Archivist는 ActionCard로 선택을 요청한다. `COL-003`
 
-Archivist 추가 화면은 이름·Archivist Host·감지된 CLI만 받는다. Archivist Host 등록, backend와 workspace root는 시작 설정과 Archivist Host 설치가 소유한다. `CTL-006`, `DSH-012`
+Archivist 추가 화면은 이름·Archivist Host·감지된 CLI만 받는다. Archivist Host 등록, backend와 workspace root는 시작 설정과 Archivist Host 설치가 소유한다. 같은 이름·Host·CLI의 활성 Archivist를 다시 제출하면 새 Session을 늘리지 않고 기존 Session을 반환한다. `CTL-006`, `DSH-012`
 
 협업 경계는 다음과 같다.
 
@@ -178,7 +178,7 @@ Archivist용 MCP는 드라이브·폴더 조회, 1단계 시작, 상태 조회, 
 - 작업 관리: 생성 입력 없이 진행 중, 시작 대기, 직접 확인할 항목, 완료된 작업 목록을 둔다. ArchiveRun 상세는 하위 Job과 ArchivePackage 저장된 결과를 함께 본다. `DSH-019`, `DSH-043`
 - 작업 PC: 처리 중인 드라이브, 드라이브에 속하지 않은 Job, 결과 저장 위치 접근과 자원을 보인다.
 
-자막·텍스트 만들기 버튼은 영상 정리·저장에 남은 실행 작업이 있으면 그 수와 함께 비활성, 게이트 통과 시 활성, 시작 뒤 진행 중으로 표시한다. 드라이브 단계는 `실행 전 → 영상 정리·저장 중 → 자막·텍스트 만들기 가능 → 자막·텍스트 만드는 중 → 작업 완료` 순서이고, 폴더 단계 순서 `처리 방식 결정·영상 구간 정리·영상 변환·결과 검사·결과 저장·영상 목록 갱신 | 음성 준비·음성을 텍스트로 변환·자막 생성·텍스트 파일 생성·결과에 추가·영상 목록 갱신`은 폴더 행의 단계 점과 펼친 처리 과정에서만 보인다. 단계 점과 폴더 행은 영속 StepState와 저장된 WaitReason만 사용한다. `INPUT`·`APPROVAL`·`DEVICE`는 직접 확인할 항목과 폴더 행 글자, `MEMORY`·`SCRATCH`·`SLOT`·`DISK`·`IDLE`·`PRIORITY`는 진행 중과 세부의 이유 label로 표시한다. `DSH-006`, `DSH-008`
+자막·텍스트는 영상 정리·저장 게이트 뒤 자동으로 이어지며 별도 시작 버튼이나 ActionCard를 두지 않는다. 드라이브 단계는 `실행 전 → 영상 정리·저장 중 → 자막·텍스트 자동 시작 중 → 자막·텍스트 만드는 중 → 작업 완료` 순서이고, 폴더 단계 순서 `처리 방식 결정·영상 구간 정리·영상 변환·결과 검사·결과 저장·영상 목록 갱신 | 음성 준비·음성을 텍스트로 변환·자막 생성·텍스트 파일 생성·결과에 추가·영상 목록 갱신`은 폴더 행의 단계 점과 펼친 처리 과정에서만 보인다. 단계 점과 폴더 행은 영속 StepState와 저장된 WaitReason만 사용한다. `INPUT`·`APPROVAL`·`DEVICE`는 직접 확인할 항목과 폴더 행 글자, `MEMORY`·`SCRATCH`·`SLOT`·`DISK`·`IDLE`·`PRIORITY`는 진행 중과 세부의 이유 label로 표시한다. `DSH-006`, `DSH-008`
 
 화면은 기본 어두운·선택 밝은 무채색 표면, 목록 hairline, 2px 이하 모서리와 명사형 label을 사용하고 설명형 본문을 두지 않는다. Darwin·Linux·Windows Chromium PNG golden과 폭별 배치 검사로 승인한다. `DSH-004`, `DSH-007`, `DSH-009`
 
