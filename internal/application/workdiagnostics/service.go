@@ -110,6 +110,7 @@ type JobDiagnostic struct {
 	LastProgressAt   time.Time                      `json:"last_progress_at"`
 	Worker           *WorkerSnapshot                `json:"worker,omitempty"`
 	Execution        *ExecutionObservation          `json:"execution,omitempty"`
+	ProgressEvidence []corejob.StepProgressEvidence `json:"progress_evidence,omitempty"`
 	FailureEvidence  []corejob.StepFailureEvidence  `json:"failure_evidence,omitempty"`
 	RecoveryEvidence []corejob.StepRecoveryEvidence `json:"recovery_evidence,omitempty"`
 }
@@ -207,6 +208,7 @@ func (service *Service) diagnoseJob(ctx context.Context, view archiveworkspace.J
 		LogReference: safeLogReference(summary.LogReference), LastProgressAt: summary.LastEventAt,
 	}
 	for _, step := range view.Steps {
+		item.ProgressEvidence = append(item.ProgressEvidence, step.ProgressEvidence...)
 		for _, evidence := range step.FailureEvidence {
 			item.FailureEvidence = append(item.FailureEvidence, sanitizeFailureEvidence(evidence))
 		}
@@ -214,6 +216,12 @@ func (service *Service) diagnoseJob(ctx context.Context, view archiveworkspace.J
 			item.RecoveryEvidence = append(item.RecoveryEvidence, sanitizeRecoveryEvidence(evidence))
 		}
 	}
+	sort.SliceStable(item.ProgressEvidence, func(i, j int) bool {
+		if item.ProgressEvidence[i].ObservedAt.Equal(item.ProgressEvidence[j].ObservedAt) {
+			return item.ProgressEvidence[i].ReportSequence < item.ProgressEvidence[j].ReportSequence
+		}
+		return item.ProgressEvidence[i].ObservedAt.Before(item.ProgressEvidence[j].ObservedAt)
+	})
 	sort.SliceStable(item.FailureEvidence, func(i, j int) bool {
 		if item.FailureEvidence[i].ObservedAt.Equal(item.FailureEvidence[j].ObservedAt) {
 			return item.FailureEvidence[i].FailureSequence < item.FailureEvidence[j].FailureSequence
@@ -223,6 +231,14 @@ func (service *Service) diagnoseJob(ctx context.Context, view archiveworkspace.J
 	stateFact := diagnosticFact("STEP_STATE_OBSERVED", "Step "+summary.CurrentStepID+" is "+string(summary.StepState), summary.LastEventAt,
 		summary.JobID, strconv.FormatUint(summary.Revision, 10), summary.CurrentStepID, string(summary.StepState))
 	facts := []Fact{stateFact}
+	for _, evidence := range item.ProgressEvidence {
+		facts = append(facts, Fact{
+			EvidenceID: evidence.EvidenceID, Code: "WORKER_PROGRESS_RECORDED",
+			Summary: "Chunk " + strconv.FormatUint(uint64(evidence.Update.ChunkIndex), 10) + "/" + strconv.FormatUint(uint64(evidence.Update.ChunkCount), 10) +
+				" is " + string(evidence.Update.Status) + " for source milliseconds " + strconv.FormatInt(evidence.Update.SourceStartMillis, 10) + "-" + strconv.FormatInt(evidence.Update.SourceEndMillis, 10),
+			ObservedAt: evidence.ObservedAt,
+		})
+	}
 	for _, evidence := range item.FailureEvidence {
 		facts = append(facts, Fact{
 			EvidenceID: evidence.EvidenceID, Code: "WORKER_FAILURE_RECORDED",
@@ -442,6 +458,7 @@ func Sanitize(snapshot Snapshot) Snapshot {
 			copy.PhysicalDeviceIDs = append([]string(nil), copy.PhysicalDeviceIDs...)
 			result.Jobs[index].Execution = &copy
 		}
+		result.Jobs[index].ProgressEvidence = append([]corejob.StepProgressEvidence(nil), snapshot.Jobs[index].ProgressEvidence...)
 		result.Jobs[index].FailureEvidence = append([]corejob.StepFailureEvidence(nil), snapshot.Jobs[index].FailureEvidence...)
 		for evidenceIndex := range result.Jobs[index].FailureEvidence {
 			result.Jobs[index].FailureEvidence[evidenceIndex] = sanitizeFailureEvidence(result.Jobs[index].FailureEvidence[evidenceIndex])
@@ -512,6 +529,9 @@ func fingerprint(snapshot Snapshot) string {
 		}
 		if item.Execution != nil {
 			source.WriteString("/lease=" + boolString(item.Execution.HasLease))
+		}
+		for _, evidence := range item.ProgressEvidence {
+			source.WriteString("/operation-progress=" + evidence.EvidenceID + ":" + string(evidence.Update.Status))
 		}
 		for _, evidence := range item.FailureEvidence {
 			source.WriteString("/failure=" + evidence.EvidenceID + ":" + evidence.CauseCode)

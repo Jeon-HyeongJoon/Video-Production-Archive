@@ -45,6 +45,7 @@ type StepStatus struct {
 	LogReference     string
 	LastEventAt      time.Time
 	DependencyIDs    []string
+	ProgressEvidence []corejob.StepProgressEvidence
 	FailureEvidence  []corejob.StepFailureEvidence
 	RecoveryEvidence []corejob.StepRecoveryEvidence
 }
@@ -214,6 +215,7 @@ func cloneSteps(source []StepStatus) []StepStatus {
 	steps := append([]StepStatus(nil), source...)
 	for index := range steps {
 		steps[index].DependencyIDs = append([]string(nil), steps[index].DependencyIDs...)
+		steps[index].ProgressEvidence = append([]corejob.StepProgressEvidence(nil), steps[index].ProgressEvidence...)
 		steps[index].FailureEvidence = append([]corejob.StepFailureEvidence(nil), steps[index].FailureEvidence...)
 		for evidenceIndex := range steps[index].FailureEvidence {
 			if steps[index].FailureEvidence[evidenceIndex].ProcessExitCode != nil {

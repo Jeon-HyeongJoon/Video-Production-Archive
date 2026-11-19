@@ -77,7 +77,7 @@ func (publisher *Publisher) PublishInitialV2(request InitialRequest) (Package, e
 
 func (publisher *Publisher) ReviseV2(request RevisionRequest) (Package, error) {
 	request.PackageID = strings.TrimSpace(request.PackageID)
-	if !packageIDPattern.MatchString(request.PackageID) || request.CreatedAt.IsZero() {
+	if !packageIDPattern.MatchString(request.PackageID) || request.BaseRevision == 0 || request.CreatedAt.IsZero() {
 		return Package{}, ErrInvalidRequest
 	}
 	lock, err := publisher.acquirePackageLock(request.PackageID)
@@ -91,6 +91,9 @@ func (publisher *Publisher) ReviseV2(request RevisionRequest) (Package, error) {
 	}
 	if current.LayoutVersion != FlatLayoutVersion || current.State != archive.PackageStored {
 		return Package{}, ErrPackageState
+	}
+	if replayed, ok, replayErr := publisher.replayedStoredRevision(current, request); replayErr != nil || ok {
+		return replayed, replayErr
 	}
 	metadataPayload, err := publisher.archive.ReadFile(path.Join(current.packageDirectory, revisionFileName(current.Revision, "metadata.json")))
 	if err != nil {

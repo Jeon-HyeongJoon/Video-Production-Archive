@@ -57,6 +57,15 @@ type Result struct {
 	OutputRecord        *execution.StepOutputRecord
 }
 
+type ProgressReport struct {
+	WorkerID       string
+	JobID          string
+	StepID         string
+	FencingToken   uint64
+	ReportSequence uint64
+	Update         execution.ProgressUpdate
+}
+
 type Cancellation struct {
 	ID           string
 	WorkerID     string
@@ -81,6 +90,7 @@ type CancellationResult struct {
 type Store interface {
 	ClaimWorkerStep(context.Context, string, time.Time) (Assignment, job.State, error)
 	RenewWorkerLease(context.Context, string, string, string, uint64, time.Time) (LeaseRenewal, error)
+	RecordWorkerProgress(context.Context, ProgressReport, time.Time) (job.State, error)
 	SettleWorkerStep(context.Context, Result, time.Time) (job.State, error)
 	PendingWorkerCompletions(context.Context, int) ([]CompletionWork, error)
 	MarkWorkerCompletionDelivered(context.Context, string, time.Time) error
@@ -95,6 +105,18 @@ func (service *Service) RenewLease(ctx context.Context, workerID, jobID, stepID 
 		return LeaseRenewal{}, ErrInvalidAssignment
 	}
 	return service.store.RenewWorkerLease(ctx, workerID, jobID, stepID, fencingToken, service.now().UTC())
+}
+
+func (service *Service) ReportProgress(ctx context.Context, report ProgressReport) error {
+	if report.WorkerID == "" || report.JobID == "" || report.StepID == "" || report.FencingToken == 0 ||
+		report.ReportSequence == 0 || report.Update.Validate() != nil {
+		return ErrInvalidAssignment
+	}
+	state, err := service.store.RecordWorkerProgress(ctx, report, service.now().UTC())
+	if err != nil {
+		return err
+	}
+	return service.project(ctx, state)
 }
 
 type ProjectionWriter interface {

@@ -86,6 +86,7 @@ export const labels = {
     transcript: "음성을 텍스트로 변환", transcript_text: "텍스트 파일 생성", subtitle: "자막 생성", add: "결과에 추가", catalog: "영상 목록 갱신", job_pending: "작업 준비",
   },
   step: { QUEUED: "시작 대기", WAITING: "대기", RESERVED: "시작 준비", RUNNING: "처리 중", VERIFYING: "결과 확인 중", PAUSED: "일시 정지", FAILED: "실패", COMPLETED: "완료", CANCELLED: "취소" },
+  progress: { PLANNED: "청크 계획", STARTED: "처리 시작", COMPLETED: "처리 완료", FAILED: "처리 실패" },
   worker: { ONLINE: "연결됨", BUSY: "처리 중", DRAINING: "정리 중", OFFLINE: "꺼짐", DISABLED: "사용 안 함" },
   host: { ONLINE: "연결됨", BUSY: "처리 중", CONNECTING: "연결 중", OFFLINE: "꺼짐", DISABLED: "사용 안 함" },
   turn: { QUEUED: "시작 대기", LEASED: "전달 중", SUBMITTED: "전달됨", RUNNING: "처리 중", WAITING: "대기", COMPLETED: "완료", FAILED: "실패", CANCELLED: "취소" },

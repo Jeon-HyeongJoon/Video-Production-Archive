@@ -17,17 +17,27 @@ import (
 
 const (
 	StartWorkerStepCommand             = "step.start"
+	ReportWorkerStepProgressCommand    = "step.report_progress"
 	SettleWorkerStepCommand            = "step.settle"
 	SettleWorkerCancellationCommand    = "step.settle_cancellation"
 	RecoverWorkerReservationCommand    = "step.recover_reservation"
 	RecoverWorkerExecutionLeaseCommand = "step.recover_execution_lease"
 )
 
+const maxStepProgressEvidence = 1024
+
 var ErrInvalidWorkerLifecycle = errors.New("Worker Step lifecycle command is invalid")
 
 type StartWorkerStepParameters struct {
 	StepID       string `json:"step_id"`
 	FencingToken uint64 `json:"fencing_token"`
+}
+
+type ReportWorkerStepProgressParameters struct {
+	StepID         string                   `json:"step_id"`
+	FencingToken   uint64                   `json:"fencing_token"`
+	ReportSequence uint64                   `json:"report_sequence"`
+	Update         execution.ProgressUpdate `json:"update"`
 }
 
 type SettleWorkerStepParameters struct {
@@ -83,6 +93,12 @@ func (handler *WorkerLifecycleHandler) Handle(envelope command.Envelope, snapsho
 			return command.Change{}, ErrInvalidWorkerLifecycle
 		}
 		return handler.start(envelope, snapshot, parameters)
+	case ReportWorkerStepProgressCommand:
+		var parameters ReportWorkerStepProgressParameters
+		if decodeParameters(envelope.Parameters, &parameters) != nil {
+			return command.Change{}, ErrInvalidWorkerLifecycle
+		}
+		return handler.progress(envelope, snapshot, parameters)
 	case SettleWorkerStepCommand:
 		var parameters SettleWorkerStepParameters
 		if decodeParameters(envelope.Parameters, &parameters) != nil {
@@ -106,6 +122,52 @@ func (handler *WorkerLifecycleHandler) Handle(envelope command.Envelope, snapsho
 	}
 }
 
+func (handler *WorkerLifecycleHandler) progress(
+	envelope command.Envelope,
+	snapshot command.Snapshot,
+	parameters ReportWorkerStepProgressParameters,
+) (command.Change, error) {
+	state, step, err := workerStepState(envelope, snapshot, parameters.StepID, parameters.FencingToken, true)
+	if err != nil || step.Workflow.State != workflow.Running {
+		if err != nil {
+			return command.Change{}, err
+		}
+		return command.Change{}, workflow.ErrStaleFencingToken
+	}
+	if parameters.ReportSequence == 0 || parameters.Update.Validate() != nil || step.ExecutionSpec == nil ||
+		parameters.Update.Operation != step.ExecutionSpec.Operation || len(step.ProgressEvidence) >= maxStepProgressEvidence {
+		return command.Change{}, ErrInvalidWorkerLifecycle
+	}
+	if count := len(step.ProgressEvidence); count > 0 {
+		previous := step.ProgressEvidence[count-1]
+		if previous.FencingToken == parameters.FencingToken {
+			if parameters.ReportSequence <= previous.ReportSequence || parameters.Update.Progress < previous.Update.Progress ||
+				parameters.Update.ChunkCount != previous.Update.ChunkCount || parameters.Update.ChunkIndex < previous.Update.ChunkIndex {
+				return command.Change{}, ErrInvalidWorkerLifecycle
+			}
+		}
+	}
+	now := handler.now().UTC()
+	evidence := StepProgressEvidence{
+		EvidenceID: progressEvidenceID(state.ID, step.Workflow.ID, parameters.FencingToken, parameters.ReportSequence),
+		StepID:     step.Workflow.ID, WorkerID: envelope.Actor.ID, FencingToken: parameters.FencingToken,
+		ReportSequence: parameters.ReportSequence, ObservedAt: now, Update: parameters.Update,
+	}
+	step.ProgressEvidence = append(step.ProgressEvidence, evidence)
+	step.Progress = parameters.Update.Progress
+	step.LastEventAt = now
+	state.CurrentStepID = step.Workflow.ID
+	state.Revision = snapshot.Revision + 1
+	return stateChange(envelope, state, "StepProgressObserved", map[string]any{
+		"step_id": step.Workflow.ID, "fencing_token": parameters.FencingToken, "progress_evidence": evidence,
+	})
+}
+
+func progressEvidenceID(jobID, stepID string, fencingToken, reportSequence uint64) string {
+	digest := sha256.Sum256([]byte(jobID + "\x00" + stepID + "\x00" + strconv.FormatUint(fencingToken, 10) + "\x00" + strconv.FormatUint(reportSequence, 10)))
+	return "EVD-PROGRESS-" + strings.ToUpper(hex.EncodeToString(digest[:8]))
+}
+
 func (handler *WorkerLifecycleHandler) start(
 	envelope command.Envelope,
 	snapshot command.Snapshot,
@@ -119,6 +181,12 @@ func (handler *WorkerLifecycleHandler) start(
 		return command.Change{}, workflow.ErrIllegalTransition
 	}
 	now := handler.now().UTC()
+	// FailureEvidence is the immutable history. The current-attempt fields must
+	// describe the execution that just started, not a preceding retry.
+	step.ErrorClass = ""
+	step.LogReference = ""
+	step.WaitTargetStorageID = ""
+	step.Progress = 0
 	step.LastEventAt = now
 	state.CurrentStepID = step.Workflow.ID
 	state.Revision = snapshot.Revision + 1

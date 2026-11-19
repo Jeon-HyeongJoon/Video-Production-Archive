@@ -135,7 +135,7 @@ func MaterializeDependentStepExecutionSpec(request MaterializeRequest) (StepExec
 		}
 	case "transcript_text":
 		operation = OperationWriteTranscriptText
-		profileReference = "plain-text@v1"
+		profileReference = "plain-text-timecode@v1"
 		inputs = inputsFromOutputs(allOutputs, outputOriginals, OutputTranscript)
 		for _, input := range inputs {
 			id := stableExecutionID("TRANSCRIPT-TEXT", parameters.OrganizationDecisionID, input.ArtifactID)
@@ -151,7 +151,10 @@ func MaterializeDependentStepExecutionSpec(request MaterializeRequest) (StepExec
 			if err != nil {
 				return StepExecutionSpec{}, ErrCannotMaterializeStepExecutionSpec
 			}
-			relativePath := path.Join(directory, ".archive-package.json")
+			relativePath := strings.TrimSpace(parameters.ArchivePackageMetadataPath)
+			if relativePath == "" {
+				relativePath = path.Join(directory, ".archive-package.json")
+			}
 			for _, candidate := range allOutputs {
 				if candidate.ID == parameters.ArchivePackageID && candidate.Kind == OutputOrganizedMedia && candidate.RelativePath != "" {
 					relativePath = candidate.RelativePath

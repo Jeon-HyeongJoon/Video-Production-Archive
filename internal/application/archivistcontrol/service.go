@@ -401,8 +401,10 @@ func (service *Service) HandleAdvisoryEvent(ctx context.Context, event AdvisoryE
 	turnID := "SYSTEM-ADVISORY-" + hex.EncodeToString(digest[:12])
 	if stored, loadErr := service.store.Turn(ctx, turnID); loadErr == nil {
 		expectedPolicy := advisoryPolicy(event.Kind)
+		legacyDiagnostic := event.Kind == AdvisoryWorkDiagnostic && stored.Turn.ToolPolicy.Effective() == archivistruntime.ToolPolicyAdvisory &&
+			stored.Turn.WorkReference != nil && event.Work != nil && *stored.Turn.WorkReference == *event.Work
 		if (event.Kind != AdvisoryNewDrive && stored.Turn.SessionID != event.SessionID) || stored.Turn.SubmittedBy != vocabulary.ActorSystem ||
-			stored.Turn.ToolPolicy.Effective() != expectedPolicy {
+			(stored.Turn.ToolPolicy.Effective() != expectedPolicy && !legacyDiagnostic) {
 			return TurnRecord{}, false, command.ErrIdempotencyConflict
 		}
 		return stored, true, nil

@@ -130,7 +130,8 @@ func TestStartCreatesOneIdempotentTranscriptionJobPerStoredRecordingInReadyArchi
 		}
 		if audioSpec == nil || audioSpec.Validate() != nil || audioSpec.Inputs[0].StorageID != "ARCHIVE-1" ||
 			audioSpec.Inputs[0].RelativePath[:9] != "packages/" || audioSpec.Parameters.ArchivePackageID == "" ||
-			audioSpec.Parameters.ArchivePackageRevision != 1 || audioSpec.Parameters.WorkspaceDriveID != "VOLUME-1" {
+			audioSpec.Parameters.ArchivePackageRevision != 1 || audioSpec.Parameters.ArchivePackageMetadataPath == "" ||
+			audioSpec.Parameters.WorkspaceDriveID != "VOLUME-1" {
 			t.Fatalf("unsafe or incomplete first stage-two execution spec: %+v", audioSpec)
 		}
 		for _, step := range state.Steps {
@@ -161,7 +162,8 @@ func storedRecording(folder, originalID, decisionID string, disposition vocabula
 		FolderID: folder, WorkspaceDriveID: "VOLUME-1", OriginalAssetID: originalID,
 		OrganizationDecisionID: decisionID, Disposition: disposition,
 		ArchivePackageID: packageID, ArchivePackageRevision: 1,
-		VideoRelativePath: path.Join(directory, presentation.VideoFileName), VideoChecksum: checksum,
+		ArchivePackageMetadataPath: path.Join(directory, "metadata.json"),
+		VideoRelativePath:          path.Join(directory, presentation.VideoFileName), VideoChecksum: checksum,
 		SelectedProfileReference: "organization-1080p-6000k@v1",
 		TranscriptionEligible:    true,
 		SourceInputs: []execution.InputReference{{

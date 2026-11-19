@@ -125,26 +125,27 @@ type OutputTarget struct {
 }
 
 type StepExecutionParameters struct {
-	ArchiveRunID             string                             `json:"archive_run_id,omitempty"`
-	ArchiveIntakeSessionID   string                             `json:"archive_intake_session_id,omitempty"`
-	StartIdempotencyKey      string                             `json:"start_idempotency_key,omitempty"`
-	SourceStorageID          string                             `json:"source_storage_id,omitempty"`
-	FolderIDs                []string                           `json:"folder_ids,omitempty"`
-	RequestedBy              string                             `json:"requested_by,omitempty"`
-	RequestedAt              time.Time                          `json:"requested_at,omitempty"`
-	OrganizationDecisionID   string                             `json:"organization_decision_id"`
-	WorkspaceDriveID         string                             `json:"workspace_drive_id"`
-	ArchiveStorageID         string                             `json:"archive_storage_id,omitempty"`
-	MediaFolder              string                             `json:"media_folder,omitempty"`
-	InputRevision            uint64                             `json:"input_revision"`
-	ArchiveDate              string                             `json:"archive_date,omitempty"`
-	ArchivePackageID         string                             `json:"archive_package_id,omitempty"`
-	ArchivePackageRevision   uint64                             `json:"archive_package_revision,omitempty"`
-	Disposition              vocabulary.OrganizationDisposition `json:"disposition,omitempty"`
-	SelectedProfileReference string                             `json:"selected_profile_reference,omitempty"`
-	TranscriptionEligible    bool                               `json:"transcription_eligible,omitempty"`
-	SourceInputs             []InputReference                   `json:"source_inputs,omitempty"`
-	SourceTimeline           *organization.SourceTimeline       `json:"source_timeline,omitempty"`
+	ArchiveRunID               string                             `json:"archive_run_id,omitempty"`
+	ArchiveIntakeSessionID     string                             `json:"archive_intake_session_id,omitempty"`
+	StartIdempotencyKey        string                             `json:"start_idempotency_key,omitempty"`
+	SourceStorageID            string                             `json:"source_storage_id,omitempty"`
+	FolderIDs                  []string                           `json:"folder_ids,omitempty"`
+	RequestedBy                string                             `json:"requested_by,omitempty"`
+	RequestedAt                time.Time                          `json:"requested_at,omitempty"`
+	OrganizationDecisionID     string                             `json:"organization_decision_id"`
+	WorkspaceDriveID           string                             `json:"workspace_drive_id"`
+	ArchiveStorageID           string                             `json:"archive_storage_id,omitempty"`
+	MediaFolder                string                             `json:"media_folder,omitempty"`
+	InputRevision              uint64                             `json:"input_revision"`
+	ArchiveDate                string                             `json:"archive_date,omitempty"`
+	ArchivePackageID           string                             `json:"archive_package_id,omitempty"`
+	ArchivePackageRevision     uint64                             `json:"archive_package_revision,omitempty"`
+	ArchivePackageMetadataPath string                             `json:"archive_package_metadata_path,omitempty"`
+	Disposition                vocabulary.OrganizationDisposition `json:"disposition,omitempty"`
+	SelectedProfileReference   string                             `json:"selected_profile_reference,omitempty"`
+	TranscriptionEligible      bool                               `json:"transcription_eligible,omitempty"`
+	SourceInputs               []InputReference                   `json:"source_inputs,omitempty"`
+	SourceTimeline             *organization.SourceTimeline       `json:"source_timeline,omitempty"`
 }
 
 type StepExecutionSpec struct {

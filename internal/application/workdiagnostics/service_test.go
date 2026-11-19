@@ -143,6 +143,53 @@ func TestWorkDiagnosticsCorrelatesStepWorkerLeaseReservationAndSeparatesFactsFro
 	}
 }
 
+func TestWorkDiagnosticsExposeStructuredProgressEvidenceAsFacts(t *testing.T) {
+	now := time.Date(2026, 11, 19, 12, 0, 0, 0, time.UTC)
+	progress := corejob.StepProgressEvidence{
+		EvidenceID: "EVD-PROGRESS-STT", StepID: "transcript", WorkerID: "WORKER-1", FencingToken: 9,
+		ReportSequence: 4, ObservedAt: now.Add(-time.Minute), Update: execution.ProgressUpdate{
+			Operation: execution.OperationTranscribeAudio, Status: execution.ProgressCompleted,
+			ChunkIndex: 2, ChunkCount: 5, SourceStartMillis: 720_000, SourceEndMillis: 1_440_000, Progress: 0.4,
+		},
+	}
+	view := archiveworkspace.JobView{
+		Summary: archiveworkspace.JobSummary{
+			JobID: "JOB-STT", Revision: 9, CurrentStepID: "transcript", StepState: workflow.Running,
+			Progress: 0.4, WorkerID: "WORKER-1", LastEventAt: progress.ObservedAt,
+		},
+		Steps: []archiveworkspace.StepStatus{{
+			ID: "transcript", State: workflow.Running, Progress: 0.4, WorkerID: "WORKER-1",
+			LastEventAt: progress.ObservedAt, ProgressEvidence: []corejob.StepProgressEvidence{progress},
+		}},
+	}
+	lease := ExecutionObservation{
+		ReservationID: "RES-STT", WorkerID: "WORKER-1", ResourceClass: vocabulary.ResourceHeavy,
+		ReservedAt: now.Add(-20 * time.Minute), HasLease: true, LeaseAcquiredAt: now.Add(-20 * time.Minute),
+		LeaseHeartbeatAt: now.Add(-10 * time.Second), LeaseExpiresAt: now.Add(time.Minute), FencingToken: 9,
+	}
+	service, err := New(
+		fixedWorkReader{}, fixedJobReader{view: view}, fixedWorkerReader{values: []worker.Status{{
+			WorkerID: "WORKER-1", State: "BUSY", LastHeartbeat: now.Add(-5 * time.Second),
+			Metrics: worker.Metrics{HeavyRunning: 1}, Capacity: worker.Capacity{AvailableMemoryBytes: 4096, ScratchFreeBytes: 8192},
+		}}}, fixedExecutionReader{value: lease}, func() time.Time { return now }, 10*time.Minute,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	diagnostic, err := service.Diagnose(context.Background(), archivistruntime.WorkReference{
+		Kind: archivistruntime.WorkJob, WorkID: "JOB-STT", Revision: 9,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(diagnostic.Jobs) != 1 || len(diagnostic.Jobs[0].ProgressEvidence) != 1 ||
+		diagnostic.Jobs[0].ProgressEvidence[0] != progress ||
+		!hasFactEvidence(diagnostic.Facts, "WORKER_PROGRESS_RECORDED", progress.EvidenceID) ||
+		hasHypothesis(diagnostic.Hypotheses, "PROGRESS_UNOBSERVED") {
+		t.Fatalf("structured STT progress was not exposed as a confirmed fact: %+v", diagnostic)
+	}
+}
+
 func hasFact(values []Fact, code string) bool {
 	for _, value := range values {
 		if value.Code == code {

@@ -12,6 +12,7 @@ import (
 
 	"videoarchive/internal/adapter/workerconfig"
 	"videoarchive/internal/core/execution"
+	"videoarchive/internal/core/vocabulary"
 	"videoarchive/internal/core/worker"
 )
 
@@ -97,4 +98,44 @@ func TestCancellationThatDoesNotStopReportsUncertaintyInsteadOfBlockingWorkerLoo
 		t.Fatal("Worker execution slot did not return after reporting uncertainty")
 	}
 	close(release)
+}
+
+func TestHeartbeatIncludesTheResourceClassOfTheCurrentlyExecutingStep(t *testing.T) {
+	received := make(chan map[string]any, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/worker/v1/heartbeat" {
+			writer.WriteHeader(http.StatusNotFound)
+			return
+		}
+		var payload map[string]any
+		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+			t.Error(err)
+			writer.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		received <- payload
+		writer.Header().Set("Content-Type", "application/json")
+		writer.Write([]byte(`{"data":{"state":"ONLINE"}}`))
+	}))
+	defer server.Close()
+	controlURL, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, err := NewWithExecutor(workerconfig.Configuration{
+		SchemaVersion: 1, ID: "worker-main", ControlURL: controlURL,
+		CredentialReference: "secret", HeartbeatInterval: time.Second,
+		AccessibleStorageIDs: []string{"scratch"},
+	}, cancellationSecret("service-secret"), server.Client(), cancellationProbe{}, time.Now, cancellationIgnoringExecutor{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.setExecutionResourceClass(vocabulary.ResourceHeavy)
+	if err := client.Heartbeat(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	payload := <-received
+	if payload["heavy_running"] != float64(1) || payload["light_running"] != float64(0) {
+		t.Fatalf("heartbeat omitted current execution resource class: %+v", payload)
+	}
 }

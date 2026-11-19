@@ -115,6 +115,7 @@ func Project(state job.State) (archiveworkspace.JobView, error) {
 			ExecutorKind: step.ExecutorKind, ActorID: step.ActorID, WorkerID: step.WorkerID,
 			WaitReason: step.Workflow.WaitReason, ErrorClass: step.ErrorClass, LogReference: step.LogReference,
 			LastEventAt: step.LastEventAt, DependencyIDs: append([]string(nil), step.Workflow.Dependencies...),
+			ProgressEvidence: append([]job.StepProgressEvidence(nil), step.ProgressEvidence...),
 			FailureEvidence:  append([]job.StepFailureEvidence(nil), step.FailureEvidence...),
 			RecoveryEvidence: append([]job.StepRecoveryEvidence(nil), step.RecoveryEvidence...),
 		})

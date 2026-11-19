@@ -103,6 +103,7 @@ type InitialRequest struct {
 
 type RevisionRequest struct {
 	PackageID      string
+	BaseRevision   uint64
 	Transcript     FileSource
 	TranscriptText FileSource
 	Subtitle       FileSource
@@ -196,7 +197,7 @@ func (publisher *Publisher) PublishInitial(request InitialRequest) (Package, err
 
 func (publisher *Publisher) Revise(request RevisionRequest) (Package, error) {
 	request.PackageID = strings.TrimSpace(request.PackageID)
-	if !packageIDPattern.MatchString(request.PackageID) || request.CreatedAt.IsZero() {
+	if !packageIDPattern.MatchString(request.PackageID) || request.BaseRevision == 0 || request.CreatedAt.IsZero() {
 		return Package{}, ErrInvalidRequest
 	}
 	lock, err := publisher.acquirePackageLock(request.PackageID)
@@ -210,6 +211,9 @@ func (publisher *Publisher) Revise(request RevisionRequest) (Package, error) {
 	}
 	if current.State != archive.PackageStored {
 		return Package{}, ErrPackageState
+	}
+	if replayed, ok, replayErr := publisher.replayedStoredRevision(current, request); replayErr != nil || ok {
+		return replayed, replayErr
 	}
 	previousDirectory := path.Join(current.packageDirectory, "revisions", fmt.Sprintf("%06d", current.Revision))
 	previousMetadataPath := path.Join(previousDirectory, "metadata.json")
@@ -302,6 +306,84 @@ func (publisher *Publisher) ReviseStored(request RevisionRequest) (Package, erro
 	default:
 		return Package{}, ErrInvalidRequest
 	}
+}
+
+// replayedStoredRevision makes a fixed-base revision request safe to retry
+// after its files were published but before the Worker could report success.
+// A later or different revision is never accepted as the result of the stale
+// request.
+func (publisher *Publisher) replayedStoredRevision(current currentDocument, request RevisionRequest) (Package, bool, error) {
+	if request.BaseRevision == 0 {
+		return Package{}, false, ErrInvalidRequest
+	}
+	if current.Revision == request.BaseRevision {
+		return Package{}, false, nil
+	}
+	if current.Revision != request.BaseRevision+1 || current.State != archive.PackageStored {
+		return Package{}, false, ErrPackageState
+	}
+	transcript, _, err := publisher.readVerifiedSource(request.Transcript)
+	if err != nil {
+		return Package{}, false, err
+	}
+	text, _, err := publisher.readVerifiedSource(request.TranscriptText)
+	if err != nil {
+		return Package{}, false, err
+	}
+	subtitle, _, err := publisher.readVerifiedSource(request.Subtitle)
+	if err != nil {
+		return Package{}, false, err
+	}
+	expected := map[string]string{
+		"transcript.json": digest(transcript),
+		"transcript.txt":  digest(text),
+		"subtitle.srt":    digest(subtitle),
+	}
+	if current.LayoutVersion == archive.PackageLayoutCompactResultFolder {
+		var compact bytes.Buffer
+		if json.Compact(&compact, transcript) != nil {
+			return Package{}, false, ErrInvalidRequest
+		}
+		expected["transcript.json"] = digest(compact.Bytes())
+		document, readErr := publisher.readCompactDocument(current.packageDirectory)
+		if readErr != nil || len(document.Revisions) == 0 {
+			return Package{}, false, errors.Join(ErrInvalidRequest, readErr)
+		}
+		latest := document.Revisions[len(document.Revisions)-1]
+		if latest.Revision != current.Revision || !checksumsMatch(expected, latest.Files) {
+			return Package{}, false, ErrPackageState
+		}
+		return publisher.loadPackage(current), true, nil
+	}
+	stored := publisher.loadPackage(current)
+	paths := map[string]string{
+		"transcript.json": stored.TranscriptPath,
+		"transcript.txt":  stored.TranscriptTextPath,
+		"subtitle.srt":    stored.SubtitlePath,
+	}
+	for name, checksum := range expected {
+		if paths[name] == "" {
+			return Package{}, false, ErrPackageState
+		}
+		_, observed, hashErr := publisher.archive.FileSHA256(paths[name])
+		if hashErr != nil || observed != checksum {
+			return Package{}, false, errors.Join(ErrPackageState, hashErr)
+		}
+	}
+	return stored, true, nil
+}
+
+func checksumsMatch(expected map[string]string, files []CompactFile) bool {
+	observed := make(map[string]string, len(files))
+	for _, file := range files {
+		observed[file.Path] = file.Checksum
+	}
+	for name, checksum := range expected {
+		if observed[name] != checksum {
+			return false
+		}
+	}
+	return true
 }
 
 func (publisher *Publisher) publish(metadata Metadata, video FileSource, additions map[string]FileSource, packageDirectory string) (Package, error) {

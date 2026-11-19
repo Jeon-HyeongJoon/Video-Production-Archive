@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"videoarchive/internal/adapter/workerconfig"
@@ -25,6 +26,7 @@ var (
 	ErrHeartbeatRejected     = errors.New("worker heartbeat was rejected")
 	ErrInvalidAssignment     = errors.New("worker assignment is invalid")
 	ErrLeaseRenewalRejected  = errors.New("worker execution lease renewal was rejected")
+	ErrStepProgressRejected  = errors.New("worker Step progress was rejected")
 )
 
 type SecretResolver interface {
@@ -113,6 +115,7 @@ type Client struct {
 	attachedStorageRoots     AttachedStorageRoots
 	selectedSourceStorageIDs []string
 	executing                bool
+	executingResourceClass   vocabulary.ResourceClass
 }
 
 func New(configuration workerconfig.Configuration, secrets SecretResolver, httpClient *http.Client, probe ResourceProbe, now func() time.Time) (*Client, error) {
@@ -154,6 +157,7 @@ func (client *Client) Heartbeat(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("observe Worker resources: %w", err)
 	}
+	client.overlayExecutionMetrics(&snapshot)
 	if client.storageProbe != nil {
 		snapshot.StorageObservations, err = client.storageProbe.Observe(ctx)
 		if err != nil {
@@ -374,6 +378,7 @@ func (client *Client) Run(ctx context.Context, report func(error)) error {
 				} else if assignment == nil {
 					client.endExecution()
 				} else {
+					client.setExecutionResourceClass(assignment.ResourceClass)
 					go client.execute(ctx, *assignment, report)
 				}
 			}
@@ -394,7 +399,33 @@ func (client *Client) beginExecution() bool {
 func (client *Client) endExecution() {
 	client.mu.Lock()
 	client.executing = false
+	client.executingResourceClass = ""
 	client.mu.Unlock()
+}
+
+func (client *Client) setExecutionResourceClass(resourceClass vocabulary.ResourceClass) {
+	client.mu.Lock()
+	client.executingResourceClass = resourceClass
+	client.mu.Unlock()
+}
+
+func (client *Client) overlayExecutionMetrics(snapshot *worker.Metrics) {
+	if snapshot == nil {
+		return
+	}
+	client.mu.Lock()
+	resourceClass := client.executingResourceClass
+	client.mu.Unlock()
+	switch resourceClass {
+	case vocabulary.ResourceHeavy:
+		if snapshot.HeavyRunning < 1 {
+			snapshot.HeavyRunning = 1
+		}
+	case vocabulary.ResourceLight:
+		if snapshot.LightRunning < 1 {
+			snapshot.LightRunning = 1
+		}
+	}
 }
 
 func (client *Client) claim(ctx context.Context) (*Assignment, error) {
@@ -438,8 +469,17 @@ func (client *Client) claim(ctx context.Context) (*Assignment, error) {
 
 func (client *Client) execute(ctx context.Context, assignment Assignment, reportError func(error)) {
 	defer client.endExecution()
+	client.setExecutionResourceClass(assignment.ResourceClass)
 	executionContext, cancelExecution := context.WithCancel(ctx)
 	defer cancelExecution()
+	var progressSequence atomic.Uint64
+	executionContext = execution.WithProgressReporter(executionContext, func(progressContext context.Context, update execution.ProgressUpdate) error {
+		err := client.reportProgress(progressContext, assignment, progressSequence.Add(1), update)
+		if err != nil && !errors.Is(err, context.Canceled) {
+			reportError(err)
+		}
+		return err
+	})
 	resultChannel := make(chan ExecutionResult, 1)
 	go func() { resultChannel <- client.executor.Execute(executionContext, assignment) }()
 	ticker := time.NewTicker(client.configuration.ClaimInterval)
@@ -514,6 +554,32 @@ func (client *Client) execute(ctx context.Context, assignment Assignment, report
 			return
 		}
 	}
+}
+
+func (client *Client) reportProgress(
+	ctx context.Context,
+	assignment Assignment,
+	reportSequence uint64,
+	update execution.ProgressUpdate,
+) error {
+	payload, err := json.Marshal(map[string]any{
+		"job_id": assignment.JobID, "step_id": assignment.StepID, "fencing_token": assignment.FencingToken,
+		"report_sequence": reportSequence, "update": update,
+	})
+	if err != nil {
+		return err
+	}
+	response, err := client.workerRequest(ctx, "/worker/v1/steps/progress", payload)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(response.Body, 64<<10))
+		return fmt.Errorf("%w: HTTP %d: %s", ErrStepProgressRejected, response.StatusCode, body)
+	}
+	io.Copy(io.Discard, io.LimitReader(response.Body, 64<<10))
+	return nil
 }
 
 func (client *Client) cancellationConfirmationTimeout() time.Duration {

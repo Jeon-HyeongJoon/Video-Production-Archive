@@ -105,13 +105,15 @@ func TestPublisherStoresOneResultPerRecoverablePackageAndAddsStageTwoAsNewRevisi
 		t.Fatalf("source original changed: checksum=%s err=%v", digest(unchanged), err)
 	}
 
-	revised, err := publisher.Revise(RevisionRequest{
+	revisionRequest := RevisionRequest{
 		PackageID:      "VP-20261031-0001",
+		BaseRevision:   1,
 		Transcript:     FileSource{Root: RootArchive, Path: "staging/transcript.json", Checksum: fixtureDigest(`{"segments":[{"text":"행사"}]}`)},
 		TranscriptText: FileSource{Root: RootArchive, Path: "staging/transcript.txt", Checksum: fixtureDigest("행사\n")},
 		Subtitle:       FileSource{Root: RootArchive, Path: "staging/subtitle.srt", Checksum: fixtureDigest("1\n00:00:00,000 --> 00:00:01,000\n행사\n")},
 		CreatedAt:      createdAt.Add(time.Hour),
-	})
+	}
+	revised, err := publisher.Revise(revisionRequest)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,6 +123,10 @@ func TestPublisherStoresOneResultPerRecoverablePackageAndAddsStageTwoAsNewRevisi
 	}
 	if _, err := archiveRoot.ReadFile("packages/2026/10/31/VP-20261031-0001/revisions/000001/transcript.json"); err == nil {
 		t.Fatal("stage-two revision mutated the stored first revision")
+	}
+	replayed, err := publisher.Revise(revisionRequest)
+	if err != nil || replayed.Revision != revised.Revision || replayed.ManifestDigest != revised.ManifestDigest {
+		t.Fatalf("same fixed-base revision retry was not replayed: revised=%+v replayed=%+v err=%v", revised, replayed, err)
 	}
 }
 
@@ -138,15 +144,21 @@ func TestCommittedPackageRejectsFurtherRevisionAndKeepsPriorRevisionsImmutable(t
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := publisher.Revise(RevisionRequest{
+	revisionRequest := RevisionRequest{
 		PackageID:      "VP-20261031-0002",
+		BaseRevision:   1,
 		Transcript:     FileSource{Root: RootArchive, Path: "staging/transcript.json", Checksum: fixtureDigest(`{"segments":[{"text":"행사"}]}`)},
 		TranscriptText: FileSource{Root: RootArchive, Path: "staging/transcript.txt", Checksum: fixtureDigest("행사\n")},
 		Subtitle:       FileSource{Root: RootArchive, Path: "staging/subtitle.srt", Checksum: fixtureDigest("1\n00:00:00,000 --> 00:00:01,000\n행사\n")},
 		CreatedAt:      now.Add(time.Hour),
-	})
+	}
+	second, err := publisher.Revise(revisionRequest)
 	if err != nil || second.Revision != 2 || first.ManifestDigest == second.ManifestDigest {
 		t.Fatalf("immutable second revision was not created: first=%+v second=%+v err=%v", first, second, err)
+	}
+	replayed, err := publisher.Revise(revisionRequest)
+	if err != nil || replayed.Revision != second.Revision || replayed.ManifestDigest != second.ManifestDigest {
+		t.Fatalf("same fixed-base revision retry did not return the stored revision: second=%+v replayed=%+v err=%v", second, replayed, err)
 	}
 	evidence := commitEvidence(second, now.Add(2*time.Hour))
 	committed, err := publisher.Commit(second.PackageID, evidence)
@@ -155,6 +167,7 @@ func TestCommittedPackageRejectsFurtherRevisionAndKeepsPriorRevisionsImmutable(t
 	}
 	_, err = publisher.Revise(RevisionRequest{
 		PackageID:      second.PackageID,
+		BaseRevision:   second.Revision,
 		Transcript:     FileSource{Root: RootArchive, Path: "staging/transcript.json", Checksum: fixtureDigest(`{"segments":[{"text":"행사"}]}`)},
 		TranscriptText: FileSource{Root: RootArchive, Path: "staging/transcript.txt", Checksum: fixtureDigest("행사\n")},
 		Subtitle:       FileSource{Root: RootArchive, Path: "staging/subtitle.srt", Checksum: fixtureDigest("1\n00:00:00,000 --> 00:00:01,000\n행사\n")},

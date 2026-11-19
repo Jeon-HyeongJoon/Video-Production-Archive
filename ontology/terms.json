@@ -203,6 +203,7 @@
         "작업 진단을 만들 때 StepState·WaitReason·ExecutionLease·ResourceReservation를 바꾸지 않는다.",
         "관측된 값만 사실로 기록하고 원인이 확인되지 않은 설명은 가설로 기록한다.",
         "사실은 증적 ID를 가지며 가설의 basis는 설명문이 아니라 관련 증적 ID를 참조한다.",
+        "영속 Step Progress Evidence는 실제 subprocess가 관측된 작업 단위까지 전진한 확인된 사실로 제공한다.",
         "영속 Step Failure Evidence는 재시도 순서를 보존한 확인된 사실로 제공한다.",
         "실행 가능한 복구는 현재 진단 fingerprint와 증적 ID에 묶인 구조화된 Recovery Action으로만 제공한다.",
         "영속 Step Recovery Evidence는 실행된 복구와 사후 상태를 확인된 사실로 제공한다.",
@@ -232,6 +233,10 @@
         },
         {
           "type": "refers-to",
+          "target": "step-progress-evidence"
+        },
+        {
+          "type": "refers-to",
           "target": "step-failure-evidence"
         },
         {
@@ -241,7 +246,7 @@
       ],
       "sources": [
         "docs/design/10-capabilities-observability.md §4",
-        "requirements OBS-002~003, MCP-009, MCP-011"
+        "requirements WRK-017, OBS-002~003, MCP-009, MCP-011"
       ],
       "decided": "2026-11-15"
     },
@@ -727,6 +732,49 @@
         "requirements WRK-009"
       ],
       "decided": "2026-11-06"
+    },
+    {
+      "id": "step-progress-evidence",
+      "layer": "product",
+      "kind": "record",
+      "name": {
+        "ko": "단계 진행 증적",
+        "en": "Step Progress Evidence"
+      },
+      "code_name": "StepProgressEvidence",
+      "definition": "장시간 Worker Step이 현재 실행 경계 안에서 어느 작업 단위와 원본 시간 범위까지 전진했는지 보존하는 변경 불가능한 구조화 증적 기록.",
+      "rules": [
+        "Worker·Step·typed operation·fencing token·보고 순번·Control 관측 시각을 기록한다.",
+        "계획·시작·완료·실패 상태, 청크 순번과 전체 수, 원본 시작·종료 millisecond와 완료 비율만 기록한다.",
+        "원문 stdout·stderr, executable 인수, credential, 절대경로, 음성 내용과 전사문을 기록하지 않는다.",
+        "Job 상태와 같은 transaction에서 추가하고 같은 fencing token과 보고 순번의 동일 재전송으로 중복하지 않는다.",
+        "ExecutionLease heartbeat와 구분하며 WorkDiagnostic은 실제 subprocess 전진 사실로 제공한다."
+      ],
+      "forbidden": {
+        "words": [],
+        "code": []
+      },
+      "relations": [
+        {
+          "type": "refers-to",
+          "target": "evidence"
+        },
+        {
+          "type": "part-of",
+          "target": "step"
+        },
+        {
+          "type": "refers-to",
+          "target": "fencing-token"
+        }
+      ],
+      "sources": [
+        "docs/design/07-worker-fleet.md §4.1",
+        "docs/design/10-capabilities-observability.md §3",
+        "requirements WRK-017",
+        "사용자 결정 2026-11-19: STT 청크별 모니터링과 로그 근거를 영속화"
+      ],
+      "decided": "2026-11-19"
     },
     {
       "id": "step-failure-evidence",
@@ -3755,6 +3803,7 @@
         "구간은 순서가 있고 서로 겹치지 않으며 비어 있지 않은 text를 가진다.",
         "STT 인식 결과이며 Summary나 사람이 확인한 사실을 대신하지 않는다.",
         "게시 JSON에 Worker host 정보나 실제 모델 파일 경로를 포함하지 않는다.",
+        "긴 AudioArtifact의 내부 청크는 게시 Entity가 아니며 무음 경계 우선으로 처리한 구간을 원본 영상의 전역 millisecond 시간축으로 합친다.",
         "같은 OriginalAsset의 전사 검색은 가장 최근에 게시한 Transcript segment를 사용하고 파일 경로가 아닌 timecode를 반환한다."
       ],
       "forbidden": {
@@ -3908,11 +3957,11 @@
         "en": "Transcript Text"
       },
       "code_name": "TranscriptText",
-      "definition": "구조화 Transcript의 시간순 segment text를 사람이 일반 편집기로 읽을 수 있게 UTF-8 plain text로 직렬화한 파생 아티팩트.",
+      "definition": "구조화 Transcript의 전역 영상 시간 구간과 segment text를 사람이 일반 편집기로 읽을 수 있게 UTF-8 plain text로 직렬화한 파생 아티팩트.",
       "rules": [
         "원본 STT 결과나 시간 구간을 대신하지 않고 같은 Transcript를 provenance로 참조한다.",
         "ArchivePackage의 2단계 리비전에 transcript.txt 이름으로 포함한다.",
-        "segment text를 시간순으로 기록하며 모델 경로·Host 정보·credential을 넣지 않는다."
+        "각 줄에 전역 영상 HH:MM:SS.mmm 시작·종료 시각과 segment text를 시간순으로 기록하며 모델 경로·Host 정보·credential을 넣지 않는다."
       ],
       "forbidden": {
         "words": [],

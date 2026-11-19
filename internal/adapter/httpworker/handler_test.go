@@ -184,6 +184,75 @@ func TestWorkerResultAtomicallyStoresOnlyExpectedStepOutputRecord(t *testing.T) 
 	}
 }
 
+// Requirement: WRK-017
+func TestWorkerProgressPersistsFencedStructuredEvidenceWithoutRawProcessData(t *testing.T) {
+	handler, store, _ := claimHarness(t, true, false)
+	claim := httptest.NewRecorder()
+	claimRequest := httptest.NewRequest(http.MethodPost, "/worker/v1/steps/claim", nil)
+	claimRequest.Header.Set("Authorization", "Bearer service-secret")
+	claimRequest.Header.Set("X-Worker-ID", "worker-windows")
+	handler.ServeHTTP(claim, claimRequest)
+	if claim.Code != http.StatusOK {
+		t.Fatalf("claim returned %d: %s", claim.Code, claim.Body.String())
+	}
+	updates := []execution.ProgressUpdate{
+		{Operation: execution.OperationRenderRecording, Status: execution.ProgressPlanned, ChunkCount: 2, SourceEndMillis: 10_000},
+		{Operation: execution.OperationRenderRecording, Status: execution.ProgressStarted, ChunkIndex: 1, ChunkCount: 2, SourceEndMillis: 5_000},
+		{Operation: execution.OperationRenderRecording, Status: execution.ProgressCompleted, ChunkIndex: 1, ChunkCount: 2, SourceEndMillis: 5_000, Progress: 0.5},
+	}
+	for index, update := range updates {
+		response := workerProgress(handler, uint64(index+1), 1, update)
+		if response.Code != http.StatusOK {
+			t.Fatalf("progress %d returned %d: %s", index+1, response.Code, response.Body.String())
+		}
+	}
+	beforeReplay, err := store.Load("JOB-SPEC")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if replay := workerProgress(handler, 3, 1, updates[2]); replay.Code != http.StatusOK {
+		t.Fatalf("identical progress replay returned %d: %s", replay.Code, replay.Body.String())
+	}
+	afterReplay, err := store.Load("JOB-SPEC")
+	if err != nil || afterReplay.Revision != beforeReplay.Revision {
+		t.Fatalf("progress replay changed revision: before=%d after=%d err=%v", beforeReplay.Revision, afterReplay.Revision, err)
+	}
+	if stale := workerProgress(handler, 4, 2, execution.ProgressUpdate{
+		Operation: execution.OperationRenderRecording, Status: execution.ProgressCompleted,
+		ChunkIndex: 2, ChunkCount: 2, SourceStartMillis: 5_000, SourceEndMillis: 10_000, Progress: 1,
+	}); stale.Code != http.StatusConflict {
+		t.Fatalf("stale fencing token returned %d: %s", stale.Code, stale.Body.String())
+	}
+	state, err := job.Decode(afterReplay)
+	if err != nil {
+		t.Fatal(err)
+	}
+	step := claimTestStep(&state, "render")
+	if step == nil || step.Workflow.State != workflow.Running || step.Progress != 0.5 || len(step.ProgressEvidence) != 3 {
+		t.Fatalf("structured progress was not retained in the running Step: %+v", step)
+	}
+	for index, evidence := range step.ProgressEvidence {
+		if evidence.EvidenceID == "" || evidence.WorkerID != "worker-windows" || evidence.FencingToken != 1 ||
+			evidence.ReportSequence != uint64(index+1) || evidence.Update != updates[index] || evidence.ObservedAt.IsZero() {
+			t.Fatalf("progress evidence %d is incomplete: %+v", index, evidence)
+		}
+	}
+}
+
+func workerProgress(handler http.Handler, sequence, fencingToken uint64, update execution.ProgressUpdate) *httptest.ResponseRecorder {
+	payload, _ := json.Marshal(map[string]any{
+		"job_id": "JOB-SPEC", "step_id": "render", "fencing_token": fencingToken,
+		"report_sequence": sequence, "update": update,
+	})
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/worker/v1/steps/progress", bytes.NewReader(payload))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Authorization", "Bearer service-secret")
+	request.Header.Set("X-Worker-ID", "worker-windows")
+	handler.ServeHTTP(response, request)
+	return response
+}
+
 // Requirement: APP-004
 func TestDriveWorkerOutputsMaterializeEveryDependentStepSpecExactlyOnce(t *testing.T) {
 	handler, store, _ := claimHarness(t, true, false)

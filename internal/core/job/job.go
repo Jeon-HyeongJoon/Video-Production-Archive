@@ -52,8 +52,21 @@ type Step struct {
 	PhysicalDeviceIDs       []string                     `json:"physical_device_ids,omitempty"`
 	ExecutionSpec           *execution.StepExecutionSpec `json:"execution_spec,omitempty"`
 	OutputRecord            *execution.StepOutputRecord  `json:"output_record,omitempty"`
+	ProgressEvidence        []StepProgressEvidence       `json:"progress_evidence,omitempty"`
 	FailureEvidence         []StepFailureEvidence        `json:"failure_evidence,omitempty"`
 	RecoveryEvidence        []StepRecoveryEvidence       `json:"recovery_evidence,omitempty"`
+}
+
+// StepProgressEvidence is the immutable, transport-safe execution progress
+// retained while a Worker holds the current fencing token.
+type StepProgressEvidence struct {
+	EvidenceID     string                   `json:"evidence_id"`
+	StepID         string                   `json:"step_id"`
+	WorkerID       string                   `json:"worker_id"`
+	FencingToken   uint64                   `json:"fencing_token"`
+	ReportSequence uint64                   `json:"report_sequence"`
+	ObservedAt     time.Time                `json:"observed_at"`
+	Update         execution.ProgressUpdate `json:"update"`
 }
 
 // StepFailureEvidence is the immutable, transport-safe observation retained for

@@ -24,7 +24,7 @@
 
 Audio Extraction은 versioned Profile로 원본 자산에서 STT 입력용 WAV/PCM 16-bit little-endian, 16kHz, mono `AudioArtifact`를 만든다. FFmpeg는 해석 완료된 입력 경로를 인수 배열로 받고 임시 출력을 검증한 뒤에만 게시하며, 원본 자산·Profile·처리기·Worker provenance를 남긴다. 실제 Windows FFmpeg와 대표 영상 검증은 장비 제공 전까지 acceptance 계획으로 둔다. `AUD-001~003`
 
-Transcription은 경로가 아니라 provenance가 완전한 `AudioArtifact`를 입력으로 받는다. versioned STT Profile은 모델 식별자·언어·thread 상한을 고정하고, `whisper.cpp` Adapter는 해석 완료된 모델·오디오 경로를 인수 배열로 실행한다. Adapter는 임시 JSON의 언어와 겹치지 않는 시간 구간을 검증한 뒤 host 정보와 실제 모델 경로를 제거한 정규 Transcript JSON만 게시한다. Transcript는 공통 파일 생애주기와 provenance는 Artifact에서, 검색 가능한 언어·시간 구간 의미는 전용 구조에서 소유한다. 실제 Windows 모델·대표 한국어 음성 검증은 장비 제공 전까지 acceptance 계획으로 둔다. `TRN-001~003`
+Transcription은 경로가 아니라 provenance가 완전한 `AudioArtifact`를 입력으로 받는다. versioned STT Profile은 모델 식별자·언어·thread 상한을 고정하고, `whisper.cpp` Adapter는 해석 완료된 모델·오디오 경로를 인수 배열로 실행한다. 긴 PCM 입력은 전체를 한 subprocess에 맡기지 않고 무음 구간의 가운데를 우선 경계로 삼아 제한 길이 청크로 나눈다. 제한 구간 안에 충분한 무음이 없으면 가장 조용한 관측 창을 경계로 정하고 문장 손실을 줄이는 문맥 겹침을 주되, 각 구간의 중앙점 소유 규칙으로 중복 segment를 제거한다. Adapter는 청크별 상대 시각을 원본 영상의 전역 millisecond 시간축으로 합치고 겹치지 않는 구간을 검증한 뒤 host 정보와 실제 모델 경로를 제거한 정규 Transcript JSON만 게시한다. Transcript는 공통 파일 생애주기와 provenance는 Artifact에서, 검색 가능한 언어·전역 시간 구간 의미는 전용 구조에서 소유한다. 실제 Windows 모델·대표 한국어 음성 검증은 장비 제공 전까지 acceptance 계획으로 둔다. `TRN-001~003`
 
 게시 직후 Worker는 `transcript-quality@v1` 결정 규칙으로 Transcript의 구간 길이와 문자 밀도를 평가한다. 15초를 넘는 구간은 `SEGMENT_TOO_LONG`, 5초 이상 결과에서 초당 문자 수가 1 미만이면 `LOW_TEXT_DENSITY`이며 하나라도 있으면 `REVIEW_RECOMMENDED`다. 판정은 policy reference, 전체 길이, 구간 수, 문자 수와 함께 transcript Step 출력 기록에 저장한다. 이는 사람이 확인한 ContentReview가 아니고 STT 성공이나 Job 완료를 되돌리지 않으며, 화면의 별도 확인 필요 신호만 만든다. `TRN-007`
 

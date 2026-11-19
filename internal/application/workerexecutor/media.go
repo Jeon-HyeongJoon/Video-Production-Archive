@@ -597,7 +597,8 @@ func (operations *mediaOperations) transcribeAudio(ctx context.Context, spec exe
 			return nil, nil, err
 		}
 		result, err := transcriber.Transcribe(ctx, whispercpp.Request{
-			TranscriptID: target.ID, AudioArtifact: audioArtifact, ResolvedAudioPath: audioPath, ResolvedModelPath: modelPath,
+			TranscriptID: target.ID, AudioArtifact: audioArtifact, InputRoot: inputRoot,
+			ResolvedAudioPath: audioPath, ResolvedModelPath: modelPath,
 			TemporaryOutputPath: publisher.temporaryResolved, PublishedOutputPath: publisher.publishedResolved,
 			ArtifactPath: target.RelativePath, TemporaryArtifactPath: temporaryRelative, OutputRoot: outputRoot, Profile: tool.Profile,
 		})
@@ -750,6 +751,7 @@ func (operations *mediaOperations) reviseArchivePackage(_ context.Context, spec 
 	}
 	revised, err := publisher.ReviseStored(archivebundle.RevisionRequest{
 		PackageID:      spec.Parameters.ArchivePackageID,
+		BaseRevision:   spec.Parameters.ArchivePackageRevision,
 		Transcript:     archivebundle.FileSource{Root: archivebundle.RootArchive, Path: transcriptInput.RelativePath, Checksum: transcriptInput.Checksum},
 		TranscriptText: archivebundle.FileSource{Root: archivebundle.RootArchive, Path: textInput.RelativePath, Checksum: textInput.Checksum},
 		Subtitle:       archivebundle.FileSource{Root: archivebundle.RootArchive, Path: subtitleInput.RelativePath, Checksum: subtitleInput.Checksum},

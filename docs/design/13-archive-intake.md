@@ -86,7 +86,7 @@ STT 시작은 내부적으로 별도 Command다. Control 조정기는 해당 Arc
 오디오 → STT → 자막·텍스트 → 기록물에 추가 → ArchiveCatalog
 ```
 
-AudioArtifact는 16kHz mono PCM 규격과 provenance를 보존한다. Transcript는 정규화한 시간 구간 JSON, Subtitle은 SRT이며 `transcript.txt`는 같은 구간 text를 시간순으로 합친 사람이 읽는 UTF-8 sidecar다. 세 파일을 같은 ArchivePackage에 추가할 때 기존 리비전을 고치지 않고 새 manifest digest의 리비전을 게시한다. `ORG-008`, `ARC-011`
+AudioArtifact는 16kHz mono PCM 규격과 provenance를 보존한다. 긴 음성은 무음 경계 우선의 제한 길이 청크로 전사하지만 청크는 별도 기록물이 아니며 결과 segment는 원본 영상의 전역 시간축으로 합친다. Transcript는 정규화한 시간 구간 JSON, Subtitle은 SRT이며 `transcript.txt`는 각 구간의 `HH:MM:SS.mmm` 시작·종료 시각과 text를 시간순으로 기록한 사람이 읽는 UTF-8 sidecar다. 세 파일을 같은 ArchivePackage에 추가할 때 기존 리비전을 고치지 않고 새 manifest digest의 리비전을 게시한다. `TRN-002`, `TRN-006`, `ORG-008`, `ARC-011`
 
 Transcript 게시가 성공하면 Worker는 versioned 결정 규칙으로 구간 길이와 문자 밀도를 평가하고 판정을 transcript Step의 출력 기록에 함께 보낸다. `REVIEW_RECOMMENDED`는 2단계 완료를 막지 않으며 폴더별 확인 필요 항목으로 남는다. 담당자는 원본·전사 텍스트·자막을 대조할 대상을 이 신호로 찾고, 화면은 저장된 사유와 측정값만 표시한다. `TRN-007`, `DSH-018`
 

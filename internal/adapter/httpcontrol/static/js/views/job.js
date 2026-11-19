@@ -129,6 +129,24 @@ function stepLine(step) {
   ].filter(Boolean).join(" · ");
 }
 
+function progressEvidenceLine(evidence) {
+  const update = evidence.update || {};
+  const chunk = update.chunk_index ? `${update.chunk_index}/${update.chunk_count}` : `${update.chunk_count || 0}개 계획`;
+  const range = update.chunk_index && update.source_end_millis > update.source_start_millis
+    ? `${update.source_start_millis ? mediaDuration(update.source_start_millis) : "0:00"}–${mediaDuration(update.source_end_millis)}`
+    : `전체 ${mediaDuration(update.source_end_millis)}`;
+  return `${chunk} · ${range} · ${label("progress", update.status)}`;
+}
+
+function ProgressEvidence({ items }) {
+  if (!items?.length) return null;
+  return html`<details class="step-evidence"><summary>실행 근거 <span class="num">${items.length}</span></summary>
+    <ol>${items.map((evidence) => html`<li key=${evidence.evidence_id}>
+      <time>${clockTime(evidence.observed_at, true)}</time><span>${progressEvidenceLine(evidence)}</span>
+    </li>`)}</ol>
+  </details>`;
+}
+
 export function JobScreen({ id }) {
   const job = jobOf(id);
   const answer = jobDetail(id);
@@ -203,6 +221,7 @@ export function JobScreen({ id }) {
           return html`<li class="step-item" key=${step.id} data-step=${step.id} data-signal=${signal} data-state=${kind}>
             <${StatusIcon} kind=${kind} /><span><b>${label("stage", step.id)}</b><small class="stage-state">${stepLine(step)}</small></span>
             ${step.state === "RUNNING" ? html`<${Meter} value=${step.progress || 0} label="진행" />` : html`<span></span>`}
+            <${ProgressEvidence} items=${step.progress_evidence || []} />
           </li>`;
         }) : html`<${Empty} text=${answer.error ? "상세 조회 실패" : answer.value === undefined ? "불러오는 중" : "단계 없음"} />`}
       </ol>

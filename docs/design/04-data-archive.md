@@ -94,7 +94,7 @@ size + sha256
 
 `AudioArtifact`는 원본 자산에서 STT 입력 규격으로 추출한 파생 파일이다. v1은 WAV/PCM 16-bit little-endian, 16kHz, mono 규격을 사용하며 checksum·Profile·FFmpeg·Worker provenance를 가진다. `AUD-001~002`
 
-`Transcript`는 AudioArtifact에서 STT가 게시한 JSON Artifact이면서 언어와 순서 있는 millisecond 시간 구간을 제공하는 구조화 결과다. 원본 `whisper.cpp` JSON의 host 정보와 모델 파일 경로는 게시하지 않고 Profile reference와 정규 구간만 sidecar에 남긴다. 공통 checksum·게시·provenance는 Artifact가 소유하고 전사문 검색과 타임코드 이동에 필요한 필드는 Transcript가 소유한다. `TRN-001~002`
+`Transcript`는 AudioArtifact에서 STT가 게시한 JSON Artifact이면서 언어와 순서 있는 전역 영상 millisecond 시간 구간을 제공하는 구조화 결과다. 긴 입력을 처리하는 내부 청크는 게시 Entity가 아니며, 무음 경계 우선 분할 뒤 나온 상대 시각을 원본 시간축으로 합치고 경계 겹침을 제거한다. 원본 `whisper.cpp` JSON의 host 정보와 모델 파일 경로는 게시하지 않고 Profile reference와 정규 구간만 sidecar에 남긴다. 공통 checksum·게시·provenance는 Artifact가 소유하고 전사문 검색과 타임코드 이동에 필요한 필드는 Transcript가 소유한다. `TRN-001~002`
 
 `Subtitle`은 Transcript의 시간 구간을 versioned SRT Profile로 직렬화한 게시 Artifact다. Subtitle provenance는 입력 Transcript ID를 하나만 가지며 등록 Storage root 안의 임시 파일을 검증한 뒤 게시한다. `SUB-001~002`
 
@@ -167,7 +167,7 @@ layout v3의 결과 폴더 이름은 `처리일_사람이 읽는 결과명__패�
 - `transcript.txt`, `subtitle.srt`: STT 뒤 사람이 직접 읽고 사용하는 현재 결과
 - `.archive-package.json`: 기계가 읽는 identity·provenance·checksum·리비전·복구 기록. 구조화 Transcript도 여기에 포함한다.
 
-Archive Intake의 1단계 결과는 담당자가 고른 `ARCHIVE_PRIMARY`에 ArchivePackage로 게시한다. 한 벌의 checksum 기록까지 검증되면 `STORED`, 즉 보관됨이다. 2단계 Transcript·TranscriptText·Subtitle은 확정 전 패키지에 checksum manifest가 다른 새 리비전으로 추가한다. ArchiveCatalog는 같은 `ARCHIVE_PRIMARY`를 쓰는 작업과 원본 드라이브를 가리지 않고 최상단 `archive-catalog.csv` 하나에 누적한다. Worker와 process가 달라도 같은 StorageRoot의 잠금 파일을 배타적으로 잡은 뒤 현재 투영을 읽고 병합해 `archive-catalog.csv.partial`에 작성·동기화·검증한 뒤 `os.Root.Rename`으로 원자 교체한다. 기존 `catalog/<원본 드라이브 ID>.csv`가 있고 최상단 파일이 없으면 첫 게시에서 행을 병합하고 기존 파일은 복구 근거로 유지한다. `ORG-008~009`, `ARC-011`
+Archive Intake의 1단계 결과는 담당자가 고른 `ARCHIVE_PRIMARY`에 ArchivePackage로 게시한다. 한 벌의 checksum 기록까지 검증되면 `STORED`, 즉 보관됨이다. 2단계 Transcript·TranscriptText·Subtitle은 확정 전 패키지에 checksum manifest가 다른 새 리비전으로 추가한다. 이 추가 명령은 기준 package revision과 1단계에서 검증된 metadata 상대경로를 실행 명세에 고정한다. 게시 뒤 결과 보고가 끊겨 같은 기준 revision·같은 세 sidecar checksum으로 재실행되면 이미 게시된 바로 다음 리비전을 검증해 같은 결과로 반환하고, 더 뒤의 리비전이나 다른 파일은 오래된 요청의 성공으로 간주하지 않는다. 따라서 layout v1·v2의 `metadata.json`과 layout v3의 `.archive-package.json`을 추측으로 바꾸지 않으며 재전송이 리비전을 하나 더 만들지 않는다. ArchiveCatalog는 같은 `ARCHIVE_PRIMARY`를 쓰는 작업과 원본 드라이브를 가리지 않고 최상단 `archive-catalog.csv` 하나에 누적한다. Worker와 process가 달라도 같은 StorageRoot의 잠금 파일을 배타적으로 잡은 뒤 현재 투영을 읽고 병합해 `archive-catalog.csv.partial`에 작성·동기화·검증한 뒤 `os.Root.Rename`으로 원자 교체한다. 기존 `catalog/<원본 드라이브 ID>.csv`가 있고 최상단 파일이 없으면 첫 게시에서 행을 병합하고 기존 파일은 복구 근거로 유지한다. `ORG-008~009`, `ARC-011`
 
 layout v3에서는 검색과 상세 provenance의 범위를 분리한다. 루트 `archive-catalog.csv`는 ArchivePackage, 즉 결과 폴더 하나당 한 행인 저장소 전체 검색 projection이다. 패키지 폴더의 `video-info.csv`는 그 결과를 만든 OriginalAsset 하나당 한 행인 상세 기록이며 다중 소스 결과는 여러 행을 가진다. `.archive-package.json`은 검색 인덱스가 아니라 package identity·layout version·현재 revision·원본 참조·provenance·복구에 필요한 기계 계약이다. 따라서 실제 매핑은 `결과 폴더 1 = ArchivePackage 1 = 결과 영상 1 = 루트 CSV 행 1`이고, 그 안의 `video-info.csv`만 `OriginalAsset N`을 표현한다. `MED-008`, `ORG-015`
 

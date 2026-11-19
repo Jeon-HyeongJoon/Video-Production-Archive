@@ -62,7 +62,7 @@ wait_reason 또는 error_class
 last_event_at, log_reference
 ```
 
-작업 상세는 Step DAG, CommandRecord, Event, Approval, ArchivistToolCall, ArchivistTurn, ActionCard, Worker progress와 정제된 process log 참조를 시간순으로 결합한다. 사람과 Archivist 중 누가 시작했는지를 Actor와 requested_via로 구분하되 별도 작업함으로 나누지 않는다. 읽기 모델은 원장이 아니며 SQLite 원장과 일시 metric에서 다시 만들 수 있어야 한다.
+작업 상세는 Step DAG, CommandRecord, Event, Approval, ArchivistToolCall, ArchivistTurn, ActionCard, Worker progress와 정제된 process log 참조를 시간순으로 결합한다. 장시간 Step은 접힌 상태에 영속 `StepProgressEvidence` 수만 보이고, `실행 근거`를 펼쳤을 때 Control 관측 시각·청크 순번과 전체 수·원본 시간 범위·계획/시작/완료/실패 상태를 보여 준다. 원문 process 출력·실행 인수·credential·절대경로는 API와 화면에 포함하지 않는다. 사람과 Archivist 중 누가 시작했는지를 Actor와 requested_via로 구분하되 별도 작업함으로 나누지 않는다. 읽기 모델은 원장이 아니며 SQLite 원장과 일시 metric에서 다시 만들 수 있어야 한다. `WRK-017`, `DSH-044`
 
 실패한 ArchiveRun의 결과 사실과 사람이 아직 처리할 일이 있는지는 분리한다. 같은 원본 Volume에서 그 실패 실행보다 뒤에 생성되고 실패 폴더 전체를 고정 범위로 받은 가장 이른 ArchiveRun이 있으면 이전 실행은 `replacement_work_id`로 그 후속 작업을 가리킨다. 이전 실행의 FAILED 결과와 하위 Job의 폴더·단계·`error_class`·안전한 `log_reference`는 바꾸지 않지만 확인 필요와 왼쪽 워크스페이스에서는 제거하고 완료 이력에 `새 작업으로 넘김`으로 둔다. 후속 실행도 실패하면 그 후속 실행 자체가 새 미해결 관리 작업이다. 과거 실패 ArchiveRun 상세은 하위 Job을 열기 전에도 이 구조화된 실패 기록과 후속 실행 이동을 개요 바로 아래에 보여 준다. `DSH-036~039`
 

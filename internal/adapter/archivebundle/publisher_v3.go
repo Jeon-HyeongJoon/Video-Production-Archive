@@ -92,7 +92,7 @@ func (publisher *Publisher) PublishInitialCompact(request InitialRequest) (Packa
 
 func (publisher *Publisher) ReviseCompact(request RevisionRequest) (Package, error) {
 	request.PackageID = strings.TrimSpace(request.PackageID)
-	if !packageIDPattern.MatchString(request.PackageID) || request.CreatedAt.IsZero() {
+	if !packageIDPattern.MatchString(request.PackageID) || request.BaseRevision == 0 || request.CreatedAt.IsZero() {
 		return Package{}, ErrInvalidRequest
 	}
 	lock, err := publisher.acquirePackageLock(request.PackageID)
@@ -106,6 +106,9 @@ func (publisher *Publisher) ReviseCompact(request RevisionRequest) (Package, err
 	}
 	if current.LayoutVersion != CompactLayoutVersion || current.State != archive.PackageStored {
 		return Package{}, ErrPackageState
+	}
+	if replayed, ok, replayErr := publisher.replayedStoredRevision(current, request); replayErr != nil || ok {
+		return replayed, replayErr
 	}
 	document, err := publisher.readCompactDocument(current.packageDirectory)
 	if err != nil || document.PackageID != request.PackageID || document.Revision != current.Revision {
@@ -410,4 +413,3 @@ func compactManifestDigest(packageID string, revision CompactRevision) string {
 	payload, _ := json.Marshal(manifest)
 	return digest(payload)
 }
-

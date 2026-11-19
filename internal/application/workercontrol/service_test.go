@@ -95,6 +95,10 @@ func (store *completionStore) ClaimWorkerStep(context.Context, string, time.Time
 func (store *completionStore) RenewWorkerLease(context.Context, string, string, string, uint64, time.Time) (LeaseRenewal, error) {
 	return LeaseRenewal{}, ErrInvalidAssignment
 }
+
+func (store *completionStore) RecordWorkerProgress(context.Context, ProgressReport, time.Time) (job.State, error) {
+	return job.State{}, ErrInvalidAssignment
+}
 func (store *completionStore) SettleWorkerStep(context.Context, Result, time.Time) (job.State, error) {
 	store.settleCalls++
 	return store.state, nil

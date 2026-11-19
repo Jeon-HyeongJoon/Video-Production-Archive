@@ -140,6 +140,8 @@ Control은 Worker의 service credential과 단조 증가 snapshot ID를 검증�
 
 `accepting_work`는 Worker가 종료·정리 중인지 나타내는 운영 gate이며 CPU·memory 기반의 최종 수용 판정이 아니다. Control은 heartbeat 원시값에 아직 해제되지 않은 ResourceReservation을 결합해 WorkerCapacity를 계산한다. 따라서 Worker가 보내는 `heavy_running`·`light_running`만으로 추가 작업 가능 여부를 표시하거나 queue admission을 결정하지 않는다. 실제 Step의 예상량과 예약 차감값을 사용한 Control의 판정이 실행·보류 상태의 기준이다. `DSP-004`, `DSH-014`
 
+관리 Runner는 OS 자원 Probe 결과에 현재 claim한 Step의 `ResourceClass`를 합쳐 `heavy_running` 또는 `light_running`을 최소 1로 보고하고, 실행 정산 뒤에만 이 실행 표시를 비운다. 그러므로 WorkDiagnostic은 활성 예약과 Worker 실행 수를 같은 실행 경계로 비교할 수 있으며, 외부 subprocess가 별도 프로세스여도 실행 중인 작업을 0건으로 잘못 보고하지 않는다. `WRK-006`, `WRK-008`
+
 배정된 Worker는 outbound claim으로 자신의 `RESERVED` Step 하나를 `RUNNING`으로 확정한다. claim과 결과 API는 매 요청의 Worker credential을 다시 검증하고, 결과는 현재 ExecutionLease owner와 fencing token이 일치할 때만 수락한다. Step 시작·성공·분류된 실패·취소 정산·lease 만료 복구의 결정적 상태 전이는 Core `WorkerLifecycleHandler`가 staged Job state와 Event로 만들며 SQLite Adapter는 Job state를 직접 바꾸지 않는다. staged change, 결과 receipt, Event·Command 기록, ResourceReservation·device reservation·lease 해제는 같은 SQLite transaction에서 정산한다. 응답을 받지 못해 같은 token과 같은 결과를 다시 보내면 저장된 receipt를 반환하고, 내용이 바뀌었거나 이미 다른 token으로 넘어간 결과는 `STALE_FENCING_TOKEN`으로 거부한다. `WRK-009`
 
 ### 4.1 실행 명세와 출력 기록
@@ -169,6 +171,8 @@ profile reference와 operation별 typed parameter
 운영 executor는 checksum·명세 불일치를 영구 `INPUT`, 일반 subprocess·일시 I/O 실패를 `TRANSIENT`, 접근 불가 또는 용량 부족 Storage를 대상 ID가 있는 `DEVICE` 대기로 보고한다. `DISK`는 PhysicalDevice I/O 충돌 예약에만 쓴다. Storage 대기는 사람이 복구할 때까지 실행 시도 횟수를 소비하지 않는다. `WRK-015`
 
 성공하지 못한 Worker 결과는 현재 오류 한 칸을 덮어쓰는 대신 재시도별 `StepFailureEvidence`를 Job 원장에 추가한다. 이 기록은 Worker·Step·typed operation·fencing token·실패 순서·workflow 시도·failure class·WaitReason과 대상 Storage ID·정규화 오류와 원인 code·정제 summary·process exit code·안전한 log reference·Control 관측 시각·결과 StepState를 가진다. 원문 stdout·stderr, 실행 인수, credential과 절대경로는 필드 자체를 두지 않는다. staged Job state, 같은 증적을 담은 Domain Event, Worker 결과 영수증, 예약·리스 해제는 한 transaction에서 확정하고 같은 결과 재전송은 최초 상태를 반환하므로 증적도 중복하지 않는다. 이후 성공해 현재 오류를 비워도 과거 실패 증적은 유지한다. `WRK-016`
+
+장시간 MediaOperation은 lease heartbeat와 별도로 제한된 빈도의 `StepProgressEvidence`를 제출한다. Worker가 현재 fencing token과 단조 증가 보고 순번으로 operation·계획/시작/완료/실패 상태·청크 순번과 전체 수·원본 시작/종료 millisecond·완료 비율을 보고하면 Control의 `WorkerLifecycleHandler`가 진행률·최근 관측 시각·변경 불가능한 증적과 Domain Event를 같은 Job transaction으로 확정한다. 같은 보고 재전송은 증적을 중복하지 않고 오래된 token은 거부한다. 이 구조에는 원문 stdout·stderr, 실행 인수, credential, 절대경로와 음성 내용이 없으며 작업 상세와 WorkDiagnostic이 같은 증적 ID를 읽는다. `WRK-017`
 
 권장 상태:
 

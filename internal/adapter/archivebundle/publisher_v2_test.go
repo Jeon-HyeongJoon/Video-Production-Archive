@@ -13,6 +13,37 @@ import (
 	"videoarchive/internal/core/vocabulary"
 )
 
+func TestFlatResultPackageRevisionRetryReturnsThePublishedRevision(t *testing.T) {
+	publisher, _, archiveRoot, checksum, _, _ := publisherFixture(t)
+	request := compactInitialRequest("VP-20261108-FLAT-RETRY", "DECISION-FLAT-RETRY", checksum, []SourceReference{{
+		OriginalAssetID: "ASSET-FLAT-RETRY", OriginalName: "event.mov", RelativePath: "recordings/event.mov", Checksum: checksum,
+	}})
+	request.LayoutVersion = FlatLayoutVersion
+	initial, err := publisher.PublishInitialV2(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	revisionRequest := RevisionRequest{
+		PackageID: initial.PackageID, BaseRevision: initial.Revision,
+		Transcript:     FileSource{Root: RootArchive, Path: "staging/transcript.json", Checksum: fixtureDigest(`{"segments":[{"text":"행사"}]}`)},
+		TranscriptText: FileSource{Root: RootArchive, Path: "staging/transcript.txt", Checksum: fixtureDigest("행사\n")},
+		Subtitle:       FileSource{Root: RootArchive, Path: "staging/subtitle.srt", Checksum: fixtureDigest("1\n00:00:00,000 --> 00:00:01,000\n행사\n")},
+		CreatedAt:      request.CreatedAt.Add(time.Hour),
+	}
+	first, err := publisher.ReviseStored(revisionRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replayed, err := publisher.ReviseStored(revisionRequest)
+	if err != nil || first.Revision != 2 || replayed.Revision != 2 || first.ManifestDigest != replayed.ManifestDigest ||
+		first.MetadataPath != path.Join(path.Dir(initial.MetadataPath), "metadata.json") {
+		t.Fatalf("flat revision retry changed the package: initial=%+v first=%+v replayed=%+v err=%v", initial, first, replayed, err)
+	}
+	if _, observed, hashErr := archiveRoot.FileSHA256(first.TranscriptTextPath); hashErr != nil || observed != revisionRequest.TranscriptText.Checksum {
+		t.Fatalf("flat revision text was not verified: checksum=%s err=%v", observed, hashErr)
+	}
+}
+
 // Requirement: ARC-015
 func TestCompactArchivePackagePublishesOnlyHumanFilesAndRecoveryDocument(t *testing.T) {
 	publisher, _, archiveRoot, checksum, _, _ := publisherFixture(t)
@@ -123,6 +154,7 @@ func TestCompactArchivePackageRevisionPreservesHistoryInsideRecoveryDocument(t *
 	firstRevision, _ := json.Marshal(documentV1.Revisions[0])
 	revised, err := publisher.ReviseCompact(RevisionRequest{
 		PackageID:      initial.PackageID,
+		BaseRevision:   1,
 		Transcript:     FileSource{Root: RootArchive, Path: "staging/transcript.json", Checksum: fixtureDigest(`{"segments":[{"text":"행사"}]}`)},
 		TranscriptText: FileSource{Root: RootArchive, Path: "staging/transcript.txt", Checksum: fixtureDigest("행사\n")},
 		Subtitle:       FileSource{Root: RootArchive, Path: "staging/subtitle.srt", Checksum: fixtureDigest("1\n00:00:00,000 --> 00:00:01,000\n행사\n")},

@@ -270,6 +270,18 @@ func TestWorkerFailureEvidenceCommitsAtomicallyAndSurvivesResultReplay(t *testin
 		t.Fatalf("result replay duplicated or lost failure evidence: state=%+v err=%v", replayed, err)
 	}
 	retry := reserveRetryWorkerStep(t, store, settled, now.Add(5*time.Second))
+	retryingSnapshot, err := store.Load(retry.JobID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var retrying job.State
+	if err := json.Unmarshal(retryingSnapshot.State, &retrying); err != nil {
+		t.Fatal(err)
+	}
+	if retrying.Steps[0].ErrorClass != "" || retrying.Steps[0].LogReference != "" ||
+		len(retrying.Steps[0].FailureEvidence) != 1 || retrying.Steps[0].FailureEvidence[0].EvidenceID != evidence.EvidenceID {
+		t.Fatalf("retry start retained stale current-attempt failure fields or lost history: %+v", retrying.Steps[0])
+	}
 	outputRecord, err := execution.NewStepOutputRecord(
 		retry.ExecutionSpec, retry.FencingToken, report.WorkerID, now.Add(7*time.Second),
 		[]execution.StepOutput{{

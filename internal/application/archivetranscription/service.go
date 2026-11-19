@@ -45,18 +45,19 @@ type JobBus interface {
 // It contains only IDs, checksums and Storage-relative paths needed to create
 // the first Worker execution spec for a separate stage-two Job.
 type StoredRecording struct {
-	FolderID                 string
-	WorkspaceDriveID         string
-	OriginalAssetID          string
-	OrganizationDecisionID   string
-	Disposition              vocabulary.OrganizationDisposition
-	ArchivePackageID         string
-	ArchivePackageRevision   uint64
-	VideoRelativePath        string
-	VideoChecksum            string
-	SelectedProfileReference string
-	SourceInputs             []execution.InputReference
-	TranscriptionEligible    bool
+	FolderID                   string
+	WorkspaceDriveID           string
+	OriginalAssetID            string
+	OrganizationDecisionID     string
+	Disposition                vocabulary.OrganizationDisposition
+	ArchivePackageID           string
+	ArchivePackageRevision     uint64
+	ArchivePackageMetadataPath string
+	VideoRelativePath          string
+	VideoChecksum              string
+	SelectedProfileReference   string
+	SourceInputs               []execution.InputReference
+	TranscriptionEligible      bool
 }
 
 type StageOneProjection interface {
@@ -183,7 +184,8 @@ func (service *Service) createJob(request StartRequest, archiveRun archiverun.St
 			ArchiveStorageID: archiveRun.ArchiveStorageID,
 			MediaFolder:      recording.FolderID, InputRevision: archiveRun.FolderDiscoveryRevision,
 			ArchivePackageID: recording.ArchivePackageID, ArchivePackageRevision: recording.ArchivePackageRevision,
-			Disposition: recording.Disposition, SelectedProfileReference: recording.SelectedProfileReference,
+			ArchivePackageMetadataPath: recording.ArchivePackageMetadataPath,
+			Disposition:                recording.Disposition, SelectedProfileReference: recording.SelectedProfileReference,
 			TranscriptionEligible: recording.TranscriptionEligible, SourceInputs: append([]execution.InputReference(nil), recording.SourceInputs...),
 		},
 	})
@@ -230,7 +232,7 @@ func validateStoredRecording(archiveRun archiverun.State, recording StoredRecord
 	recording.ArchivePackageID = strings.TrimSpace(recording.ArchivePackageID)
 	recording.SelectedProfileReference = strings.TrimSpace(recording.SelectedProfileReference)
 	if recording.FolderID == "" || recording.WorkspaceDriveID == "" || recording.OriginalAssetID == "" || recording.OrganizationDecisionID == "" ||
-		recording.ArchivePackageID == "" || recording.ArchivePackageRevision == 0 || recording.VideoRelativePath == "" ||
+		recording.ArchivePackageID == "" || recording.ArchivePackageRevision == 0 || recording.ArchivePackageMetadataPath == "" || recording.VideoRelativePath == "" ||
 		recording.VideoChecksum == "" || recording.SelectedProfileReference == "" || len(recording.SourceInputs) == 0 || !recording.TranscriptionEligible ||
 		(recording.Disposition != vocabulary.OrganizationAsIs && recording.Disposition != vocabulary.OrganizationRenderRecordings) {
 		return ErrInvalidStoredResult

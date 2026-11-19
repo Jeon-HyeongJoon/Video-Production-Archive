@@ -1191,6 +1191,85 @@ func (store *Store) RenewWorkerLease(
 	return workercontrol.LeaseRenewal{ExpiresAt: renewedUntil, RenewAfter: ttl / 2}, nil
 }
 
+func (store *Store) RecordWorkerProgress(
+	ctx context.Context,
+	report workercontrol.ProgressReport,
+	now time.Time,
+) (job.State, error) {
+	if report.WorkerID == "" || report.JobID == "" || report.StepID == "" || report.FencingToken == 0 ||
+		report.ReportSequence == 0 || report.Update.Validate() != nil {
+		return job.State{}, workercontrol.ErrInvalidAssignment
+	}
+	tx, err := store.db.BeginTx(ctx, nil)
+	if err != nil {
+		return job.State{}, err
+	}
+	defer tx.Rollback()
+	compositeStepID := report.JobID + "/" + report.StepID
+	var owner, expiresRaw string
+	var token uint64
+	if err := tx.QueryRowContext(ctx, `
+		SELECT owner_worker_id, fencing_token, expires_at FROM execution_leases WHERE step_id = ?
+	`, compositeStepID).Scan(&owner, &token, &expiresRaw); errors.Is(err, sql.ErrNoRows) {
+		return job.State{}, workflow.ErrStaleFencingToken
+	} else if err != nil {
+		return job.State{}, err
+	}
+	expiresAt, parseErr := time.Parse(time.RFC3339Nano, expiresRaw)
+	if parseErr != nil || owner != report.WorkerID || token != report.FencingToken || !now.Before(expiresAt) {
+		return job.State{}, workflow.ErrStaleFencingToken
+	}
+	var revision uint64
+	var encoded []byte
+	if err := tx.QueryRowContext(ctx, `SELECT revision, state FROM aggregate_states WHERE target_id = ?`, report.JobID).Scan(&revision, &encoded); err != nil {
+		return job.State{}, err
+	}
+	state, err := job.Decode(command.Snapshot{TargetID: report.JobID, Revision: revision, State: encoded})
+	if err != nil {
+		return job.State{}, err
+	}
+	step := stateStep(&state, compositeStepID)
+	if step == nil {
+		return job.State{}, workflow.ErrStaleFencingToken
+	}
+	for _, evidence := range step.ProgressEvidence {
+		if evidence.FencingToken != report.FencingToken || evidence.ReportSequence != report.ReportSequence {
+			continue
+		}
+		if evidence.WorkerID == report.WorkerID && evidence.Update == report.Update {
+			return state, nil
+		}
+		return job.State{}, workflow.ErrStaleFencingToken
+	}
+	commandID := fmt.Sprintf("worker-progress:%s:%s:%d:%d", report.JobID, report.StepID, report.FencingToken, report.ReportSequence)
+	envelope := command.Envelope{
+		CommandID: commandID, CommandType: job.ReportWorkerStepProgressCommand,
+		Actor: command.Actor{Type: command.WorkerActor, ID: report.WorkerID}, RequestedVia: "worker_api",
+		TargetID: report.JobID, ExpectedRevision: revision, IdempotencyKey: commandID, Reason: "Worker reported structured Step progress",
+		Parameters: lifecycleParameters(job.ReportWorkerStepProgressParameters{
+			StepID: report.StepID, FencingToken: report.FencingToken, ReportSequence: report.ReportSequence, Update: report.Update,
+		}),
+	}
+	change, state, err := workerLifecycleChange(envelope, command.Snapshot{TargetID: report.JobID, Revision: revision, State: encoded}, now)
+	if errors.Is(err, job.ErrInvalidWorkerLifecycle) {
+		return job.State{}, workercontrol.ErrInvalidAssignment
+	}
+	if err != nil {
+		return job.State{}, err
+	}
+	expected := revision
+	if err := applyCommit(tx, "", command.Commit{
+		ExpectedRevision: &expected, NextState: &command.Snapshot{TargetID: state.ID, Revision: change.Revision, State: change.State},
+		Record: command.CommandRecord{Envelope: envelope, Accepted: true}, Events: change.Events,
+	}); err != nil {
+		return job.State{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return job.State{}, err
+	}
+	return state, nil
+}
+
 func (store *Store) PendingWorkerCancellation(
 	ctx context.Context,
 	workerID, jobID, stepID string,

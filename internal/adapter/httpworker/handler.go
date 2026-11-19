@@ -97,6 +97,8 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		handler.claim(writer, request)
 	case request.Method == http.MethodPost && request.URL.Path == "/worker/v1/steps/lease-renewal" && handler.execution != nil:
 		handler.renewLease(writer, request)
+	case request.Method == http.MethodPost && request.URL.Path == "/worker/v1/steps/progress" && handler.execution != nil:
+		handler.progress(writer, request)
 	case request.Method == http.MethodPost && request.URL.Path == "/worker/v1/steps/result" && handler.execution != nil:
 		handler.result(writer, request)
 	case request.Method == http.MethodPost && request.URL.Path == "/worker/v1/steps/cancellation" && handler.execution != nil:
@@ -106,6 +108,41 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 	default:
 		writeError(writer, http.StatusNotFound, "NOT_FOUND")
 	}
+}
+
+type progressRequest struct {
+	JobID          string                   `json:"job_id"`
+	StepID         string                   `json:"step_id"`
+	FencingToken   uint64                   `json:"fencing_token"`
+	ReportSequence uint64                   `json:"report_sequence"`
+	Update         execution.ProgressUpdate `json:"update"`
+}
+
+func (handler *Handler) progress(writer http.ResponseWriter, request *http.Request) {
+	workerID, credential, ok := workerIdentity(request)
+	if !ok || handler.registry.Authenticate(workerID, credential) != nil {
+		writeError(writer, http.StatusUnauthorized, "WORKER_AUTHENTICATION_FAILED")
+		return
+	}
+	var payload progressRequest
+	if !decodeWorkerJSON(writer, request, &payload) || strings.TrimSpace(payload.JobID) == "" ||
+		strings.TrimSpace(payload.StepID) == "" || payload.FencingToken == 0 || payload.ReportSequence == 0 || payload.Update.Validate() != nil {
+		writeError(writer, http.StatusBadRequest, "INVALID_STEP_PROGRESS")
+		return
+	}
+	err := handler.execution.ReportProgress(request.Context(), workercontrol.ProgressReport{
+		WorkerID: workerID, JobID: strings.TrimSpace(payload.JobID), StepID: strings.TrimSpace(payload.StepID),
+		FencingToken: payload.FencingToken, ReportSequence: payload.ReportSequence, Update: payload.Update,
+	})
+	if errors.Is(err, workflow.ErrStaleFencingToken) {
+		writeError(writer, http.StatusConflict, "STALE_FENCING_TOKEN")
+		return
+	}
+	if err != nil {
+		writeError(writer, http.StatusConflict, "STEP_PROGRESS_REJECTED")
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"data": map[string]string{"state": "RECORDED"}})
 }
 
 type leaseRenewalRequest struct {

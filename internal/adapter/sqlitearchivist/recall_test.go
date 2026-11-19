@@ -2,6 +2,8 @@ package sqlitearchivist
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"path/filepath"
 	"testing"
@@ -190,6 +192,51 @@ func TestWorkDiagnosticAdvisoryPersistsRemediationPolicy(t *testing.T) {
 	if err != nil || replayed || record.Turn.ToolPolicy != archivistruntime.ToolPolicyRemediation ||
 		record.Turn.SubmittedBy != vocabulary.ActorSystem || record.Turn.WorkReference == nil || record.Turn.WorkReference.WorkID != reference.WorkID {
 		t.Fatalf("work diagnostic advisory did not persist remediation authority: record=%+v replayed=%v err=%v", record, replayed, err)
+	}
+}
+
+func TestLegacyReadOnlyWorkDiagnosticAdvisoryRemainsDeduplicatedAfterPolicyUpgrade(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 11, 17, 8, 0, 0, 0, time.UTC)
+	store, err := Open(filepath.Join(t.TempDir(), "archivist.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	hosts := archivistruntime.NewHostRegistry([]archivistruntime.HostDefinition{{
+		ID: "HOST-1", Enabled: true, CredentialRef: "secret://host",
+		AllowedBackends: map[vocabulary.RuntimeBackend]bool{vocabulary.RuntimeEmbeddedCore: true},
+		AllowedCLIIDs:   map[string]bool{"codex": true}, AllowedWorkspaceRootIDs: map[string]bool{"video-project": true},
+	}}, recallVerifier{}, time.Minute)
+	service, err := archivistcontrol.New(store, hosts, func() time.Time { return now }, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const sessionID = "SESSION-LEGACY-DIAGNOSTIC"
+	if _, err := service.CreateSession(ctx, archivistruntime.SessionSpec{
+		ID: sessionID, ArchivistHostID: "HOST-1", Backend: vocabulary.RuntimeEmbeddedCore,
+		CLIID: "codex", WorkspaceRootID: "video-project",
+	}, ""); err != nil {
+		t.Fatal(err)
+	}
+	reference := archivistruntime.WorkReference{Kind: archivistruntime.WorkJob, WorkID: "JOB-LEGACY", Revision: 3}
+	const triggerID = "legacy-diagnostic-fingerprint"
+	identity := sessionID + "\x00" + string(archivistcontrol.AdvisoryWorkDiagnostic) + "\x00" + triggerID
+	digest := sha256.Sum256([]byte(identity))
+	turnID := "SYSTEM-ADVISORY-" + hex.EncodeToString(digest[:12])
+	legacy, err := archivistruntime.NewAdvisorySystemTurn(turnID, sessionID, "REQUEST-"+turnID, &reference)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CreateTurn(ctx, archivistcontrol.TurnRecord{Turn: legacy, Prompt: "legacy diagnosis", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	record, replayed, err := service.HandleAdvisoryEvent(ctx, archivistcontrol.AdvisoryEvent{
+		SessionID: sessionID, Kind: archivistcontrol.AdvisoryWorkDiagnostic,
+		TriggerID: triggerID, Prompt: "diagnose and recover", Work: &reference,
+	})
+	if err != nil || !replayed || record.Turn.ID != turnID || record.Turn.ToolPolicy.Effective() != archivistruntime.ToolPolicyAdvisory {
+		t.Fatalf("legacy diagnostic advisory was not safely deduplicated: record=%+v replayed=%v err=%v", record, replayed, err)
 	}
 }
 

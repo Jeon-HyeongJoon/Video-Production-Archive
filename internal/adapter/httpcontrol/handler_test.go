@@ -34,7 +34,9 @@ import (
 	"videoarchive/internal/core/catalog"
 	"videoarchive/internal/core/command"
 	"videoarchive/internal/core/contentreview"
+	"videoarchive/internal/core/execution"
 	"videoarchive/internal/core/intake"
+	corejob "videoarchive/internal/core/job"
 	"videoarchive/internal/core/mediaanalysis"
 	"videoarchive/internal/core/notification"
 	"videoarchive/internal/core/organization"
@@ -334,6 +336,13 @@ func TestNewArchiveWorkShowsExpectedRelativeOutputLayoutBeforeStart(t *testing.T
 	})
 }
 
+// Requirement: DSH-044
+func TestWorkspaceShowsStructuredStepProgressEvidenceOnlyOnDisclosure(t *testing.T) {
+	testControlHTTPWorkspace(t, func(t *testing.T, handler http.Handler) {
+		assertArchiveWorkspaceScript(t, handler, "check_archive_workspace_step_progress.py")
+	})
+}
+
 // Requirement: DSH-014
 func TestWorkspaceShowsReservationAdjustedWorkerCapacity(t *testing.T) {
 	testControlHTTPWorkspace(t, func(t *testing.T, handler http.Handler) {
@@ -506,6 +515,19 @@ func testControlHTTPScene(t *testing.T, scene archiveWorkspaceScene, check func(
 		Steps: []archiveworkspace.StepStatus{{
 			ID: "render", State: workflow.Running, Progress: 0.64, ExecutorKind: vocabulary.ExecutorWorker,
 			WorkerID: "worker-main", LastEventAt: observation.ObservedAt,
+			ProgressEvidence: []corejob.StepProgressEvidence{{
+				EvidenceID: "EVD-PROGRESS-ONE", StepID: "render", WorkerID: "worker-main", FencingToken: 7, ReportSequence: 1,
+				ObservedAt: observation.ObservedAt.Add(-time.Minute), Update: execution.ProgressUpdate{
+					Operation: execution.OperationRenderRecording, Status: execution.ProgressPlanned,
+					ChunkCount: 2, SourceEndMillis: 10_000,
+				},
+			}, {
+				EvidenceID: "EVD-PROGRESS-TWO", StepID: "render", WorkerID: "worker-main", FencingToken: 7, ReportSequence: 2,
+				ObservedAt: observation.ObservedAt, Update: execution.ProgressUpdate{
+					Operation: execution.OperationRenderRecording, Status: execution.ProgressCompleted,
+					ChunkIndex: 1, ChunkCount: 2, SourceEndMillis: 5_000, Progress: 0.5,
+				},
+			}},
 		}},
 		Workers: []archiveworkspace.WorkerResource{{
 			WorkerID: "worker-main", CPUPercent: 38, GPUPercent: 71,

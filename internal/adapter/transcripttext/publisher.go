@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"path"
 	"strings"
 	"time"
@@ -49,6 +50,11 @@ func (publisher *Publisher) Publish(request Request) (archive.Artifact, error) {
 	}
 	var builder strings.Builder
 	for _, segment := range request.Transcript.Content.Segments {
+		builder.WriteByte('[')
+		builder.WriteString(formatTimecode(segment.StartMillis))
+		builder.WriteString(" --> ")
+		builder.WriteString(formatTimecode(segment.EndMillis))
+		builder.WriteString("] ")
 		builder.WriteString(segment.Text)
 		builder.WriteByte('\n')
 	}
@@ -72,7 +78,7 @@ func (publisher *Publisher) Publish(request Request) (archive.Artifact, error) {
 		Origin: archive.Provenance{
 			OriginalAssetID:  request.Transcript.Artifact.Origin.OriginalAssetID,
 			InputArtifactIDs: []string{request.Transcript.Artifact.ID}, ProcessingKind: vocabulary.ProcessingSTT,
-			ProcessorVersion: "archive-transcript-text-v1", ProfileVersion: "plain-text@v1",
+			ProcessorVersion: "archive-transcript-text-v2", ProfileVersion: "plain-text-timecode@v1",
 			CreatedBy: publisher.workerID, CreatedAt: publisher.now().UTC(),
 		},
 	}
@@ -83,6 +89,16 @@ func (publisher *Publisher) Publish(request Request) (archive.Artifact, error) {
 		return archive.Artifact{}, errors.Join(ErrPublishFailed, err)
 	}
 	return artifact, nil
+}
+
+func formatTimecode(milliseconds int64) string {
+	hours := milliseconds / 3_600_000
+	milliseconds %= 3_600_000
+	minutes := milliseconds / 60_000
+	milliseconds %= 60_000
+	seconds := milliseconds / 1_000
+	milliseconds %= 1_000
+	return fmt.Sprintf("%02d:%02d:%02d.%03d", hours, minutes, seconds, milliseconds)
 }
 
 func normalizePath(value string) string {

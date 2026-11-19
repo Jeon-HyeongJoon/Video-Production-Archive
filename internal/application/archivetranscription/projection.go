@@ -214,8 +214,9 @@ func storedRecordingsFromJob(archiveRun archiverun.State, folder organization.Co
 			FolderID: folder.Folder, WorkspaceDriveID: parameters.WorkspaceDriveID,
 			OriginalAssetID: source.OriginalAssetID, OrganizationDecisionID: parameters.OrganizationDecisionID,
 			Disposition: parameters.Disposition, ArchivePackageID: packageOutput.ID, ArchivePackageRevision: 1,
-			VideoRelativePath: path.Join(path.Dir(packageTarget.RelativePath), videoFileName),
-			VideoChecksum:     videoChecksum, SelectedProfileReference: profileReference,
+			ArchivePackageMetadataPath: packageTarget.RelativePath,
+			VideoRelativePath:          path.Join(path.Dir(packageTarget.RelativePath), videoFileName),
+			VideoChecksum:              videoChecksum, SelectedProfileReference: profileReference,
 			SourceInputs: []execution.InputReference{source}, TranscriptionEligible: true,
 		})
 	}

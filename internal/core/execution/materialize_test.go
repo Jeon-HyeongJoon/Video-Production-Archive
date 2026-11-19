@@ -13,7 +13,8 @@ func TestMaterializeArchiveTranscriptionUsesVerifiedOutputsAndArchivePackageRevi
 	parameters := StepExecutionParameters{
 		OrganizationDecisionID: "DECISION-1", WorkspaceDriveID: "DRIVE-1", ArchiveStorageID: "ARCHIVE-1",
 		MediaFolder: "recordings", InputRevision: 3, ArchivePackageID: "VP-20261031-0001", ArchivePackageRevision: 1,
-		Disposition: vocabulary.OrganizationRenderRecordings, SelectedProfileReference: "archive-1080p-6mbps@v1",
+		ArchivePackageMetadataPath: "2026-10-31_master__0001/metadata.json",
+		Disposition:                vocabulary.OrganizationRenderRecordings, SelectedProfileReference: "archive-1080p-6mbps@v1",
 		TranscriptionEligible: true,
 		SourceInputs: []InputReference{{
 			OriginalAssetID: "ASSET-1", OriginalName: "master.mov", StorageID: "SOURCE-1",
@@ -48,7 +49,7 @@ func TestMaterializeArchiveTranscriptionUsesVerifiedOutputsAndArchivePackageRevi
 	if revision.Operation != OperationReviseArchivePackage || len(revision.Inputs) != 3 ||
 		len(revision.Outputs) != 1 || revision.Outputs[0].Kind != OutputArchiveRevision ||
 		revision.Outputs[0].StorageID != "ARCHIVE-1" ||
-		revision.Outputs[0].RelativePath != "2026-10-31_master__0001/.archive-package.json" {
+		revision.Outputs[0].RelativePath != "2026-10-31_master__0001/metadata.json" {
 		t.Fatalf("archive package revision spec is invalid: %+v", revision)
 	}
 	completed = append(completed, completeSpec(t, revision, "1"))

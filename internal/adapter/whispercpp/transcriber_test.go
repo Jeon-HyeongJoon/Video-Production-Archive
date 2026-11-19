@@ -1,8 +1,10 @@
 package whispercpp
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -10,12 +12,14 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"videoarchive/internal/core/archive"
 	"videoarchive/internal/core/audio"
+	"videoarchive/internal/core/execution"
 	"videoarchive/internal/core/transcription"
 	"videoarchive/internal/core/vocabulary"
 )
@@ -48,6 +52,62 @@ func TestMain(m *testing.M) {
 		os.Exit(0)
 	}
 	os.Exit(m.Run())
+}
+
+type chunkFixtureRunner struct {
+	calls  [][]string
+	failAt int
+}
+
+func (runner *chunkFixtureRunner) Run(_ context.Context, _ string, arguments []string) error {
+	runner.calls = append(runner.calls, append([]string(nil), arguments...))
+	if runner.failAt == len(runner.calls) {
+		return errors.New("fixture chunk failure")
+	}
+	value := func(flag string) string {
+		for index := 0; index+1 < len(arguments); index++ {
+			if arguments[index] == flag {
+				return arguments[index+1]
+			}
+		}
+		return ""
+	}
+	prefix := value("-of")
+	duration, _ := strconv.ParseInt(value("-d"), 10, 64)
+	if prefix == "" || duration <= 200 {
+		return errors.New("invalid chunk fixture arguments")
+	}
+	payload := fmt.Sprintf(`{"result":{"language":"ko"},"transcription":[{"offsets":{"from":100,"to":%d},"text":"청크 %d"}]}`, minInt64(duration-100, 900), len(runner.calls))
+	return os.WriteFile(prefix+".json", []byte(payload), 0o600)
+}
+
+func fixturePCM16WAV(t *testing.T, durationMillis int64, silent func(int64) bool) []byte {
+	t.Helper()
+	const sampleRate = 16_000
+	sampleCount := durationMillis * sampleRate / 1000
+	dataSize := sampleCount * 2
+	var payload bytes.Buffer
+	payload.WriteString("RIFF")
+	_ = binary.Write(&payload, binary.LittleEndian, uint32(36+dataSize))
+	payload.WriteString("WAVEfmt ")
+	_ = binary.Write(&payload, binary.LittleEndian, uint32(16))
+	_ = binary.Write(&payload, binary.LittleEndian, uint16(1))
+	_ = binary.Write(&payload, binary.LittleEndian, uint16(1))
+	_ = binary.Write(&payload, binary.LittleEndian, uint32(sampleRate))
+	_ = binary.Write(&payload, binary.LittleEndian, uint32(sampleRate*2))
+	_ = binary.Write(&payload, binary.LittleEndian, uint16(2))
+	_ = binary.Write(&payload, binary.LittleEndian, uint16(16))
+	payload.WriteString("data")
+	_ = binary.Write(&payload, binary.LittleEndian, uint32(dataSize))
+	for sample := int64(0); sample < sampleCount; sample++ {
+		millis := sample * 1000 / sampleRate
+		level := int16(3000)
+		if silent(millis) {
+			level = 0
+		}
+		_ = binary.Write(&payload, binary.LittleEndian, level)
+	}
+	return payload.Bytes()
 }
 
 func whisperFixtureExecutable(t *testing.T, argumentsPath string) string {
@@ -154,4 +214,103 @@ func TestWhisperCPPAdapterExecutesArgumentArrayAndPublishesVerifiedTranscript(t 
 	if _, err := os.Stat(invalidPublishedPath); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("invalid transcript was published: %v", err)
 	}
+
+	t.Run("long audio uses silence-aware bounded chunks and global timecodes", func(t *testing.T) {
+		rootDirectory := t.TempDir()
+		root, err := archive.OpenStorageRoot(rootDirectory)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer root.Close()
+		wave := fixturePCM16WAV(t, 10_000, func(millis int64) bool {
+			return (millis >= 2_500 && millis < 3_100) || (millis >= 5_700 && millis < 6_300)
+		})
+		if err := root.MkdirAll("audio", 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := root.WriteFile("audio/event.wav", wave, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		sum := sha256.Sum256(wave)
+		chunkAudio, err := audio.NewAudioArtifact(archive.Artifact{
+			ID: "AUDIO-CHUNKED", Path: "audio/event.wav", Size: int64(len(wave)), Checksum: hex.EncodeToString(sum[:]),
+			Origin: audioArtifact.Origin,
+		}, audioProfile)
+		if err != nil {
+			t.Fatal(err)
+		}
+		runner := &chunkFixtureRunner{}
+		chunkTranscriber, err := NewTranscriber("whisper-cli", "whisper.cpp-b6250", "WORKER-1", runner, AtomicPublisher{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		chunkTranscriber.chunkPolicy = chunkPolicy{MinimumMillis: 2_000, TargetMillis: 3_000, MaximumMillis: 4_000, SilenceMillis: 400, ContextMillis: 500}
+		temporaryRelative := "staging/chunked.json.partial"
+		publishedRelative := "staging/chunked.json"
+		temporaryResolved, _ := root.ExternalProcessPath(temporaryRelative)
+		publishedResolved, _ := root.ExternalProcessPath(publishedRelative)
+		audioResolved, _ := root.ExternalProcessPath("audio/event.wav")
+		var progress []execution.ProgressUpdate
+		ctx := execution.WithProgressReporter(context.Background(), func(_ context.Context, update execution.ProgressUpdate) error {
+			progress = append(progress, update)
+			return nil
+		})
+		result, err := chunkTranscriber.Transcribe(ctx, Request{
+			TranscriptID: "TRANSCRIPT-CHUNKED", AudioArtifact: chunkAudio, InputRoot: root,
+			ResolvedAudioPath: audioResolved, ResolvedModelPath: modelPath,
+			TemporaryOutputPath: temporaryResolved, PublishedOutputPath: publishedResolved,
+			ArtifactPath: publishedRelative, TemporaryArtifactPath: temporaryRelative, OutputRoot: root, Profile: profile,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(runner.calls) != 3 || len(result.Content.Segments) != 3 || len(progress) != 7 ||
+			progress[0].Status != execution.ProgressPlanned || progress[0].ChunkCount != 3 ||
+			progress[len(progress)-1].Status != execution.ProgressCompleted || progress[len(progress)-1].Progress != 1 ||
+			result.Content.Segments[0].StartMillis != 100 || result.Content.Segments[1].StartMillis < 2_800 ||
+			result.Content.Segments[2].StartMillis < 6_000 {
+			t.Fatalf("chunked transcription evidence is incomplete: calls=%d progress=%+v content=%+v", len(runner.calls), progress, result.Content)
+		}
+		for _, call := range runner.calls {
+			if !containsArgument(call, "-ot") || !containsArgument(call, "-d") {
+				t.Fatalf("bounded chunk arguments missing: %q", call)
+			}
+		}
+
+		failureRunner := &chunkFixtureRunner{failAt: 2}
+		failureTranscriber, err := NewTranscriber("whisper-cli", "whisper.cpp-b6250", "WORKER-1", failureRunner, AtomicPublisher{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		failureTranscriber.chunkPolicy = chunkTranscriber.chunkPolicy
+		failedTemporaryRelative := "staging/failed.json.partial"
+		failedPublishedRelative := "staging/failed.json"
+		failedTemporaryResolved, _ := root.ExternalProcessPath(failedTemporaryRelative)
+		failedPublishedResolved, _ := root.ExternalProcessPath(failedPublishedRelative)
+		var failureProgress []execution.ProgressUpdate
+		failureContext := execution.WithProgressReporter(context.Background(), func(_ context.Context, update execution.ProgressUpdate) error {
+			failureProgress = append(failureProgress, update)
+			return nil
+		})
+		_, err = failureTranscriber.Transcribe(failureContext, Request{
+			TranscriptID: "TRANSCRIPT-FAILED-CHUNK", AudioArtifact: chunkAudio, InputRoot: root,
+			ResolvedAudioPath: audioResolved, ResolvedModelPath: modelPath,
+			TemporaryOutputPath: failedTemporaryResolved, PublishedOutputPath: failedPublishedResolved,
+			ArtifactPath: failedPublishedRelative, TemporaryArtifactPath: failedTemporaryRelative, OutputRoot: root, Profile: profile,
+		})
+		last := failureProgress[len(failureProgress)-1]
+		if !errors.Is(err, ErrTranscriptionFailed) || last.Status != execution.ProgressFailed || last.ChunkIndex != 2 ||
+			last.SourceStartMillis < 2_500 || last.SourceEndMillis < 5_700 {
+			t.Fatalf("failed chunk range was not reported: progress=%+v err=%v", failureProgress, err)
+		}
+	})
+}
+
+func containsArgument(arguments []string, value string) bool {
+	for _, argument := range arguments {
+		if argument == value {
+			return true
+		}
+	}
+	return false
 }

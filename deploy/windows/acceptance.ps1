@@ -20,44 +20,57 @@ $archivistSession = @{
     cli_id = 'fixture-archivist'
 } | ConvertTo-Json -Compress
 Invoke-RestMethod -Method Post -Uri "$control/api/v1/archivist-sessions" -WebSession $web -Headers $headers -ContentType 'application/json' -Body $archivistSession | Out-Null
-$turn = @{
-    turn_id = $turnId
-    request_id = $requestId
-    prompt = 'Windows Archivist Host MCP acceptance'
-} | ConvertTo-Json -Compress
-Invoke-RestMethod -Method Post -Uri "$control/api/v1/archivist-sessions/$sessionId/turns" -WebSession $web -Headers $headers -ContentType 'application/json' -Body $turn | Out-Null
+$sessionCreated = $true
+try {
+    $turn = @{
+        turn_id = $turnId
+        request_id = $requestId
+        prompt = 'Windows Archivist Host MCP acceptance'
+    } | ConvertTo-Json -Compress
+    Invoke-RestMethod -Method Post -Uri "$control/api/v1/archivist-sessions/$sessionId/turns" -WebSession $web -Headers $headers -ContentType 'application/json' -Body $turn | Out-Null
 
-$archivistEvidence = $null
-for ($attempt = 0; $attempt -lt 100; $attempt++) {
-    $sessions = Invoke-RestMethod -Uri "$control/api/v1/archivist-sessions"
-    $candidate = $sessions.data | Where-Object { $_.session_id -eq $sessionId }
-    $turnView = $candidate.turns | Where-Object { $_.turn_id -eq $turnId }
-    $completedCall = $turnView.tool_calls | Where-Object { $_.state -eq 'COMPLETED' -and $_.tool_name -eq 'archive.assets.search.v1' }
-    if ($null -ne $completedCall) {
-        $archivistEvidence = $completedCall
-        break
+    $archivistEvidence = $null
+    for ($attempt = 0; $attempt -lt 100; $attempt++) {
+        $sessions = Invoke-RestMethod -Uri "$control/api/v1/archivist-sessions"
+        $candidate = $sessions.data | Where-Object { $_.session_id -eq $sessionId }
+        $turnView = $candidate.turns | Where-Object { $_.turn_id -eq $turnId }
+        $completedCall = $turnView.tool_calls | Where-Object { $_.state -eq 'COMPLETED' -and $_.tool_name -eq 'archive.assets.search.v1' }
+        if ($null -ne $completedCall) {
+            $archivistEvidence = $completedCall
+            break
+        }
+        Start-Sleep -Milliseconds 100
     }
-    Start-Sleep -Milliseconds 100
-}
-if ($null -eq $archivistEvidence) {
-    throw 'Windows Archivist Host did not complete its MCP Tool Call'
-}
+    if ($null -eq $archivistEvidence) {
+        throw 'Windows Archivist Host did not complete its MCP Tool Call'
+    }
 
-$workers = Invoke-RestMethod -Uri "$control/api/v1/workers"
-$hosts = Invoke-RestMethod -Uri "$control/api/v1/archivist-hosts"
-$worker = $workers.data | Where-Object { $_.worker_id -eq 'worker-windows' }
-$archivistStatus = $hosts.data | Where-Object { $_.archivist_host_id -eq 'archivist-windows' }
-if ($worker.state -notin @('ONLINE', 'BUSY') -or $archivistStatus.state -ne 'ONLINE') {
-    throw 'Windows Worker or Archivist Host is not online'
-}
+    $workers = Invoke-RestMethod -Uri "$control/api/v1/workers"
+    $hosts = Invoke-RestMethod -Uri "$control/api/v1/archivist-hosts"
+    $worker = $workers.data | Where-Object { $_.worker_id -eq 'worker-windows' }
+    $archivistStatus = $hosts.data | Where-Object { $_.archivist_host_id -eq 'archivist-windows' }
+    if ($worker.state -notin @('ONLINE', 'BUSY') -or $archivistStatus.state -ne 'ONLINE') {
+        throw 'Windows Worker or Archivist Host is not online'
+    }
 
-[ordered]@{
-    worker_state = $worker.state
-    worker_snapshot_id = $worker.snapshot_id
-    archivist_host_state = $archivistStatus.state
-    session_id = $sessionId
-    turn_id = $turnId
-    tool_call_id = $archivistEvidence.tool_call_id
-    tool_name = $archivistEvidence.tool_name
-    tool_state = $archivistEvidence.state
-} | ConvertTo-Json -Compress
+    [ordered]@{
+        worker_state = $worker.state
+        worker_snapshot_id = $worker.snapshot_id
+        archivist_host_state = $archivistStatus.state
+        session_id = $sessionId
+        turn_id = $turnId
+        tool_call_id = $archivistEvidence.tool_call_id
+        tool_name = $archivistEvidence.tool_name
+        tool_state = $archivistEvidence.state
+    } | ConvertTo-Json -Compress
+}
+finally {
+    if ($sessionCreated) {
+        try {
+            Invoke-RestMethod -Method Post -Uri "$control/api/v1/archivist-sessions/$sessionId/remove" -WebSession $web -Headers $headers -ContentType 'application/json' -Body '{}' | Out-Null
+        }
+        catch {
+            Write-Warning "Acceptance session cleanup failed: $($_.Exception.Message)"
+        }
+    }
+}
