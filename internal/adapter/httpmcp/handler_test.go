@@ -394,6 +394,16 @@ type capturingRecoveryCommands struct {
 	evidence corejob.StepRecoveryEvidence
 }
 
+type recordingWorkRecovery struct {
+	envelopes []command.Envelope
+	result    workrecovery.Result
+}
+
+func (fixture *recordingWorkRecovery) Apply(_ context.Context, _ archivistruntime.WorkReference, envelope command.Envelope) (workrecovery.Result, error) {
+	fixture.envelopes = append(fixture.envelopes, envelope)
+	return fixture.result, nil
+}
+
 func (fixture *capturingRecoveryCommands) Execute(_ context.Context, envelope command.Envelope) (command.Result, error) {
 	fixture.calls = append(fixture.calls, envelope)
 	state := corejob.State{
@@ -543,6 +553,39 @@ func TestRemediationTurnAppliesOnlyCurrentBoundDiagnosticRecovery(t *testing.T) 
 		`{"job_id":"JOB-OTHER","template_name":"final-edit","target_title":"other","reason":"not recovery"}`), "secret")
 	if denied.Code != http.StatusForbidden || !strings.Contains(denied.Body.String(), "MCP_REMEDIATION_POLICY_DENIED") {
 		t.Fatalf("remediation Turn exposed unrelated mutation: %d %s", denied.Code, denied.Body.String())
+	}
+
+	terminalReference := archivistruntime.WorkReference{Kind: archivistruntime.WorkJob, WorkID: "JOB-PACKAGE-FAILED", Revision: 12}
+	terminalFingerprint := "fedcba9876543210fedcba98"
+	terminalBasis := []string{"EVD-TERMINAL-PACKAGE"}
+	terminalDiagnostics := fixedWorkDiagnostics{snapshot: workdiagnostics.Snapshot{
+		WorkKind: terminalReference.Kind, WorkID: terminalReference.WorkID, WorkRevision: terminalReference.Revision,
+		Fingerprint: terminalFingerprint,
+		Jobs: []workdiagnostics.JobDiagnostic{{JobID: terminalReference.WorkID, JobRevision: terminalReference.Revision,
+			StepID: "archive_package_revision", StepState: workflow.Failed}},
+		RecoveryActions: []workdiagnostics.RecoveryAction{{
+			ActionCode: corejob.RecoveryActionRetryTerminalArchivePublication, JobID: terminalReference.WorkID,
+			JobRevision: terminalReference.Revision, StepID: "archive_package_revision", FencingToken: 19,
+			DiagnosticFingerprint: terminalFingerprint, Basis: terminalBasis,
+			RecoveryJobID: corejob.TerminalRecoveryJobID(terminalReference.WorkID, terminalBasis[0]),
+		}},
+	}}
+	recoveryExecutor := &recordingWorkRecovery{result: workrecovery.Result{RecoveryJobID: corejob.TerminalRecoveryJobID(terminalReference.WorkID, terminalBasis[0])}}
+	terminalHandler, err := New(Configuration{
+		Archivists: fixtureArchivistRuntime{work: &terminalReference, policy: archivistruntime.ToolPolicyRemediation},
+		Catalog:    fixtureCatalog{}, ArchiveWorkspace: fixtureArchiveWorkspace{}, Commands: fixtureCommands{},
+		WorkDiagnostics: terminalDiagnostics, WorkRecovery: recoveryExecutor,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	terminalInput := `{"action_code":"RETRY_TERMINAL_ARCHIVE_PUBLICATION","job_id":"JOB-PACKAGE-FAILED","expected_job_revision":12,"step_id":"archive_package_revision","fencing_token":19,"diagnostic_fingerprint":"` + terminalFingerprint + `","basis":["EVD-TERMINAL-PACKAGE"],"reason":"create evidence-bound publication recovery"}`
+	terminalResponse := mcpTestRequest(terminalHandler, http.MethodPost, "/mcp/v1/call", archiveToolCall("CALL-TERMINAL-RECOVERY", ToolWorkRecoveryApply, terminalInput), "secret")
+	if terminalResponse.Code != http.StatusOK || len(recoveryExecutor.envelopes) != 1 ||
+		recoveryExecutor.envelopes[0].CommandType != workrecovery.CreateTerminalRecoveryCommand ||
+		recoveryExecutor.envelopes[0].TargetID != terminalReference.WorkID || recoveryExecutor.envelopes[0].ExpectedRevision != terminalReference.Revision {
+		t.Fatalf("terminal recovery action was not routed through the evidence-bound application service: %d %s envelopes=%+v",
+			terminalResponse.Code, terminalResponse.Body.String(), recoveryExecutor.envelopes)
 	}
 }
 

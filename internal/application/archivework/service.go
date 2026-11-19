@@ -498,7 +498,7 @@ func markReplacementRuns(views []View) {
 
 func failedFolders(view View) []string {
 	set := make(map[string]bool)
-	for _, child := range view.Children {
+	for _, child := range unresolvedChildren(view.Children) {
 		if child.Job.StepState != workflow.Failed && child.Job.ErrorClass == "" {
 			continue
 		}
@@ -535,7 +535,7 @@ func containsFolders(scope, required []string) bool {
 
 func failuresFromChildren(children []ChildJob) []Failure {
 	result := make([]Failure, 0)
-	for _, child := range children {
+	for _, child := range unresolvedChildren(children) {
 		if child.Job.StepState != workflow.Failed && child.Job.ErrorClass == "" {
 			continue
 		}
@@ -543,6 +543,25 @@ func failuresFromChildren(children []ChildJob) []Failure {
 			JobID: child.Job.JobID, Folder: child.Folder, StepID: child.Job.CurrentStepID,
 			ErrorClass: child.Job.ErrorClass, LogReference: child.Job.LogReference,
 		})
+	}
+	return result
+}
+
+func unresolvedChildren(children []ChildJob) []ChildJob {
+	recovered := make(map[string]bool)
+	for _, child := range children {
+		if child.Job.RecoverySource == nil || child.Job.RecoverySource.JobID == "" ||
+			child.Job.StepState == workflow.Failed || child.Job.ErrorClass != "" {
+			continue
+		}
+		recovered[child.Job.RecoverySource.JobID] = true
+	}
+	result := make([]ChildJob, 0, len(children))
+	for _, child := range children {
+		if recovered[child.Job.JobID] && (child.Job.StepState == workflow.Failed || child.Job.ErrorClass != "") {
+			continue
+		}
+		result = append(result, child)
 	}
 	return result
 }
@@ -609,6 +628,7 @@ func sortChildren(children []ChildJob) {
 }
 
 func summarizeRun(run archiverun.State, children []ChildJob, drive archiveintakeworkspace.DriveView, current bool, completed []archiveintakeworkspace.CompletedWorkView) Summary {
+	effectiveChildren := unresolvedChildren(children)
 	summary := Summary{
 		WorkID: run.ID, Revision: run.Revision, Kind: ArchiveRunWork, CreatedAt: run.CreatedAt, LastEventAt: run.CreatedAt,
 		WorkerID: run.WorkerID, SourceVolumeID: run.SourceVolumeID, SourceStorageID: run.SourceStorageID,
@@ -616,14 +636,14 @@ func summarizeRun(run archiverun.State, children []ChildJob, drive archiveintake
 		ResultCount: len(completed),
 	}
 	var totalProgress float64
-	for _, child := range children {
+	for _, child := range effectiveChildren {
 		totalProgress += child.Job.Progress
 		if child.Job.LastEventAt.After(summary.LastEventAt) {
 			summary.LastEventAt = child.Job.LastEventAt
 		}
 	}
-	if len(children) > 0 {
-		summary.Progress = totalProgress / float64(len(children))
+	if len(effectiveChildren) > 0 {
+		summary.Progress = totalProgress / float64(len(effectiveChildren))
 	}
 	if current {
 		summary.HoldCount = drive.HoldCount
@@ -635,13 +655,14 @@ func summarizeRun(run archiverun.State, children []ChildJob, drive archiveintake
 			summary.VideoCount += item.SourceVideoCount
 		}
 	}
-	summary.State = summarizeState(children, drive, current)
+	summary.State = summarizeState(effectiveChildren, drive, current)
 	return summary
 }
 
 func summarizeProjectedRun(runID string, drive archiveintakeworkspace.DriveView, children []ChildJob, completed []archiveintakeworkspace.CompletedWorkView) Summary {
+	effectiveChildren := unresolvedChildren(children)
 	createdAt := drive.CatalogUpdatedAt
-	for _, child := range children {
+	for _, child := range effectiveChildren {
 		if createdAt.IsZero() || child.Job.LastEventAt.Before(createdAt) {
 			createdAt = child.Job.LastEventAt
 		}
@@ -656,19 +677,19 @@ func summarizeProjectedRun(runID string, drive archiveintakeworkspace.DriveView,
 		summary.FolderCount = len(drive.Folders)
 	}
 	var totalProgress float64
-	for _, child := range children {
+	for _, child := range effectiveChildren {
 		totalProgress += child.Job.Progress
 		if child.Job.LastEventAt.After(summary.LastEventAt) {
 			summary.LastEventAt = child.Job.LastEventAt
 		}
 	}
-	if len(children) > 0 {
-		summary.Progress = totalProgress / float64(len(children))
+	if len(effectiveChildren) > 0 {
+		summary.Progress = totalProgress / float64(len(effectiveChildren))
 	}
 	for _, folder := range drive.Folders {
 		summary.VideoCount += folder.VideoCount
 	}
-	summary.State = summarizeState(children, drive, true)
+	summary.State = summarizeState(effectiveChildren, drive, true)
 	return summary
 }
 

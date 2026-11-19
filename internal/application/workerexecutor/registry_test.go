@@ -829,6 +829,112 @@ func TestMultiFileAsIsPackagesPreserveEachReadyInputProfile(t *testing.T) {
 	}
 }
 
+// Requirement: WRK-018
+func TestArchivePublicationRecoveryReconcilesPackageAndCatalogIdempotently(t *testing.T) {
+	directory := t.TempDir()
+	sourcePath := filepath.Join(directory, "source")
+	archivePath := filepath.Join(directory, "archive")
+	for _, root := range []string{sourcePath, archivePath} {
+		if err := os.Mkdir(root, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	configuration := workerconfig.Configuration{
+		ID: "worker-recovery", StorageRoots: []workerconfig.StorageRootConfiguration{
+			{StorageID: "source", Root: sourcePath}, {StorageID: "archive", Root: archivePath},
+		},
+		AccessibleStorageIDs: []string{"source", "archive"},
+		Tools: workerconfig.MediaTools{
+			FFmpeg:  workerconfig.LocalTool{Executable: os.Args[0], Version: "unused"},
+			FFprobe: workerconfig.LocalTool{Executable: os.Args[0], Version: "unused"},
+		},
+	}
+	roots, err := workerconfig.OpenStorageRoots(configuration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer roots.Close()
+	if err := roots.MustRoot("source").WriteFile("recording.mp4", []byte("video"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, videoChecksum, err := roots.MustRoot("source").FileSHA256("recording.mp4")
+	if err != nil {
+		t.Fatal(err)
+	}
+	publisher, err := archivebundle.NewPublisher(roots.MustRoot("source"), roots.MustRoot("archive"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 11, 19, 17, 0, 0, 0, time.UTC)
+	packageID := "VP-20261119-RECOVERY"
+	stored, err := publisher.PublishInitialCompact(archivebundle.InitialRequest{
+		LayoutVersion: archive.PackageLayoutCompactResultFolder, PackageID: packageID,
+		WorkspaceDriveID: "VOLUME-1", DecisionID: "DECISION-1", MediaFolder: "recordings",
+		Disposition: vocabulary.OrganizationAsIs, ProfileReference: "archive-1080p-6mbps@v1", CreatedAt: now,
+		Video:   archivebundle.FileSource{Root: archivebundle.RootSource, Path: "recording.mp4", Checksum: videoChecksum},
+		Sources: []archivebundle.SourceReference{{OriginalAssetID: "ASSET-1", OriginalName: "recording.mp4", RelativePath: "recording.mp4", Checksum: videoChecksum}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	staging := []struct {
+		path string
+		kind execution.OutputKind
+		id   string
+		body []byte
+	}{
+		{"staging/recovery/transcript.json", execution.OutputTranscript, "TRANSCRIPT-1", []byte(`{"schema_version":1,"content":{}}`)},
+		{"staging/recovery/transcript.txt", execution.OutputTranscriptText, "TEXT-1", []byte("[00:00:00.000 --> 00:00:01.000] test\n")},
+		{"staging/recovery/subtitle.srt", execution.OutputSubtitle, "SUBTITLE-1", []byte("1\n00:00:00,000 --> 00:00:01,000\ntest\n")},
+	}
+	inputs := make([]execution.InputReference, 0, len(staging))
+	for _, item := range staging {
+		if err := roots.MustRoot("archive").MkdirAll(filepath.ToSlash(filepath.Dir(item.path)), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := roots.MustRoot("archive").WriteFile(item.path, item.body, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		_, checksum, err := roots.MustRoot("archive").FileSHA256(item.path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		inputs = append(inputs, execution.InputReference{OriginalAssetID: "ASSET-1", ArtifactID: item.id, StorageID: "archive", RelativePath: item.path, Checksum: checksum, Kind: item.kind})
+	}
+	spec, err := execution.NewStepExecutionSpec(execution.StepExecutionSpec{
+		JobID: "JOB-RECOVERY-PACKAGE", StepID: "reconcile_archive_publication", TemplateName: "archive-publication-recovery",
+		Operation: execution.OperationReconcileArchivePublication, Inputs: inputs,
+		Outputs: []execution.OutputTarget{{ID: "CATALOG-RECOVERY", Kind: execution.OutputArchiveCatalog, StorageID: "archive", RelativePath: "archive-catalog.csv"}},
+		Parameters: execution.StepExecutionParameters{
+			ArchiveRunID: "RUN-1", OrganizationDecisionID: "DECISION-1", WorkspaceDriveID: "VOLUME-1",
+			ArchiveStorageID: "archive", InputRevision: 1, ArchivePackageID: packageID, ArchivePackageRevision: stored.Revision,
+			MediaFolder: "recordings", Disposition: vocabulary.OrganizationAsIs, SelectedProfileReference: "archive-1080p-6mbps@v1",
+			SourceInputs: []execution.InputReference{{OriginalAssetID: "ASSET-1", OriginalName: "recording.mp4", StorageID: "source", RelativePath: "recording.mp4", Checksum: videoChecksum, ProfileReference: "archive-1080p-6mbps@v1"}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry, err := NewProduction(configuration, roots)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for token := uint64(1); token <= 2; token++ {
+		result := registry.Execute(context.Background(), workerclient.Assignment{JobID: spec.JobID, StepID: spec.StepID, FencingToken: token, LeaseExpiresAt: time.Now().Add(time.Minute), ExecutionSpec: spec})
+		if !result.Success || len(result.Outputs) != 1 || result.Outputs[0].Kind != execution.OutputArchiveCatalog {
+			t.Fatalf("archive publication recovery failed on attempt %d: %+v", token, result)
+		}
+	}
+	current, err := publisher.Current(packageID)
+	if err != nil || current.Revision != stored.Revision+1 || current.TranscriptTextPath == "" || current.SubtitlePath == "" {
+		t.Fatalf("recovery did not publish exactly one package revision: before=%+v current=%+v err=%v", stored, current, err)
+	}
+	if payload, err := roots.MustRoot("archive").ReadFile("archive-catalog.csv"); err != nil || !strings.Contains(string(payload), packageID) ||
+		!strings.Contains(string(payload), "transcript.txt") || !strings.Contains(string(payload), "subtitle.srt") {
+		t.Fatalf("recovery did not publish the completed catalog row: %s err=%v", payload, err)
+	}
+}
+
 func testActualSourceSequence(t *testing.T) {
 	ffmpegPath, ffmpegErr := osexec.LookPath("ffmpeg")
 	ffprobePath, ffprobeErr := osexec.LookPath("ffprobe")

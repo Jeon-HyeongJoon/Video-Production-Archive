@@ -14,6 +14,7 @@ import (
 	"videoarchive/internal/application/archivework"
 	"videoarchive/internal/application/archiveworkspace"
 	"videoarchive/internal/core/archivistruntime"
+	"videoarchive/internal/core/execution"
 	corejob "videoarchive/internal/core/job"
 	"videoarchive/internal/core/vocabulary"
 	"videoarchive/internal/core/worker"
@@ -30,6 +31,7 @@ type WorkReader interface {
 
 type JobReader interface {
 	Detail(context.Context, string) (archiveworkspace.JobView, error)
+	Inbox(context.Context) ([]archiveworkspace.JobSummary, error)
 }
 
 type WorkerReader interface {
@@ -85,6 +87,7 @@ type RecoveryAction struct {
 	FencingToken          uint64   `json:"fencing_token"`
 	DiagnosticFingerprint string   `json:"diagnostic_fingerprint,omitempty"`
 	Basis                 []string `json:"basis"`
+	RecoveryJobID         string   `json:"recovery_job_id,omitempty"`
 }
 
 type WorkerSnapshot struct {
@@ -160,6 +163,16 @@ func (service *Service) Diagnose(ctx context.Context, reference archivistruntime
 		byWorker[status.WorkerID] = status
 	}
 	jobIDs := make([]string, 0)
+	recoverySummaries, err := service.jobs.Inbox(ctx)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	recoveriesByFailure := make(map[string]archiveworkspace.JobSummary)
+	for _, summary := range recoverySummaries {
+		if summary.RecoverySource != nil && summary.RecoverySource.FailureEvidenceID != "" {
+			recoveriesByFailure[summary.RecoverySource.FailureEvidenceID] = summary
+		}
+	}
 	switch reference.Kind {
 	case archivistruntime.WorkJob:
 		jobIDs = append(jobIDs, reference.WorkID)
@@ -182,7 +195,7 @@ func (service *Service) Diagnose(ctx context.Context, reference archivistruntime
 		if loadErr != nil {
 			return Snapshot{}, loadErr
 		}
-		jobDiagnostic, facts, hypotheses, actions, recoveries, report, diagnosticErr := service.diagnoseJob(ctx, view, byWorker, now)
+		jobDiagnostic, facts, hypotheses, actions, recoveries, report, diagnosticErr := service.diagnoseJob(ctx, view, byWorker, recoveriesByFailure, now)
 		if diagnosticErr != nil {
 			return Snapshot{}, diagnosticErr
 		}
@@ -200,7 +213,7 @@ func (service *Service) Diagnose(ctx context.Context, reference archivistruntime
 	return result, nil
 }
 
-func (service *Service) diagnoseJob(ctx context.Context, view archiveworkspace.JobView, workers map[string]worker.Status, now time.Time) (JobDiagnostic, []Fact, []Hypothesis, []SuggestedAction, []RecoveryAction, bool, error) {
+func (service *Service) diagnoseJob(ctx context.Context, view archiveworkspace.JobView, workers map[string]worker.Status, recoveryJobs map[string]archiveworkspace.JobSummary, now time.Time) (JobDiagnostic, []Fact, []Hypothesis, []SuggestedAction, []RecoveryAction, bool, error) {
 	summary := view.Summary
 	item := JobDiagnostic{
 		JobID: summary.JobID, JobRevision: summary.Revision, StepID: summary.CurrentStepID, StepState: summary.StepState,
@@ -285,6 +298,19 @@ func (service *Service) diagnoseJob(ctx context.Context, view archiveworkspace.J
 		facts = append(facts, diagnosticFact("REPORTED_FAILURE", "The Step reported "+item.ErrorClass, summary.LastEventAt,
 			summary.JobID, summary.CurrentStepID, item.ErrorClass, summary.LastEventAt.Format(time.RFC3339Nano)))
 		actions = append(actions, SuggestedAction{Code: "INSPECT_FAILURE", Summary: "Review the structured error and safe log reference before retrying"})
+		if latest, ok := retryableTerminalArchiveFailure(item, summary.CurrentStepID); ok && !found {
+			if recovery, exists := recoveryJobs[latest.EvidenceID]; exists {
+				facts = append(facts, diagnosticFact("TERMINAL_RECOVERY_JOB_CREATED", "A replacement recovery Job preserves and follows the terminal failure", recovery.LastEventAt,
+					summary.JobID, latest.EvidenceID, recovery.JobID, strconv.FormatUint(recovery.Revision, 10)))
+			} else {
+				recoveries = append(recoveries, RecoveryAction{
+					ActionCode: corejob.RecoveryActionRetryTerminalArchivePublication,
+					JobID:      summary.JobID, JobRevision: summary.Revision, StepID: summary.CurrentStepID,
+					FencingToken: latest.FencingToken, Basis: []string{latest.EvidenceID},
+					RecoveryJobID: corejob.TerminalRecoveryJobID(summary.JobID, latest.EvidenceID),
+				})
+			}
+		}
 	}
 	if summary.StepState == workflow.Waiting {
 		report = summary.WaitReason == vocabulary.WaitInput || summary.WaitReason == vocabulary.WaitApproval || summary.WaitReason == vocabulary.WaitDevice
@@ -340,6 +366,28 @@ func (service *Service) diagnoseJob(ctx context.Context, view archiveworkspace.J
 		actions = append(actions, SuggestedAction{Code: "OBSERVE_PROGRESS", Summary: "Request a new structured Worker progress sample before retrying or cancelling"})
 	}
 	return item, facts, hypotheses, dedupeActions(actions), recoveries, report, nil
+}
+
+func retryableTerminalArchiveFailure(item JobDiagnostic, currentStepID string) (corejob.StepFailureEvidence, bool) {
+	if len(item.FailureEvidence) == 0 {
+		return corejob.StepFailureEvidence{}, false
+	}
+	var latest corejob.StepFailureEvidence
+	for index := len(item.FailureEvidence) - 1; index >= 0; index-- {
+		if item.FailureEvidence[index].StepID == currentStepID {
+			latest = item.FailureEvidence[index]
+			break
+		}
+	}
+	if latest.EvidenceID == "" || latest.ResultingState != workflow.Failed || latest.FailureClass != workflow.FailureTransient {
+		return corejob.StepFailureEvidence{}, false
+	}
+	switch latest.Operation {
+	case execution.OperationReviseArchivePackage, execution.OperationWriteArchiveCatalog:
+		return latest, true
+	default:
+		return corejob.StepFailureEvidence{}, false
+	}
 }
 
 func sanitizeRecoveryEvidence(source corejob.StepRecoveryEvidence) corejob.StepRecoveryEvidence {

@@ -84,7 +84,7 @@ stateDiagram-v2
     PAUSED --> CANCELLED
 ```
 
-`WAITING`의 원인은 WaitReason.IDLE/MEMORY/SCRATCH/SLOT/DISK/APPROVAL/INPUT/DEVICE/PRIORITY로 분리한다. 모든 상태 변경 연산은 같은 전이표를 통과하고 자원 대기는 측정된 WaitReason을 그대로 기록한다. `COMPLETED`, `FAILED`, `CANCELLED`는 종결 상태다. 완료된 업무를 되돌려야 하면 기존 Step을 수정하지 않고 보상 Command와 새 Step/Event를 생성한다. 미시작·실행 중 Worker 취소, 완료 경합과 외부 효과 PARTIAL·UNCERTAIN 조정은 `CAN-001~005`로 확정했고, 업무 보상 후보는 [12. 취소와 보상 설계 제안](12-cancellation-compensation-proposal.md)에서 분리한다. 상태 계약은 `WFL-001~014`이다.
+`WAITING`의 원인은 WaitReason.IDLE/MEMORY/SCRATCH/SLOT/DISK/APPROVAL/INPUT/DEVICE/PRIORITY로 분리한다. 모든 상태 변경 연산은 같은 전이표를 통과하고 자원 대기는 측정된 WaitReason을 그대로 기록한다. `COMPLETED`, `FAILED`, `CANCELLED`는 종결 상태다. 완료되거나 실패한 업무를 되돌려야 하면 기존 Step을 수정하지 않고 보상 Command 또는 근거가 연결된 새 복구 Job/Event를 생성한다. 미시작·실행 중 Worker 취소, 완료 경합과 외부 효과 PARTIAL·UNCERTAIN 조정은 `CAN-001~005`로 확정했고, 업무 보상 후보는 [12. 취소와 보상 설계 제안](12-cancellation-compensation-proposal.md)에서 분리한다. 상태 계약은 `WFL-001~015`이다.
 
 `QUEUED`는 단순 배열 위치가 아니라 dispatch 가능성을 나타낸다. Step에는 선행 조건을 처음 만족한 `ready_at`과 재시도 backoff용 `next_eligible_at`을 두고, Job에는 마지막 성공 dispatch sequence를 둔다. 이 값은 queue projection을 재구성하고 Control 재시작 전후 같은 다음 후보를 선택하는 근거이며 Worker lease가 실제로 확정되기 전에는 갱신하지 않는다. 순서와 공정성 계약은 `DSP-001`이 소유한다.
 
@@ -99,7 +99,9 @@ stateDiagram-v2
 - 만료된 RUNNING Step은 idempotency receipt와 결과 receipt를 먼저 확인한다. 실제 게시 파일은 있지만 결과 receipt가 없는 중단을 자동 조정하는 경계는 `EXE-003` planned이므로 그 경우를 안전한 재실행으로 간주하지 않는다.
 - 사람과 Archivist 사이에서 같은 영속 작업을 이어가도 StepState와 Worker ExecutionLease는 유지한다.
 
-Archivist의 직접 복구는 범용 retry가 아니다. `WorkDiagnostic.recovery_actions`가 `RECONCILE_EXPIRED_EXECUTION`을 반환한 경우에만 현재 고정 작업의 Job revision, Step, ResourceReservation, fencing token, 진단 fingerprint와 basis 증적 ID를 그대로 제출한다. Core Handler는 실제 Job의 만료 리스와 전이 가능 상태를 다시 확인하고 `QUEUED` 변경과 `StepRecoveryEvidence`를 staged change로 반환한다. SQLite Unit of Work는 상태·CommandRecord·Domain Event·idempotency receipt와 ExecutionLease·ResourceReservation 해제를 함께 확정한다. 실패한 commit은 모두 되돌리고 같은 key 재전송은 최초 결과만 반환한다. 입력 오류·종결 실패·장치 부재·취소·보상은 이 복구 경로에 포함하지 않는다. `WFL-014`
+Archivist의 직접 복구는 범용 retry가 아니다. `WorkDiagnostic.recovery_actions`가 `RECONCILE_EXPIRED_EXECUTION`을 반환한 경우에만 현재 고정 작업의 Job revision, Step, ResourceReservation, fencing token, 진단 fingerprint와 basis 증적 ID를 그대로 제출한다. Core Handler는 실제 Job의 만료 리스와 전이 가능 상태를 다시 확인하고 `QUEUED` 변경과 `StepRecoveryEvidence`를 staged change로 반환한다. SQLite Unit of Work는 상태·CommandRecord·Domain Event·idempotency receipt와 ExecutionLease·ResourceReservation 해제를 함께 확정한다. 실패한 commit은 모두 되돌리고 같은 key 재전송은 최초 결과만 반환한다. `WFL-014`
+
+종결 실패는 원래 Step을 다시 열지 않는다. 마지막 `StepFailureEvidence`가 `TRANSIENT`이고 operation이 패키지 리비전 또는 아카이브 카탈로그 게시이며 활성 실행 경계가 없을 때만 진단이 `RETRY_TERMINAL_ARCHIVE_PUBLICATION`을 반환한다. 복구 서비스는 source Job·revision·Step·fencing token·진단 fingerprint·실패 증적 ID를 다시 대조하고, 그 증적에서 결정적으로 계산한 ID의 `archive-publication-recovery` Job을 새로 만든다. 새 Job의 `RecoverySource`는 원래 실패와 근거를 보존하고 Worker는 패키지의 현재 리비전과 동일 전사 산출물을 확인한 뒤 필요한 리비전과 최상위 카탈로그를 멱등하게 재조정한다. 원래 Job과 실패 증적은 계속 `FAILED`이며 입력 오류·장치 부재·취소·임의 operation은 이 경로에 포함하지 않는다. `WFL-015`, `WRK-018`
 
 ## 5. Retry 분류
 

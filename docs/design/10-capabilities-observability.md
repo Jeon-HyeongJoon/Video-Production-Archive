@@ -80,7 +80,7 @@ Worker가 보고한 각 실패는 `StepFailureEvidence`로 Job 원장에 남으�
 
 장시간 실행 중의 `StepProgressEvidence`도 같은 진단의 확인된 사실이다. 청크 상태·순번·전체 수·원본 millisecond 범위·진행률과 관측 시각만 제공하며, 청크 음성·전사문·process 원문은 포함하지 않는다. 실패한 청크는 마지막 진행 증적과 같은 fencing token의 `StepFailureEvidence`를 함께 읽어 어느 범위에서 실행이 멈췄는지 확인한다. `WRK-017`, `OBS-002`, `MCP-009`
 
-진단은 설명용 `suggested_actions`와 실행 가능한 `recovery_actions`를 구분한다. 후자는 Control이 현재 저장된 실행 경계를 확인해 안전하다고 판정한 만료 리스 조정만 Job revision·Step·reservation·fencing token·진단 fingerprint·basis 증적 ID와 함께 반환한다. Archivist가 실행하면 `StepRecoveryEvidence`가 원래 실패 증적을 보존한 채 추가되고, 복구 뒤 진단은 이 증적 ID와 결과 StepState를 확인된 사실로 제공한다. fingerprint나 실행 경계가 달라진 요청은 상태 변경 전에 거부한다. `WFL-014`, `MCP-011`
+진단은 설명용 `suggested_actions`와 실행 가능한 `recovery_actions`를 구분한다. 후자는 Control이 현재 저장된 실행 경계를 확인해 안전하다고 판정한 만료 리스 조정 또는 일시적 아카이브 게시 종결 실패의 새 복구 Job만 Job revision·Step·선택적 reservation·fencing token·진단 fingerprint·basis 증적 ID와 함께 반환한다. 만료 리스 조정은 `StepRecoveryEvidence`를 추가하고, 종결 실패 복구는 원래 `FAILED`와 `StepFailureEvidence`를 그대로 둔 채 같은 실패 증적에서 한 번만 계산되는 Job ID와 `RecoverySource`를 저장한다. 복구 Job이 존재하면 진단은 `TERMINAL_RECOVERY_JOB_CREATED` 사실을 반환하고 같은 recovery action을 다시 내지 않는다. fingerprint나 실행 경계가 달라진 요청은 상태 변경 전에 거부한다. `WFL-014~015`, `WRK-018`, `MCP-011`
 
 ## 4. 요구사항 테스트와 증적 묶음
 

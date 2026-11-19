@@ -95,6 +95,7 @@ func NewProduction(configuration workerconfig.Configuration, roots *workerconfig
 		media.handler(execution.OperationWriteArchiveCatalog, media.writeArchiveCatalog),
 		media.handler(execution.OperationVerifyArchiveCatalog, media.verifyArchiveCatalog),
 		media.handler(execution.OperationRebuildArchiveCatalog, media.rebuildArchiveCatalog),
+		media.handler(execution.OperationReconcileArchivePublication, media.reconcileArchivePublication),
 	}
 	if configuration.Tools.WhisperCPP != nil {
 		handlers = append(handlers, media.handler(execution.OperationTranscribeAudio, media.transcribeAudio))
@@ -766,6 +767,84 @@ func (operations *mediaOperations) reviseArchivePackage(_ context.Context, spec 
 	}
 	output := stepOutput(spec.Outputs[0], checksum)
 	return []execution.StepOutput{output}, verificationReferences(spec.Operation, []execution.StepOutput{output}), nil
+}
+
+// reconcileArchivePublication is the idempotent Worker boundary used by a
+// replacement recovery Job. It either confirms/revises the package sidecars
+// and then publishes the catalog, or retries an already-materialized catalog
+// publication. The source terminal Job is never changed.
+func (operations *mediaOperations) reconcileArchivePublication(ctx context.Context, spec execution.StepExecutionSpec, roots *workerconfig.StorageRoots) ([]execution.StepOutput, []string, error) {
+	if len(spec.Outputs) != 1 || spec.Outputs[0].Kind != execution.OutputArchiveCatalog ||
+		spec.Outputs[0].RelativePath != "archive-catalog.csv" || len(spec.Inputs) == 0 {
+		return nil, nil, ErrProductionExecution
+	}
+	catalogSpec := spec
+	catalogSpec.Operation = execution.OperationWriteArchiveCatalog
+	var transcriptInput, textInput, subtitleInput execution.InputReference
+	for _, input := range spec.Inputs {
+		switch input.Kind {
+		case execution.OutputTranscript:
+			transcriptInput = input
+		case execution.OutputTranscriptText:
+			textInput = input
+		case execution.OutputSubtitle:
+			subtitleInput = input
+		}
+	}
+	if transcriptInput.ArtifactID != "" || textInput.ArtifactID != "" || subtitleInput.ArtifactID != "" {
+		if transcriptInput.ArtifactID == "" || textInput.ArtifactID == "" || subtitleInput.ArtifactID == "" ||
+			len(spec.Inputs) != 3 || spec.Parameters.ArchivePackageID == "" ||
+			transcriptInput.StorageID != textInput.StorageID || transcriptInput.StorageID != subtitleInput.StorageID ||
+			transcriptInput.StorageID != spec.Outputs[0].StorageID {
+			return nil, nil, ErrProductionExecution
+		}
+		root := roots.MustRoot(spec.Outputs[0].StorageID)
+		publisher, err := archivebundle.NewPublisher(root, root)
+		if err != nil {
+			return nil, nil, err
+		}
+		current, err := publisher.Current(spec.Parameters.ArchivePackageID)
+		if err != nil {
+			return nil, nil, err
+		}
+		request := archivebundle.RevisionRequest{
+			PackageID:      spec.Parameters.ArchivePackageID,
+			Transcript:     archivebundle.FileSource{Root: archivebundle.RootArchive, Path: transcriptInput.RelativePath, Checksum: transcriptInput.Checksum},
+			TranscriptText: archivebundle.FileSource{Root: archivebundle.RootArchive, Path: textInput.RelativePath, Checksum: textInput.Checksum},
+			Subtitle:       archivebundle.FileSource{Root: archivebundle.RootArchive, Path: subtitleInput.RelativePath, Checksum: subtitleInput.Checksum},
+			CreatedAt:      operations.now(),
+		}
+		if current.Revision > 1 {
+			request.BaseRevision = current.Revision - 1
+			if replayed, replayErr := publisher.ReviseStored(request); replayErr == nil {
+				current = replayed
+			} else {
+				if !errors.Is(replayErr, archivebundle.ErrPackageState) {
+					return nil, nil, replayErr
+				}
+				request.BaseRevision = current.Revision
+				current, err = publisher.ReviseStored(request)
+				if err != nil {
+					return nil, nil, err
+				}
+			}
+		} else {
+			request.BaseRevision = current.Revision
+			current, err = publisher.ReviseStored(request)
+			if err != nil {
+				return nil, nil, err
+			}
+		}
+		_, checksum, err := root.FileSHA256(current.MetadataPath)
+		if err != nil {
+			return nil, nil, err
+		}
+		catalogSpec.Inputs = []execution.InputReference{{
+			ArtifactID: spec.Parameters.ArchivePackageID, StorageID: spec.Outputs[0].StorageID,
+			RelativePath: current.MetadataPath, Checksum: checksum, Kind: execution.OutputArchiveRevision,
+		}}
+	}
+	return operations.writeArchiveCatalog(ctx, catalogSpec, roots)
 }
 
 func (operations *mediaOperations) organizeMedia(_ context.Context, spec execution.StepExecutionSpec, roots *workerconfig.StorageRoots) ([]execution.StepOutput, []string, error) {

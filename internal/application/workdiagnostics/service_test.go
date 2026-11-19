@@ -79,10 +79,17 @@ func TestWorkDiagnosticsExposePersistedFailureEvidenceAsFactsWithoutRawProcessDa
 	}
 }
 
-type fixedJobReader struct{ view archiveworkspace.JobView }
+type fixedJobReader struct {
+	view  archiveworkspace.JobView
+	inbox []archiveworkspace.JobSummary
+}
 
 func (reader fixedJobReader) Detail(context.Context, string) (archiveworkspace.JobView, error) {
 	return reader.view, nil
+}
+
+func (reader fixedJobReader) Inbox(context.Context) ([]archiveworkspace.JobSummary, error) {
+	return append([]archiveworkspace.JobSummary(nil), reader.inbox...), nil
 }
 
 type fixedWorkerReader struct{ values []worker.Status }
@@ -94,7 +101,7 @@ func (reader fixedWorkerReader) Statuses(context.Context) ([]worker.Status, erro
 type fixedExecutionReader struct{ value ExecutionObservation }
 
 func (reader fixedExecutionReader) ActiveExecution(context.Context, string, string) (ExecutionObservation, bool, error) {
-	return reader.value, true, nil
+	return reader.value, reader.value.ReservationID != "", nil
 }
 
 // Requirement: OBS-002
@@ -187,6 +194,49 @@ func TestWorkDiagnosticsExposeStructuredProgressEvidenceAsFacts(t *testing.T) {
 		!hasFactEvidence(diagnostic.Facts, "WORKER_PROGRESS_RECORDED", progress.EvidenceID) ||
 		hasHypothesis(diagnostic.Hypotheses, "PROGRESS_UNOBSERVED") {
 		t.Fatalf("structured STT progress was not exposed as a confirmed fact: %+v", diagnostic)
+	}
+}
+
+func TestWorkDiagnosticsOffersOneReplacementForTransientTerminalArchivePublicationFailure(t *testing.T) {
+	now := time.Date(2026, 11, 19, 15, 0, 0, 0, time.UTC)
+	failure := corejob.StepFailureEvidence{
+		EvidenceID: "EVD-PACKAGE-FAILED", StepID: "archive_package_revision",
+		Operation: execution.OperationReviseArchivePackage, FailureSequence: 3, WorkflowAttempt: 3,
+		WorkerID: "WORKER-1", FencingToken: 13, FailureClass: workflow.FailureTransient,
+		ErrorClass: "STEP_EXECUTION_FAILED", CauseCode: "REVISE_ARCHIVE_PACKAGE_FAILED",
+		Summary: "Archive package revision operation failed", ObservedAt: now.Add(-time.Minute), ResultingState: workflow.Failed,
+	}
+	view := archiveworkspace.JobView{
+		Summary: archiveworkspace.JobSummary{JobID: "JOB-STT-FAILED", Revision: 17, CurrentStepID: failure.StepID,
+			StepState: workflow.Failed, ErrorClass: failure.ErrorClass, LastEventAt: failure.ObservedAt},
+		Steps: []archiveworkspace.StepStatus{{ID: failure.StepID, State: workflow.Failed, ExecutorKind: vocabulary.ExecutorWorker,
+			LastEventAt: failure.ObservedAt, FailureEvidence: []corejob.StepFailureEvidence{failure}}},
+	}
+	service, err := New(fixedWorkReader{}, fixedJobReader{view: view}, fixedWorkerReader{}, fixedExecutionReader{}, func() time.Time { return now }, 10*time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	diagnostic, err := service.Diagnose(context.Background(), archivistruntime.WorkReference{Kind: archivistruntime.WorkJob, WorkID: "JOB-STT-FAILED", Revision: 17})
+	if err != nil || len(diagnostic.RecoveryActions) != 1 {
+		t.Fatalf("terminal archive publication did not produce one recovery action: diagnostic=%+v err=%v", diagnostic, err)
+	}
+	action := diagnostic.RecoveryActions[0]
+	if action.ActionCode != corejob.RecoveryActionRetryTerminalArchivePublication || action.Basis[0] != failure.EvidenceID ||
+		action.FencingToken != failure.FencingToken || action.RecoveryJobID != corejob.TerminalRecoveryJobID("JOB-STT-FAILED", failure.EvidenceID) {
+		t.Fatalf("recovery action was not bound to terminal failure evidence: %+v", action)
+	}
+
+	reader := fixedJobReader{view: view, inbox: []archiveworkspace.JobSummary{{
+		JobID: action.RecoveryJobID, Revision: 1, LastEventAt: now,
+		RecoverySource: &corejob.RecoverySource{FailureEvidenceID: failure.EvidenceID},
+	}}}
+	service, err = New(fixedWorkReader{}, reader, fixedWorkerReader{}, fixedExecutionReader{}, func() time.Time { return now }, 10*time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	diagnostic, err = service.Diagnose(context.Background(), archivistruntime.WorkReference{Kind: archivistruntime.WorkJob, WorkID: "JOB-STT-FAILED", Revision: 17})
+	if err != nil || len(diagnostic.RecoveryActions) != 0 || !hasFact(diagnostic.Facts, "TERMINAL_RECOVERY_JOB_CREATED") {
+		t.Fatalf("existing recovery Job did not suppress duplicate action: diagnostic=%+v err=%v", diagnostic, err)
 	}
 }
 

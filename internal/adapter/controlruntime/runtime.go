@@ -320,7 +320,7 @@ func OpenWithDependencies(ctx context.Context, configuration bootconfig.Configur
 	if err != nil {
 		return fail(err)
 	}
-	workRecovery, err := workrecovery.New(workDiagnostics, jobCommands)
+	workRecovery, err := workrecovery.New(workDiagnostics, jobCommands, commandStore)
 	if err != nil {
 		return fail(err)
 	}

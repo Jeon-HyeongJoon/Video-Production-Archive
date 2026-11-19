@@ -998,6 +998,18 @@
       "level": "integration"
     },
     {
+      "id": "WFL-015",
+      "design": "evidence-bound-terminal-recovery-job",
+      "statement": "Archivist의 종결 실패 복구는 현재 진단이 실행 가능으로 제시한 일시적 아카이브 게시 실패에만 원래 FAILED Job을 보존한 새 복구 Job을 결정적으로 생성해야 한다.",
+      "given": "영속 StepFailureEvidence가 있는 TRANSIENT 아카이브 패키지 게시 실패와 그 증적에 묶인 현재 진단 recovery action이 있다.",
+      "when": "Archivist가 복구 action의 Job revision·Step·fencing token·진단 fingerprint·증적 ID를 그대로 제출한다.",
+      "then": "원래 Job과 실패 증적은 FAILED로 유지되고 같은 증적 ID에서 한 복구 Job ID만 계산되며 새 Job은 source Job·revision·Step·실패 증적과 재조정 실행 명세를 영속화한다.",
+      "test_file": "internal/application/workrecovery/service_test.go",
+      "test_name": "TestTerminalArchiveFailureRecoveryCreatesLinkedJobAndKeepsOriginalFailed",
+      "status": "implemented",
+      "level": "unit"
+    },
+    {
       "id": "PIP-006",
       "design": "templates",
       "statement": "행사 요약은 Archivist Gateway가 수행하고 AI 사용 불가 시 사람 폴백을 가지며 QC 전에 별도 ContentReview를 거쳐야 한다.",
@@ -3770,6 +3782,18 @@
       "level": "integration"
     },
     {
+      "id": "WRK-018",
+      "design": "archive-publication-recovery-operation",
+      "statement": "Worker의 아카이브 게시 복구 operation은 이미 게시된 동일 전사 산출물을 중복 리비전 없이 확인하고 패키지와 최상위 카탈로그를 멱등하게 재조정해야 한다.",
+      "given": "보관됨 패키지와 검증된 transcript JSON·시간 코드 text·subtitle 산출물 및 아카이브 카탈로그 출력 명세가 있다.",
+      "when": "같은 typed 복구 operation을 서로 다른 fencing token으로 두 번 실행한다.",
+      "then": "패키지 리비전은 정확히 한 번만 증가하고 전사 산출물 경로와 같은 패키지 ID의 카탈로그 행이 게시되며 두 실행은 검증된 같은 카탈로그 출력을 성공으로 반환한다.",
+      "test_file": "internal/application/workerexecutor/registry_test.go",
+      "test_name": "TestArchivePublicationRecoveryReconcilesPackageAndCatalogIdempotently",
+      "status": "implemented",
+      "level": "integration"
+    },
+    {
       "id": "OBS-002",
       "design": "work-execution-diagnostics",
       "statement": "진행 중인 영속 작업의 진단 읽기 모델은 현재 Step·Worker heartbeat·실행 리스·자원 예약·저장된 오류와 로그 참조를 같은 관측 시각으로 결합하고 확인된 증적과 미확인 가설을 구분해야 한다.",
@@ -3821,9 +3845,9 @@
       "id": "MCP-011",
       "design": "archivist-evidence-bound-recovery-capability",
       "statement": "복구 제한 ArchivistTurn은 현재 Turn에 고정된 작업의 진단이 반환한 실행 가능 복구만 MCP로 직접 적용하고 다른 상태 변경과 오래되거나 변조된 복구 입력을 거부해야 한다.",
-      "given": "WorkReference와 REMEDIATION 정책이 고정된 Turn, 현재 또는 오래된 진단 fingerprint·Job revision·reservation·fencing token·증적 ID 및 일반 Job 생성 요청이 있다.",
+      "given": "WorkReference와 REMEDIATION 정책이 고정된 Turn, 현재 또는 오래된 진단 fingerprint·Job revision·선택적 reservation·fencing token·증적 ID, 만료 실행 및 종결 아카이브 게시 복구 action과 일반 Job 생성 요청이 있다.",
       "when": "Archivist가 작업 복구 Capability와 관련 없는 상태 변경 Capability를 호출한다.",
-      "then": "현재 진단의 recovery action과 모든 필드가 일치할 때만 복구 Command를 한 번 실행해 영속 복구 증적과 사후 진단을 반환하고 오래된 입력과 관련 없는 상태 변경은 Command 경계 전에 거부한다.",
+      "then": "현재 진단의 recovery action과 모든 필드가 일치할 때만 만료 실행 조정 또는 원본 실패를 보존하는 복구 Job 생성을 한 번 실행해 영속 근거와 사후 진단을 반환하고 오래된 입력과 관련 없는 상태 변경은 Command 경계 전에 거부한다.",
       "test_file": "internal/adapter/httpmcp/handler_test.go",
       "test_name": "TestRemediationTurnAppliesOnlyCurrentBoundDiagnosticRecovery",
       "status": "implemented",
@@ -3847,7 +3871,7 @@
       "statement": "Control의 자동 제안 루프는 ArchivistSession에 고정된 진행 중 작업에서 일정 시간 새 진행 증적이 없거나 실행 경계 이상 진단이 생기면 같은 진단 fingerprint의 복구 제한 SYSTEM Turn을 정확히 한 번 제출해야 한다.",
       "given": "같은 Session이 참조하는 정상 진행 작업, 오래된 진행 관측 작업과 같은 진단 fingerprint의 반복 projection이 있다.",
       "when": "자동 제안 루프가 작업 진단을 반복 평가한다.",
-      "then": "정상 진행 작업에는 Turn을 만들지 않고 보고가 필요한 작업에는 WorkReference와 REMEDIATION 정책이 있는 SYSTEM Turn 하나만 제출하며 진단의 실행 가능 복구가 있으면 정확한 근거로 복구한 뒤 진단을 다시 읽고 그 밖의 재시도·취소·분류·단계 시작은 요청하지 않는다.",
+      "then": "정상 진행 작업에는 Turn을 만들지 않고 보고가 필요한 작업에는 WorkReference와 REMEDIATION 정책이 있는 SYSTEM Turn 하나만 제출하며 진단의 실행 가능 복구가 있으면 정확한 근거로 복구한 뒤 진단을 다시 읽고 목록에 없는 재시도·취소·분류·단계 시작은 요청하지 않는다.",
       "test_file": "internal/application/archivistadvisory/service_test.go",
       "test_name": "TestAdvisoryLoopQueuesOneRecoveryLimitedTurnForStaleReferencedWork",
       "status": "implemented",

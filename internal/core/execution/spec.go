@@ -21,22 +21,23 @@ const StepExecutionSpecVersion uint32 = 1
 type Operation string
 
 const (
-	OperationInspectMedia          Operation = "INSPECT_MEDIA"
-	OperationRenderRecording       Operation = "RENDER_RECORDING"
-	OperationRenderSourceSequence  Operation = "RENDER_SOURCE_SEQUENCE"
-	OperationCreateThumbnail       Operation = "CREATE_THUMBNAIL"
-	OperationQCRendition           Operation = "QC_RENDITION"
-	OperationVerifyChecksum        Operation = "VERIFY_CHECKSUM"
-	OperationDeviceIO              Operation = "DEVICE_IO"
-	OperationOrganizeMedia         Operation = "ORGANIZE_MEDIA"
-	OperationExtractSpeechAudio    Operation = "EXTRACT_SPEECH_AUDIO"
-	OperationTranscribeAudio       Operation = "TRANSCRIBE_AUDIO"
-	OperationWriteSubtitle         Operation = "WRITE_SUBTITLE"
-	OperationWriteTranscriptText   Operation = "WRITE_TRANSCRIPT_TEXT"
-	OperationReviseArchivePackage  Operation = "REVISE_ARCHIVE_PACKAGE"
-	OperationWriteArchiveCatalog   Operation = "WRITE_ARCHIVE_CATALOG"
-	OperationVerifyArchiveCatalog  Operation = "VERIFY_ARCHIVE_CATALOG"
-	OperationRebuildArchiveCatalog Operation = "REBUILD_ARCHIVE_CATALOG"
+	OperationInspectMedia                Operation = "INSPECT_MEDIA"
+	OperationRenderRecording             Operation = "RENDER_RECORDING"
+	OperationRenderSourceSequence        Operation = "RENDER_SOURCE_SEQUENCE"
+	OperationCreateThumbnail             Operation = "CREATE_THUMBNAIL"
+	OperationQCRendition                 Operation = "QC_RENDITION"
+	OperationVerifyChecksum              Operation = "VERIFY_CHECKSUM"
+	OperationDeviceIO                    Operation = "DEVICE_IO"
+	OperationOrganizeMedia               Operation = "ORGANIZE_MEDIA"
+	OperationExtractSpeechAudio          Operation = "EXTRACT_SPEECH_AUDIO"
+	OperationTranscribeAudio             Operation = "TRANSCRIBE_AUDIO"
+	OperationWriteSubtitle               Operation = "WRITE_SUBTITLE"
+	OperationWriteTranscriptText         Operation = "WRITE_TRANSCRIPT_TEXT"
+	OperationReviseArchivePackage        Operation = "REVISE_ARCHIVE_PACKAGE"
+	OperationWriteArchiveCatalog         Operation = "WRITE_ARCHIVE_CATALOG"
+	OperationVerifyArchiveCatalog        Operation = "VERIFY_ARCHIVE_CATALOG"
+	OperationRebuildArchiveCatalog       Operation = "REBUILD_ARCHIVE_CATALOG"
+	OperationReconcileArchivePublication Operation = "RECONCILE_ARCHIVE_PUBLICATION"
 )
 
 func (operation Operation) Valid() bool {
@@ -45,7 +46,7 @@ func (operation Operation) Valid() bool {
 		OperationQCRendition, OperationVerifyChecksum, OperationDeviceIO, OperationOrganizeMedia,
 		OperationExtractSpeechAudio, OperationTranscribeAudio, OperationWriteSubtitle, OperationWriteTranscriptText,
 		OperationReviseArchivePackage, OperationWriteArchiveCatalog,
-		OperationVerifyArchiveCatalog, OperationRebuildArchiveCatalog:
+		OperationVerifyArchiveCatalog, OperationRebuildArchiveCatalog, OperationReconcileArchivePublication:
 		return true
 	default:
 		return false

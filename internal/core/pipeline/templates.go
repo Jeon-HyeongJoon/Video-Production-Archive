@@ -196,6 +196,14 @@ func ArchiveTranscription() Template {
 	)
 }
 
+// ArchivePublicationRecovery is a new Job that reconciles a failed package or
+// catalog publication without reopening the terminal source Step.
+func ArchivePublicationRecovery() Template {
+	return newTemplate("archive-publication-recovery",
+		lightStep("reconcile_archive_publication", vocabulary.ProcessingOrganize),
+	)
+}
+
 func (template Template) Validate() error {
 	for id, step := range template.Steps {
 		if id == "" || step.ID != id {

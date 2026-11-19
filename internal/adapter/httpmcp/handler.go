@@ -423,8 +423,10 @@ func (handler *Handler) applyWorkRecovery(writer http.ResponseWriter, request *h
 	input.ReservationID = strings.TrimSpace(input.ReservationID)
 	input.DiagnosticFingerprint = strings.TrimSpace(input.DiagnosticFingerprint)
 	input.Reason = strings.TrimSpace(input.Reason)
-	if input.ActionCode != "RECONCILE_EXPIRED_EXECUTION" || input.JobID == "" || input.ExpectedJobRevision == 0 ||
-		input.StepID == "" || input.ReservationID == "" || input.FencingToken == 0 || input.DiagnosticFingerprint == "" ||
+	expiredExecution := input.ActionCode == "RECONCILE_EXPIRED_EXECUTION" && input.ReservationID != ""
+	terminalPublication := input.ActionCode == job.RecoveryActionRetryTerminalArchivePublication && input.ReservationID == ""
+	if (!expiredExecution && !terminalPublication) || input.JobID == "" || input.ExpectedJobRevision == 0 ||
+		input.StepID == "" || input.FencingToken == 0 || input.DiagnosticFingerprint == "" ||
 		len(input.Basis) == 0 || input.Reason == "" || len(input.Reason) > 256 {
 		handler.failRecoveryTool(writer, request, call, http.StatusBadRequest, "MCP_INPUT_INVALID", input.JobID)
 		return
@@ -434,10 +436,14 @@ func (handler *Handler) applyWorkRecovery(writer http.ResponseWriter, request *h
 		handler.failRecoveryTool(writer, request, call, http.StatusConflict, "MCP_WORK_REFERENCE_REQUIRED", input.JobID)
 		return
 	}
+	commandType := job.RecoverExpiredExecutionCommand
+	if terminalPublication {
+		commandType = workrecovery.CreateTerminalRecoveryCommand
+	}
 	decision, err := archivistruntime.PrepareToolCall(archivistruntime.ToolCallRequest{
 		ID: call.ToolCallID, CommandID: call.CommandID, ArchivistHostID: hostID,
 		ArchivistSessionID: call.SessionID, ArchivistTurnID: call.TurnID, ArchivistID: "archivist:" + call.SessionID,
-		FencingToken: call.FencingToken, ToolName: job.RecoverExpiredExecutionCommand,
+		FencingToken: call.FencingToken, ToolName: commandType,
 		InputDigest: call.InputDigest, IdempotencyKey: call.IdempotencyKey,
 		TargetID: input.JobID, ExpectedRevision: input.ExpectedJobRevision, Reason: input.Reason,
 		Parameters: map[string]any{

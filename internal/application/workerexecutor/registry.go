@@ -306,19 +306,20 @@ func inputFailure(errorClass string) workerclient.ExecutionResult {
 func operationFailureDetails(operation execution.Operation, err error) (string, string, *int) {
 	code := string(operation) + "_FAILED"
 	summary := map[execution.Operation]string{
-		execution.OperationInspectMedia:          "Media inspection operation failed",
-		execution.OperationRenderRecording:       "Recording render operation failed",
-		execution.OperationRenderSourceSequence:  "Source sequence render operation failed",
-		execution.OperationQCRendition:           "Rendition quality verification failed",
-		execution.OperationOrganizeMedia:         "Archive media organization operation failed",
-		execution.OperationExtractSpeechAudio:    "Speech audio extraction operation failed",
-		execution.OperationTranscribeAudio:       "Speech transcription operation failed",
-		execution.OperationWriteSubtitle:         "Subtitle publication operation failed",
-		execution.OperationWriteTranscriptText:   "Transcript text publication operation failed",
-		execution.OperationReviseArchivePackage:  "Archive package revision operation failed",
-		execution.OperationWriteArchiveCatalog:   "Archive Catalog publication operation failed",
-		execution.OperationVerifyArchiveCatalog:  "Archive Catalog verification operation failed",
-		execution.OperationRebuildArchiveCatalog: "Archive Catalog rebuild operation failed",
+		execution.OperationInspectMedia:                "Media inspection operation failed",
+		execution.OperationRenderRecording:             "Recording render operation failed",
+		execution.OperationRenderSourceSequence:        "Source sequence render operation failed",
+		execution.OperationQCRendition:                 "Rendition quality verification failed",
+		execution.OperationOrganizeMedia:               "Archive media organization operation failed",
+		execution.OperationExtractSpeechAudio:          "Speech audio extraction operation failed",
+		execution.OperationTranscribeAudio:             "Speech transcription operation failed",
+		execution.OperationWriteSubtitle:               "Subtitle publication operation failed",
+		execution.OperationWriteTranscriptText:         "Transcript text publication operation failed",
+		execution.OperationReviseArchivePackage:        "Archive package revision operation failed",
+		execution.OperationWriteArchiveCatalog:         "Archive Catalog publication operation failed",
+		execution.OperationVerifyArchiveCatalog:        "Archive Catalog verification operation failed",
+		execution.OperationRebuildArchiveCatalog:       "Archive Catalog rebuild operation failed",
+		execution.OperationReconcileArchivePublication: "Archive publication recovery operation failed",
 	}[operation]
 	if summary == "" {
 		code = "MEDIA_OPERATION_FAILED"

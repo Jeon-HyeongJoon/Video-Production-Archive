@@ -20,9 +20,10 @@ import (
 )
 
 const (
-	CreateCommand                  = "job.create"
-	CancelCommand                  = "job.cancel"
-	RecoverExpiredExecutionCommand = "job.recover_expired_execution"
+	CreateCommand                                 = "job.create"
+	CancelCommand                                 = "job.cancel"
+	RecoverExpiredExecutionCommand                = "job.recover_expired_execution"
+	RecoveryActionRetryTerminalArchivePublication = "RETRY_TERMINAL_ARCHIVE_PUBLICATION"
 )
 
 var (
@@ -119,13 +120,27 @@ type RecoverExpiredExecutionParameters struct {
 }
 
 type State struct {
-	ID                   string `json:"id"`
-	Revision             uint64 `json:"revision"`
-	TemplateName         string `json:"template_name"`
-	TargetTitle          string `json:"target_title"`
-	CurrentStepID        string `json:"current_step_id"`
-	Steps                []Step `json:"steps"`
-	LastDispatchSequence uint64 `json:"last_dispatch_sequence"`
+	ID                   string          `json:"id"`
+	Revision             uint64          `json:"revision"`
+	TemplateName         string          `json:"template_name"`
+	TargetTitle          string          `json:"target_title"`
+	CurrentStepID        string          `json:"current_step_id"`
+	Steps                []Step          `json:"steps"`
+	LastDispatchSequence uint64          `json:"last_dispatch_sequence"`
+	RecoverySource       *RecoverySource `json:"recovery_source,omitempty"`
+}
+
+// RecoverySource links a replacement recovery Job to the immutable terminal
+// failure that authorized it. It is not permission to mutate the source Job.
+type RecoverySource struct {
+	ActionCode            string   `json:"action_code"`
+	JobID                 string   `json:"job_id"`
+	JobRevision           uint64   `json:"job_revision"`
+	StepID                string   `json:"step_id"`
+	FailureEvidenceID     string   `json:"failure_evidence_id"`
+	FencingToken          uint64   `json:"fencing_token"`
+	DiagnosticFingerprint string   `json:"diagnostic_fingerprint"`
+	Basis                 []string `json:"basis"`
 }
 
 type CreateParameters struct {
@@ -136,6 +151,7 @@ type CreateParameters struct {
 	PhysicalDeviceIDs       []string                               `json:"physical_device_ids,omitempty"`
 	StepExecutionSpecs      map[string]execution.StepExecutionSpec `json:"step_execution_specs,omitempty"`
 	CompletedControlStepIDs []string                               `json:"completed_control_step_ids,omitempty"`
+	RecoverySource          *RecoverySource                        `json:"recovery_source,omitempty"`
 }
 
 type Handler struct {
@@ -240,6 +256,13 @@ func recoveryEvidenceID(commandID string) string {
 	return "EVD-RECOVERY-" + strings.ToUpper(hex.EncodeToString(digest[:8]))
 }
 
+// TerminalRecoveryJobID is stable for one immutable failure evidence record,
+// so repeated advisory Turns cannot create duplicate recovery Jobs.
+func TerminalRecoveryJobID(sourceJobID, failureEvidenceID string) string {
+	digest := sha256.Sum256([]byte(strings.TrimSpace(sourceJobID) + "\x00" + strings.TrimSpace(failureEvidenceID)))
+	return "JOB-RECOVERY-" + strings.ToUpper(hex.EncodeToString(digest[:8]))
+}
+
 func (handler *Handler) create(envelope command.Envelope, snapshot command.Snapshot) (command.Change, error) {
 	if snapshot.Revision != 0 || len(snapshot.State) != 0 {
 		return command.Change{}, command.DeterministicFailure("JOB_ALREADY_EXISTS", command.ErrRevisionConflict)
@@ -254,6 +277,15 @@ func (handler *Handler) create(envelope command.Envelope, snapshot command.Snaps
 	}
 	if err := template.Validate(); err != nil {
 		return command.Change{}, fmt.Errorf("validate template: %w", err)
+	}
+	if parameters.RecoverySource != nil {
+		if envelope.Actor.Type != command.ArchivistActor || envelope.RequestedVia != "mcp" ||
+			template.Name != pipeline.ArchivePublicationRecovery().Name ||
+			!validRecoverySource(*parameters.RecoverySource) {
+			return command.Change{}, command.DeterministicFailure("INVALID_JOB_RECOVERY_SOURCE", ErrInvalidJob)
+		}
+	} else if template.Name == pipeline.ArchivePublicationRecovery().Name {
+		return command.Change{}, command.DeterministicFailure("INVALID_JOB_RECOVERY_SOURCE", ErrInvalidJob)
 	}
 	priority := parameters.ExecutionPriority
 	if priority == "" {
@@ -359,12 +391,52 @@ func (handler *Handler) create(envelope command.Envelope, snapshot command.Snaps
 	state := State{
 		ID: envelope.TargetID, Revision: 1, TemplateName: template.Name,
 		TargetTitle:   strings.TrimSpace(parameters.TargetTitle),
-		CurrentStepID: currentStepID, Steps: steps,
+		CurrentStepID: currentStepID, Steps: steps, RecoverySource: cloneRecoverySource(parameters.RecoverySource),
 	}
 	return stateChange(envelope, state, "JobCreated", map[string]any{
 		"template_name": state.TemplateName, "target_title": state.TargetTitle,
 		"completed_control_step_ids": parameters.CompletedControlStepIDs,
+		"recovery_source":            state.RecoverySource,
 	})
+}
+
+func validRecoverySource(source RecoverySource) bool {
+	if source.ActionCode != "RETRY_TERMINAL_ARCHIVE_PUBLICATION" || strings.TrimSpace(source.JobID) == "" ||
+		source.JobRevision == 0 || strings.TrimSpace(source.StepID) == "" || source.FencingToken == 0 ||
+		len(source.DiagnosticFingerprint) != 24 || len(source.Basis) != 1 ||
+		strings.TrimSpace(source.FailureEvidenceID) == "" || source.Basis[0] != source.FailureEvidenceID {
+		return false
+	}
+	if !validEvidenceID(source.FailureEvidenceID) {
+		return false
+	}
+	for _, character := range source.DiagnosticFingerprint {
+		if (character < '0' || character > '9') && (character < 'a' || character > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+func validEvidenceID(value string) bool {
+	if !strings.HasPrefix(value, "EVD-") || len(value) > 128 {
+		return false
+	}
+	for _, character := range value {
+		if (character < 'A' || character > 'Z') && (character < '0' || character > '9') && character != '_' && character != '-' {
+			return false
+		}
+	}
+	return true
+}
+
+func cloneRecoverySource(source *RecoverySource) *RecoverySource {
+	if source == nil {
+		return nil
+	}
+	result := *source
+	result.Basis = append([]string(nil), source.Basis...)
+	return &result
 }
 
 func (handler *Handler) cancel(envelope command.Envelope, snapshot command.Snapshot) (command.Change, error) {
@@ -483,6 +555,8 @@ func templateByName(name string) (pipeline.Template, bool) {
 		return pipeline.ArchiveIntakeInspection(), true
 	case pipeline.ArchiveTranscription().Name:
 		return pipeline.ArchiveTranscription(), true
+	case pipeline.ArchivePublicationRecovery().Name:
+		return pipeline.ArchivePublicationRecovery(), true
 	default:
 		for _, disposition := range []vocabulary.OrganizationDisposition{
 			vocabulary.OrganizationAsIs, vocabulary.OrganizationRenderRecordings, vocabulary.OrganizationCompileSourceSequence,

@@ -123,7 +123,7 @@ func Project(state job.State) (archiveworkspace.JobView, error) {
 	return archiveworkspace.Project(archiveworkspace.ProjectionInput{
 		Job: archiveworkspace.Job{
 			ID: state.ID, Revision: state.Revision, TemplateName: state.TemplateName,
-			TargetTitle: state.TargetTitle, CurrentStepID: state.CurrentStepID,
+			TargetTitle: state.TargetTitle, CurrentStepID: state.CurrentStepID, RecoverySource: state.RecoverySource,
 		},
 		Steps: steps,
 	})

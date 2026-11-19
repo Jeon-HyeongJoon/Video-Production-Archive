@@ -26,11 +26,12 @@ const (
 )
 
 type Job struct {
-	ID            string
-	Revision      uint64
-	TemplateName  string
-	TargetTitle   string
-	CurrentStepID string
+	ID             string
+	Revision       uint64
+	TemplateName   string
+	TargetTitle    string
+	CurrentStepID  string
+	RecoverySource *corejob.RecoverySource
 }
 
 type StepStatus struct {
@@ -105,6 +106,7 @@ type JobSummary struct {
 	NeedsHumanIntervention bool
 	InterventionReason     string
 	Worker                 *WorkerResource
+	RecoverySource         *corejob.RecoverySource
 }
 
 type JobView struct {
@@ -149,6 +151,7 @@ func Project(input ProjectionInput) (JobView, error) {
 		ExecutorKind: current.ExecutorKind, ActorID: current.ActorID, WorkerID: current.WorkerID,
 		WaitReason: current.WaitReason, ErrorClass: current.ErrorClass,
 		LastEventAt: current.LastEventAt, LogReference: current.LogReference,
+		RecoverySource: cloneRecoverySource(input.Job.RecoverySource),
 	}
 	if len(actions) > 0 {
 		latest := actions[len(actions)-1]
@@ -165,6 +168,15 @@ func Project(input ProjectionInput) (JobView, error) {
 	summary.NeedsHumanIntervention, summary.InterventionReason = intervention(summary)
 
 	return JobView{Summary: summary, Steps: steps, ArchivistActions: actions, Workers: workers, Timeline: timeline}, nil
+}
+
+func cloneRecoverySource(source *corejob.RecoverySource) *corejob.RecoverySource {
+	if source == nil {
+		return nil
+	}
+	result := *source
+	result.Basis = append([]string(nil), source.Basis...)
+	return &result
 }
 
 func validStep(step StepStatus) bool {
