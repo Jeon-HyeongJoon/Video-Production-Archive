@@ -34,6 +34,15 @@ type Configuration struct {
 	StorageRoots         []StorageRootConfiguration
 	AccessibleStorageIDs []string
 	Tools                MediaTools
+	ProcessLogs          *ProcessLogConfiguration
+}
+
+type ProcessLogConfiguration struct {
+	Root          string
+	MaxFileBytes  int64
+	TailBytes     int
+	Retention     time.Duration
+	MaxTotalBytes int64
 }
 
 type StorageRootConfiguration struct {
@@ -62,11 +71,12 @@ type WhisperTool struct {
 // StorageRoots owns the filesystem capabilities opened before the Worker
 // execution loop starts. Protocol payloads use only their Storage IDs.
 type StorageRoots struct {
-	updateMu sync.Mutex
-	mu       sync.RWMutex
-	roots    map[string]*archive.StorageRoot
-	static   map[string]bool
-	dynamic  map[string]attachedStorageRoot
+	updateMu       sync.Mutex
+	mu             sync.RWMutex
+	roots          map[string]*archive.StorageRoot
+	static         map[string]bool
+	dynamic        map[string]attachedStorageRoot
+	processLogRoot *archive.StorageRoot
 }
 
 type attachedStorageRoot struct {
@@ -109,7 +119,16 @@ type document struct {
 				} `yaml:"profile"`
 			} `yaml:"whispercpp"`
 		} `yaml:"tools"`
+		ProcessLogs *processLogDocument `yaml:"process_logs"`
 	} `yaml:"worker"`
+}
+
+type processLogDocument struct {
+	Root          string `yaml:"root"`
+	MaxFileBytes  int64  `yaml:"max_file_bytes"`
+	TailBytes     int    `yaml:"tail_bytes"`
+	Retention     string `yaml:"retention"`
+	MaxTotalBytes int64  `yaml:"max_total_bytes"`
 }
 
 func Load(path string) (Configuration, error) {
@@ -199,14 +218,33 @@ func normalize(source document) (Configuration, error) {
 			LocalTool: localTool, ModelStorageID: modelStorageID, ModelRelativePath: modelRelativePath, Profile: profile,
 		}
 	}
+	processLogs, err := normalizeProcessLogs(source.Worker.ProcessLogs)
+	if err != nil {
+		return Configuration{}, err
+	}
 	return Configuration{
 		SchemaVersion: source.SchemaVersion, ID: workerID, ControlURL: controlURL,
 		CredentialReference: credentialReference, HeartbeatInterval: interval,
 		ClaimInterval:        claimInterval,
 		StorageRoots:         storageRoots,
 		AccessibleStorageIDs: storageIDs,
-		Tools:                MediaTools{FFmpeg: ffmpeg, FFprobe: ffprobe, WhisperCPP: whisper},
+		Tools:                MediaTools{FFmpeg: ffmpeg, FFprobe: ffprobe, WhisperCPP: whisper}, ProcessLogs: processLogs,
 	}, nil
+}
+
+func normalizeProcessLogs(source *processLogDocument) (*ProcessLogConfiguration, error) {
+	if source == nil {
+		return nil, nil
+	}
+	root := strings.TrimSpace(source.Root)
+	retention, err := time.ParseDuration(strings.TrimSpace(source.Retention))
+	if err != nil || !filepath.IsAbs(root) || source.MaxFileBytes < 1024 || source.MaxFileBytes > 64<<20 ||
+		source.TailBytes < 512 || source.TailBytes > 16<<10 || retention < time.Hour ||
+		source.MaxTotalBytes < source.MaxFileBytes || source.MaxTotalBytes > 16<<30 {
+		return nil, ErrInvalidConfiguration
+	}
+	return &ProcessLogConfiguration{Root: filepath.Clean(root), MaxFileBytes: source.MaxFileBytes, TailBytes: source.TailBytes,
+		Retention: retention, MaxTotalBytes: source.MaxTotalBytes}, nil
 }
 
 func normalizeLocalTool(executable, version string) (LocalTool, error) {
@@ -261,6 +299,14 @@ func OpenStorageRoots(configuration Configuration) (*StorageRoots, error) {
 		opened.roots[configured.StorageID] = root
 		opened.static[configured.StorageID] = true
 	}
+	if configuration.ProcessLogs != nil {
+		root, err := archive.OpenStorageRoot(configuration.ProcessLogs.Root)
+		if err != nil {
+			opened.Close()
+			return nil, fmt.Errorf("%w: process logs: %v", ErrInvalidConfiguration, err)
+		}
+		opened.processLogRoot = root
+	}
 	if tool := configuration.Tools.WhisperCPP; tool != nil {
 		modelRoot, ok := opened.Root(tool.ModelStorageID)
 		if !ok {
@@ -284,6 +330,15 @@ func (roots *StorageRoots) Root(storageID string) (*archive.StorageRoot, bool) {
 	defer roots.mu.RUnlock()
 	root, ok := roots.roots[strings.TrimSpace(storageID)]
 	return root, ok
+}
+
+func (roots *StorageRoots) ProcessLogRoot() *archive.StorageRoot {
+	if roots == nil {
+		return nil
+	}
+	roots.mu.RLock()
+	defer roots.mu.RUnlock()
+	return roots.processLogRoot
 }
 
 // SyncAttachedVolumes reconciles runtime filesystem capabilities while no
@@ -404,6 +459,8 @@ func (roots *StorageRoots) Close() error {
 	}
 	sort.Strings(ids)
 	opened := roots.roots
+	processLogRoot := roots.processLogRoot
+	roots.processLogRoot = nil
 	roots.roots = make(map[string]*archive.StorageRoot)
 	roots.dynamic = make(map[string]attachedStorageRoot)
 	roots.static = make(map[string]bool)
@@ -413,6 +470,9 @@ func (roots *StorageRoots) Close() error {
 		if err := opened[storageID].Close(); err != nil {
 			closeErrors = append(closeErrors, err)
 		}
+	}
+	if processLogRoot != nil {
+		closeErrors = append(closeErrors, processLogRoot.Close())
 	}
 	return errors.Join(closeErrors...)
 }

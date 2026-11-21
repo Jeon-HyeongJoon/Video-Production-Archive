@@ -343,6 +343,13 @@ func TestWorkspaceShowsStructuredStepProgressEvidenceOnlyOnDisclosure(t *testing
 	})
 }
 
+// Requirement: DSH-045
+func TestWorkspaceDisclosesSanitizedFailureDetailAndAvailabilityOnlyOnDemand(t *testing.T) {
+	testControlHTTPWorkspace(t, func(t *testing.T, handler http.Handler) {
+		assertArchiveWorkspaceScript(t, handler, "check_archive_workspace_failure_evidence.py")
+	})
+}
+
 // Requirement: DSH-014
 func TestWorkspaceShowsReservationAdjustedWorkerCapacity(t *testing.T) {
 	testControlHTTPWorkspace(t, func(t *testing.T, handler http.Handler) {
@@ -528,6 +535,22 @@ func testControlHTTPScene(t *testing.T, scene archiveWorkspaceScene, check func(
 					ChunkIndex: 1, ChunkCount: 2, SourceEndMillis: 5_000, Progress: 0.5,
 				},
 			}},
+			FailureEvidence: []corejob.StepFailureEvidence{{
+				EvidenceID: "EVD-WORKER-AVAILABLE", StepID: "render", Operation: execution.OperationRenderRecording,
+				FailureSequence: 1, WorkflowAttempt: 1, WorkerID: "worker-main", FencingToken: 6,
+				FailureClass: workflow.FailureTransient, ErrorClass: "STEP_EXECUTION_FAILED", CauseCode: "PROCESS_EXIT_NONZERO",
+				Summary: "Render process failed", ProcessExitCode: integerPointer(22), LogReference: "evidence://process-log/PLOG-WORKSPACE",
+				ObservedAt: observation.ObservedAt.Add(-2 * time.Minute), ResultingState: workflow.Queued,
+				ProcessLog: &execution.ProcessLogArtifact{ID: "PLOG-WORKSPACE", Reference: "evidence://process-log/PLOG-WORKSPACE",
+					State: execution.ProcessLogAvailable, Digest: "sha256:workspace-log", CapturedBytes: 90, TotalBytes: 120, Truncated: true,
+					SanitizedTail: "unsupported codec profile"},
+			}, {
+				EvidenceID: "EVD-WORKER-LEGACY", StepID: "render", Operation: execution.OperationRenderRecording,
+				FailureSequence: 2, WorkflowAttempt: 2, WorkerID: "worker-main", FencingToken: 7,
+				FailureClass: workflow.FailureTransient, ErrorClass: "STEP_EXECUTION_FAILED", CauseCode: "PROCESS_EXIT_NONZERO",
+				Summary: "Render process failed", LogReference: "worker://operation-failed",
+				ObservedAt: observation.ObservedAt.Add(-90 * time.Second), ResultingState: workflow.Queued,
+			}},
 		}},
 		Workers: []archiveworkspace.WorkerResource{{
 			WorkerID: "worker-main", CPUPercent: 38, GPUPercent: 71,
@@ -669,6 +692,8 @@ func testControlHTTPScene(t *testing.T, scene archiveWorkspaceScene, check func(
 		check(t, handler)
 	}
 }
+
+func integerPointer(value int) *int { return &value }
 
 func assertArchiveWorkspaceLayout(t *testing.T, handler http.Handler) {
 	t.Helper()

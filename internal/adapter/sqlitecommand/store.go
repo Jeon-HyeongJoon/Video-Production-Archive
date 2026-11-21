@@ -1024,7 +1024,7 @@ func (store *Store) SettleWorkerStep(ctx context.Context, report workercontrol.R
 			StepID: report.StepID, FencingToken: report.FencingToken, Success: report.Success,
 			FailureClass: report.FailureClass, WaitReason: report.WaitReason, WaitTargetStorageID: report.WaitTargetStorageID,
 			ErrorClass: report.ErrorClass, CauseCode: report.CauseCode, ErrorSummary: report.ErrorSummary,
-			ProcessExitCode: report.ProcessExitCode, LogReference: report.LogReference, OutputRecord: report.OutputRecord,
+			ProcessExitCode: report.ProcessExitCode, LogReference: report.LogReference, ProcessLog: report.ProcessLog, OutputRecord: report.OutputRecord,
 		}),
 	}
 	change, state, err := workerLifecycleChange(envelope, command.Snapshot{TargetID: report.JobID, Revision: revision, State: encoded}, now)

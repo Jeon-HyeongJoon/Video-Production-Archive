@@ -6018,6 +6018,67 @@
         "requirements APP-009~010"
       ],
       "decided": "2026-11-06"
+    },
+    {
+      "id": "process-log-state",
+      "layer": "product",
+      "kind": "enum",
+      "name": {
+        "ko": "프로세스 로그 상태",
+        "en": "Process Log State"
+      },
+      "code_name": "ProcessLogState",
+      "definition": "ProcessLogArtifact의 raw log와 정제 상세를 현재 조회할 수 있는지 나타내는 값.",
+      "values": [
+        {"id": "AVAILABLE", "description": "불투명 reference와 정제된 제한 tail을 Control에서 조회할 수 있다."},
+        {"id": "CAPTURE_FAILED", "description": "process는 실행됐지만 Worker 로컬 raw log 게시나 검증을 완료하지 못했다."},
+        {"id": "EXPIRED", "description": "보존 정책으로 Worker 로컬 raw log가 제거됐다."},
+        {"id": "LEGACY_UNRESOLVABLE", "description": "ProcessLogArtifact 도입 전에 저장되어 실제 상세로 해석할 수 없는 과거 reference다."}
+      ],
+      "rules": [
+        "일반 log reference가 있다는 이유만으로 AVAILABLE을 추론하지 않는다."
+      ],
+      "forbidden": {"words": [], "code": []},
+      "relations": [
+        {"type": "part-of", "target": "process-log-artifact"}
+      ],
+      "sources": [
+        "requirements OBS-004",
+        "docs/design/10-capabilities-observability.md §3"
+      ],
+      "decided": "2026-11-21"
+    },
+    {
+      "id": "process-log-artifact",
+      "layer": "product",
+      "kind": "record",
+      "name": {
+        "ko": "프로세스 로그 산출물",
+        "en": "Process Log Artifact"
+      },
+      "code_name": "ProcessLogArtifact",
+      "definition": "Worker가 하나의 외부 미디어 process 실행 경계에서 stdout·stderr를 로컬에 제한 보관하고 실패 원인 확인에 쓰도록 만든 증적 산출물.",
+      "rules": [
+        "ID는 Job·Step·operation·fencing token의 실행 경계에서 결정적으로 계산하고 reference에는 Worker 절대경로를 넣지 않는다.",
+        "raw stdout·stderr는 Worker 로컬 StorageRoot에 파일별 용량·보존 기간·총량 상한을 적용해 보관한다.",
+        "Control에는 digest·기록량·전체량·잘림 상태·가용 상태와 비밀값·절대경로를 제거한 제한 tail만 보존한다.",
+        "MCP와 작업 공간은 사용자가 상세를 요청했을 때만 정제 tail을 공개한다."
+      ],
+      "forbidden": {"words": [], "code": []},
+      "relations": [
+        {"type": "refers-to", "target": "evidence"},
+        {"type": "part-of", "target": "step-failure-evidence"},
+        {"type": "refers-to", "target": "process-log-state"},
+        {"type": "refers-to", "target": "fencing-token"}
+      ],
+      "sources": [
+        "docs/design/05-runtime-deployment.md §9",
+        "docs/design/07-worker-fleet.md §4.1",
+        "docs/design/10-capabilities-observability.md §3",
+        "requirements WRK-019, OBS-004, MCP-013, DSH-045",
+        "사용자 결정 2026-11-21: 시스템 상태와 실패 원인을 영속 근거로 보관하고 Archivist가 근거 기반으로 조치"
+      ],
+      "decided": "2026-11-21"
     }
   ],
   "open": [

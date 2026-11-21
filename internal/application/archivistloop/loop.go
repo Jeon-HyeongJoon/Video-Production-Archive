@@ -142,6 +142,7 @@ Destructive actions and approvals belong to a human. Never submit an arbitrary p
 When a long ArchiveRun or transcription is started, report that it started and end this turn; Control will recall you after a stage completes.
 If evidence is insufficient to classify a HOLD item, keep it on hold and state what evidence is missing.
 For an automatic advisory turn, cite persisted evidence IDs for confirmed statements and report observed facts separately from hypotheses. Never turn a hypothesis into a fact. A fresh lease heartbeat proves only that the Worker execution loop answered, not that its subprocess progressed. If diagnostics returns a recovery_actions entry, you may call only archive.work.recovery.apply.v1 with every field copied exactly, then read diagnostics again and cite the returned recovery evidence ID. Never invent a recovery, retry a terminal failure, cancel work, or substitute a different revision. Prepare current drive selections when requested, but treat an archive start ActionCard as a proposal and never claim work started until the tool reports an executed ArchiveRun.
+When diagnostics reports AVAILABLE process detail, call archive.work.failure_evidence.get.v1 with that exact failure evidence ID before explaining the process cause. For CAPTURE_FAILED, EXPIRED, or LEGACY_UNRESOLVABLE, say the detail is unavailable and do not claim that a log can be inspected. When the human asks about all, every, or multiple failures, call archive.system.status.get.v1 first even if this turn also has one fixed work reference, then narrow to each work diagnostic and available failure detail.
 Give a concise Korean final answer focused on the result or the next human action.`
 
 func (loop *Loop) Run(ctx context.Context, runtime RuntimeContext, prompt string) (Result, error) {
@@ -293,10 +294,11 @@ func ToolProgress(name string) string {
 	summaries := map[string]string{
 		"archive.jobs.get.v1": "작업 상태 확인", "archive.assets.search.v1": "아카이브 자료 조회",
 		"archive.jobs.create.v1": "작업 요청", "archive.work.reference.get.v1": "이어갈 작업 확인",
-		"archive.work.diagnostics.get.v1":     "작업 진단 확인",
-		"archive.work.recovery.apply.v1":      "안전 복구 실행",
-		"archive.system.status.get.v1":        "전체 현황 확인",
-		"archive.intake.candidates.search.v1": "입고 후보 검색", "archive.intake.source.select.v1": "원본 선택",
+		"archive.work.diagnostics.get.v1":      "작업 진단 확인",
+		"archive.work.failure_evidence.get.v1": "실패 근거 상세 확인",
+		"archive.work.recovery.apply.v1":       "안전 복구 실행",
+		"archive.system.status.get.v1":         "전체 현황 확인",
+		"archive.intake.candidates.search.v1":  "입고 후보 검색", "archive.intake.source.select.v1": "원본 선택",
 		"archive.intake.selection.pin.v1": "작업 범위 고정",
 		"archive.intake.selection.get.v1": "선택 범위 확인",
 		"archive.run.status.v1":           "아카이브 실행 상태 확인", "archive.organization.holds.list.v1": "보류 목록 확인",
@@ -350,6 +352,10 @@ func knownTools() map[string]ToolDefinition {
 		"archive.work.diagnostics.get.v1": {
 			Name: "archive.work.diagnostics.get.v1", ProviderName: "archive_work_diagnostics_get_v1", Description: "Read sanitized execution diagnostics and persisted failure evidence IDs for the persistent work fixed to this turn. Confirmed facts, hypotheses with evidence-ID basis, and next checks are separate; this tool never changes work state.",
 			Parameters: objectSchema(map[string]any{}),
+		},
+		"archive.work.failure_evidence.get.v1": {
+			Name: "archive.work.failure_evidence.get.v1", ProviderName: "archive_work_failure_evidence_get_v1", Description: "Read the persisted sanitized process failure detail for one failure evidence ID belonging to the work fixed to this turn. Use it after diagnostics reports AVAILABLE detail; this tool never changes state.",
+			Parameters: objectSchema(map[string]any{"evidence_id": stringProperty("Persisted failure evidence ID from current work diagnostics")}, "evidence_id"),
 		},
 		"archive.system.status.get.v1": {
 			Name: "archive.system.status.get.v1", ProviderName: "archive_system_status_get_v1", Description: "Read the current Archive-wide Worker and Archivist Host connection and capacity status, work counts, and unresolved or stalled work with sanitized evidence. No drive selection or work reference is required and this tool never changes state.",

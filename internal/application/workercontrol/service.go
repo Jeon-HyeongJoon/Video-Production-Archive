@@ -54,6 +54,7 @@ type Result struct {
 	ErrorSummary        string
 	ProcessExitCode     *int
 	LogReference        string
+	ProcessLog          *execution.ProcessLogArtifact
 	OutputRecord        *execution.StepOutputRecord
 }
 

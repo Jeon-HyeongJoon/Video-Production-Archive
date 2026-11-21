@@ -3900,6 +3900,54 @@
       "test_name": "TestWindowsTrayStartsAtInteractiveLogonWithoutOwningControl",
       "status": "implemented",
       "level": "acceptance"
+    },
+    {
+      "id": "WRK-019",
+      "design": "worker-bounded-process-log-artifact",
+      "statement": "Worker의 외부 미디어 process 실패는 실행 경계마다 용량이 제한된 로컬 ProcessLogArtifact를 만들고 보존 기간과 총량 정책 안에서 관리해야 한다.",
+      "given": "Job·Step·operation·fencing token이 고정된 Worker 실행과 stdout·stderr에 비밀값·절대경로·상한을 넘는 출력이 있는 실패 process 및 오래된 로컬 process log가 있다.",
+      "when": "Worker가 shell 없이 process를 실행하고 실패를 정산한다.",
+      "then": "Worker 로컬 StorageRoot 안에 실행 경계에서 결정적으로 식별되는 raw log가 파일별 상한까지만 기록되고 오래된 파일과 총량 초과 파일은 제거되며 실패 결과에는 절대경로가 아닌 고유 ProcessLogArtifact ID·불투명 reference·digest·기록량·전체량·잘림 상태와 이중 정제된 제한 tail만 포함되고 성공한 실행의 임시 log는 제거된다.",
+      "test_file": "internal/adapter/processlog/runner_test.go",
+      "test_name": "TestProcessRunnerCapturesBoundedSanitizedFailureArtifactAndRetention",
+      "status": "implemented",
+      "level": "integration"
+    },
+    {
+      "id": "OBS-004",
+      "design": "persisted-process-failure-detail",
+      "statement": "Control은 Worker가 보고한 ProcessLogArtifact의 정제된 실패 상세와 가용 상태를 StepFailureEvidence에 원자적으로 보존하고 실제 상세가 없으면 확인할 수 있다고 제안하지 않아야 한다.",
+      "given": "유효한 ProcessLogArtifact 메타데이터·정제 tail이 있는 실패 결과와 과거의 일반 worker log reference만 있는 실패 결과가 있다.",
+      "when": "실패 결과를 정산하고 작업 진단을 만든다.",
+      "then": "유효한 상세는 Job 상태·Domain Event·결과 영수증과 같은 transaction에 한 번 저장되고 진단은 AVAILABLE과 증적 ID를 제공하며 과거 reference는 LEGACY_UNRESOLVABLE로 표시하고 상세 확인을 제안하지 않으며 원문 출력·credential·절대경로는 저장하거나 반환하지 않는다.",
+      "test_file": "internal/application/workdiagnostics/service_test.go",
+      "test_name": "TestWorkDiagnosticsExposeAvailableDetailAndMarkLegacyReferenceUnresolvable",
+      "status": "implemented",
+      "level": "unit"
+    },
+    {
+      "id": "MCP-013",
+      "design": "archivist-failure-evidence-detail-capability",
+      "statement": "Archivist는 현재 Turn에 고정된 작업의 실패 증적 ID로 영속된 정제 process 실패 상세를 읽기 전용 MCP Capability에서 조회할 수 있어야 한다.",
+      "given": "WorkReference가 고정된 유효한 ArchivistTurn, 그 작업의 AVAILABLE process 실패 증적과 다른 작업의 증적 ID 및 비밀값·절대경로처럼 보이는 tail이 있다.",
+      "when": "Archivist가 실패 증적 상세 MCP Capability를 호출한다.",
+      "then": "현재 작업에 속한 증적만 process log 가용 상태·operation·exit code·정제된 제한 tail·불투명 reference와 함께 반환하고 다른 작업·원문 stdout·stderr·credential·절대경로는 노출하지 않으며 업무 상태를 바꾸지 않는다.",
+      "test_file": "internal/adapter/httpmcp/handler_test.go",
+      "test_name": "TestMCPReadsOnlyBoundSanitizedFailureEvidenceDetail",
+      "status": "implemented",
+      "level": "integration"
+    },
+    {
+      "id": "DSH-045",
+      "design": "failure-evidence-detail-disclosure",
+      "statement": "작업 상세는 실패 증적의 process log 가용 상태를 표시하고 사람이 펼쳤을 때만 정제된 실패 상세를 보여줘야 한다.",
+      "given": "AVAILABLE 또는 LEGACY_UNRESOLVABLE process 실패 증적이 저장된 Job이 있다.",
+      "when": "담당자가 작업 상세의 실패 근거를 펼친다.",
+      "then": "접힌 상태에는 실패 증적 수와 가용 상태만 보이고 펼치면 증적 ID·operation·exit code·정제 tail·불투명 reference를 시간순으로 표시하며 실제 상세이 없는 실패에는 기록되지 않음을 표시하고 원문 credential·절대경로는 표시하지 않는다.",
+      "test_file": "internal/adapter/httpcontrol/handler_test.go",
+      "test_name": "TestWorkspaceDisclosesSanitizedFailureDetailAndAvailabilityOnlyOnDemand",
+      "status": "implemented",
+      "level": "integration"
     }
   ]
 }

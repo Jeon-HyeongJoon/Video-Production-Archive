@@ -499,6 +499,8 @@ html[data-stale] .view [data-action],html[data-stale] .agent-pane [data-action]{
 .step-evidence[open] summary::before{transform:rotate(90deg)}
 .step-evidence ol{margin:7px 0 0;padding:7px 0 0;list-style:none;border-top:1px solid var(--line)}
 .step-evidence li{display:grid;grid-template-columns:72px minmax(0,1fr);gap:10px;padding:3px 0;font:11px/1.45 var(--mono)}
+.failure-tail{display:block;white-space:pre-wrap;overflow-wrap:anywhere;margin-top:4px;padding:6px 8px;background:var(--sunken);border:1px solid var(--line);color:var(--ink)}
+.failure-evidence small{display:block;margin-top:3px;color:var(--muted)}
 .timeline{padding:6px 16px 12px;list-style:none;display:flex;flex-direction:column}
 .timeline li{min-height:30px;display:grid;grid-template-columns:64px 12px minmax(0,1fr);align-items:center;gap:10px;color:var(--soft);font-size:var(--text-sm)}
 .timeline time{color:var(--muted);font-family:var(--mono);font-size:var(--text-xs)}

@@ -5,6 +5,12 @@ worker:
   control_url: http://127.0.0.1:8080
   credential_ref: wincred://archive/workers/worker-main
   heartbeat_interval: 10s
+  process_logs:
+    root: /srv/archive/logs/operations
+    max_file_bytes: 4194304
+    tail_bytes: 12288
+    retention: 336h
+    max_total_bytes: 268435456
   storage_roots:
     - storage_id: scratch-main
       root: /srv/archive/scratch

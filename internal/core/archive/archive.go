@@ -439,6 +439,28 @@ func (root *StorageRoot) Open(requested string) (*os.File, error) {
 	return file, nil
 }
 
+// Create opens a root-confined file for streaming output. The caller owns
+// Sync and Close; all path resolution stays inside this StorageRoot.
+func (root *StorageRoot) Create(requested string, permission os.FileMode) (*os.File, error) {
+	if root == nil || root.root == nil {
+		return nil, ErrUnsafeStoragePath
+	}
+	clean, err := root.safeRelative(requested)
+	if err != nil {
+		return nil, err
+	}
+	file, err := root.root.OpenFile(clean, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, permission)
+	if err != nil {
+		return nil, storageIOError(err)
+	}
+	if err := root.syncParent(clean); err != nil {
+		_ = file.Close()
+		_ = root.root.Remove(clean)
+		return nil, err
+	}
+	return file, nil
+}
+
 func (root *StorageRoot) ReadFile(requested string) ([]byte, error) {
 	file, err := root.Open(requested)
 	if err != nil {

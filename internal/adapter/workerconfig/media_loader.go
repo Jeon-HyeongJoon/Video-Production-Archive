@@ -38,6 +38,7 @@ type mediaDocument struct {
 				} `yaml:"profile"`
 			} `yaml:"whispercpp"`
 		} `yaml:"tools"`
+		ProcessLogs *processLogDocument `yaml:"process_logs"`
 	} `yaml:"media"`
 }
 
@@ -110,9 +111,13 @@ func normalizeMedia(source mediaDocument) (Configuration, error) {
 			LocalTool: localTool, ModelStorageID: modelStorageID, ModelRelativePath: modelRelativePath, Profile: profile,
 		}
 	}
+	processLogs, err := normalizeProcessLogs(source.Media.ProcessLogs)
+	if err != nil {
+		return Configuration{}, err
+	}
 	return Configuration{
 		SchemaVersion: source.SchemaVersion, ID: executorID,
 		StorageRoots: storageRoots, AccessibleStorageIDs: storageIDs,
-		Tools: MediaTools{FFmpeg: ffmpeg, FFprobe: ffprobe, WhisperCPP: whisper},
+		Tools: MediaTools{FFmpeg: ffmpeg, FFprobe: ffprobe, WhisperCPP: whisper}, ProcessLogs: processLogs,
 	}, nil
 }

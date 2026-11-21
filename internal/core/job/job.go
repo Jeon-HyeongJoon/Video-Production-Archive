@@ -74,23 +74,24 @@ type StepProgressEvidence struct {
 // every unsuccessful Worker settlement. It deliberately excludes raw process
 // output, executable arguments, credentials and filesystem paths.
 type StepFailureEvidence struct {
-	EvidenceID          string                `json:"evidence_id"`
-	StepID              string                `json:"step_id"`
-	Operation           execution.Operation   `json:"operation"`
-	FailureSequence     uint64                `json:"failure_sequence"`
-	WorkflowAttempt     int                   `json:"workflow_attempt"`
-	WorkerID            string                `json:"worker_id"`
-	FencingToken        uint64                `json:"fencing_token"`
-	FailureClass        workflow.FailureClass `json:"failure_class"`
-	WaitReason          vocabulary.WaitReason `json:"wait_reason,omitempty"`
-	WaitTargetStorageID string                `json:"wait_target_storage_id,omitempty"`
-	ErrorClass          string                `json:"error_class"`
-	CauseCode           string                `json:"cause_code"`
-	Summary             string                `json:"summary"`
-	ProcessExitCode     *int                  `json:"process_exit_code,omitempty"`
-	LogReference        string                `json:"log_reference,omitempty"`
-	ObservedAt          time.Time             `json:"observed_at"`
-	ResultingState      workflow.StepState    `json:"resulting_state"`
+	EvidenceID          string                        `json:"evidence_id"`
+	StepID              string                        `json:"step_id"`
+	Operation           execution.Operation           `json:"operation"`
+	FailureSequence     uint64                        `json:"failure_sequence"`
+	WorkflowAttempt     int                           `json:"workflow_attempt"`
+	WorkerID            string                        `json:"worker_id"`
+	FencingToken        uint64                        `json:"fencing_token"`
+	FailureClass        workflow.FailureClass         `json:"failure_class"`
+	WaitReason          vocabulary.WaitReason         `json:"wait_reason,omitempty"`
+	WaitTargetStorageID string                        `json:"wait_target_storage_id,omitempty"`
+	ErrorClass          string                        `json:"error_class"`
+	CauseCode           string                        `json:"cause_code"`
+	Summary             string                        `json:"summary"`
+	ProcessExitCode     *int                          `json:"process_exit_code,omitempty"`
+	LogReference        string                        `json:"log_reference,omitempty"`
+	ProcessLog          *execution.ProcessLogArtifact `json:"process_log,omitempty"`
+	ObservedAt          time.Time                     `json:"observed_at"`
+	ResultingState      workflow.StepState            `json:"resulting_state"`
 }
 
 // StepRecoveryEvidence is the immutable reason and execution boundary for one

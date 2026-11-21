@@ -34,6 +34,7 @@ const (
 	ToolJobsGet                   = "archive.jobs.get.v1"
 	ToolWorkReferenceGet          = "archive.work.reference.get.v1"
 	ToolWorkDiagnosticsGet        = "archive.work.diagnostics.get.v1"
+	ToolWorkFailureEvidenceGet    = "archive.work.failure_evidence.get.v1"
 	ToolWorkRecoveryApply         = "archive.work.recovery.apply.v1"
 	ToolSystemStatusGet           = "archive.system.status.get.v1"
 	ToolAssetsSearch              = "archive.assets.search.v1"
@@ -67,6 +68,10 @@ type CatalogReader interface {
 
 type WorkDiagnosticsReader interface {
 	Diagnose(context.Context, archivistruntime.WorkReference) (workdiagnostics.Snapshot, error)
+}
+
+type WorkFailureEvidenceReader interface {
+	FailureEvidence(context.Context, archivistruntime.WorkReference, string) (workdiagnostics.FailureDetail, error)
 }
 
 type WorkRecoveryExecutor interface {
@@ -116,6 +121,7 @@ type Configuration struct {
 	ArchiveRuns           ArchiveRunStarter
 	ArchiveTranscriptions ArchiveTranscriptionStarter
 	WorkDiagnostics       WorkDiagnosticsReader
+	WorkFailureEvidence   WorkFailureEvidenceReader
 	WorkRecovery          WorkRecoveryExecutor
 	SystemStatus          SystemStatusReader
 }
@@ -130,6 +136,7 @@ type Handler struct {
 	archiveRuns           ArchiveRunStarter
 	archiveTranscriptions ArchiveTranscriptionStarter
 	workDiagnostics       WorkDiagnosticsReader
+	workFailureEvidence   WorkFailureEvidenceReader
 	workRecovery          WorkRecoveryExecutor
 	systemStatus          SystemStatusReader
 	router                http.Handler
@@ -144,6 +151,7 @@ func New(configuration Configuration) (*Handler, error) {
 	}
 	if configuration.Archivists == nil || configuration.Catalog == nil || configuration.ArchiveWorkspace == nil || configuration.Commands == nil ||
 		(configuration.WorkRecovery != nil && configuration.WorkDiagnostics == nil) ||
+		(configuration.WorkFailureEvidence != nil && configuration.WorkDiagnostics == nil) ||
 		(driveCount != 0 && driveCount != 4) {
 		return nil, errors.New("MCP adapter configuration is incomplete")
 	}
@@ -152,9 +160,10 @@ func New(configuration Configuration) (*Handler, error) {
 		archiveWorkspace: configuration.ArchiveWorkspace, commands: configuration.Commands,
 		drives: configuration.Drives, intakeSelector: configuration.IntakeSelector,
 		archiveRuns: configuration.ArchiveRuns, archiveTranscriptions: configuration.ArchiveTranscriptions,
-		workDiagnostics: configuration.WorkDiagnostics,
-		workRecovery:    configuration.WorkRecovery,
-		systemStatus:    configuration.SystemStatus,
+		workDiagnostics:     configuration.WorkDiagnostics,
+		workFailureEvidence: configuration.WorkFailureEvidence,
+		workRecovery:        configuration.WorkRecovery,
+		systemStatus:        configuration.SystemStatus,
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /mcp/v1/tools", handler.tools)
@@ -184,6 +193,9 @@ func (handler *Handler) tools(writer http.ResponseWriter, _ *http.Request) {
 	}
 	if handler.workDiagnostics != nil {
 		result = append(result, map[string]string{"name": ToolWorkDiagnosticsGet, "action_class": string(vocabulary.ActionRead)})
+	}
+	if handler.workFailureEvidence != nil {
+		result = append(result, map[string]string{"name": ToolWorkFailureEvidenceGet, "action_class": string(vocabulary.ActionRead)})
 	}
 	if handler.systemStatus != nil {
 		result = append(result, map[string]string{"name": ToolSystemStatusGet, "action_class": string(vocabulary.ActionRead)})
@@ -241,6 +253,7 @@ func (handler *Handler) call(writer http.ResponseWriter, request *http.Request) 
 	}
 	if payload.Tool != ToolJobsGet && payload.Tool != ToolWorkReferenceGet && payload.Tool != ToolAssetsSearch && payload.Tool != ToolJobsCreate &&
 		payload.Tool != ToolWorkDiagnosticsGet &&
+		payload.Tool != ToolWorkFailureEvidenceGet &&
 		payload.Tool != ToolSystemStatusGet &&
 		payload.Tool != ToolWorkRecoveryApply &&
 		payload.Tool != ToolIntakeCandidatesSearch && payload.Tool != ToolIntakeSourceSelect && payload.Tool != ToolIntakeSelectionPin &&
@@ -271,6 +284,8 @@ func (handler *Handler) call(writer http.ResponseWriter, request *http.Request) 
 		handler.getWorkReference(writer, request, payload)
 	case ToolWorkDiagnosticsGet:
 		handler.getWorkDiagnostics(writer, request, payload)
+	case ToolWorkFailureEvidenceGet:
+		handler.getWorkFailureEvidence(writer, request, payload)
 	case ToolSystemStatusGet:
 		handler.getSystemStatus(writer, request, payload)
 	case ToolWorkRecoveryApply:
@@ -304,7 +319,7 @@ func (handler *Handler) call(writer http.ResponseWriter, request *http.Request) 
 
 func remediationToolAllowed(tool string) bool {
 	switch tool {
-	case ToolJobsGet, ToolWorkReferenceGet, ToolWorkDiagnosticsGet, ToolSystemStatusGet, ToolArchiveRunStatus, ToolWorkRecoveryApply:
+	case ToolJobsGet, ToolWorkReferenceGet, ToolWorkDiagnosticsGet, ToolWorkFailureEvidenceGet, ToolSystemStatusGet, ToolArchiveRunStatus, ToolWorkRecoveryApply:
 		return true
 	default:
 		return false
@@ -313,7 +328,7 @@ func remediationToolAllowed(tool string) bool {
 
 func advisoryToolAllowed(tool string) bool {
 	switch tool {
-	case ToolJobsGet, ToolWorkReferenceGet, ToolWorkDiagnosticsGet, ToolSystemStatusGet, ToolAssetsSearch,
+	case ToolJobsGet, ToolWorkReferenceGet, ToolWorkDiagnosticsGet, ToolWorkFailureEvidenceGet, ToolSystemStatusGet, ToolAssetsSearch,
 		ToolIntakeCandidatesSearch, ToolIntakeSourceSelect, ToolIntakeSelectionPin,
 		ToolDriveSelectionGet, ToolArchiveRunStatus, ToolOrganizationHoldsList,
 		ToolOrganizationHoldGet, ToolArchiveRunStart:
@@ -375,6 +390,35 @@ func (handler *Handler) getWorkDiagnostics(writer http.ResponseWriter, request *
 	}
 	_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, reference.WorkID, "COMPLETED")
 	writeJSON(writer, http.StatusOK, map[string]any{"data": workdiagnostics.Sanitize(diagnostic)})
+}
+
+func (handler *Handler) getWorkFailureEvidence(writer http.ResponseWriter, request *http.Request, call callRequest) {
+	if handler.workFailureEvidence == nil {
+		writeError(writer, http.StatusNotFound, "MCP_CAPABILITY_NOT_FOUND")
+		return
+	}
+	var input struct {
+		EvidenceID string `json:"evidence_id"`
+	}
+	if !decodeToolInput(call.Input, &input) || strings.TrimSpace(input.EvidenceID) == "" {
+		_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, "", "FAILED")
+		writeError(writer, http.StatusBadRequest, "MCP_INPUT_INVALID")
+		return
+	}
+	reference, err := handler.archivists.TurnWorkReference(request.Context(), call.SessionID, call.TurnID)
+	if err != nil {
+		_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, "", "FAILED")
+		writeError(writer, http.StatusConflict, "MCP_WORK_REFERENCE_REQUIRED")
+		return
+	}
+	detail, err := handler.workFailureEvidence.FailureEvidence(request.Context(), reference, strings.TrimSpace(input.EvidenceID))
+	if err != nil {
+		_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, reference.WorkID, "FAILED")
+		writeError(writer, http.StatusNotFound, "MCP_FAILURE_EVIDENCE_NOT_FOUND")
+		return
+	}
+	_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, reference.WorkID, "COMPLETED")
+	writeJSON(writer, http.StatusOK, map[string]any{"data": workdiagnostics.SanitizeFailureDetail(detail)})
 }
 
 func (handler *Handler) getSystemStatus(writer http.ResponseWriter, request *http.Request, call callRequest) {

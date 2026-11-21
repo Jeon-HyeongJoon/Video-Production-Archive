@@ -5,6 +5,7 @@ import (
 
 	"videoarchive/internal/application/archivework"
 	"videoarchive/internal/application/archiveworkspace"
+	"videoarchive/internal/application/workdiagnostics"
 	"videoarchive/internal/core/archivistruntime"
 	corejob "videoarchive/internal/core/job"
 	"videoarchive/internal/core/summary"
@@ -309,6 +310,7 @@ type stepView struct {
 	LastEventAt      time.Time                      `json:"last_event_at"`
 	DependencyIDs    []string                       `json:"dependency_ids"`
 	ProgressEvidence []corejob.StepProgressEvidence `json:"progress_evidence,omitempty"`
+	FailureEvidence  []corejob.StepFailureEvidence  `json:"failure_evidence,omitempty"`
 }
 
 type archivistActionView struct {
@@ -491,12 +493,17 @@ func projectJobSummary(value archiveworkspace.JobSummary) jobSummaryView {
 func projectJobDetail(value archiveworkspace.JobView) jobDetailView {
 	result := jobDetailView{Summary: projectJobSummary(value.Summary)}
 	for _, step := range value.Steps {
+		failureEvidence := make([]corejob.StepFailureEvidence, 0, len(step.FailureEvidence))
+		for _, evidence := range step.FailureEvidence {
+			failureEvidence = append(failureEvidence, workdiagnostics.SanitizeFailureEvidenceForDisclosure(evidence))
+		}
 		result.Steps = append(result.Steps, stepView{
 			ID: step.ID, State: string(step.State), Progress: step.Progress, ExecutorKind: string(step.ExecutorKind),
 			ActorID: step.ActorID, WorkerID: step.WorkerID, WaitReason: string(step.WaitReason), ErrorClass: step.ErrorClass,
 			LogReference: step.LogReference, LastEventAt: step.LastEventAt,
 			DependencyIDs:    append([]string(nil), step.DependencyIDs...),
 			ProgressEvidence: append([]corejob.StepProgressEvidence(nil), step.ProgressEvidence...),
+			FailureEvidence:  failureEvidence,
 		})
 	}
 	for _, action := range value.ArchivistActions {

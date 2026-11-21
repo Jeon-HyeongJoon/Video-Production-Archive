@@ -331,19 +331,20 @@ func (handler *Handler) claim(writer http.ResponseWriter, request *http.Request)
 }
 
 type resultRequest struct {
-	JobID               string                      `json:"job_id"`
-	StepID              string                      `json:"step_id"`
-	FencingToken        uint64                      `json:"fencing_token"`
-	Success             bool                        `json:"success"`
-	FailureClass        workflow.FailureClass       `json:"failure_class"`
-	WaitReason          vocabulary.WaitReason       `json:"wait_reason"`
-	WaitTargetStorageID string                      `json:"wait_target_storage_id"`
-	ErrorClass          string                      `json:"error_class"`
-	CauseCode           string                      `json:"cause_code"`
-	ErrorSummary        string                      `json:"error_summary"`
-	ProcessExitCode     *int                        `json:"process_exit_code"`
-	LogReference        string                      `json:"log_reference"`
-	OutputRecord        *execution.StepOutputRecord `json:"output_record"`
+	JobID               string                        `json:"job_id"`
+	StepID              string                        `json:"step_id"`
+	FencingToken        uint64                        `json:"fencing_token"`
+	Success             bool                          `json:"success"`
+	FailureClass        workflow.FailureClass         `json:"failure_class"`
+	WaitReason          vocabulary.WaitReason         `json:"wait_reason"`
+	WaitTargetStorageID string                        `json:"wait_target_storage_id"`
+	ErrorClass          string                        `json:"error_class"`
+	CauseCode           string                        `json:"cause_code"`
+	ErrorSummary        string                        `json:"error_summary"`
+	ProcessExitCode     *int                          `json:"process_exit_code"`
+	LogReference        string                        `json:"log_reference"`
+	ProcessLog          *execution.ProcessLogArtifact `json:"process_log"`
+	OutputRecord        *execution.StepOutputRecord   `json:"output_record"`
 }
 
 func (handler *Handler) result(writer http.ResponseWriter, request *http.Request) {
@@ -381,7 +382,7 @@ func (handler *Handler) result(writer http.ResponseWriter, request *http.Request
 		WaitTargetStorageID: strings.TrimSpace(payload.WaitTargetStorageID),
 		ErrorClass:          strings.TrimSpace(payload.ErrorClass), CauseCode: strings.TrimSpace(payload.CauseCode),
 		ErrorSummary: strings.TrimSpace(payload.ErrorSummary), ProcessExitCode: payload.ProcessExitCode,
-		LogReference: strings.TrimSpace(payload.LogReference), OutputRecord: payload.OutputRecord,
+		LogReference: strings.TrimSpace(payload.LogReference), ProcessLog: payload.ProcessLog, OutputRecord: payload.OutputRecord,
 	})
 	if errors.Is(err, workflow.ErrStaleFencingToken) {
 		writeError(writer, http.StatusConflict, "STALE_FENCING_TOKEN")

@@ -1386,6 +1386,45 @@ func TestWorkerClaimsReservedStepAndAtomicallySettlesResultReservationAndProject
 	}
 }
 
+func TestWorkerFailureProcessLogFlowsThroughHTTPSettlementAndWorkspace(t *testing.T) {
+	configuration := runtimeTestConfiguration(t)
+	now := time.Date(2026, 11, 21, 4, 0, 0, 0, time.UTC)
+	runtime, err := controlruntime.OpenWithDependencies(context.Background(), configuration, "v1-test", controlruntime.Dependencies{
+		Secrets: runtimeSecret("service-secret"), Now: func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer runtime.Close()
+	cookie, token := runtimeSession(t, runtime.Handler())
+	createRunningWorkerJob(t, runtime.Handler(), configuration.DatabasePath, cookie, token, "JOB-PROCESS-LOG-HTTP", 1, now)
+	payload := `{
+		"job_id":"JOB-PROCESS-LOG-HTTP","step_id":"inspect_inputs","fencing_token":1,"success":false,
+		"failure_class":"TRANSIENT","error_class":"STEP_EXECUTION_FAILED","cause_code":"PROCESS_EXIT_NONZERO",
+		"error_summary":"Media inspection operation failed","process_exit_code":22,
+		"log_reference":"evidence://process-log/PLOG-RUNTIME",
+		"process_log":{"id":"PLOG-RUNTIME","reference":"evidence://process-log/PLOG-RUNTIME","state":"AVAILABLE",
+		"digest":"sha256:runtime","captured_bytes":100,"total_bytes":120,"truncated":true,
+		"sanitized_tail":"decoder failed at C:\\Users\\sshuser\\secret.mov token=should-not-leave\nunsupported codec profile"}
+	}`
+	settled := workerProtocolRequest(runtime.Handler(), "/worker/v1/steps/result", payload, "service-secret")
+	if settled.Code != http.StatusOK {
+		t.Fatalf("failure settlement returned %d: %s", settled.Code, settled.Body.String())
+	}
+	detail := runtimeRequest(runtime.Handler(), http.MethodGet, "/api/v1/jobs/JOB-PROCESS-LOG-HTTP", "", nil, "", "")
+	body := detail.Body.String()
+	if detail.Code != http.StatusOK || !strings.Contains(body, `"id":"PLOG-RUNTIME"`) ||
+		!strings.Contains(body, `"state":"AVAILABLE"`) || !strings.Contains(body, "unsupported codec profile") ||
+		!strings.Contains(body, "[REDACTED PROCESS OUTPUT]") {
+		t.Fatalf("persisted process failure evidence is incomplete: %d %s", detail.Code, body)
+	}
+	for _, forbidden := range []string{`C:\\Users`, "sshuser", "should-not-leave"} {
+		if strings.Contains(strings.ToLower(body), strings.ToLower(forbidden)) {
+			t.Fatalf("unsafe process detail crossed the Control boundary: %s", body)
+		}
+	}
+}
+
 // Requirement: CAN-001
 func TestReservedJobCancellationAtomicallyFencesLeaseAndReleasesReservation(t *testing.T) {
 	configuration := runtimeTestConfiguration(t)

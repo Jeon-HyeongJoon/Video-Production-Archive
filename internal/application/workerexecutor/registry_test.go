@@ -629,6 +629,82 @@ func TestWorkerArchiveIntakeInspectionUsesLocalFFprobeAndReturnsOnlyNormalizedPa
 	}
 }
 
+func TestProductionInspectionFailureReturnsBoundedProcessLogArtifact(t *testing.T) {
+	ffmpegPath, ffmpegErr := osexec.LookPath("ffmpeg")
+	ffprobePath, ffprobeErr := osexec.LookPath("ffprobe")
+	if ffmpegErr != nil || ffprobeErr != nil {
+		t.Skip("actual FFmpeg toolchain is not installed")
+	}
+	directory := t.TempDir()
+	sourcePath := filepath.Join(directory, "source")
+	archivePath := filepath.Join(directory, "archive")
+	processLogPath := filepath.Join(directory, "process-logs")
+	for _, root := range []string{sourcePath, archivePath, processLogPath} {
+		if err := os.Mkdir(root, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Mkdir(filepath.Join(sourcePath, "broken"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sourcePath, "broken", "not-video.mp4"), []byte("not a media container"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	configuration := workerconfig.Configuration{
+		ID: "worker-failure-evidence", StorageRoots: []workerconfig.StorageRootConfiguration{
+			{StorageID: "source", Root: sourcePath}, {StorageID: "archive", Root: archivePath},
+		},
+		AccessibleStorageIDs: []string{"source", "archive"},
+		Tools: workerconfig.MediaTools{
+			FFmpeg:  workerconfig.LocalTool{Executable: ffmpegPath, Version: "ffmpeg-actual"},
+			FFprobe: workerconfig.LocalTool{Executable: ffprobePath, Version: "ffprobe-actual"},
+		},
+		ProcessLogs: &workerconfig.ProcessLogConfiguration{
+			Root: processLogPath, MaxFileBytes: 4096, TailBytes: 2048,
+			Retention: time.Hour, MaxTotalBytes: 8192,
+		},
+	}
+	roots, err := workerconfig.OpenStorageRoots(configuration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer roots.Close()
+	spec, err := execution.NewStepExecutionSpec(execution.StepExecutionSpec{
+		JobID: "JOB-INSPECTION-FAILURE", StepID: "inspect", TemplateName: "archive-intake-inspection",
+		Operation: execution.OperationInspectMedia,
+		Outputs: []execution.OutputTarget{{
+			ID: "MEDIA-INSPECTION-FAILURE", Kind: execution.OutputMediaInspection, StorageID: "archive",
+			RelativePath: "staging/JOB-INSPECTION-FAILURE/inspection/result.json",
+		}},
+		Parameters: execution.StepExecutionParameters{
+			ArchiveRunID: "RUN-FAILURE", ArchiveIntakeSessionID: "SESSION-FAILURE", StartIdempotencyKey: "start:failure",
+			SourceStorageID: "source", ArchiveStorageID: "archive", WorkspaceDriveID: "VOLUME-FAILURE",
+			InputRevision: 1, FolderIDs: []string{"broken"}, RequestedBy: "operator-1",
+			RequestedAt: time.Date(2026, 11, 21, 0, 0, 0, 0, time.UTC),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry, err := NewProduction(configuration, roots)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := registry.Execute(context.Background(), workerclient.Assignment{
+		JobID: spec.JobID, StepID: spec.StepID, FencingToken: 3,
+		LeaseExpiresAt: time.Now().Add(time.Minute), ExecutionSpec: spec,
+	})
+	if result.Success || result.ProcessLog == nil || result.ProcessLog.State != execution.ProcessLogAvailable ||
+		result.LogReference != result.ProcessLog.Reference || !strings.HasPrefix(result.LogReference, "evidence://process-log/PLOG-") ||
+		strings.Contains(result.ProcessLog.SanitizedTail, sourcePath) {
+		t.Fatalf("inspection failure evidence mismatch: %+v", result)
+	}
+	info, err := os.Stat(filepath.Join(processLogPath, "process", result.ProcessLog.ID+".log"))
+	if err != nil || info.Size() <= 0 || info.Size() > configuration.ProcessLogs.MaxFileBytes {
+		t.Fatalf("bounded Worker-local process log mismatch: info=%v err=%v", info, err)
+	}
+}
+
 // Requirement: INT-001
 func TestProductionInputInspectionHashesRegisteredStorageFileReadOnly(t *testing.T) {
 	TestWorkerArchiveIntakeInspectionUsesLocalFFprobeAndReturnsOnlyNormalizedPaths(t)

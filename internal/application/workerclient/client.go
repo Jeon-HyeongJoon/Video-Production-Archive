@@ -71,6 +71,7 @@ type ExecutionResult struct {
 	ErrorSummary           string
 	ProcessExitCode        *int
 	LogReference           string
+	ProcessLog             *execution.ProcessLogArtifact
 	Outputs                []execution.StepOutput
 	VerificationReferences []string
 	InspectedMedia         []execution.InspectedMedia
@@ -760,7 +761,7 @@ func (client *Client) reportResult(ctx context.Context, assignment Assignment, r
 		"success": result.Success, "failure_class": result.FailureClass, "wait_reason": result.WaitReason,
 		"wait_target_storage_id": result.WaitTargetStorageID,
 		"error_class":            result.ErrorClass, "cause_code": result.CauseCode, "error_summary": result.ErrorSummary,
-		"process_exit_code": result.ProcessExitCode, "log_reference": result.LogReference, "output_record": outputRecord,
+		"process_exit_code": result.ProcessExitCode, "log_reference": result.LogReference, "process_log": result.ProcessLog, "output_record": outputRecord,
 	})
 	if err != nil {
 		return err

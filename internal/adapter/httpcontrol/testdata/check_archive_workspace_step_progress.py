@@ -7,7 +7,7 @@ with sync_playwright() as playwright:
     browser = playwright.chromium.launch()
     page = browser.new_page(viewport={"width": 1440, "height": 900}, color_scheme="light", locale="ko-KR")
     page.goto(sys.argv[1] + "/#/jobs/JOB-RUNNING", wait_until="networkidle")
-    disclosure = page.locator('#job-steps .step-item[data-step="render"] .step-evidence')
+    disclosure = page.locator('#job-steps .step-item[data-step="render"] .progress-evidence')
     expect(disclosure.locator("summary")).to_have_text("실행 근거 2")
     expect(disclosure.locator("li")).to_have_count(2)
     expect(disclosure.locator("li").first).not_to_be_visible()

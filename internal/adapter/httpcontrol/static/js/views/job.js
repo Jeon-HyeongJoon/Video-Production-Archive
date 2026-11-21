@@ -125,8 +125,23 @@ function stepLine(step) {
   return [
     step.state === "WAITING" && step.wait_reason ? `WAITING · ${step.wait_reason}` : step.state,
     formatPercent(Math.round((step.progress || 0) * 100)), step.worker_id, step.error_class,
-    step.log_reference ? `로그 ${step.log_reference}` : "",
   ].filter(Boolean).join(" · ");
+}
+
+function FailureEvidence({ items }) {
+  if (!items?.length) return null;
+  const available = items.filter((item) => item.process_log?.state === "AVAILABLE").length;
+  return html`<details class="step-evidence failure-evidence"><summary>실패 근거 <span class="num">${items.length}</span> · 상세 ${available}</summary>
+    <ol>${items.map((evidence) => {
+      const processLog = evidence.process_log || {};
+      const state = processLog.state || "LEGACY_UNRESOLVABLE";
+      const detail = state === "AVAILABLE" ? (processLog.sanitized_tail || "상세 없음") : "기록되지 않음";
+      return html`<li key=${evidence.evidence_id} data-log-state=${state}>
+        <time>${clockTime(evidence.observed_at, true)}</time><span><b>${evidence.evidence_id}</b> · ${evidence.operation || "—"} · ${evidence.process_exit_code ?? "종료 코드 없음"} · ${state}
+          <code class="failure-tail">${detail}</code>${processLog.reference ? html`<small>${processLog.reference}</small>` : null}</span>
+      </li>`;
+    })}</ol>
+  </details>`;
 }
 
 function progressEvidenceLine(evidence) {
@@ -140,7 +155,7 @@ function progressEvidenceLine(evidence) {
 
 function ProgressEvidence({ items }) {
   if (!items?.length) return null;
-  return html`<details class="step-evidence"><summary>실행 근거 <span class="num">${items.length}</span></summary>
+  return html`<details class="step-evidence progress-evidence"><summary>실행 근거 <span class="num">${items.length}</span></summary>
     <ol>${items.map((evidence) => html`<li key=${evidence.evidence_id}>
       <time>${clockTime(evidence.observed_at, true)}</time><span>${progressEvidenceLine(evidence)}</span>
     </li>`)}</ol>
@@ -222,6 +237,7 @@ export function JobScreen({ id }) {
             <${StatusIcon} kind=${kind} /><span><b>${label("stage", step.id)}</b><small class="stage-state">${stepLine(step)}</small></span>
             ${step.state === "RUNNING" ? html`<${Meter} value=${step.progress || 0} label="진행" />` : html`<span></span>`}
             <${ProgressEvidence} items=${step.progress_evidence || []} />
+            <${FailureEvidence} items=${step.failure_evidence || []} />
           </li>`;
         }) : html`<${Empty} text=${answer.error ? "상세 조회 실패" : answer.value === undefined ? "불러오는 중" : "단계 없음"} />`}
       </ol>

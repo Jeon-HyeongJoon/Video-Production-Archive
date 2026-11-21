@@ -19,6 +19,7 @@ import (
 	"videoarchive/internal/adapter/ffmpeg"
 	"videoarchive/internal/adapter/ffprobe"
 	"videoarchive/internal/adapter/mediafolder"
+	"videoarchive/internal/adapter/processlog"
 	"videoarchive/internal/adapter/subtitlefile"
 	"videoarchive/internal/adapter/transcripttext"
 	"videoarchive/internal/adapter/whispercpp"
@@ -75,13 +76,26 @@ func NewProduction(configuration workerconfig.Configuration, roots *workerconfig
 		configuration.Tools.FFprobe.Executable == "" {
 		return nil, ErrInvalidRegistry
 	}
+	var subprocessRunner execution.Runner = ffmpeg.OSRunner{}
+	var probeRunner ffprobe.Runner = ffprobe.OSRunner{}
+	if configuration.ProcessLogs != nil {
+		logRunner, runnerErr := processlog.NewRunner(roots.ProcessLogRoot(), processlog.Policy{
+			MaxFileBytes: configuration.ProcessLogs.MaxFileBytes, TailBytes: configuration.ProcessLogs.TailBytes,
+			Retention: configuration.ProcessLogs.Retention, MaxTotalBytes: configuration.ProcessLogs.MaxTotalBytes,
+		})
+		if runnerErr != nil {
+			return nil, errors.Join(ErrInvalidRegistry, runnerErr)
+		}
+		subprocessRunner = logRunner
+		probeRunner = logRunner
+	}
 	inspector, err := ffprobe.NewInspector(
-		configuration.Tools.FFprobe.Executable, configuration.Tools.FFprobe.Version, configuration.ID, ffprobe.OSRunner{},
+		configuration.Tools.FFprobe.Executable, configuration.Tools.FFprobe.Version, configuration.ID, probeRunner,
 	)
 	if err != nil {
 		return nil, errors.Join(ErrInvalidRegistry, err)
 	}
-	media := &mediaOperations{configuration: configuration, inspector: inspector, now: func() time.Time { return time.Now().UTC() }}
+	media := &mediaOperations{configuration: configuration, inspector: inspector, runner: subprocessRunner, now: func() time.Time { return time.Now().UTC() }}
 	handlers := []Handler{
 		&inspectionOperationHandler{operations: media},
 		media.handler(execution.OperationRenderRecording, media.renderRecording),
@@ -217,6 +231,7 @@ func stableInspectionID(prefix string, values ...string) string {
 type mediaOperations struct {
 	configuration workerconfig.Configuration
 	inspector     *ffprobe.Inspector
+	runner        execution.Runner
 	now           func() time.Time
 }
 
@@ -308,7 +323,7 @@ func (operations *mediaOperations) renderRecording(ctx context.Context, spec exe
 		verifier := storageOutputVerifier{ctx: ctx, inspector: operations.inspector, root: outputRoot, relative: temporaryRelative, resolved: publisher.temporaryResolved}
 		renderer, err := ffmpeg.NewRenderer(
 			operations.configuration.Tools.FFmpeg.Executable, operations.configuration.Tools.FFmpeg.Version,
-			operations.configuration.ID, ffmpeg.OSRunner{}, verifier, publisher,
+			operations.configuration.ID, operations.runner, verifier, publisher,
 		)
 		if err != nil {
 			return nil, nil, err
@@ -357,7 +372,7 @@ func (operations *mediaOperations) renderSourceSequence(ctx context.Context, spe
 	verifier := storageOutputVerifier{ctx: ctx, inspector: operations.inspector, root: outputRoot, relative: temporaryVideo, resolved: publisher.temporaryResolved}
 	renderer, err := ffmpeg.NewSequenceRenderer(
 		operations.configuration.Tools.FFmpeg.Executable, operations.configuration.Tools.FFmpeg.Version,
-		operations.configuration.ID, ffmpeg.OSRunner{}, verifier, publisher, outputRoot,
+		operations.configuration.ID, operations.runner, verifier, publisher, outputRoot,
 	)
 	if err != nil {
 		return nil, nil, err
@@ -530,7 +545,7 @@ func (operations *mediaOperations) extractSpeechAudio(ctx context.Context, spec 
 		verifier := storageOutputVerifier{ctx: ctx, inspector: operations.inspector, root: outputRoot, relative: temporaryRelative, resolved: publisher.temporaryResolved}
 		extractor, err := ffmpeg.NewAudioExtractor(
 			operations.configuration.Tools.FFmpeg.Executable, operations.configuration.Tools.FFmpeg.Version,
-			operations.configuration.ID, ffmpeg.OSRunner{}, verifier, publisher,
+			operations.configuration.ID, operations.runner, verifier, publisher,
 		)
 		if err != nil {
 			return nil, nil, err
@@ -593,7 +608,7 @@ func (operations *mediaOperations) transcribeAudio(ctx context.Context, spec exe
 		if err != nil {
 			return nil, nil, err
 		}
-		transcriber, err := whispercpp.NewTranscriber(tool.Executable, tool.Version, operations.configuration.ID, whispercpp.OSRunner{}, publisher)
+		transcriber, err := whispercpp.NewTranscriber(tool.Executable, tool.Version, operations.configuration.ID, operations.runner, publisher)
 		if err != nil {
 			return nil, nil, err
 		}

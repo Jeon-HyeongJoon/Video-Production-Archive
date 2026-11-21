@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"videoarchive/internal/application/archivework"
 	"videoarchive/internal/application/archiveworkspace"
@@ -23,6 +24,7 @@ import (
 
 var (
 	ErrInvalidConfiguration = errors.New("work diagnostics configuration is invalid")
+	ErrEvidenceNotFound     = errors.New("failure evidence is not part of the bound work")
 )
 
 type WorkReader interface {
@@ -132,6 +134,34 @@ type Snapshot struct {
 	Fingerprint      string                    `json:"fingerprint"`
 }
 
+type FailureDetail struct {
+	WorkKind        archivistruntime.WorkKind    `json:"work_kind"`
+	WorkID          string                       `json:"work_id"`
+	JobID           string                       `json:"job_id"`
+	StepID          string                       `json:"step_id"`
+	EvidenceID      string                       `json:"evidence_id"`
+	Operation       execution.Operation          `json:"operation"`
+	ProcessExitCode *int                         `json:"process_exit_code,omitempty"`
+	ObservedAt      time.Time                    `json:"observed_at"`
+	ProcessLog      execution.ProcessLogArtifact `json:"process_log"`
+}
+
+func SanitizeFailureDetail(source FailureDetail) FailureDetail {
+	result := source
+	result.EvidenceID = safeEvidenceID(source.EvidenceID, source.JobID+"\x00"+source.StepID)
+	result.ProcessLog.Reference = safeLogReference(source.ProcessLog.Reference)
+	result.ProcessLog.SanitizedTail = safeProcessTail(source.ProcessLog.SanitizedTail)
+	if result.ProcessLog.Validate() != nil {
+		id := result.ProcessLog.ID
+		if id == "" {
+			digest := sha256.Sum256([]byte(result.EvidenceID + "\x00invalid-process-log"))
+			id = "PLOG-REDACTED-" + strings.ToUpper(hex.EncodeToString(digest[:8]))
+		}
+		result.ProcessLog = execution.ProcessLogArtifact{ID: id, Reference: "evidence://process-log/" + id, State: execution.ProcessLogCaptureFailed}
+	}
+	return result
+}
+
 type Service struct {
 	works      WorkReader
 	jobs       JobReader
@@ -213,6 +243,44 @@ func (service *Service) Diagnose(ctx context.Context, reference archivistruntime
 	return result, nil
 }
 
+func (service *Service) FailureEvidence(ctx context.Context, reference archivistruntime.WorkReference, evidenceID string) (FailureDetail, error) {
+	reference, err := archivistruntime.NewWorkReference(reference)
+	if err != nil || strings.TrimSpace(evidenceID) == "" {
+		return FailureDetail{}, ErrEvidenceNotFound
+	}
+	jobIDs := []string{reference.WorkID}
+	if reference.Kind == archivistruntime.WorkArchiveRun {
+		view, loadErr := service.works.Detail(ctx, reference.WorkID)
+		if loadErr != nil {
+			return FailureDetail{}, loadErr
+		}
+		jobIDs = jobIDs[:0]
+		for _, child := range view.Children {
+			jobIDs = append(jobIDs, child.Job.JobID)
+		}
+	}
+	for _, jobID := range jobIDs {
+		view, loadErr := service.jobs.Detail(ctx, jobID)
+		if loadErr != nil {
+			return FailureDetail{}, loadErr
+		}
+		for _, step := range view.Steps {
+			for _, source := range step.FailureEvidence {
+				if source.EvidenceID != evidenceID {
+					continue
+				}
+				evidence := sanitizeFailureEvidenceWithTail(source)
+				return FailureDetail{
+					WorkKind: reference.Kind, WorkID: reference.WorkID, JobID: jobID, StepID: evidence.StepID,
+					EvidenceID: evidence.EvidenceID, Operation: evidence.Operation, ProcessExitCode: evidence.ProcessExitCode,
+					ObservedAt: evidence.ObservedAt, ProcessLog: *evidence.ProcessLog,
+				}, nil
+			}
+		}
+	}
+	return FailureDetail{}, ErrEvidenceNotFound
+}
+
 func (service *Service) diagnoseJob(ctx context.Context, view archiveworkspace.JobView, workers map[string]worker.Status, recoveryJobs map[string]archiveworkspace.JobSummary, now time.Time) (JobDiagnostic, []Fact, []Hypothesis, []SuggestedAction, []RecoveryAction, bool, error) {
 	summary := view.Summary
 	item := JobDiagnostic{
@@ -275,17 +343,17 @@ func (service *Service) diagnoseJob(ctx context.Context, view archiveworkspace.J
 		facts = append(facts, diagnosticFact("WORKER_STATE_OBSERVED", "Worker "+status.WorkerID+" is "+status.State, now,
 			summary.JobID, status.WorkerID, status.State, now.Format(time.RFC3339Nano)))
 	}
-	execution, found, err := service.executions.ActiveExecution(ctx, summary.JobID, summary.CurrentStepID)
+	executionObservation, found, err := service.executions.ActiveExecution(ctx, summary.JobID, summary.CurrentStepID)
 	if err != nil {
 		return JobDiagnostic{}, nil, nil, nil, nil, false, err
 	}
 	if found {
-		item.Execution = &execution
-		facts = append(facts, diagnosticFact("RESOURCE_RESERVED", "The current Step has an active resource reservation", execution.ReservedAt,
-			summary.JobID, summary.CurrentStepID, execution.ReservationID))
-		if execution.HasLease {
-			facts = append(facts, diagnosticFact("LEASE_HEARTBEAT_OBSERVED", "The Worker execution loop renewed its lease", execution.LeaseHeartbeatAt,
-				summary.JobID, summary.CurrentStepID, strconv.FormatUint(execution.FencingToken, 10), execution.LeaseHeartbeatAt.Format(time.RFC3339Nano)))
+		item.Execution = &executionObservation
+		facts = append(facts, diagnosticFact("RESOURCE_RESERVED", "The current Step has an active resource reservation", executionObservation.ReservedAt,
+			summary.JobID, summary.CurrentStepID, executionObservation.ReservationID))
+		if executionObservation.HasLease {
+			facts = append(facts, diagnosticFact("LEASE_HEARTBEAT_OBSERVED", "The Worker execution loop renewed its lease", executionObservation.LeaseHeartbeatAt,
+				summary.JobID, summary.CurrentStepID, strconv.FormatUint(executionObservation.FencingToken, 10), executionObservation.LeaseHeartbeatAt.Format(time.RFC3339Nano)))
 		}
 	}
 	var hypotheses []Hypothesis
@@ -297,7 +365,11 @@ func (service *Service) diagnoseJob(ctx context.Context, view archiveworkspace.J
 		report = true
 		facts = append(facts, diagnosticFact("REPORTED_FAILURE", "The Step reported "+item.ErrorClass, summary.LastEventAt,
 			summary.JobID, summary.CurrentStepID, item.ErrorClass, summary.LastEventAt.Format(time.RFC3339Nano)))
-		actions = append(actions, SuggestedAction{Code: "INSPECT_FAILURE", Summary: "Review the structured error and safe log reference before retrying"})
+		if latestProcessLog(item.FailureEvidence) == execution.ProcessLogAvailable {
+			actions = append(actions, SuggestedAction{Code: "INSPECT_FAILURE_DETAIL", Summary: "Read the available persisted failure evidence detail before retrying"})
+		} else {
+			actions = append(actions, SuggestedAction{Code: "FAILURE_DETAIL_UNAVAILABLE", Summary: "Use the structured failure fields because process detail was not recorded"})
+		}
 		if latest, ok := retryableTerminalArchiveFailure(item, summary.CurrentStepID); ok && !found {
 			if recovery, exists := recoveryJobs[latest.EvidenceID]; exists {
 				facts = append(facts, diagnosticFact("TERMINAL_RECOVERY_JOB_CREATED", "A replacement recovery Job preserves and follows the terminal failure", recovery.LastEventAt,
@@ -320,26 +392,26 @@ func (service *Service) diagnoseJob(ctx context.Context, view archiveworkspace.J
 			actions = append(actions, SuggestedAction{Code: "RESOLVE_WAIT", Summary: "Show the persisted wait target and ask for the required human action"})
 		}
 	}
-	if active && (!found || !execution.HasLease) {
+	if active && (!found || !executionObservation.HasLease) {
 		report = true
 		facts = append(facts, diagnosticFact("EXECUTION_LEASE_MISSING", "The active Step has no current execution lease", now,
 			summary.JobID, summary.CurrentStepID, now.Format(time.RFC3339Nano)))
 		actions = append(actions, SuggestedAction{Code: "RECONCILE_EXECUTION", Summary: "Reconcile the Step lifecycle before assigning duplicate work"})
-	} else if active && !now.Before(execution.LeaseExpiresAt) {
+	} else if active && !now.Before(executionObservation.LeaseExpiresAt) {
 		report = true
-		facts = append(facts, diagnosticFact("EXECUTION_LEASE_EXPIRED", "The active Step execution lease expired", execution.LeaseExpiresAt,
-			summary.JobID, summary.CurrentStepID, execution.LeaseExpiresAt.Format(time.RFC3339Nano)))
+		facts = append(facts, diagnosticFact("EXECUTION_LEASE_EXPIRED", "The active Step execution lease expired", executionObservation.LeaseExpiresAt,
+			summary.JobID, summary.CurrentStepID, executionObservation.LeaseExpiresAt.Format(time.RFC3339Nano)))
 		actions = append(actions, SuggestedAction{Code: "RECONCILE_EXECUTION", Summary: "Confirm the Worker process state and recover the expired lease"})
 		basis := facts[len(facts)-1].EvidenceID
 		recoveries = append(recoveries, RecoveryAction{
 			ActionCode: "RECONCILE_EXPIRED_EXECUTION", JobID: summary.JobID, JobRevision: summary.Revision,
-			StepID: summary.CurrentStepID, ReservationID: execution.ReservationID, FencingToken: execution.FencingToken,
+			StepID: summary.CurrentStepID, ReservationID: executionObservation.ReservationID, FencingToken: executionObservation.FencingToken,
 			Basis: []string{basis},
 		})
 	}
-	if found && execution.HasLease && item.Worker != nil && (summary.StepState == workflow.Running || summary.StepState == workflow.Verifying) &&
-		((execution.ResourceClass == vocabulary.ResourceHeavy && item.Worker.ReportedHeavyRunning == 0) ||
-			(execution.ResourceClass == vocabulary.ResourceLight && item.Worker.ReportedLightRunning == 0)) {
+	if found && executionObservation.HasLease && item.Worker != nil && (summary.StepState == workflow.Running || summary.StepState == workflow.Verifying) &&
+		((executionObservation.ResourceClass == vocabulary.ResourceHeavy && item.Worker.ReportedHeavyRunning == 0) ||
+			(executionObservation.ResourceClass == vocabulary.ResourceLight && item.Worker.ReportedLightRunning == 0)) {
 		report = true
 		mismatchFact := diagnosticFact("RESERVATION_LOAD_MISMATCH", "Control has an active execution reservation that the latest Worker load snapshot does not report", now,
 			summary.JobID, summary.CurrentStepID, summary.WorkerID, now.Format(time.RFC3339Nano))
@@ -412,12 +484,33 @@ func diagnosticFact(code, summary string, observedAt time.Time, identity ...stri
 }
 
 func sanitizeFailureEvidence(source corejob.StepFailureEvidence) corejob.StepFailureEvidence {
+	result := sanitizeFailureEvidenceWithTail(source)
+	if result.ProcessLog != nil {
+		copy := *result.ProcessLog
+		copy.SanitizedTail = ""
+		result.ProcessLog = &copy
+	}
+	return result
+}
+
+func sanitizeFailureEvidenceWithTail(source corejob.StepFailureEvidence) corejob.StepFailureEvidence {
 	result := source
 	result.EvidenceID = safeEvidenceID(source.EvidenceID, source.StepID+"\x00"+strconv.FormatUint(source.FencingToken, 10))
 	result.ErrorClass = safeDiagnosticCode(source.ErrorClass, "WORKER_REPORTED_FAILURE")
 	result.CauseCode = safeDiagnosticCode(source.CauseCode, result.ErrorClass)
 	result.LogReference = safeLogReference(source.LogReference)
 	result.Summary = safeDiagnosticSummary(source.Summary)
+	if source.ProcessLog != nil && source.ProcessLog.Validate() == nil {
+		copy := *source.ProcessLog
+		copy.SanitizedTail = safeProcessTail(copy.SanitizedTail)
+		result.ProcessLog = &copy
+	} else {
+		digest := sha256.Sum256([]byte(result.EvidenceID + "\x00legacy-process-log"))
+		id := "PLOG-LEGACY-" + strings.ToUpper(hex.EncodeToString(digest[:8]))
+		result.ProcessLog = &execution.ProcessLogArtifact{
+			ID: id, Reference: "evidence://process-log/" + id, State: execution.ProcessLogLegacyUnresolvable,
+		}
+	}
 	if result.ProcessExitCode != nil {
 		value := *result.ProcessExitCode
 		if value < 0 {
@@ -427,6 +520,41 @@ func sanitizeFailureEvidence(source corejob.StepFailureEvidence) corejob.StepFai
 		}
 	}
 	return result
+}
+
+// SanitizeFailureEvidenceForDisclosure returns the bounded detail intended for
+// an explicit UI disclosure. General diagnostics use the tail-free projection.
+func SanitizeFailureEvidenceForDisclosure(source corejob.StepFailureEvidence) corejob.StepFailureEvidence {
+	return sanitizeFailureEvidenceWithTail(source)
+}
+
+func latestProcessLog(evidence []corejob.StepFailureEvidence) execution.ProcessLogState {
+	if len(evidence) == 0 || evidence[len(evidence)-1].ProcessLog == nil {
+		return execution.ProcessLogLegacyUnresolvable
+	}
+	return evidence[len(evidence)-1].ProcessLog.State
+}
+
+func safeProcessTail(value string) string {
+	value = strings.TrimSpace(strings.ToValidUTF8(value, "�"))
+	if len(value) > 16<<10 {
+		value = value[len(value)-(16<<10):]
+		for !utf8.ValidString(value) && len(value) > 0 {
+			value = value[1:]
+		}
+	}
+	lines := strings.Split(value, "\n")
+	for index, line := range lines {
+		lower := strings.ToLower(line)
+		if strings.Contains(line, "\\") || strings.Contains(line, "@") || strings.Contains(lower, "/users/") ||
+			strings.Contains(lower, "/home/") || strings.Contains(lower, "/private/") || strings.Contains(lower, "/tmp/") ||
+			strings.Contains(lower, "password") || strings.Contains(lower, "credential") || strings.Contains(lower, "bearer ") ||
+			strings.Contains(lower, "api_key") || strings.Contains(lower, "apikey") || strings.Contains(lower, "secret=") ||
+			strings.Contains(lower, "token=") || strings.Contains(lower, "cookie=") {
+			lines[index] = "[REDACTED PROCESS OUTPUT]"
+		}
+	}
+	return strings.TrimSpace(strings.Join(lines, "\n"))
 }
 
 func safeEvidenceID(value, fallbackSeed string) string {
@@ -478,7 +606,7 @@ func safeLogReference(value string) string {
 	}
 	if strings.Contains(value, "://") {
 		scheme := strings.SplitN(value, "://", 2)[0]
-		if scheme != "worker" && scheme != "media" && scheme != "archive" && scheme != "fixture" {
+		if scheme != "worker" && scheme != "media" && scheme != "archive" && scheme != "fixture" && scheme != "evidence" {
 			return ""
 		}
 		return value

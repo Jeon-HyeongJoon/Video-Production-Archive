@@ -27,6 +27,7 @@ import (
 	"videoarchive/internal/core/archivistruntime"
 	"videoarchive/internal/core/catalog"
 	"videoarchive/internal/core/command"
+	"videoarchive/internal/core/execution"
 	corejob "videoarchive/internal/core/job"
 	"videoarchive/internal/core/mediaanalysis"
 	"videoarchive/internal/core/organization"
@@ -294,6 +295,18 @@ func (fixture fixedWorkDiagnostics) Diagnose(context.Context, archivistruntime.W
 	return fixture.snapshot, nil
 }
 
+type fixedFailureEvidenceReader struct {
+	reference archivistruntime.WorkReference
+	detail    workdiagnostics.FailureDetail
+}
+
+func (fixture fixedFailureEvidenceReader) FailureEvidence(_ context.Context, reference archivistruntime.WorkReference, evidenceID string) (workdiagnostics.FailureDetail, error) {
+	if reference != fixture.reference || evidenceID != fixture.detail.EvidenceID {
+		return workdiagnostics.FailureDetail{}, workdiagnostics.ErrEvidenceNotFound
+	}
+	return fixture.detail, nil
+}
+
 type systemStatusWorks []archivework.Summary
 
 func (fixture systemStatusWorks) Inbox(context.Context) ([]archivework.Summary, error) {
@@ -449,6 +462,52 @@ func TestMCPReadsBoundWorkDiagnosticsWithoutRawLogsOrPaths(t *testing.T) {
 		if strings.Contains(strings.ToLower(body), strings.ToLower(forbidden)) {
 			t.Fatalf("diagnostic exposed raw log or secret material: %s", body)
 		}
+	}
+}
+
+// Requirement: MCP-013
+func TestMCPReadsOnlyBoundSanitizedFailureEvidenceDetail(t *testing.T) {
+	reference := archivistruntime.WorkReference{Kind: archivistruntime.WorkJob, WorkID: "JOB-DETAIL-1", Revision: 4}
+	detail := workdiagnostics.FailureDetail{
+		WorkKind: reference.Kind, WorkID: reference.WorkID, JobID: reference.WorkID, StepID: "render",
+		EvidenceID: "EVD-WORKER-DETAIL", Operation: execution.OperationRenderRecording,
+		ObservedAt: time.Date(2026, 11, 21, 10, 0, 0, 0, time.UTC),
+		ProcessLog: execution.ProcessLogArtifact{
+			ID: "PLOG-DETAIL", Reference: "evidence://process-log/PLOG-DETAIL", State: execution.ProcessLogAvailable,
+			Digest: "sha256:detail", CapturedBytes: 90, TotalBytes: 90,
+			SanitizedTail: "decoder failed at C:\\private\\video.mov\ntoken=secret-value\nunsupported codec profile",
+		},
+	}
+	handler, err := New(Configuration{
+		Archivists: fixtureArchivistRuntime{work: &reference}, Catalog: fixtureCatalog{},
+		ArchiveWorkspace: fixtureArchiveWorkspace{}, Commands: fixtureCommands{},
+		WorkDiagnostics:     fixedWorkDiagnostics{snapshot: workdiagnostics.Snapshot{WorkKind: reference.Kind, WorkID: reference.WorkID}},
+		WorkFailureEvidence: fixedFailureEvidenceReader{reference: reference, detail: detail},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := mcpTestRequest(handler, http.MethodPost, "/mcp/v1/call",
+		archiveToolCall("CALL-FAILURE-DETAIL", ToolWorkFailureEvidenceGet, `{"evidence_id":"EVD-WORKER-DETAIL"}`), "secret")
+	body := response.Body.String()
+	if response.Code != http.StatusOK || !strings.Contains(body, `"evidence_id":"EVD-WORKER-DETAIL"`) ||
+		!strings.Contains(body, `"state":"AVAILABLE"`) || !strings.Contains(body, "unsupported codec profile") ||
+		!strings.Contains(body, `"reference":"evidence://process-log/PLOG-DETAIL"`) {
+		t.Fatalf("bound failure detail was not returned: %d %s", response.Code, body)
+	}
+	for _, forbidden := range []string{`C:\private`, "secret-value", "password", "credential"} {
+		if strings.Contains(strings.ToLower(body), strings.ToLower(forbidden)) {
+			t.Fatalf("failure detail exposed raw path or credential: %s", body)
+		}
+	}
+	wrong := mcpTestRequest(handler, http.MethodPost, "/mcp/v1/call",
+		archiveToolCall("CALL-OTHER-DETAIL", ToolWorkFailureEvidenceGet, `{"evidence_id":"EVD-OTHER-WORK"}`), "secret")
+	if wrong.Code != http.StatusNotFound {
+		t.Fatalf("other work evidence was readable: %d %s", wrong.Code, wrong.Body.String())
+	}
+	definitions, mapping := archivistloop.SelectTools([]archivistloop.AvailableTool{{Name: ToolWorkFailureEvidenceGet, ActionClass: string(vocabulary.ActionRead)}})
+	if len(definitions) != 1 || mapping["archive_work_failure_evidence_get_v1"].Name != ToolWorkFailureEvidenceGet {
+		t.Fatalf("Archivist loop did not expose failure detail capability: definitions=%+v mapping=%+v", definitions, mapping)
 	}
 }
 

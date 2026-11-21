@@ -8,6 +8,7 @@ $secrets = Join-Path $root 'secrets'
 $ready = Join-Path $root 'integration.ready.json'
 New-Item -ItemType Directory -Force -Path (Join-Path $root 'workspace') | Out-Null
 New-Item -ItemType Directory -Force -Path $secrets | Out-Null
+New-Item -ItemType Directory -Force -Path (Join-Path $logs 'operations') | Out-Null
 
 try {
     $existing = Invoke-RestMethod -Uri 'http://127.0.0.1:18080/healthz' -TimeoutSec 2

@@ -117,6 +117,9 @@ func (registry *Registry) ExecuteOperation(ctx context.Context, spec execution.S
 	var inspectedMedia []execution.InspectedMedia
 	var err error
 	attemptContext := context.WithValue(ctx, executionAttemptContextKey{}, executionToken)
+	attemptContext = execution.WithProcessContext(attemptContext, execution.ProcessContext{
+		JobID: spec.JobID, StepID: spec.StepID, Operation: spec.Operation, FencingToken: executionToken,
+	})
 	releaseOutputLocks, lockErr := registry.acquireOutputLocks(attemptContext, spec)
 	if lockErr != nil {
 		if ctx.Err() != nil {
@@ -157,10 +160,18 @@ func (registry *Registry) ExecuteOperation(ctx context.Context, spec execution.S
 			return failure
 		}
 		causeCode, summary, exitCode := operationFailureDetails(spec.Operation, err)
+		var processFailure *execution.ProcessFailure
+		var processLog *execution.ProcessLogArtifact
+		logReference := "worker://operation-failed"
+		if errors.As(err, &processFailure) && processFailure.Artifact.Validate() == nil {
+			artifact := processFailure.Artifact
+			processLog = &artifact
+			logReference = artifact.Reference
+		}
 		return workerclient.ExecutionResult{
 			FailureClass: workflow.FailureTransient, ErrorClass: "STEP_EXECUTION_FAILED",
 			CauseCode: causeCode, ErrorSummary: summary, ProcessExitCode: exitCode,
-			LogReference: "worker://operation-failed",
+			LogReference: logReference, ProcessLog: processLog,
 		}
 	}
 	validationWorkerID := "registry-validation"

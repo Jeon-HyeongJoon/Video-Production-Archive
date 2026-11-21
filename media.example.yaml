@@ -1,6 +1,12 @@
 schema_version: 1
 media:
   id: media-local
+  process_logs:
+    root: /absolute/path/to/local-process-logs
+    max_file_bytes: 4194304
+    tail_bytes: 12288
+    retention: 336h
+    max_total_bytes: 268435456
   storage_roots:
     - storage_id: source-main
       root: /absolute/path/to/source

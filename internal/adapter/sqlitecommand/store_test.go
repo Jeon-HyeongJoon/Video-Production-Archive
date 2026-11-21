@@ -213,11 +213,16 @@ func TestWorkerFailureEvidenceCommitsAtomicallyAndSurvivesResultReplay(t *testin
 		t.Fatal(err)
 	}
 	exitCode := 23
+	processLog := &execution.ProcessLogArtifact{
+		ID: "PLOG-FAILURE-EVIDENCE", Reference: "evidence://process-log/PLOG-FAILURE-EVIDENCE",
+		State: execution.ProcessLogAvailable, Digest: "sha256:failure-log", CapturedBytes: 128, TotalBytes: 256,
+		Truncated: true, SanitizedTail: "muxer rejected output header",
+	}
 	report := workercontrol.Result{
 		WorkerID: "worker-windows", JobID: assignment.JobID, StepID: assignment.StepID, FencingToken: assignment.FencingToken,
 		FailureClass: workflow.FailureTransient, ErrorClass: "STEP_EXECUTION_FAILED", CauseCode: "PROCESS_EXIT_NONZERO",
 		ErrorSummary: "Archive media organization operation failed", ProcessExitCode: &exitCode,
-		LogReference: "worker://operation-failed",
+		LogReference: processLog.Reference, ProcessLog: processLog,
 	}
 	if _, err := store.SettleWorkerStep(ctx, report, now.Add(2*time.Second)); err == nil {
 		t.Fatal("injected Worker receipt failure did not roll back settlement")
@@ -248,7 +253,8 @@ func TestWorkerFailureEvidenceCommitsAtomicallyAndSurvivesResultReplay(t *testin
 		evidence.FailureSequence != 1 || evidence.WorkflowAttempt != 1 || evidence.WorkerID != report.WorkerID ||
 		evidence.FencingToken != assignment.FencingToken || evidence.CauseCode != report.CauseCode ||
 		evidence.ProcessExitCode == nil || *evidence.ProcessExitCode != exitCode || evidence.Summary != report.ErrorSummary ||
-		evidence.LogReference != report.LogReference || evidence.ResultingState != workflow.Queued {
+		evidence.LogReference != report.LogReference || evidence.ProcessLog == nil || evidence.ProcessLog.ID != processLog.ID ||
+		evidence.ProcessLog.SanitizedTail != processLog.SanitizedTail || evidence.ResultingState != workflow.Queued {
 		t.Fatalf("persisted failure evidence is incomplete: %+v", evidence)
 	}
 	var eventPayload []byte

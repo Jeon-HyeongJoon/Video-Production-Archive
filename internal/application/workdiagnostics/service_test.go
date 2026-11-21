@@ -79,6 +79,64 @@ func TestWorkDiagnosticsExposePersistedFailureEvidenceAsFactsWithoutRawProcessDa
 	}
 }
 
+// Requirement: OBS-004
+func TestWorkDiagnosticsExposeAvailableDetailAndMarkLegacyReferenceUnresolvable(t *testing.T) {
+	now := time.Date(2026, 11, 21, 9, 0, 0, 0, time.UTC)
+	exitCode := 22
+	artifact := &execution.ProcessLogArtifact{
+		ID: "PLOG-A1B2C3", Reference: "evidence://process-log/PLOG-A1B2C3", State: execution.ProcessLogAvailable,
+		Digest: "sha256:process-log", CapturedBytes: 140, TotalBytes: 240, Truncated: true,
+		SanitizedTail: "decoder rejected the input stream\ntoken=should-not-leave-control",
+	}
+	failure := corejob.StepFailureEvidence{
+		EvidenceID: "EVD-WORKER-PROCESS", StepID: "render", Operation: execution.OperationRenderRecording,
+		FailureSequence: 1, WorkflowAttempt: 1, WorkerID: "WORKER-1", FencingToken: 8,
+		FailureClass: workflow.FailureTransient, ErrorClass: "STEP_EXECUTION_FAILED", CauseCode: "PROCESS_EXIT_NONZERO",
+		Summary: "Render process failed", ProcessExitCode: &exitCode, LogReference: artifact.Reference, ProcessLog: artifact,
+		ObservedAt: now.Add(-time.Minute), ResultingState: workflow.Failed,
+	}
+	view := archiveworkspace.JobView{
+		Summary: archiveworkspace.JobSummary{JobID: "JOB-PROCESS", Revision: 5, CurrentStepID: "render", StepState: workflow.Failed,
+			ErrorClass: failure.ErrorClass, LastEventAt: failure.ObservedAt},
+		Steps: []archiveworkspace.StepStatus{{ID: "render", State: workflow.Failed, FailureEvidence: []corejob.StepFailureEvidence{failure}}},
+	}
+	service, err := New(fixedWorkReader{}, fixedJobReader{view: view}, fixedWorkerReader{}, fixedExecutionReader{}, func() time.Time { return now }, 10*time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reference := archivistruntime.WorkReference{Kind: archivistruntime.WorkJob, WorkID: "JOB-PROCESS", Revision: 5}
+	diagnostic, err := service.Diagnose(context.Background(), reference)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projected := diagnostic.Jobs[0].FailureEvidence[0]
+	if projected.ProcessLog == nil || projected.ProcessLog.State != execution.ProcessLogAvailable || projected.ProcessLog.SanitizedTail != "" ||
+		!hasSuggestedAction(diagnostic.SuggestedActions, "INSPECT_FAILURE_DETAIL") {
+		t.Fatalf("available detail was not projected safely: %+v", diagnostic)
+	}
+	detail, err := service.FailureEvidence(context.Background(), reference, failure.EvidenceID)
+	if err != nil || detail.ProcessLog.State != execution.ProcessLogAvailable ||
+		!strings.Contains(detail.ProcessLog.SanitizedTail, "decoder rejected") || strings.Contains(strings.ToLower(detail.ProcessLog.SanitizedTail), "should-not-leave") {
+		t.Fatalf("failure detail was not independently sanitized: detail=%+v err=%v", detail, err)
+	}
+
+	legacy := failure
+	legacy.EvidenceID = "EVD-WORKER-LEGACY"
+	legacy.LogReference = "worker://operation-failed"
+	legacy.ProcessLog = nil
+	view.Steps[0].FailureEvidence = []corejob.StepFailureEvidence{legacy}
+	service, _ = New(fixedWorkReader{}, fixedJobReader{view: view}, fixedWorkerReader{}, fixedExecutionReader{}, func() time.Time { return now }, 10*time.Minute)
+	diagnostic, err = service.Diagnose(context.Background(), reference)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projected = diagnostic.Jobs[0].FailureEvidence[0]
+	if projected.ProcessLog == nil || projected.ProcessLog.State != execution.ProcessLogLegacyUnresolvable ||
+		hasSuggestedAction(diagnostic.SuggestedActions, "INSPECT_FAILURE_DETAIL") || !hasSuggestedAction(diagnostic.SuggestedActions, "FAILURE_DETAIL_UNAVAILABLE") {
+		t.Fatalf("legacy reference was presented as resolvable: %+v", diagnostic)
+	}
+}
+
 type fixedJobReader struct {
 	view  archiveworkspace.JobView
 	inbox []archiveworkspace.JobSummary
@@ -259,6 +317,15 @@ func hasFactEvidence(values []Fact, code, evidenceID string) bool {
 }
 
 func hasHypothesis(values []Hypothesis, code string) bool {
+	for _, value := range values {
+		if value.Code == code {
+			return true
+		}
+	}
+	return false
+}
+
+func hasSuggestedAction(values []SuggestedAction, code string) bool {
 	for _, value := range values {
 		if value.Code == code {
 			return true

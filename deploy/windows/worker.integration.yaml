@@ -5,6 +5,12 @@ worker:
   credential_ref: dpapi://C:/Archive/secrets/worker-windows.dpapi
   heartbeat_interval: 5s
   claim_interval: 1s
+  process_logs:
+    root: C:/Archive/logs/operations
+    max_file_bytes: 4194304
+    tail_bytes: 12288
+    retention: 336h
+    max_total_bytes: 268435456
   storage_roots:
     - storage_id: scratch-windows
       root: C:/Archive/workspace

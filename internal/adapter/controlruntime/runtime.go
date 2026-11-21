@@ -366,9 +366,10 @@ func OpenWithDependencies(ctx context.Context, configuration bootconfig.Configur
 		Archivists: archivists, Catalog: catalogStore, ArchiveWorkspace: queries, Commands: jobCommands,
 		Drives: mcpArchiveIntake, IntakeSelector: mcpArchiveIntakeSelector,
 		ArchiveRuns: mcpArchiveRuns, ArchiveTranscriptions: mcpArchiveTranscriptions,
-		WorkDiagnostics: workDiagnostics,
-		WorkRecovery:    workRecovery,
-		SystemStatus:    systemStatus,
+		WorkDiagnostics:     workDiagnostics,
+		WorkFailureEvidence: workDiagnostics,
+		WorkRecovery:        workRecovery,
+		SystemStatus:        systemStatus,
 	})
 	if err != nil {
 		return fail(err)

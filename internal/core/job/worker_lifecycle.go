@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"videoarchive/internal/core/command"
 	"videoarchive/internal/core/execution"
@@ -41,18 +42,19 @@ type ReportWorkerStepProgressParameters struct {
 }
 
 type SettleWorkerStepParameters struct {
-	StepID              string                      `json:"step_id"`
-	FencingToken        uint64                      `json:"fencing_token"`
-	Success             bool                        `json:"success"`
-	FailureClass        workflow.FailureClass       `json:"failure_class,omitempty"`
-	WaitReason          vocabulary.WaitReason       `json:"wait_reason,omitempty"`
-	WaitTargetStorageID string                      `json:"wait_target_storage_id,omitempty"`
-	ErrorClass          string                      `json:"error_class,omitempty"`
-	CauseCode           string                      `json:"cause_code,omitempty"`
-	ErrorSummary        string                      `json:"error_summary,omitempty"`
-	ProcessExitCode     *int                        `json:"process_exit_code,omitempty"`
-	LogReference        string                      `json:"log_reference,omitempty"`
-	OutputRecord        *execution.StepOutputRecord `json:"output_record,omitempty"`
+	StepID              string                        `json:"step_id"`
+	FencingToken        uint64                        `json:"fencing_token"`
+	Success             bool                          `json:"success"`
+	FailureClass        workflow.FailureClass         `json:"failure_class,omitempty"`
+	WaitReason          vocabulary.WaitReason         `json:"wait_reason,omitempty"`
+	WaitTargetStorageID string                        `json:"wait_target_storage_id,omitempty"`
+	ErrorClass          string                        `json:"error_class,omitempty"`
+	CauseCode           string                        `json:"cause_code,omitempty"`
+	ErrorSummary        string                        `json:"error_summary,omitempty"`
+	ProcessExitCode     *int                          `json:"process_exit_code,omitempty"`
+	LogReference        string                        `json:"log_reference,omitempty"`
+	ProcessLog          *execution.ProcessLogArtifact `json:"process_log,omitempty"`
+	OutputRecord        *execution.StepOutputRecord   `json:"output_record,omitempty"`
 }
 
 type SettleWorkerCancellationParameters struct {
@@ -246,6 +248,10 @@ func (handler *WorkerLifecycleHandler) settle(
 		}
 		step.WaitTargetStorageID = strings.TrimSpace(parameters.WaitTargetStorageID)
 		step.ErrorClass = safeFailureCode(parameters.ErrorClass, "WORKER_REPORTED_FAILURE")
+		processLog, processLogErr := safeProcessLogArtifact(parameters.ProcessLog, parameters.LogReference)
+		if processLogErr != nil {
+			return command.Change{}, ErrInvalidWorkerLifecycle
+		}
 		failureEvidence := StepFailureEvidence{
 			EvidenceID: failureEvidenceID(state.ID, step.Workflow.ID, parameters.FencingToken),
 			StepID:     step.Workflow.ID, Operation: step.ExecutionSpec.Operation,
@@ -255,7 +261,7 @@ func (handler *WorkerLifecycleHandler) settle(
 			WaitTargetStorageID: step.WaitTargetStorageID,
 			ErrorClass:          step.ErrorClass, CauseCode: safeFailureCode(parameters.CauseCode, step.ErrorClass),
 			Summary: safeFailureSummary(parameters.ErrorSummary), ProcessExitCode: cloneExitCode(parameters.ProcessExitCode),
-			LogReference: safeFailureLogReference(parameters.LogReference), ObservedAt: now,
+			LogReference: safeFailureLogReference(parameters.LogReference), ProcessLog: processLog, ObservedAt: now,
 			ResultingState: step.Workflow.State,
 		}
 		step.FailureEvidence = append(step.FailureEvidence, failureEvidence)
@@ -323,7 +329,7 @@ func safeFailureLogReference(value string) string {
 	}
 	if strings.Contains(value, "://") {
 		scheme := strings.SplitN(value, "://", 2)[0]
-		if scheme == "worker" || scheme == "media" || scheme == "archive" || scheme == "fixture" {
+		if scheme == "worker" || scheme == "media" || scheme == "archive" || scheme == "fixture" || scheme == "evidence" {
 			return value
 		}
 		return ""
@@ -333,6 +339,35 @@ func safeFailureLogReference(value string) string {
 		return ""
 	}
 	return value
+}
+
+func safeProcessLogArtifact(source *execution.ProcessLogArtifact, logReference string) (*execution.ProcessLogArtifact, error) {
+	if source == nil {
+		return nil, nil
+	}
+	result := *source
+	if result.Validate() != nil || result.Reference != safeFailureLogReference(logReference) {
+		return nil, ErrInvalidWorkerLifecycle
+	}
+	lines := strings.Split(strings.ToValidUTF8(result.SanitizedTail, "�"), "\n")
+	for index, line := range lines {
+		lower := strings.ToLower(line)
+		if strings.Contains(line, "\\") || strings.Contains(line, "@") || strings.Contains(lower, "/users/") ||
+			strings.Contains(lower, "/home/") || strings.Contains(lower, "/private/") || strings.Contains(lower, "/tmp/") ||
+			strings.Contains(lower, "password") || strings.Contains(lower, "credential") || strings.Contains(lower, "bearer ") ||
+			strings.Contains(lower, "api_key") || strings.Contains(lower, "apikey") || strings.Contains(lower, "secret=") ||
+			strings.Contains(lower, "token=") || strings.Contains(lower, "cookie=") {
+			lines[index] = "[REDACTED PROCESS OUTPUT]"
+		}
+	}
+	result.SanitizedTail = strings.TrimSpace(strings.Join(lines, "\n"))
+	if len(result.SanitizedTail) > 16<<10 {
+		result.SanitizedTail = result.SanitizedTail[len(result.SanitizedTail)-(16<<10):]
+		for !utf8.ValidString(result.SanitizedTail) && len(result.SanitizedTail) > 0 {
+			result.SanitizedTail = result.SanitizedTail[1:]
+		}
+	}
+	return &result, nil
 }
 
 func cloneExitCode(value *int) *int {
