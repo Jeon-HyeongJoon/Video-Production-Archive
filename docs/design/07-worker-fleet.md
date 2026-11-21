@@ -91,7 +91,7 @@ worker:
 
 `storage_roots`의 key가 Worker가 접근 가능하다고 보고하는 Storage ID의 기준이다. root는 Worker 로컬의 절대경로지만 heartbeat·claim·결과·로그에는 보내지 않는다. Worker는 시작할 때 각 root를 `archive.StorageRoot`로 열고, 중복 ID·상대경로·열 수 없는 root가 하나라도 있으면 실행 loop를 시작하지 않는다. `CFG-008`
 
-`process_logs`는 ArchivePackage Storage와 분리된 Worker 로컬 증적 root다. root는 시작 전에 존재해야 하며 Worker가 `StorageRoot`로 한 번 열어 실행 중 공유한다. `max_file_bytes`는 실행 하나, `tail_bytes`는 Control에 보낼 정제 tail, `retention`과 `max_total_bytes`는 로컬 보존 경계를 고정한다. 이 root와 raw 파일 경로는 heartbeat·결과·MCP·화면에 노출하지 않는다. `WRK-019`
+`process_logs`는 관리형 Worker boot에 필수인 ArchivePackage Storage와 분리된 로컬 증적 root다. 블록이 없거나 정책 값이 범위를 벗어나면 실행 loop를 시작하지 않는다. root는 시작 전에 존재해야 하며 Worker가 `StorageRoot`로 한 번 열어 실행 중 공유한다. `max_file_bytes`는 실행 하나, `tail_bytes`는 Control에 보낼 정제 tail, `retention`과 `max_total_bytes`는 로컬 보존 경계를 고정한다. 이 root와 raw 파일 경로는 heartbeat·결과·MCP·화면에 노출하지 않는다. Control에 연결하지 않는 단독 `archive-media` CLI에서는 이 블록을 생략할 수 있다. `CFG-007`, `WRK-019`
 
 외부 도구 executable과 processor version도 Worker 로컬 strict 설정만 소유한다. FFmpeg·FFprobe 경로는 절대경로의 실제 파일이어야 하고 시작 전에 열 수 있어야 한다. Control의 StepExecutionSpec, heartbeat, 결과에는 executable 경로를 넣지 않는다. `CFG-009`
 
@@ -180,7 +180,7 @@ profile reference와 operation별 typed parameter
 
 성공하지 못한 Worker 결과는 현재 오류 한 칸을 덮어쓰는 대신 재시도별 `StepFailureEvidence`를 Job 원장에 추가한다. 이 기록은 Worker·Step·typed operation·fencing token·실패 순서·workflow 시도·failure class·WaitReason과 대상 Storage ID·정규화 오류와 원인 code·정제 summary·process exit code·안전한 log reference·Control 관측 시각·결과 StepState를 가진다. 원문 stdout·stderr, 실행 인수, credential과 절대경로는 필드 자체를 두지 않는다. staged Job state, 같은 증적을 담은 Domain Event, Worker 결과 영수증, 예약·리스 해제는 한 transaction에서 확정하고 같은 결과 재전송은 최초 상태를 반환하므로 증적도 중복하지 않는다. 이후 성공해 현재 오류를 비워도 과거 실패 증적은 유지한다. `WRK-016`
 
-외부 미디어 process는 Worker 로컬의 별도 `StorageRoot`에 실행 경계별 `ProcessLogArtifact`를 쓴다. 파일은 설정된 단일 파일 상한에서 잘리고, 새 실행 전 보존 기간과 총량을 넘는 오래된 항목부터 제거한다. 성공한 실행의 임시 log는 제거하고 실패한 실행만 raw 파일을 유지한다. Worker 결과에는 raw 파일 경로나 process 인수를 넣지 않고 Job·Step·operation·fencing token으로 계산한 ID, `evidence://process-log/<ID>` reference, digest, 기록량·전체량·잘림 상태와 비밀값·절대경로를 제거한 제한 tail을 보낸다. 로컬 게시를 완료하지 못해도 process 실행 결과는 잃지 않으며 가용 상태를 `CAPTURE_FAILED`로 보고한다. `WRK-019`
+외부 미디어 process는 Worker 로컬의 별도 `StorageRoot`에 실행 경계별 `ProcessLogArtifact`를 쓴다. 실행 중 출력은 같은 실행 ID의 `.partial` 파일에 단일 파일 상한까지만 쓰고, 실패 뒤 sync·hash 검증과 Storage 단위 quota lock을 거쳐 `.log`로 게시한다. 새 실행 전과 실패 게시 직전에 보존 기간과 총량을 넘는 오래된 완성 log부터 제거하므로 동시 실패가 총량 경계를 우회하지 않는다. 성공한 실행과 게시 실패의 임시 log는 제거하고 검증된 실패 실행만 raw 파일을 유지한다. Worker 결과에는 raw 파일 경로나 process 인수를 넣지 않고 Job·Step·operation·fencing token으로 계산한 ID, `evidence://process-log/<ID>` reference, digest, 기록량·전체량·잘림 상태와 비밀값·절대경로를 제거한 제한 tail을 보낸다. 로컬 게시를 완료하지 못해도 process 실행 결과는 잃지 않으며 가용 상태를 `CAPTURE_FAILED`로 보고한다. `WRK-019`
 
 장시간 MediaOperation은 lease heartbeat와 별도로 제한된 빈도의 `StepProgressEvidence`를 제출한다. Worker가 현재 fencing token과 단조 증가 보고 순번으로 operation·계획/시작/완료/실패 상태·청크 순번과 전체 수·원본 시작/종료 millisecond·완료 비율을 보고하면 Control의 `WorkerLifecycleHandler`가 진행률·최근 관측 시각·변경 불가능한 증적과 Domain Event를 같은 Job transaction으로 확정한다. 같은 보고 재전송은 증적을 중복하지 않고 오래된 token은 거부한다. 이 구조에는 원문 stdout·stderr, 실행 인수, credential, 절대경로와 음성 내용이 없으며 작업 상세와 WorkDiagnostic이 같은 증적 ID를 읽는다. `WRK-017`
 

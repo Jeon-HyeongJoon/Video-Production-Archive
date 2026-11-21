@@ -73,11 +73,29 @@ func (runner *Runner) execute(ctx context.Context, executable string, arguments 
 	if runner == nil || runner.root == nil || !ok || strings.TrimSpace(executable) == "" {
 		return errors.New("process log execution boundary is invalid")
 	}
-	_ = runner.prune()
 	logID := processLogID(boundary)
 	relative := path.Join(directory, logID+".log")
-	_ = runner.root.MkdirAll(directory, 0o700)
-	file, createErr := runner.root.Create(relative, 0o600)
+	temporary := relative + ".partial"
+	var file *os.File
+	var createErr error
+	if err := runner.root.MkdirAll(path.Join(directory, ".locks"), 0o700); err != nil {
+		createErr = err
+	} else if lock, err := runner.root.AcquireExclusiveLock(ctx, path.Join(directory, ".locks", logID+".lock")); err != nil {
+		createErr = err
+	} else {
+		defer lock.Close()
+		if exists, existsErr := runner.root.Exists(temporary); existsErr != nil {
+			createErr = existsErr
+		} else if exists {
+			createErr = runner.root.Remove(temporary)
+		}
+		if createErr == nil {
+			createErr = runner.withQuotaLock(ctx, runner.prune)
+		}
+		if createErr == nil {
+			file, createErr = runner.root.Create(temporary, 0o600)
+		}
+	}
 	writer := newBoundedWriter(file, runner.policy.MaxFileBytes, runner.policy.TailBytes)
 	command := exec.CommandContext(ctx, executable, append([]string(nil), arguments...)...)
 	stdout := io.Writer(streamWriter{target: writer, label: "stdout"})
@@ -93,7 +111,7 @@ func (runner *Runner) execute(ctx context.Context, executable string, arguments 
 	closeErr := writer.close()
 	if runErr == nil {
 		if createErr == nil {
-			_ = runner.root.Remove(relative)
+			_ = runner.root.Remove(temporary)
 		}
 		return nil
 	}
@@ -103,10 +121,35 @@ func (runner *Runner) execute(ctx context.Context, executable string, arguments 
 		Truncated: writer.total() > writer.captured(), SanitizedTail: SanitizeTail(writer.tail()),
 	}
 	if createErr == nil && closeErr == nil {
-		captured, digest, digestErr := runner.root.FileSHA256(relative)
+		captured, digest, digestErr := runner.root.FileSHA256(temporary)
 		if digestErr == nil && captured == writer.captured() && captured > 0 {
-			artifact.State = execution.ProcessLogAvailable
-			artifact.Digest = digest
+			published := false
+			publishErr := runner.withQuotaLock(ctx, func() error {
+				if err := runner.prune(); err != nil {
+					return err
+				}
+				if err := runner.root.Rename(temporary, relative); err != nil {
+					return err
+				}
+				publishedSize, publishedDigest, publishedErr := runner.root.FileSHA256(relative)
+				if publishedErr != nil || publishedSize != captured || publishedDigest != digest {
+					_ = runner.root.Remove(relative)
+					return errors.New("published process log verification failed")
+				}
+				published = true
+				return nil
+			})
+			if publishErr == nil && published {
+				artifact.State = execution.ProcessLogAvailable
+				artifact.Digest = digest
+			} else if published {
+				_ = runner.root.Remove(relative)
+			}
+		}
+	}
+	if artifact.State != execution.ProcessLogAvailable && createErr == nil {
+		if exists, existsErr := runner.root.Exists(temporary); existsErr == nil && exists {
+			_ = runner.root.Remove(temporary)
 		}
 	}
 	if artifact.Validate() != nil {
@@ -117,6 +160,15 @@ func (runner *Runner) execute(ctx context.Context, executable string, arguments 
 		}
 	}
 	return &execution.ProcessFailure{Cause: runErr, Artifact: artifact}
+}
+
+func (runner *Runner) withQuotaLock(ctx context.Context, action func() error) error {
+	lock, err := runner.root.AcquireExclusiveLock(ctx, path.Join(directory, ".locks", "quota.lock"))
+	if err != nil {
+		return err
+	}
+	actionErr := action()
+	return errors.Join(actionErr, lock.Close())
 }
 
 func processLogID(boundary execution.ProcessContext) string {
@@ -259,7 +311,7 @@ func SanitizeTail(raw []byte) string {
 func (runner *Runner) prune() error {
 	entries, err := runner.root.ReadDir(directory)
 	if err != nil {
-		return nil
+		return err
 	}
 	type candidate struct {
 		name string
@@ -274,11 +326,13 @@ func (runner *Runner) prune() error {
 		}
 		info, infoErr := entry.Info()
 		if infoErr != nil {
-			continue
+			return infoErr
 		}
 		item := candidate{name: entry.Name(), size: info.Size(), mod: info.ModTime()}
 		if runner.now().Sub(item.mod) > runner.policy.Retention {
-			_ = runner.root.Remove(path.Join(directory, item.name))
+			if err := runner.root.Remove(path.Join(directory, item.name)); err != nil {
+				return err
+			}
 			continue
 		}
 		total += item.size
@@ -290,9 +344,10 @@ func (runner *Runner) prune() error {
 		if total <= limit {
 			break
 		}
-		if runner.root.Remove(path.Join(directory, item.name)) == nil {
-			total -= item.size
+		if err := runner.root.Remove(path.Join(directory, item.name)); err != nil {
+			return err
 		}
+		total -= item.size
 	}
 	return nil
 }

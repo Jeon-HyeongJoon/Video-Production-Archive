@@ -7,6 +7,7 @@ import (
 	"os"
 	"path"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -61,6 +62,12 @@ func TestProcessRunnerCapturesBoundedSanitizedFailureArtifactAndRetention(t *tes
 	if err != nil || info.Size() != artifact.CapturedBytes {
 		t.Fatalf("bounded raw log missing: info=%v err=%v", info, err)
 	}
+	if _, err := os.Stat(path.Join(temporary, directory, artifact.ID+".log.partial")); !os.IsNotExist(err) {
+		t.Fatalf("verified failure log left a partial file: %v", err)
+	}
+	if rerunErr := runner.Run(contextWithBoundary, executable, []string{"-test.run=^TestProcessLogHelper$", "--", "process-log-fail"}); !errors.As(rerunErr, &failure) || failure.Artifact.ID != artifact.ID || failure.Artifact.State != execution.ProcessLogAvailable {
+		t.Fatalf("same execution boundary did not replace its deterministic log safely: %v", rerunErr)
+	}
 
 	successContext := execution.WithProcessContext(context.Background(), execution.ProcessContext{
 		JobID: "JOB-PROCESS-LOG", StepID: "render", Operation: execution.OperationRenderRecording, FencingToken: 8,
@@ -71,6 +78,9 @@ func TestProcessRunnerCapturesBoundedSanitizedFailureArtifactAndRetention(t *tes
 	successID := processLogID(execution.ProcessContext{JobID: "JOB-PROCESS-LOG", StepID: "render", Operation: execution.OperationRenderRecording, FencingToken: 8})
 	if _, err := os.Stat(path.Join(temporary, directory, successID+".log")); !os.IsNotExist(err) {
 		t.Fatalf("successful process log was retained: %v", err)
+	}
+	if _, err := os.Stat(path.Join(temporary, directory, successID+".log.partial")); !os.IsNotExist(err) {
+		t.Fatalf("successful process log partial was retained: %v", err)
 	}
 
 	probeContext := execution.WithProcessContext(context.Background(), execution.ProcessContext{
@@ -85,6 +95,24 @@ func TestProcessRunnerCapturesBoundedSanitizedFailureArtifactAndRetention(t *tes
 	output, err := runner.Output(probeSuccessContext, executable, []string{"-test.run=^TestProcessLogHelper$", "--", "process-log-output-success"})
 	if err != nil || !strings.HasPrefix(string(output), `{"ok":true}`) {
 		t.Fatalf("ffprobe-style success output mismatch: output=%q err=%v", output, err)
+	}
+
+	unavailableRoot, err := archive.OpenStorageRoot(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	unavailableRunner, err := NewRunner(unavailableRoot, Policy{MaxFileBytes: 1024, TailBytes: 1024, Retention: time.Hour, MaxTotalBytes: 2048})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := unavailableRoot.Close(); err != nil {
+		t.Fatal(err)
+	}
+	unavailableContext := execution.WithProcessContext(context.Background(), execution.ProcessContext{
+		JobID: "JOB-PROCESS-LOG", StepID: "render", Operation: execution.OperationRenderRecording, FencingToken: 11,
+	})
+	if err := unavailableRunner.Run(unavailableContext, executable, []string{"-test.run=^TestProcessLogHelper$", "--", "process-log-fail"}); !errors.As(err, &failure) || failure.Artifact.State != execution.ProcessLogCaptureFailed || !strings.Contains(failure.Artifact.SanitizedTail, "fatal codec mismatch") {
+		t.Fatalf("local log failure hid the process result: %v", err)
 	}
 }
 
@@ -107,5 +135,69 @@ func TestProcessLogHelper(t *testing.T) {
 	fmt.Fprintln(os.Stderr, "fatal codec mismatch")
 	if mode == "process-log-fail" {
 		os.Exit(22)
+	}
+}
+
+func TestConcurrentFailurePublicationHonorsTotalBudget(t *testing.T) {
+	temporary := t.TempDir()
+	root, err := archive.OpenStorageRoot(temporary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	runner, err := NewRunner(root, Policy{MaxFileBytes: 1024, TailBytes: 512, Retention: time.Hour, MaxTotalBytes: 2048})
+	if err != nil {
+		t.Fatal(err)
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wait sync.WaitGroup
+	failures := make(chan error, 4)
+	for index := 1; index <= 4; index++ {
+		index := index
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			ctx := execution.WithProcessContext(context.Background(), execution.ProcessContext{
+				JobID: fmt.Sprintf("JOB-CONCURRENT-%d", index), StepID: "render",
+				Operation: execution.OperationRenderRecording, FencingToken: uint64(index),
+			})
+			runErr := runner.Run(ctx, executable, []string{"-test.run=^TestProcessLogHelper$", "--", "process-log-fail"})
+			var failure *execution.ProcessFailure
+			if !errors.As(runErr, &failure) || failure.Artifact.State != execution.ProcessLogAvailable {
+				failures <- fmt.Errorf("concurrent process %d: %w", index, runErr)
+			}
+		}()
+	}
+	wait.Wait()
+	close(failures)
+	for failure := range failures {
+		t.Error(failure)
+	}
+	entries, err := os.ReadDir(path.Join(temporary, directory))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var retained int64
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		if strings.HasSuffix(entry.Name(), ".partial") {
+			t.Fatalf("concurrent publication left a partial file: %s", entry.Name())
+		}
+		if !strings.HasSuffix(entry.Name(), ".log") {
+			continue
+		}
+		info, infoErr := entry.Info()
+		if infoErr != nil {
+			t.Fatal(infoErr)
+		}
+		retained += info.Size()
+	}
+	if retained <= 0 || retained > 2048 {
+		t.Fatalf("retained process logs exceeded the total budget: %d", retained)
 	}
 }

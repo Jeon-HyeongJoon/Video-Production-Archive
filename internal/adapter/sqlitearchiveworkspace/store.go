@@ -71,6 +71,7 @@ func (store *Store) Replace(ctx context.Context, view archiveworkspace.JobView) 
 			needs_intervention = excluded.needs_intervention,
 			last_event_at = excluded.last_event_at,
 			payload = excluded.payload
+		WHERE excluded.revision >= archive_workspace_job_projections.revision
 	`, view.Summary.JobID, view.Summary.Revision, view.Summary.NeedsHumanIntervention,
 		sqlitebase.FormatTime(view.Summary.LastEventAt), payload)
 	return err

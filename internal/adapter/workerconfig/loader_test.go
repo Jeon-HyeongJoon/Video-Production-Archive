@@ -17,7 +17,8 @@ func TestWorkerConfigurationRequiresStrictSecureOutboundSettings(t *testing.T) {
 	directory := t.TempDir()
 	sourceRoot := filepath.Join(directory, "source")
 	scratchRoot := filepath.Join(directory, "scratch")
-	for _, root := range []string{sourceRoot, scratchRoot} {
+	processLogRoot := filepath.Join(directory, "process-logs")
+	for _, root := range []string{sourceRoot, scratchRoot, processLogRoot} {
 		if err := os.Mkdir(root, 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -29,7 +30,7 @@ worker:
   control_url: https://control.internal:8443
   credential_ref: wincred://archive/workers/worker-main
   heartbeat_interval: 10s
-  storage_roots:
+` + processLogBlock(processLogRoot) + `  storage_roots:
     - storage_id: source-main
       root: ` + sourceRoot + `
     - storage_id: scratch-main
@@ -52,7 +53,8 @@ worker:
 	}
 	if configuration.ID != "worker-main" || configuration.ControlURL.String() != "https://control.internal:8443" ||
 		configuration.CredentialReference != "wincred://archive/workers/worker-main" ||
-		configuration.HeartbeatInterval != 10*time.Second || len(configuration.AccessibleStorageIDs) != 2 {
+		configuration.HeartbeatInterval != 10*time.Second || len(configuration.AccessibleStorageIDs) != 2 ||
+		configuration.ProcessLogs == nil || configuration.ProcessLogs.Root != processLogRoot {
 		t.Fatalf("worker configuration was not normalized: %+v", configuration)
 	}
 	dpapi := stringsReplace(valid, "wincred://archive/workers/worker-main", "dpapi://C:/Archive/secrets/worker-main.dpapi")
@@ -69,6 +71,7 @@ worker:
 		stringsReplace(valid, "https://control.internal:8443", "http://192.168.40.8:8080"),
 		stringsReplace(valid, "wincred://archive/workers/worker-main", "dpapi://relative/worker-main.dpapi"),
 		stringsReplace(valid, "wincred://archive/workers/worker-main", "plaintext-secret"),
+		stringsReplace(valid, processLogBlock(processLogRoot), ""),
 	} {
 		candidate := filepath.Join(directory, fmtName(index)+".yaml")
 		if err := os.WriteFile(candidate, []byte(payload), 0o600); err != nil {
@@ -85,7 +88,8 @@ func TestWorkerConfigurationOpensOnlyMappedAbsoluteStorageRootsBeforeExecution(t
 	directory := t.TempDir()
 	sourceRoot := filepath.Join(directory, "source")
 	workingRoot := filepath.Join(directory, "working")
-	for _, root := range []string{sourceRoot, workingRoot} {
+	processLogRoot := filepath.Join(directory, "process-logs")
+	for _, root := range []string{sourceRoot, workingRoot, processLogRoot} {
 		if err := os.Mkdir(root, 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -100,7 +104,7 @@ worker:
   control_url: https://control.internal:8443
   credential_ref: wincred://archive/workers/worker-main
   heartbeat_interval: 10s
-  storage_roots:
+` + processLogBlock(processLogRoot) + `  storage_roots:
     - storage_id: source-main
       root: ` + sourceRoot + `
     - storage_id: working-main
@@ -221,8 +225,11 @@ func TestWorkerReconcilesRoleSeparatedAttachedVolumeStorageRoots(t *testing.T) {
 func TestWorkerConfigurationValidatesLocalMediaToolchainBeforeExecution(t *testing.T) {
 	directory := t.TempDir()
 	storageRoot := filepath.Join(directory, "storage")
-	if err := os.Mkdir(storageRoot, 0o700); err != nil {
-		t.Fatal(err)
+	processLogRoot := filepath.Join(directory, "process-logs")
+	for _, root := range []string{storageRoot, processLogRoot} {
+		if err := os.Mkdir(root, 0o700); err != nil {
+			t.Fatal(err)
+		}
 	}
 	ffmpegPath := filepath.Join(directory, "ffmpeg")
 	ffprobePath := filepath.Join(directory, "ffprobe")
@@ -237,7 +244,7 @@ worker:
   control_url: https://control.internal:8443
   credential_ref: wincred://archive/workers/worker-main
   heartbeat_interval: 10s
-  storage_roots:
+` + processLogBlock(processLogRoot) + `  storage_roots:
     - storage_id: working-main
       root: ` + storageRoot + `
   tools:
@@ -280,7 +287,11 @@ worker:
 func TestWorkerConfigurationValidatesOptionalWhisperToolModelAndProfile(t *testing.T) {
 	directory := t.TempDir()
 	storageRoot := filepath.Join(directory, "storage")
+	processLogRoot := filepath.Join(directory, "process-logs")
 	if err := os.MkdirAll(filepath.Join(storageRoot, "models"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(processLogRoot, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	modelPath := filepath.Join(storageRoot, "models", "ggml.bin")
@@ -298,7 +309,7 @@ worker:
   control_url: https://control.internal:8443
   credential_ref: wincred://archive/workers/worker-stt
   heartbeat_interval: 10s
-  storage_roots:
+` + processLogBlock(processLogRoot) + `  storage_roots:
     - storage_id: models-main
       root: ` + storageRoot + `
   tools:
@@ -378,6 +389,15 @@ worker:
 
 func stringsReplace(value, old, replacement string) string {
 	return strings.Replace(value, old, replacement, 1)
+}
+
+func processLogBlock(root string) string {
+	return "  process_logs:\n" +
+		"    root: " + root + "\n" +
+		"    max_file_bytes: 4194304\n" +
+		"    tail_bytes: 12288\n" +
+		"    retention: 336h\n" +
+		"    max_total_bytes: 268435456\n"
 }
 
 func fmtName(index int) string {

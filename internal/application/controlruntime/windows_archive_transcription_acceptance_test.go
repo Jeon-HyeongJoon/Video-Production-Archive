@@ -126,6 +126,10 @@ archive_organization:
 	if err := ossecret.ProvisionDPAPI(credentialReference, credential); err != nil {
 		t.Fatal(err)
 	}
+	processLogRoot := filepath.Join(directory, "process-logs")
+	if err := os.Mkdir(processLogRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	workerPath := filepath.Join(directory, "worker.yaml")
 	workerDocument := fmt.Sprintf(`schema_version: 1
 worker:
@@ -134,6 +138,12 @@ worker:
   credential_ref: %s
   heartbeat_interval: 1s
   claim_interval: 1s
+  process_logs:
+    root: %s
+    max_file_bytes: 4194304
+    tail_bytes: 12288
+    retention: 336h
+    max_total_bytes: 268435456
   storage_roots:
     - storage_id: source-windows
       root: %s
@@ -159,7 +169,7 @@ worker:
         model_id: ggml-large-v3-turbo-q5_0
         language: ko
         thread_count: 4
-`, yamlScalar(controlServer.URL), yamlScalar(credentialReference), yamlScalar(sourceRoot), yamlScalar(workingRoot),
+`, yamlScalar(controlServer.URL), yamlScalar(credentialReference), yamlScalar(processLogRoot), yamlScalar(sourceRoot), yamlScalar(workingRoot),
 		yamlScalar(filepath.Dir(whisperModel)), yamlScalar(ffmpegExecutable), yamlScalar(ffprobeExecutable),
 		yamlScalar(whisperExecutable), yamlScalar(filepath.Base(whisperModel)))
 	if err := os.WriteFile(workerPath, []byte(workerDocument), 0o600); err != nil {

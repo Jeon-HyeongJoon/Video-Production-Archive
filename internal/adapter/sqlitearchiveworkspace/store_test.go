@@ -43,6 +43,17 @@ func TestArchiveWorkspaceProjectsJobStatusInterventionAndOperationalDetailWithou
 		}
 		before[view.Summary.JobID] = view
 	}
+	stale := inputs[0]
+	stale.Job.Revision = 3
+	stale.Steps[0].State = workflow.Failed
+	stale.Steps[0].ErrorClass = "STALE_PROJECTION"
+	staleView, err := archiveworkspace.Project(stale)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Replace(ctx, staleView); err != nil {
+		t.Fatal(err)
+	}
 
 	query, err := archiveworkspace.NewQueryService(store)
 	if err != nil {

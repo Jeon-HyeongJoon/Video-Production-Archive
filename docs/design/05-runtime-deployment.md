@@ -212,7 +212,7 @@ Archivist Host 종료:
 - metric: queue depth, wait reason, CPU/GPU/memory, disk throughput, failure rate
 - Event: 상태 전이, 승인, fallback, device connect/disconnect
 - Notification: Event 또는 metric에서 만든 실시간 메시지. Event 기반 알림만 재연결 replay
-- process 원문 로그: Worker 로컬 `ProcessLogArtifact` 회전 파일. DB에는 절대 위치가 아닌 불투명 reference·가용 상태·digest·기록량·잘림 상태와 이중 정제된 제한 tail만 저장한다. 실행별·보존 기간·총량 상한을 Worker 설정으로 고정하고 성공 실행의 임시 log는 제거한다. `WRK-019`, `OBS-004`
+- process 원문 로그: Worker 로컬 `ProcessLogArtifact` 회전 파일. DB에는 절대 위치가 아닌 불투명 reference·가용 상태·digest·기록량·잘림 상태와 이중 정제된 제한 tail만 저장한다. 실행별·보존 기간·총량 상한을 Worker 설정으로 고정하고 `.partial`은 sync·hash 검증과 quota lock 뒤 실패 log로만 게시하며 성공 또는 게시 실패의 임시 log는 제거한다. `WRK-019`, `OBS-004`
 
 로컬 CLI ArchivistTurnEntry는 `LRH-013`의 허용 목록으로 정제한다. 외부 Provider 관련 필드의 `AGT-008` 정책은 Provider Router가 runtime에 연결될 때까지 planned다. feed의 replay 분리는 `NTF-001`, 실제 HTTP/SSE 재연결은 `NTF-002` integration test가 검증한다.
 

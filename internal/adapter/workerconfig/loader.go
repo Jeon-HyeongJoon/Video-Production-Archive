@@ -218,6 +218,9 @@ func normalize(source document) (Configuration, error) {
 			LocalTool: localTool, ModelStorageID: modelStorageID, ModelRelativePath: modelRelativePath, Profile: profile,
 		}
 	}
+	if source.Worker.ProcessLogs == nil {
+		return Configuration{}, ErrInvalidConfiguration
+	}
 	processLogs, err := normalizeProcessLogs(source.Worker.ProcessLogs)
 	if err != nil {
 		return Configuration{}, err

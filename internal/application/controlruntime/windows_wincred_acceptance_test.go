@@ -45,6 +45,10 @@ func TestWindowsCredentialManagerAuthenticatesOnlyMatchingControlAndWorkerProces
 	defer server.Close()
 
 	directory := t.TempDir()
+	processLogRoot := filepath.Join(directory, "process-logs")
+	if err := os.Mkdir(processLogRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	writeWorkerConfiguration := func(reference string) string {
 		path := filepath.Join(directory, "worker-"+strings.TrimPrefix(reference, "wincred://")+".yaml")
 		document := fmt.Sprintf(`schema_version: 1
@@ -54,6 +58,12 @@ worker:
   credential_ref: %s
   heartbeat_interval: 1s
   claim_interval: 1s
+  process_logs:
+    root: %s
+    max_file_bytes: 4194304
+    tail_bytes: 12288
+    retention: 336h
+    max_total_bytes: 268435456
   storage_roots:
     - storage_id: scratch-main
       root: %s
@@ -64,7 +74,7 @@ worker:
     ffprobe:
       executable: %s
       version: ffprobe-windows-wincred-acceptance
-`, yamlScalar(server.URL), yamlScalar(reference), yamlScalar(directory), yamlScalar(ffmpegExecutable), yamlScalar(ffprobeExecutable))
+`, yamlScalar(server.URL), yamlScalar(reference), yamlScalar(processLogRoot), yamlScalar(directory), yamlScalar(ffmpegExecutable), yamlScalar(ffprobeExecutable))
 		if strings.Contains(document, correctSecret) || strings.Contains(document, wrongSecret) {
 			t.Fatal("Worker configuration contains a plaintext credential")
 		}
