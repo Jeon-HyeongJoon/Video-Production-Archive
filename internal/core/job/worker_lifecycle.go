@@ -42,6 +42,7 @@ type ReportWorkerStepProgressParameters struct {
 }
 
 type SettleWorkerStepParameters struct {
+	ProgressReportCount uint64                        `json:"progress_report_count,omitempty"`
 	StepID              string                        `json:"step_id"`
 	FencingToken        uint64                        `json:"fencing_token"`
 	Success             bool                          `json:"success"`
@@ -137,14 +138,20 @@ func (handler *WorkerLifecycleHandler) progress(
 		return command.Change{}, workflow.ErrStaleFencingToken
 	}
 	if parameters.ReportSequence == 0 || parameters.Update.Validate() != nil || step.ExecutionSpec == nil ||
-		parameters.Update.Operation != step.ExecutionSpec.Operation || len(step.ProgressEvidence) >= maxStepProgressEvidence {
+		parameters.Update.Operation != step.ExecutionSpec.Operation {
 		return command.Change{}, ErrInvalidWorkerLifecycle
 	}
 	if count := len(step.ProgressEvidence); count > 0 {
 		previous := step.ProgressEvidence[count-1]
 		if previous.FencingToken == parameters.FencingToken {
-			if parameters.ReportSequence <= previous.ReportSequence || parameters.Update.Progress < previous.Update.Progress ||
-				parameters.Update.ChunkCount != previous.Update.ChunkCount || parameters.Update.ChunkIndex < previous.Update.ChunkIndex {
+			prior, next := previous.Update, parameters.Update
+			if parameters.ReportSequence <= previous.ReportSequence || next.Status == execution.ProgressCheckingInputs ||
+				prior.Status == execution.ProgressCheckingOutputs || (next.Status == execution.ProgressExecuting && prior.Status != execution.ProgressCheckingInputs) {
+				return command.Change{}, ErrInvalidWorkerLifecycle
+			}
+			if !prior.Status.IsPhase() && !next.Status.IsPhase() && (next.StepFraction() < prior.StepFraction() ||
+				next.InputCount != prior.InputCount || next.InputIndex < prior.InputIndex ||
+				(next.InputIndex == prior.InputIndex && (next.ChunkCount != prior.ChunkCount || next.ChunkIndex < prior.ChunkIndex || next.OutputMillis < prior.OutputMillis))) {
 				return command.Change{}, ErrInvalidWorkerLifecycle
 			}
 		}
@@ -155,8 +162,14 @@ func (handler *WorkerLifecycleHandler) progress(
 		StepID:     step.Workflow.ID, WorkerID: envelope.Actor.ID, FencingToken: parameters.FencingToken,
 		ReportSequence: parameters.ReportSequence, ObservedAt: now, Update: parameters.Update,
 	}
+	if len(step.ProgressEvidence) >= maxStepProgressEvidence {
+		step.ProgressHistoryOmitted += uint64(len(step.ProgressEvidence) - maxStepProgressEvidence + 1)
+		step.ProgressEvidence = step.ProgressEvidence[len(step.ProgressEvidence)-maxStepProgressEvidence+1:]
+	}
 	step.ProgressEvidence = append(step.ProgressEvidence, evidence)
-	step.Progress = parameters.Update.Progress
+	if !parameters.Update.Status.IsPhase() {
+		step.Progress = parameters.Update.StepFraction()
+	}
 	step.LastEventAt = now
 	state.CurrentStepID = step.Workflow.ID
 	state.Revision = snapshot.Revision + 1
@@ -252,6 +265,9 @@ func (handler *WorkerLifecycleHandler) settle(
 		if processLogErr != nil {
 			return command.Change{}, ErrInvalidWorkerLifecycle
 		}
+		if processLog != nil && step.ExecutionSpec.Operation == execution.OperationTranscribeAudio {
+			processLog.SanitizedTail = ""
+		}
 		failureEvidence := StepFailureEvidence{
 			EvidenceID: failureEvidenceID(state.ID, step.Workflow.ID, parameters.FencingToken),
 			StepID:     step.Workflow.ID, Operation: step.ExecutionSpec.Operation,
@@ -269,6 +285,12 @@ func (handler *WorkerLifecycleHandler) settle(
 		if step.Workflow.State == workflow.Queued || step.Workflow.State == workflow.Waiting {
 			eventType = "StepRetryScheduled"
 		}
+	}
+	if parameters.ProgressReportCount > 0 {
+		if step.ProgressReportCounts == nil {
+			step.ProgressReportCounts = make(map[uint64]uint64)
+		}
+		step.ProgressReportCounts[parameters.FencingToken] = parameters.ProgressReportCount
 	}
 	step.Workflow.ExecutionLease = nil
 	if parameters.Success {

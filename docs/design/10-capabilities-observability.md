@@ -47,6 +47,8 @@ Archive Control를 띄우지 않은 상태에서 영속 업무 Capability를 공
 
 ## 3. 실행 증적 경계
 
+이 시스템은 사무실 영상을 정리·검사·보관하고 Archivist가 그 업무를 인수해 자동으로 수행하는 아카이브다. 각 작업은 대상과 실행 이유, 현재 확인한 진행, 결과 검증, 실패 시 다음 판단의 근거를 남겨야 한다. Archivist가 작업을 재개할 때는 원장의 상태·리비전과 증적 ID를 확인한다. 부족한 근거는 관측 누락으로 표시하고 재시도·완료·복구 결정에는 해당 작업의 권한과 검증 근거를 사용한다.
+
 목표 경계에서 모니터링은 각 도메인 모듈에 로그 코드를 흩뿌리지 않고 Capability Executor를 감싸는 Evidence Sink가 담당한다. 현재 Evidence 타입·SQLite prototype은 있으나 Archive Control의 모든 실행 Port를 감싸지 않으므로 `OBS-001`은 planned다.
 
 ```text
@@ -72,7 +74,7 @@ Domain Event는 업무 상태 변경 사실이고, progress·metric·process log
 
 공통 Evidence Sink 완성 전에도 진행 중 작업의 원인을 묻는 경로에는 현재 원장에 이미 있는 증적을 한 번에 읽는 `WorkDiagnostic` projection을 둔다. 이 projection은 Job·Step과 최신 Worker resource snapshot, 활성 ResourceReservation·ExecutionLease, 저장된 WaitReason·error class·안전한 log reference를 같은 관측 시각으로 결합한다. 실행 리스 heartbeat는 Worker 실행 루프가 살아 있다는 증적이지 subprocess가 계속 전진한다는 증적은 아니므로, 진행률 관측이 없는 장시간 RUNNING을 곧바로 실패나 정지로 바꾸지 않는다. 확인된 값은 증적 ID가 있는 `facts`, 아직 확인되지 않은 인과 설명은 예측·확인 방법과 증적 ID `basis`를 가진 `hypotheses`로 나눠 반환한다. `OBS-002`
 
-`WorkDiagnostic`은 읽기 모델이며 StepState·WaitReason·ExecutionLease·ResourceReservation을 고치지 않는다. Worker heartbeat 만료, 실행 리스 누락·만료, 저장된 WAITING·FAILED, 새 progress 증적이 없는 장시간 RUNNING과 Control 예약·Worker 관측 load 불일치를 구조화된 진단 code와 다음 확인 방법으로 나타낸다. 장시간 STT는 청크 계획·시작·완료·실패와 원본 시간 범위를 `StepProgressEvidence`로 제공하므로 Archivist는 lease 생존과 실제 subprocess 전진을 구분한다. 원문 stdout·stderr, credential, 실행 인수와 절대경로는 진단 응답에 넣지 않는다. 작업 공간과 Archivist MCP에는 정규화 code·관측 시각·정제 summary·안전한 log reference만 제공한다. 고빈도 FFmpeg frame 진행과 정제된 log tail을 모든 실행기에 연결하는 일은 계속 `OBS-001`의 후속 범위다. `WRK-017`
+`WorkDiagnostic`은 읽기 모델이며 StepState·WaitReason·ExecutionLease·ResourceReservation을 고치지 않는다. Worker heartbeat 만료, 실행 리스 누락·만료, 저장된 WAITING·FAILED, 새 progress 증적이 없는 장시간 RUNNING과 Control 예약·Worker 관측 load 불일치를 구조화된 진단 code와 다음 확인 방법으로 나타낸다. 장시간 STT는 청크 계획·시작·완료·실패와 원본 시간 범위를 `StepProgressEvidence`로 제공하므로 Archivist는 lease 생존과 실제 subprocess 전진을 구분한다. 원문 stdout·stderr, credential, 실행 인수와 절대경로는 진단 응답에 넣지 않는다. 작업 공간과 Archivist MCP에는 정규화 code·관측 시각·정제 summary·안전한 log reference만 제공한다. 인코더의 숫자 출력 위치 수집은 `OBS-011`이 소유한다. `WRK-017`
 
 작업 참조가 아직 없는 대화에서 전체 현황을 물을 때는 `SystemStatus` projection이 같은 WorkerCapacity·Archivist Host·관리 작업·WorkDiagnostic 읽기 모델을 조합한다. 이 projection은 Worker와 Host의 연결·최근 heartbeat, Worker의 예약 차감 자원과 추가 작업 가능 여부, 처리 중·시작 대기·직접 확인·실패·완료 작업 수를 반환한다. 아직 해결되지 않은 실패·직접 확인 작업과 진단상 보고가 필요한 처리 중 작업만 최근 순서로 최대 50건 포함하고, 처리된 과거 실패는 작업 공간과 같은 `replacement_work_id` 규칙으로 완료 이력에 센다. 각 문제는 정제된 진단과 증적 ID를 포함하지만 선택·WorkReference를 만들거나 업무 상태를 바꾸지 않는다. `MCP-012`
 
@@ -83,6 +85,23 @@ Worker가 보고한 각 실패는 `StepFailureEvidence`로 Job 원장에 남으�
 Worker가 보고한 `ProcessLogArtifact` 메타데이터와 이중 정제된 제한 tail은 `StepFailureEvidence`와 같은 Unit of Work에 저장한다. 기본 `WorkDiagnostic`은 가용 상태와 실패 증적 ID만 제공하며 상세 tail은 펼침 조작이나 `archive.work.failure_evidence.get.v1`에서 해당 증적 ID를 지정했을 때만 반환한다. 과거의 `worker://operation-failed` 같은 일반 reference는 실제 산출물로 가장하지 않고 `LEGACY_UNRESOLVABLE`로 표시하며, 진단은 상세가 없는데 log 검사를 권하지 않는다. 원문은 Worker 로컬 보존 정책의 대상이고 Control DB·MCP·화면에는 들어오지 않는다. `OBS-004`, `MCP-013`, `DSH-045`
 
 진단은 설명용 `suggested_actions`와 실행 가능한 `recovery_actions`를 구분한다. 후자는 Control이 현재 저장된 실행 경계를 확인해 안전하다고 판정한 만료 리스 조정 또는 일시적 아카이브 게시 종결 실패의 새 복구 Job만 Job revision·Step·선택적 reservation·fencing token·진단 fingerprint·basis 증적 ID와 함께 반환한다. 만료 리스 조정은 `StepRecoveryEvidence`를 추가하고, 종결 실패 복구는 원래 `FAILED`와 `StepFailureEvidence`를 그대로 둔 채 같은 실패 증적에서 한 번만 계산되는 Job ID와 `RecoverySource`를 저장한다. 복구 Job이 존재하면 진단은 `TERMINAL_RECOVERY_JOB_CREATED` 사실을 반환하고 같은 recovery action을 다시 내지 않는다. fingerprint나 실행 경계가 달라진 요청은 상태 변경 전에 거부한다. `WFL-014~015`, `WRK-018`, `MCP-011`
+
+### 3.1 업무 판단에서 읽을 근거
+
+| 업무 | 근거가 생기는 시점 | 담당자와 Archivist가 읽는 값 |
+|---|---|---|
+| 입고·분류·배정 | 선택 고정, 검사·분류 확정, Step 전이 | Storage·입력 revision, 판정 주체, 실제 WaitReason·승인 참조, Job·Step·Worker·fencing token |
+| 검사·렌더·음성 추출·전사 | 공통 미디어 실행기가 입력 검증, 실행, 결과 검증에 진입할 때. 장시간 도구가 직접 진행을 출력할 때 | 단계 진입과 마지막 실제 처리 위치를 구분한다. FFmpeg는 출력 시간축, STT는 입력·청크·원본 범위와 엔진 백분율을 남긴다. [공통 실행기](../../internal/application/workerexecutor/registry.go) |
+| QC·자막·패키지·카탈로그 | 단계 진입, 게시 후 결과 정산 | Job revision과 StepOutputRecord의 검증 참조·checksum. 후속 projection·observer·dispatch 반영은 별도 completion ID로 추적한다. |
+| 진단·복구 | 진단 조회, 권한 있는 복구 Command 수락, 후속 검증 | 마지막 사실의 ID·시각, 누락 범위, 실패 원인과 안전한 로그 참조, 해당 복구의 근거·결과. [작업 진단](../../internal/application/workdiagnostics/progress.go) |
+
+### 3.2 수집 비용과 관측 누락
+
+단독 CLI는 stdout에 최종 결과와 검증 참조를, stderr에 시각·작업·실행 토큰·보고 순번이 붙은 JSON Lines를 쓴다. 관리형 Worker는 같은 관측을 별도 전송 루프에서 최대 32건 대기시킨다. 일시적인 통신 실패는 동일 순번과 Worker 관측 시각으로 한 차례 재시도한다. 미디어 실행이 끝나면 전송에 최대 2초를 더 허용하고 결과와 생성한 최종 순번을 제출한다. 각 Step의 최근 조회 창은 1,024건이다. 앞선 관측은 불변 Event에 남고 현재 조회 창에서 제외한 건수를 표시한다. 청크 완료와 게시 완료는 별개다. `APP-009`, `WRK-012`, `WRK-017`, `WRK-020~021`
+
+FFmpeg는 첫 전진 위치와 30초 간격 표본 및 종료 시 마지막 전진 위치를 남긴다. 전사는 청크별 엔진 백분율의 10% 구간에서 실제로 보고된 값 하나를 남긴다. 여러 입력에서는 입력별 진행과 전체 Step 진행을 구분한다. 작업 진단의 `evidence_gaps`는 순번 누락, 조회 창 이전 이력, 완료 결과의 검증 참조 미관측을 구분한다. Windows 장비의 모델·음성 품질 인수는 `TRN-003`의 별도 계약이다. `OBS-005`, `OBS-011`, `TRN-008~009`, `DSH-044`
+
+전체 현황의 `completion_delivery`는 같은 SQLite 읽기에서 미전달·재시도 건수, 가장 오래된 대기 시각, 대표 완료 ID·Job ID와 마지막 실패 단계를 조회한다. 조회 실패는 null로 구분한다. 오래된 자유 형식 오류는 단계 미상으로 제공한다. Control 모니터는 후속 전달·입고 조회·Archivist 재호출·자동 전사 시작의 장애 진입과 회복을 기록한다. 자동 처리의 반복 폴링은 같은 경보를 누적하지 않는다. `WRK-014`, `MCP-012`, `OBS-012`
 
 ## 4. 요구사항 테스트와 증적 묶음
 

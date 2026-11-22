@@ -298,19 +298,20 @@ type actionCardScope struct {
 }
 
 type stepView struct {
-	ID               string                         `json:"id"`
-	State            string                         `json:"state"`
-	Progress         float64                        `json:"progress"`
-	ExecutorKind     string                         `json:"executor_kind"`
-	ActorID          string                         `json:"actor_id,omitempty"`
-	WorkerID         string                         `json:"worker_id,omitempty"`
-	WaitReason       string                         `json:"wait_reason,omitempty"`
-	ErrorClass       string                         `json:"error_class,omitempty"`
-	LogReference     string                         `json:"log_reference,omitempty"`
-	LastEventAt      time.Time                      `json:"last_event_at"`
-	DependencyIDs    []string                       `json:"dependency_ids"`
-	ProgressEvidence []corejob.StepProgressEvidence `json:"progress_evidence,omitempty"`
-	FailureEvidence  []corejob.StepFailureEvidence  `json:"failure_evidence,omitempty"`
+	ID                     string                         `json:"id"`
+	State                  string                         `json:"state"`
+	Progress               float64                        `json:"progress"`
+	ExecutorKind           string                         `json:"executor_kind"`
+	ActorID                string                         `json:"actor_id,omitempty"`
+	WorkerID               string                         `json:"worker_id,omitempty"`
+	WaitReason             string                         `json:"wait_reason,omitempty"`
+	ErrorClass             string                         `json:"error_class,omitempty"`
+	LogReference           string                         `json:"log_reference,omitempty"`
+	LastEventAt            time.Time                      `json:"last_event_at"`
+	DependencyIDs          []string                       `json:"dependency_ids"`
+	ProgressHistoryOmitted uint64                         `json:"progress_history_omitted,omitempty"`
+	ProgressEvidence       []corejob.StepProgressEvidence `json:"progress_evidence,omitempty"`
+	FailureEvidence        []corejob.StepFailureEvidence  `json:"failure_evidence,omitempty"`
 }
 
 type archivistActionView struct {
@@ -501,9 +502,9 @@ func projectJobDetail(value archiveworkspace.JobView) jobDetailView {
 			ID: step.ID, State: string(step.State), Progress: step.Progress, ExecutorKind: string(step.ExecutorKind),
 			ActorID: step.ActorID, WorkerID: step.WorkerID, WaitReason: string(step.WaitReason), ErrorClass: step.ErrorClass,
 			LogReference: step.LogReference, LastEventAt: step.LastEventAt,
-			DependencyIDs:    append([]string(nil), step.DependencyIDs...),
-			ProgressEvidence: append([]corejob.StepProgressEvidence(nil), step.ProgressEvidence...),
-			FailureEvidence:  failureEvidence,
+			DependencyIDs:          append([]string(nil), step.DependencyIDs...),
+			ProgressHistoryOmitted: step.ProgressHistoryOmitted, ProgressEvidence: append([]corejob.StepProgressEvidence(nil), step.ProgressEvidence...),
+			FailureEvidence: failureEvidence,
 		})
 	}
 	for _, action := range value.ArchivistActions {

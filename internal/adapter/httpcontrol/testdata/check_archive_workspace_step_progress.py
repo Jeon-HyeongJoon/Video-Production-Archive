@@ -17,4 +17,26 @@ with sync_playwright() as playwright:
     rendered = disclosure.inner_text()
     if any(secret in rendered for secret in ("stdout", "stderr", "C:\\", "/private/", "credential")):
         raise AssertionError(f"unsafe process data leaked into progress disclosure: {rendered!r}")
+    def live_evidence(route):
+        response = route.fetch()
+        payload = response.json()
+        step = next(step for step in payload["data"]["steps"] if step["id"] == "render")
+        base = step["progress_evidence"][0]
+        updates = [
+            {"operation": "RENDER_RECORDING", "status": "CHECKING_INPUTS"},
+            {"operation": "RENDER_RECORDING", "status": "OUTPUT_POSITION", "output_millis": 7500, "input_index": 2, "input_count": 3},
+            {"operation": "TRANSCRIBE_AUDIO", "status": "PROCESSING", "input_index": 2, "input_count": 3,
+             "chunk_index": 1, "chunk_count": 2, "source_end_millis": 5000, "process_percent": 80},
+        ]
+        step["progress_evidence"] = [dict(base, evidence_id=f"EVD-{i}", update=u) for i, u in enumerate(updates)]
+        step["progress_history_omitted"] = 2
+        route.fulfill(response=response, json=payload)
+
+    page.route("**/api/v1/jobs/JOB-RUNNING", live_evidence)
+    page.reload(wait_until="networkidle")
+    disclosure.locator("summary").click()
+    expect(disclosure).to_contain_text("이전 2건은 이벤트 원장에 보관")
+    expect(disclosure.locator("li").nth(0)).to_contain_text("입력 검증 진입")
+    expect(disclosure.locator("li").nth(1)).to_contain_text("입력 2/3 · 출력 위치")
+    expect(disclosure.locator("li").nth(2)).to_contain_text("전사 중 · 엔진 80%")
     browser.close()

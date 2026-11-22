@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -237,6 +238,23 @@ func TestWorkerProgressPersistsFencedStructuredEvidenceWithoutRawProcessData(t *
 			t.Fatalf("progress evidence %d is incomplete: %+v", index, evidence)
 		}
 	}
+	phase := execution.ProgressUpdate{Operation: execution.OperationRenderRecording, Status: execution.ProgressCheckingOutputs}
+	if r := workerProgress(handler, 4, 1, phase); r.Code != http.StatusOK {
+		t.Fatal(r.Body.String())
+	}
+	updated, err := store.Load(state.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err = job.Decode(updated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	step = claimTestStep(&state, "render")
+	if step.Progress != .5 || step.Workflow.State != workflow.Running || step.ProgressEvidence[3].Update != phase {
+		t.Fatal("verification entry claimed completion or changed measured progress")
+	}
+
 }
 
 func workerProgress(handler http.Handler, sequence, fencingToken uint64, update execution.ProgressUpdate) *httptest.ResponseRecorder {
@@ -550,4 +568,78 @@ func heartbeat(handler http.Handler, body string) *httptest.ResponseRecorder {
 	request.Header.Set("Authorization", "Bearer service-secret")
 	handler.ServeHTTP(response, request)
 	return response
+}
+
+// Requirement: WRK-020
+func TestWorkerRetainsLatestProgressAndReplaysArchivedObservation(t *testing.T) {
+	handler, store, _ := claimHarness(t, true, false)
+	req := httptest.NewRequest(http.MethodPost, "/worker/v1/steps/claim", nil)
+	req.Header.Set("X-Worker-ID", "worker-windows")
+	req.Header.Set("Authorization", "Bearer service-secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, req)
+	if response.Code != http.StatusOK {
+		t.Fatal(response.Body.String())
+	}
+	update := execution.ProgressUpdate{Operation: execution.OperationRenderRecording, Status: execution.ProgressPosition, InputIndex: 1, InputCount: 2, OutputMillis: 1000, Progress: 1}
+	if r := workerProgress(handler, 1, 1, update); r.Code != http.StatusOK {
+		t.Fatal(r.Body.String())
+	}
+	// Restore a full legacy snapshot. The first report was committed via HTTP so its immutable Event is also present.
+	snapshot, err := store.Load("JOB-SPEC")
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := job.Decode(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	step := claimTestStep(&state, "render")
+	first := step.ProgressEvidence[0]
+	for i := 2; i <= 1024; i++ {
+		e := first
+		e.ReportSequence = uint64(i)
+		e.EvidenceID = fmt.Sprintf("EVD-%d", i)
+		step.ProgressEvidence = append(step.ProgressEvidence, e)
+	}
+	revision := state.Revision
+	state.Revision++
+	encoded, err := json.Marshal(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Commit("", command.Commit{ExpectedRevision: &revision, NextState: &command.Snapshot{TargetID: state.ID, Revision: state.Revision, State: encoded}, Record: command.CommandRecord{Envelope: command.Envelope{CommandID: "restore", TargetID: state.ID}}}); err != nil {
+		t.Fatal(err)
+	}
+	next := update
+	next.InputIndex = 2
+	next.OutputMillis = 200
+	next.Progress = .2
+	if r := workerProgress(handler, 1025, 1, next); r.Code != http.StatusOK {
+		t.Fatal(r.Body.String())
+	}
+	snapshot, err = store.Load(state.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err = job.Decode(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	step = claimTestStep(&state, "render")
+	if step.ProgressHistoryOmitted != 1 || len(step.ProgressEvidence) != 1024 || step.ProgressEvidence[0].ReportSequence != 2 || step.ProgressEvidence[1023].Update != next || step.Progress != .6 {
+		t.Fatalf("latest evidence window or multi-input progress was lost")
+	}
+	if r := workerProgress(handler, 1, 1, update); r.Code != http.StatusOK {
+		t.Fatal("archived replay:", r.Body.String())
+	}
+	different := update
+	different.OutputMillis++
+	if r := workerProgress(handler, 1, 1, different); r.Code == http.StatusOK {
+		t.Fatal("conflicting archived replay accepted")
+	}
+	after, err := store.Load(state.ID)
+	if err != nil || after.Revision != state.Revision {
+		t.Fatal("replay changed the ledger", err)
+	}
 }

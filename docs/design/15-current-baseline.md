@@ -1,13 +1,13 @@
 # 15. 현재 구현 기준선
 
-기준일: 2026-11-12
+검증 기준선 갱신일: 2026-11-23
 
 이 문서는 설계 목표, 실제 운영 진입점, 현재 연결된 기능과 planned 경계를 한 곳에서 대조한다. 상세 규칙은 각 소유 설계와 `requirements/catalog.json`이 우선하며, 이 문서는 현재 상태를 찾는 인덱스다.
 
 ## 1. 검증 기준선
 
-- 요구사항 311개 중 implemented 269개, planned 42개
-- implemented 요구사항과 주석 테스트 262개가 1:1 연결
+- 요구사항 336개 중 implemented 294개, planned 42개
+- implemented 요구사항과 주석 테스트 294개가 1:1 연결
 - `make verify`, `go vet ./...` 통과를 변경 인계 조건으로 사용
 - Core는 Application·Adapter와 HTTP·SQLite·FFmpeg·Windows API를 import하지 않음
 - 실제 제품 수직 경로는 Archive Intake와 별도 STT, layout v3 compact 게시·카탈로그 대조까지 연결
@@ -191,6 +191,7 @@ ArchiveRun은 영속 업무 identity와 선택 일관성 경계다. 현재 1·2�
 | 패키지 복원 | ArchivePackage만으로 빈 DB 복원 | `ARC-007` planned |
 | 네트워크·원격 Storage | SMB·FTP·SFTP identity, credential, 안전 게시 | `CFG-012~013`, `DEV-012` planned |
 | 공통 Capability Registry | 모든 영속 업무의 Adapter 없는 직접 실행 | `APP-001` planned |
+| 미디어 실행 모니터링 | Worker·CLI 공통 단계 진입, FFmpeg 출력 위치, 전사 입력·청크·엔진 진행, 관리형 보고 누락과 완료 후속 반영 | [실행 증적 경계](10-capabilities-observability.md#3-실행-증적-경계) |
 | 공통 운영 증적 | 모든 업무 실행의 Evidence Sink | `OBS-001` planned |
 | 장치 정리 | 안전 해제·포맷·원본 삭제 | planned 또는 요구사항 미확정 |
 

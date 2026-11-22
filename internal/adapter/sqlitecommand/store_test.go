@@ -177,11 +177,25 @@ func TestWorkerCompletionOutboxSurvivesRestartAndResultReplay(t *testing.T) {
 	if err != nil || replayed.Revision != settled.Revision {
 		t.Fatalf("identical result was not replayed: state=%+v err=%v", replayed, err)
 	}
+	attemptAt := now.Add(3 * time.Second)
+	for _, tc := range []struct{ stored, want string }{{"/private/legacy-token", "UNKNOWN"}, {"COMPLETION_OBSERVER", "COMPLETION_OBSERVER"}} {
+		if err := reopened.RecordWorkerCompletionFailure(ctx, pending[0].ID, tc.stored, attemptAt); err != nil {
+			t.Fatal(err)
+		}
+		d, err := reopened.CompletionDelivery(ctx)
+		if err != nil || d.Pending != 1 || d.Retrying != 1 || d.JobID != queued.ID || d.CompletionID != pending[0].ID || d.FailureStage != tc.want || !d.LastAttemptAt.Equal(attemptAt) || d.OldestPendingAt.IsZero() {
+			t.Fatalf("pending delivery evidence: %+v %v", d, err)
+		}
+	}
 	if err := reopened.MarkWorkerCompletionDelivered(ctx, pending[0].ID, now.Add(4*time.Second)); err != nil {
 		t.Fatal(err)
 	}
 	if remaining, err := reopened.PendingWorkerCompletions(ctx, 10); err != nil || len(remaining) != 0 {
 		t.Fatalf("delivered completion remained pending: %+v err=%v", remaining, err)
+	}
+	d, err := reopened.CompletionDelivery(ctx)
+	if err != nil || d.Pending != 0 || d.Retrying != 0 || d.JobID != "" {
+		t.Fatalf("delivered item still reported: %+v %v", d, err)
 	}
 }
 

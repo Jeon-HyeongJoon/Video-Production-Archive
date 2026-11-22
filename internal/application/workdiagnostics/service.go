@@ -104,6 +104,7 @@ type WorkerSnapshot struct {
 }
 
 type JobDiagnostic struct {
+	EvidenceGaps     []EvidenceGap                  `json:"evidence_gaps,omitempty"`
 	JobID            string                         `json:"job_id"`
 	JobRevision      uint64                         `json:"job_revision"`
 	StepID           string                         `json:"step_id"`
@@ -112,7 +113,7 @@ type JobDiagnostic struct {
 	WaitReason       vocabulary.WaitReason          `json:"wait_reason,omitempty"`
 	ErrorClass       string                         `json:"error_class,omitempty"`
 	LogReference     string                         `json:"log_reference,omitempty"`
-	LastProgressAt   time.Time                      `json:"last_progress_at"`
+	LastProgressAt   time.Time                      `json:"last_progress_at,omitzero"`
 	Worker           *WorkerSnapshot                `json:"worker,omitempty"`
 	Execution        *ExecutionObservation          `json:"execution,omitempty"`
 	ProgressEvidence []corejob.StepProgressEvidence `json:"progress_evidence,omitempty"`
@@ -151,6 +152,9 @@ func SanitizeFailureDetail(source FailureDetail) FailureDetail {
 	result.EvidenceID = safeEvidenceID(source.EvidenceID, source.JobID+"\x00"+source.StepID)
 	result.ProcessLog.Reference = safeLogReference(source.ProcessLog.Reference)
 	result.ProcessLog.SanitizedTail = safeProcessTail(source.ProcessLog.SanitizedTail)
+	if source.Operation == execution.OperationTranscribeAudio {
+		result.ProcessLog.SanitizedTail = ""
+	}
 	if result.ProcessLog.Validate() != nil {
 		id := result.ProcessLog.ID
 		if id == "" {
@@ -286,10 +290,11 @@ func (service *Service) diagnoseJob(ctx context.Context, view archiveworkspace.J
 	item := JobDiagnostic{
 		JobID: summary.JobID, JobRevision: summary.Revision, StepID: summary.CurrentStepID, StepState: summary.StepState,
 		Progress: summary.Progress, WaitReason: summary.WaitReason, ErrorClass: strings.TrimSpace(summary.ErrorClass),
-		LogReference: safeLogReference(summary.LogReference), LastProgressAt: summary.LastEventAt,
+		LogReference: safeLogReference(summary.LogReference),
 	}
 	for _, step := range view.Steps {
 		item.ProgressEvidence = append(item.ProgressEvidence, step.ProgressEvidence...)
+		item.EvidenceGaps = append(item.EvidenceGaps, evidenceGaps(step)...)
 		for _, evidence := range step.FailureEvidence {
 			item.FailureEvidence = append(item.FailureEvidence, sanitizeFailureEvidence(evidence))
 		}
@@ -313,12 +318,7 @@ func (service *Service) diagnoseJob(ctx context.Context, view archiveworkspace.J
 		summary.JobID, strconv.FormatUint(summary.Revision, 10), summary.CurrentStepID, string(summary.StepState))
 	facts := []Fact{stateFact}
 	for _, evidence := range item.ProgressEvidence {
-		facts = append(facts, Fact{
-			EvidenceID: evidence.EvidenceID, Code: "WORKER_PROGRESS_RECORDED",
-			Summary: "Chunk " + strconv.FormatUint(uint64(evidence.Update.ChunkIndex), 10) + "/" + strconv.FormatUint(uint64(evidence.Update.ChunkCount), 10) +
-				" is " + string(evidence.Update.Status) + " for source milliseconds " + strconv.FormatInt(evidence.Update.SourceStartMillis, 10) + "-" + strconv.FormatInt(evidence.Update.SourceEndMillis, 10),
-			ObservedAt: evidence.ObservedAt,
-		})
+		facts = append(facts, progressFact(evidence))
 	}
 	for _, evidence := range item.FailureEvidence {
 		facts = append(facts, Fact{
@@ -355,6 +355,13 @@ func (service *Service) diagnoseJob(ctx context.Context, view archiveworkspace.J
 			facts = append(facts, diagnosticFact("LEASE_HEARTBEAT_OBSERVED", "The Worker execution loop renewed its lease", executionObservation.LeaseHeartbeatAt,
 				summary.JobID, summary.CurrentStepID, strconv.FormatUint(executionObservation.FencingToken, 10), executionObservation.LeaseHeartbeatAt.Format(time.RFC3339Nano)))
 		}
+	}
+	// A state transition or a lease heartbeat is not a processing sample.
+	for _, e := range item.ProgressEvidence {
+		if e.StepID != summary.CurrentStepID || e.Update.Status.IsPhase() || (found && executionObservation.HasLease && e.FencingToken != executionObservation.FencingToken) {
+			continue
+		}
+		item.LastProgressAt = progressFact(e).ObservedAt
 	}
 	var hypotheses []Hypothesis
 	var actions []SuggestedAction
@@ -503,6 +510,9 @@ func sanitizeFailureEvidenceWithTail(source corejob.StepFailureEvidence) corejob
 	if source.ProcessLog != nil && source.ProcessLog.Validate() == nil {
 		copy := *source.ProcessLog
 		copy.SanitizedTail = safeProcessTail(copy.SanitizedTail)
+		if source.Operation == execution.OperationTranscribeAudio {
+			copy.SanitizedTail = ""
+		}
 		result.ProcessLog = &copy
 	} else {
 		digest := sha256.Sum256([]byte(result.EvidenceID + "\x00legacy-process-log"))
@@ -633,6 +643,17 @@ func Sanitize(snapshot Snapshot) Snapshot {
 			copy := *result.Jobs[index].Execution
 			copy.PhysicalDeviceIDs = append([]string(nil), copy.PhysicalDeviceIDs...)
 			result.Jobs[index].Execution = &copy
+		}
+		result.Jobs[index].EvidenceGaps = append([]EvidenceGap(nil), snapshot.Jobs[index].EvidenceGaps...)
+		for i := range result.Jobs[index].EvidenceGaps {
+			gap := &result.Jobs[index].EvidenceGaps[i]
+			if gap.LastKnown != nil {
+				fact := *gap.LastKnown
+				fact.EvidenceID = safeEvidenceID(fact.EvidenceID, gap.StepID)
+				fact.Code = safeDiagnosticCode(fact.Code, "WORKER_PROGRESS_RECORDED")
+				fact.Summary = safeDiagnosticSummary(fact.Summary)
+				gap.LastKnown = &fact
+			}
 		}
 		result.Jobs[index].ProgressEvidence = append([]corejob.StepProgressEvidence(nil), snapshot.Jobs[index].ProgressEvidence...)
 		result.Jobs[index].FailureEvidence = append([]corejob.StepFailureEvidence(nil), snapshot.Jobs[index].FailureEvidence...)

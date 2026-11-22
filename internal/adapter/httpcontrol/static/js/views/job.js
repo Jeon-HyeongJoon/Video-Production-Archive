@@ -146,18 +146,23 @@ function FailureEvidence({ items }) {
 
 function progressEvidenceLine(evidence) {
   const update = evidence.update || {};
+  if (["CHECKING_INPUTS", "EXECUTING", "CHECKING_OUTPUTS"].includes(update.status)) return label("progress", update.status);
+  const input = update.input_index ? `입력 ${update.input_index}/${update.input_count} · ` : "";
+  if (update.status === "OUTPUT_POSITION") return `${input}출력 위치 ${mediaDuration(update.output_millis)}`;
+  const percent = update.process_percent ? ` · 엔진 ${update.process_percent}%` : "";
   const chunk = update.chunk_index ? `${update.chunk_index}/${update.chunk_count}` : `${update.chunk_count || 0}개 계획`;
   const range = update.chunk_index && update.source_end_millis > update.source_start_millis
     ? `${update.source_start_millis ? mediaDuration(update.source_start_millis) : "0:00"}–${mediaDuration(update.source_end_millis)}`
     : `전체 ${mediaDuration(update.source_end_millis)}`;
-  return `${chunk} · ${range} · ${label("progress", update.status)}`;
+  return `${input}${chunk} · ${range} · ${label("progress", update.status)}${percent}`;
 }
 
-function ProgressEvidence({ items }) {
+function ProgressEvidence({ items, omitted }) {
   if (!items?.length) return null;
   return html`<details class="step-evidence progress-evidence"><summary>실행 근거 <span class="num">${items.length}</span></summary>
+    ${omitted ? html`<small>이전 ${omitted}건은 이벤트 원장에 보관</small>` : null}
     <ol>${items.map((evidence) => html`<li key=${evidence.evidence_id}>
-      <time>${clockTime(evidence.observed_at, true)}</time><span>${progressEvidenceLine(evidence)}</span>
+      <time>${clockTime(evidence.update?.worker_observed_at || evidence.observed_at, true)}</time><span>${progressEvidenceLine(evidence)}</span>
     </li>`)}</ol>
   </details>`;
 }
@@ -236,7 +241,7 @@ export function JobScreen({ id }) {
           return html`<li class="step-item" key=${step.id} data-step=${step.id} data-signal=${signal} data-state=${kind}>
             <${StatusIcon} kind=${kind} /><span><b>${label("stage", step.id)}</b><small class="stage-state">${stepLine(step)}</small></span>
             ${step.state === "RUNNING" ? html`<${Meter} value=${step.progress || 0} label="진행" />` : html`<span></span>`}
-            <${ProgressEvidence} items=${step.progress_evidence || []} />
+            <${ProgressEvidence} items=${step.progress_evidence || []} omitted=${step.progress_history_omitted} />
             <${FailureEvidence} items=${step.failure_evidence || []} />
           </li>`;
         }) : html`<${Empty} text=${answer.error ? "상세 조회 실패" : answer.value === undefined ? "불러오는 중" : "단계 없음"} />`}

@@ -81,16 +81,32 @@ type OpenIssue struct {
 	Diagnostic  *workdiagnostics.Snapshot `json:"diagnostic,omitempty"`
 }
 
+type CompletionDelivery struct {
+	Pending         int       `json:"pending"`
+	Retrying        int       `json:"retrying"`
+	OldestPendingAt time.Time `json:"oldest_pending_at,omitzero"`
+	CompletionID    string    `json:"completion_id,omitempty"`
+	JobID           string    `json:"job_id,omitempty"`
+	FailureStage    string    `json:"failure_stage,omitempty"`
+	LastAttemptAt   time.Time `json:"last_attempt_at,omitzero"`
+}
+
+type CompletionReader interface {
+	CompletionDelivery(context.Context) (CompletionDelivery, error)
+}
+
 type Snapshot struct {
-	ObservedAt        time.Time               `json:"observed_at"`
-	Workers           []WorkerSnapshot        `json:"workers"`
-	ArchivistHosts    []ArchivistHostSnapshot `json:"archivist_hosts"`
-	WorkCounts        WorkCounts              `json:"work_counts"`
-	OpenIssues        []OpenIssue             `json:"open_issues"`
-	OmittedIssueCount int                     `json:"omitted_issue_count"`
+	CompletionDelivery *CompletionDelivery     `json:"completion_delivery"`
+	ObservedAt         time.Time               `json:"observed_at"`
+	Workers            []WorkerSnapshot        `json:"workers"`
+	ArchivistHosts     []ArchivistHostSnapshot `json:"archivist_hosts"`
+	WorkCounts         WorkCounts              `json:"work_counts"`
+	OpenIssues         []OpenIssue             `json:"open_issues"`
+	OmittedIssueCount  int                     `json:"omitted_issue_count"`
 }
 
 type Service struct {
+	delivery    CompletionReader
 	works       WorkReader
 	workers     WorkerReader
 	hosts       ArchivistHostReader
@@ -98,11 +114,11 @@ type Service struct {
 	now         func() time.Time
 }
 
-func New(works WorkReader, workers WorkerReader, hosts ArchivistHostReader, diagnostics DiagnosticReader, now func() time.Time) (*Service, error) {
-	if works == nil || workers == nil || hosts == nil || diagnostics == nil || now == nil {
+func New(works WorkReader, workers WorkerReader, hosts ArchivistHostReader, diagnostics DiagnosticReader, delivery CompletionReader, now func() time.Time) (*Service, error) {
+	if works == nil || workers == nil || hosts == nil || diagnostics == nil || delivery == nil || now == nil {
 		return nil, ErrInvalidConfiguration
 	}
-	return &Service{works: works, workers: workers, hosts: hosts, diagnostics: diagnostics, now: now}, nil
+	return &Service{delivery: delivery, works: works, workers: workers, hosts: hosts, diagnostics: diagnostics, now: now}, nil
 }
 
 func (service *Service) Snapshot(ctx context.Context) (Snapshot, error) {
@@ -116,6 +132,9 @@ func (service *Service) Snapshot(ctx context.Context) (Snapshot, error) {
 		return Snapshot{}, err
 	}
 	result := Snapshot{ObservedAt: now}
+	if delivery, err := service.delivery.CompletionDelivery(ctx); err == nil {
+		result.CompletionDelivery = &delivery
+	}
 	for _, status := range workerStatuses {
 		result.Workers = append(result.Workers, WorkerSnapshot{
 			WorkerID: status.WorkerID, State: status.State, LastHeartbeat: status.LastHeartbeat,

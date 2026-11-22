@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"videoarchive/internal/core/execution"
 	"videoarchive/internal/core/rendering"
 )
 
@@ -20,6 +21,12 @@ const ffmpegFixtureProcess = "ARCHIVE_FFMPEG_FIXTURE_PROCESS"
 func TestMain(m *testing.M) {
 	if os.Getenv(ffmpegFixtureProcess) == "1" {
 		arguments := os.Args[1:]
+		if len(arguments) > 3 && arguments[0] == "-nostats" && arguments[1] == "-progress" && arguments[2] == "pipe:1" {
+			fmt.Fprint(os.Stdout, "out_time_us=N/A\nout_time_us=500000\nout_time_us=900000\nout_time_us=700000\nout_time_us=1500000")
+			if os.Getenv("ARCHIVE_TEST_FFMPEG_EXIT") == "1" {
+				os.Exit(17)
+			}
+		}
 		if err := os.WriteFile(os.Getenv("FFMPEG_FIXTURE_ARGUMENTS"), []byte(strings.Join(arguments, "\n")+"\n"), 0o600); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
@@ -175,5 +182,34 @@ func TestFFmpegAdapterUsesFixedTargetBitrateArgumentsForOrganizationProfiles(t *
 				t.Fatalf("published rendition lost profile provenance: %+v", result)
 			}
 		})
+	}
+}
+
+// Requirement: OBS-011
+func TestEncoderReportsBoundedActualOutputPositionOnSuccessAndFailure(t *testing.T) {
+	for _, operation := range []execution.Operation{execution.OperationRenderRecording, execution.OperationRenderSourceSequence, execution.OperationExtractSpeechAudio} {
+		for _, fail := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/fail=%t", operation, fail), func(t *testing.T) {
+				dir := t.TempDir()
+				exe := ffmpegFixtureExecutable(t, filepath.Join(dir, "args"), []byte("encoded"))
+				if fail {
+					t.Setenv("ARCHIVE_TEST_FFMPEG_EXIT", "1")
+				}
+				var samples []execution.ProgressUpdate
+				ctx := execution.WithProgressReporter(context.Background(), func(_ context.Context, u execution.ProgressUpdate) error {
+					samples = append(samples, u)
+					return nil
+				})
+				err := WithProgress(OSRunner{}, operation, 2, 3, 2000).Run(ctx, exe, []string{filepath.Join(dir, "output")})
+				if (err != nil) != fail || len(samples) != 2 || samples[0].OutputMillis != 500 || samples[1].OutputMillis != 1500 || samples[1].Progress != 0.75 {
+					t.Fatalf("output observations: %+v, error %v", samples, err)
+				}
+				for _, u := range samples {
+					if u.Status != execution.ProgressPosition || u.Operation != operation || u.InputIndex != 2 || u.InputCount != 3 || u.SourceEndMillis != 0 {
+						t.Fatalf("unexpected output position: %+v", u)
+					}
+				}
+			})
+		}
 	}
 }

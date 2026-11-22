@@ -91,6 +91,10 @@ func (registry *Registry) ExecuteOperation(ctx context.Context, spec execution.S
 	if !exists {
 		return inputFailure("UNSUPPORTED_STEP_OPERATION")
 	}
+	reportPhase := func(status execution.ProgressStatus) {
+		_ = execution.ReportProgress(ctx, execution.ProgressUpdate{Operation: spec.Operation, Status: status})
+	}
+	reportPhase(execution.ProgressCheckingInputs)
 	for _, input := range spec.Inputs {
 		root, registered := registry.roots.Root(input.StorageID)
 		if !registered {
@@ -140,6 +144,7 @@ func (registry *Registry) ExecuteOperation(ctx context.Context, spec execution.S
 		}
 	}
 	defer releaseOutputLocks()
+	reportPhase(execution.ProgressExecuting)
 	if detailed, ok := handler.(detailedHandler); ok {
 		outputs, verificationReferences, inspectedMedia, err = detailed.ExecuteDetailed(attemptContext, spec, registry.roots)
 	} else {
@@ -174,6 +179,7 @@ func (registry *Registry) ExecuteOperation(ctx context.Context, spec execution.S
 			LogReference: logReference, ProcessLog: processLog,
 		}
 	}
+	reportPhase(execution.ProgressCheckingOutputs)
 	validationWorkerID := "registry-validation"
 	if len(inspectedMedia) > 0 {
 		validationWorkerID = inspectedMedia[0].Observation.ObservedBy
@@ -368,6 +374,10 @@ func typedFailureCause(err error) (string, string, bool) {
 		{ffprobe.ErrInvalidRequest, "FFPROBE_REQUEST_INVALID", "The FFprobe request failed validation"},
 		{ffprobe.ErrProbeFailed, "FFPROBE_EXECUTION_FAILED", "FFprobe execution failed"},
 		{ffprobe.ErrInvalidOutput, "FFPROBE_OUTPUT_INVALID", "FFprobe returned invalid structured output"},
+		{whispercpp.ErrChunkPlan, "WHISPER_CHUNK_PLAN_FAILED", "Speech audio could not be read or divided into chunks"},
+		{whispercpp.ErrOutputRead, "WHISPER_OUTPUT_UNAVAILABLE", "The transcription process produced no readable result"},
+		{whispercpp.ErrOutputInvalid, "WHISPER_OUTPUT_INVALID", "The transcription result failed validation"},
+		{whispercpp.ErrPublish, "TRANSCRIPT_PUBLISH_FAILED", "The validated transcript could not be published"},
 		{whispercpp.ErrInvalidRequest, "WHISPER_REQUEST_INVALID", "The speech transcription request failed validation"},
 		{whispercpp.ErrTranscriptionFailed, "WHISPER_TRANSCRIPTION_FAILED", "Speech transcription failed"},
 		{subtitlefile.ErrInvalidRequest, "SUBTITLE_REQUEST_INVALID", "The subtitle request failed validation"},

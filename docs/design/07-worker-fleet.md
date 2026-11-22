@@ -182,6 +182,8 @@ profile reference와 operation별 typed parameter
 
 외부 미디어 process는 Worker 로컬의 별도 `StorageRoot`에 실행 경계별 `ProcessLogArtifact`를 쓴다. 실행 중 출력은 같은 실행 ID의 `.partial` 파일에 단일 파일 상한까지만 쓰고, 실패 뒤 sync·hash 검증과 Storage 단위 quota lock을 거쳐 `.log`로 게시한다. 새 실행 전과 실패 게시 직전에 보존 기간과 총량을 넘는 오래된 완성 log부터 제거하므로 동시 실패가 총량 경계를 우회하지 않는다. 성공한 실행과 게시 실패의 임시 log는 제거하고 검증된 실패 실행만 raw 파일을 유지한다. Worker 결과에는 raw 파일 경로나 process 인수를 넣지 않고 Job·Step·operation·fencing token으로 계산한 ID, `evidence://process-log/<ID>` reference, digest, 기록량·전체량·잘림 상태와 비밀값·절대경로를 제거한 제한 tail을 보낸다. 로컬 게시를 완료하지 못해도 process 실행 결과는 잃지 않으며 가용 상태를 `CAPTURE_FAILED`로 보고한다. `WRK-019`
 
+공통 실행기의 단계 진입은 측정된 처리율을 유지한다. FFmpeg가 내는 출력 millisecond는 시퀀스 결과의 시간축에 속한다. STT는 입력 순번·청크 순번·원본 범위와 whisper.cpp가 알린 숫자 진행만 전송한다. 전사 stdout은 로컬 process log에서도 제외하고 stderr 상세는 Worker 로컬에만 보관한다. Control은 이전 Worker의 전사 상세 tail도 숨긴다. 잘못된 WAV, 엔진 종료, JSON 누락·검증 실패, 게시 실패는 구체적인 원인 코드로 구분한다. [진행 수집과 비용 기준](10-capabilities-observability.md#32-수집-비용과-관측-누락) · `TRN-008~009`, `OBS-011`
+
 장시간 MediaOperation은 lease heartbeat와 별도로 제한된 빈도의 `StepProgressEvidence`를 제출한다. Worker가 현재 fencing token과 단조 증가 보고 순번으로 operation·계획/시작/완료/실패 상태·청크 순번과 전체 수·원본 시작/종료 millisecond·완료 비율을 보고하면 Control의 `WorkerLifecycleHandler`가 진행률·최근 관측 시각·변경 불가능한 증적과 Domain Event를 같은 Job transaction으로 확정한다. 같은 보고 재전송은 증적을 중복하지 않고 오래된 token은 거부한다. 이 구조에는 원문 stdout·stderr, 실행 인수, credential, 절대경로와 음성 내용이 없으며 작업 상세와 WorkDiagnostic이 같은 증적 ID를 읽는다. `WRK-017`
 
 `RECONCILE_ARCHIVE_PUBLICATION`은 진단이 허용한 새 복구 Job에서만 쓰는 typed operation이다. 패키지 리비전 실패이면 현재 패키지와 동일 전사 JSON·시간 코드 text·자막 checksum을 확인해 이미 게시된 리비전을 재사용하거나 현재 리비전 위에 한 번만 추가하고, 카탈로그 실패이면 검증된 현재 패키지를 그대로 사용한다. 두 경우 모두 Storage 최상위 카탈로그를 원자적으로 다시 게시한다. 같은 명세가 다른 fencing token으로 다시 실행돼도 같은 전사 산출물로 패키지 리비전을 더 만들지 않는다. `WRK-018`

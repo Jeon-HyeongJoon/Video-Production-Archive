@@ -316,7 +316,7 @@ func OpenWithDependencies(ctx context.Context, configuration bootconfig.Configur
 		return fail(err)
 	}
 	runtime.workDiagnostics = workDiagnostics
-	systemStatus, err := systemstatus.New(workQueries, workerCapacity, archivists, workDiagnostics, dependencies.Now)
+	systemStatus, err := systemstatus.New(workQueries, workerCapacity, archivists, workDiagnostics, commandStore, dependencies.Now)
 	if err != nil {
 		return fail(err)
 	}
@@ -492,26 +492,55 @@ func (runtime *Runtime) monitorArchivistAdvisories(ctx context.Context) {
 	}
 }
 
+// Track outages per monitored operation and run. The set contains only open outages.
+type monitorKey struct{ operation, runID string }
+type monitorHealth map[monitorKey]bool
+
+func (health monitorHealth) observe(ctx context.Context, key monitorKey, revision uint64, err error) {
+	if ctx.Err() != nil || health[key] == (err != nil) {
+		return
+	}
+	fields := []any{"operation", key.operation}
+	if key.runID != "" {
+		fields = append(fields, "archive_run_id", key.runID, "revision", revision)
+	}
+	if err != nil {
+		health[key] = true
+		slog.Warn("Archive Control monitor failed", fields...)
+	} else {
+		delete(health, key)
+		slog.Info("Archive Control monitor recovered", fields...)
+	}
+}
+
 func (runtime *Runtime) monitorArchiveRuns(ctx context.Context) {
 	if runtime == nil || runtime.archiveIntakeWorkspace == nil || runtime.archiveTranscriptions == nil || runtime.now == nil {
 		return
 	}
+	health := make(monitorHealth)
 	project := func() {
 		views, err := runtime.archiveIntakeWorkspace.Projection(ctx)
+		health.observe(ctx, monitorKey{operation: "ARCHIVE_RUN_PROJECTION"}, 0, err)
 		if err != nil {
 			return
 		}
+		seen := make(map[string]bool, len(health))
 		for _, view := range views {
 			if view.ArchiveRunID == "" || view.ArchiveRunRevision == 0 {
 				continue
 			}
+			seen[view.ArchiveRunID] = true
 			// Preserve the stage-one completion recall before the automatic
 			// continuation makes TRANSCRIPTION_READY a transient state.
 			if runtime.archivists != nil {
 				err := runtime.archivists.RecallArchiveRunProjection(
 					ctx, view.ArchiveRunID, view.ArchiveRunRevision, view.ArchiveRunState, view.HoldCount,
 				)
-				if err != nil && !errors.Is(err, archivistcontrol.ErrArchiveRunNotBound) {
+				if errors.Is(err, archivistcontrol.ErrArchiveRunNotBound) {
+					err = nil
+				}
+				health.observe(ctx, monitorKey{"ARCHIVIST_RECALL", view.ArchiveRunID}, view.ArchiveRunRevision, err)
+				if err != nil {
 					continue
 				}
 			}
@@ -524,8 +553,14 @@ func (runtime *Runtime) monitorArchiveRuns(ctx context.Context) {
 				Actor:          command.Actor{Type: vocabulary.ActorSystem, ID: archivetranscription.CoordinatorActorID},
 				StartedAt:      runtime.now(),
 			})
-			if err != nil && !errors.Is(err, archivetranscription.ErrStageOneIncomplete) && ctx.Err() == nil {
-				slog.Warn("automatic archive transcription start failed", "archive_run_id", view.ArchiveRunID, "error", err)
+			if errors.Is(err, archivetranscription.ErrStageOneIncomplete) {
+				err = nil
+			}
+			health.observe(ctx, monitorKey{"AUTO_TRANSCRIPTION_START", view.ArchiveRunID}, view.ArchiveRunRevision, err)
+		}
+		for key := range health {
+			if key.runID != "" && !seen[key.runID] {
+				delete(health, key)
 			}
 		}
 	}
@@ -546,7 +581,10 @@ func (runtime *Runtime) monitorWorkerCompletions(ctx context.Context) {
 	if runtime == nil || runtime.workerExecution == nil {
 		return
 	}
-	reconcile := func() { _ = runtime.workerExecution.ReconcileCompletions(ctx) }
+	health := make(monitorHealth)
+	reconcile := func() {
+		health.observe(ctx, monitorKey{operation: "WORKER_COMPLETION_DELIVERY"}, 0, runtime.workerExecution.ReconcileCompletions(ctx))
+	}
 	reconcile()
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()

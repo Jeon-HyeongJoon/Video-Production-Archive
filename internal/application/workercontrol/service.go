@@ -3,6 +3,7 @@ package workercontrol
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"time"
 
 	"videoarchive/internal/application/archiveworkspace"
@@ -41,6 +42,7 @@ type CompletionWork struct {
 }
 
 type Result struct {
+	ProgressReportCount uint64 `json:",omitempty"`
 	WorkerID            string
 	JobID               string
 	StepID              string
@@ -189,8 +191,7 @@ func (service *Service) Report(ctx context.Context, result Result) error {
 	// The small read-model refresh and dispatch keep claim/UI latency low, but
 	// they are best-effort and cannot reject the committed report. Potentially
 	// large per-file observers run only in ReconcileCompletions.
-	_ = service.project(ctx, state)
-	_ = service.dispatcher.DispatchAvailable(ctx)
+	service.refreshCommitted(ctx, state)
 	return nil
 }
 
@@ -201,8 +202,10 @@ func (service *Service) ReconcileCompletions(ctx context.Context) error {
 	}
 	var combined error
 	for _, item := range work {
+		stage := "JOB_PROJECTION"
 		reconcileErr := service.project(ctx, item.State)
 		if reconcileErr == nil {
+			stage = "COMPLETION_OBSERVER"
 			for _, observer := range service.observers {
 				if err := observer.ObserveCompletion(ctx, item.State); err != nil {
 					reconcileErr = err
@@ -211,10 +214,11 @@ func (service *Service) ReconcileCompletions(ctx context.Context) error {
 			}
 		}
 		if reconcileErr == nil {
+			stage = "DISPATCH"
 			reconcileErr = service.dispatcher.DispatchAvailable(ctx)
 		}
 		if reconcileErr != nil {
-			if recordErr := service.store.RecordWorkerCompletionFailure(ctx, item.ID, reconcileErr.Error(), service.now().UTC()); recordErr != nil {
+			if recordErr := service.store.RecordWorkerCompletionFailure(ctx, item.ID, stage, service.now().UTC()); recordErr != nil {
 				combined = errors.Join(combined, recordErr)
 			}
 			combined = errors.Join(combined, reconcileErr)
@@ -239,9 +243,17 @@ func (service *Service) ReportCancellation(ctx context.Context, result Cancellat
 	// Cancellation settlement uses the same durable completion outbox as a
 	// normal Worker result. Once committed, projection or dispatch failure must
 	// not make the Worker retry a state change that already succeeded.
-	_ = service.project(ctx, state)
-	_ = service.dispatcher.DispatchAvailable(ctx)
+	service.refreshCommitted(ctx, state)
 	return nil
+}
+
+func (service *Service) refreshCommitted(ctx context.Context, state job.State) {
+	if err := service.project(ctx, state); err != nil && ctx.Err() == nil {
+		slog.Warn("Committed Worker result awaits projection", "job_id", state.ID, "revision", state.Revision, "stage", "JOB_PROJECTION")
+	}
+	if err := service.dispatcher.DispatchAvailable(ctx); err != nil && ctx.Err() == nil {
+		slog.Warn("Committed Worker result awaits dispatch", "job_id", state.ID, "revision", state.Revision, "stage", "DISPATCH")
+	}
 }
 
 func (service *Service) project(ctx context.Context, state job.State) error {

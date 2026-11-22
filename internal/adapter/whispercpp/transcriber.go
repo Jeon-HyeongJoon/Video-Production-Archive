@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"videoarchive/internal/adapter/processprogress"
 	"videoarchive/internal/core/archive"
 	"videoarchive/internal/core/audio"
 	"videoarchive/internal/core/execution"
@@ -25,6 +26,10 @@ import (
 )
 
 var (
+	ErrChunkPlan           = errors.New("speech audio chunk planning failed")
+	ErrOutputRead          = errors.New("whisper output unavailable")
+	ErrOutputInvalid       = errors.New("whisper output is invalid")
+	ErrPublish             = errors.New("transcript publication failed")
 	ErrInvalidRequest      = errors.New("invalid whisper.cpp transcription request")
 	ErrTranscriptionFailed = errors.New("whisper.cpp transcription failed")
 )
@@ -32,9 +37,12 @@ var (
 type OSRunner struct{}
 
 func (OSRunner) Run(ctx context.Context, executable string, arguments []string) error {
+	return (OSRunner{}).RunStreams(ctx, executable, arguments, nil, nil)
+}
+
+func (OSRunner) RunStreams(ctx context.Context, executable string, arguments []string, stdout, stderr io.Writer) error {
 	process := exec.CommandContext(ctx, executable, arguments...)
-	process.Stdout = io.Discard
-	process.Stderr = io.Discard
+	process.Stdout, process.Stderr = stdout, stderr
 	return process.Run()
 }
 
@@ -48,6 +56,8 @@ func (AtomicPublisher) Publish(temporaryPath, publishedPath string) error {
 }
 
 type Request struct {
+	InputIndex            uint32
+	InputCount            uint32
 	TranscriptID          string
 	AudioArtifact         audio.AudioArtifact
 	InputRoot             *archive.StorageRoot
@@ -122,16 +132,17 @@ func (transcriber *Transcriber) Transcribe(ctx context.Context, request Request)
 	if request.InputRoot != nil {
 		input, openErr := request.InputRoot.Open(audioArtifact.Artifact.Path)
 		if openErr != nil {
-			return transcription.Transcript{}, errors.Join(ErrTranscriptionFailed, openErr)
+			return transcription.Transcript{}, errors.Join(ErrTranscriptionFailed, ErrChunkPlan, openErr)
 		}
 		chunks, err = planSpeechChunks(input, transcriber.chunkPolicy)
 		closeErr := input.Close()
 		if err != nil || closeErr != nil {
-			return transcription.Transcript{}, errors.Join(ErrTranscriptionFailed, err, closeErr)
+			return transcription.Transcript{}, errors.Join(ErrTranscriptionFailed, ErrChunkPlan, err, closeErr)
 		}
 	}
 	if request.InputRoot != nil {
 		_ = execution.ReportProgress(ctx, execution.ProgressUpdate{
+			InputIndex: request.InputIndex, InputCount: request.InputCount,
 			Operation: execution.OperationTranscribeAudio, Status: execution.ProgressPlanned,
 			ChunkCount: uint32(len(chunks)), SourceEndMillis: chunks[len(chunks)-1].LogicalEndMillis,
 		})
@@ -139,11 +150,18 @@ func (transcriber *Transcriber) Transcribe(ctx context.Context, request Request)
 	var language string
 	segments := make([]transcription.Segment, 0)
 	for index, chunk := range chunks {
+		var observedPercent uint32
 		reportChunk := func(status execution.ProgressStatus, progress float64) {
 			if request.InputRoot == nil {
 				return
 			}
+			var percent uint32
+			if status == execution.ProgressProcessing || status == execution.ProgressFailed {
+				percent = observedPercent
+				progress = (float64(index) + float64(percent)/100) / float64(len(chunks))
+			}
 			_ = execution.ReportProgress(ctx, execution.ProgressUpdate{
+				ProcessPercent: percent, InputIndex: request.InputIndex, InputCount: request.InputCount,
 				Operation: execution.OperationTranscribeAudio, Status: status,
 				ChunkIndex: uint32(index + 1), ChunkCount: uint32(len(chunks)),
 				SourceStartMillis: chunk.LogicalStartMillis, SourceEndMillis: chunk.LogicalEndMillis,
@@ -173,38 +191,68 @@ func (transcriber *Transcriber) Transcribe(ctx context.Context, request Request)
 			)
 		}
 		arguments = append(arguments, "-oj", "-of", rawPrefix, "-l", profile.Language, "-t", strconv.Itoa(profile.ThreadCount), "-np")
-		if err := transcriber.runner.Run(ctx, transcriber.executable, arguments); err != nil {
+		var runErr error
+		if stream, ok := transcriber.runner.(execution.StreamRunner); ok && request.InputRoot != nil {
+			// Only numeric whisper progress reaches the reporter. Limit live updates to ten per chunk.
+			lines := processprogress.Lines{OnLine: func(line string) {
+				value, found := strings.CutPrefix(strings.TrimSpace(line), "whisper_print_progress_callback: progress =")
+				if !found {
+					return
+				}
+				value = strings.TrimSpace(value)
+				if !strings.HasSuffix(value, "%") {
+					return
+				}
+				n, err := strconv.ParseUint(strings.TrimSuffix(value, "%"), 10, 32)
+				if err == nil && n <= 100 && uint32(n)/10 > observedPercent/10 {
+					observedPercent = uint32(n)
+					reportChunk(execution.ProgressProcessing, 0)
+				}
+			}}
+			arguments[len(arguments)-1] = "-pp"
+			runErr = stream.RunStreams(ctx, transcriber.executable, arguments, nil, &lines)
+			lines.Flush()
+		} else {
+			runErr = transcriber.runner.Run(ctx, transcriber.executable, arguments)
+		}
+		if runErr != nil {
 			cleanupRaw()
 			reportChunk(execution.ProgressFailed, float64(index)/float64(len(chunks)))
-			return transcription.Transcript{}, errors.Join(ErrTranscriptionFailed, err)
+			return transcription.Transcript{}, errors.Join(ErrTranscriptionFailed, runErr)
 		}
 		var rawPayload []byte
 		if request.OutputRoot != nil {
 			rawPayload, err = request.OutputRoot.ReadFile(rawArtifactPath)
+			if errors.Is(err, os.ErrNotExist) {
+				// A reachable output directory with a missing JSON is a tool failure.
+				if _, dirErr := request.OutputRoot.ReadDir(path.Dir(rawArtifactPath)); dirErr == nil {
+					err = ErrOutputRead
+				}
+			}
 		} else {
 			rawPayload, err = os.ReadFile(rawPath)
 		}
 		cleanupRaw()
 		if err != nil {
 			reportChunk(execution.ProgressFailed, float64(index)/float64(len(chunks)))
-			return transcription.Transcript{}, errors.Join(ErrTranscriptionFailed, err)
+			return transcription.Transcript{}, errors.Join(ErrTranscriptionFailed, ErrOutputRead, err)
 		}
 		decoded, decodeErr := decodeWhisperJSON(rawPayload)
 		if decodeErr != nil {
 			reportChunk(execution.ProgressFailed, float64(index)/float64(len(chunks)))
-			return transcription.Transcript{}, errors.Join(ErrTranscriptionFailed, decodeErr)
+			return transcription.Transcript{}, errors.Join(ErrTranscriptionFailed, ErrOutputInvalid, decodeErr)
 		}
 		if language == "" {
 			language = strings.ToLower(strings.TrimSpace(decoded.Result.Language))
 		} else if language != strings.ToLower(strings.TrimSpace(decoded.Result.Language)) {
 			reportChunk(execution.ProgressFailed, float64(index)/float64(len(chunks)))
-			return transcription.Transcript{}, ErrTranscriptionFailed
+			return transcription.Transcript{}, errors.Join(ErrTranscriptionFailed, ErrOutputInvalid)
 		}
 		if len(chunks) == 1 {
 			parsed, parseErr := parseWhisperJSON(rawPayload)
 			if parseErr != nil {
 				reportChunk(execution.ProgressFailed, float64(index)/float64(len(chunks)))
-				return transcription.Transcript{}, errors.Join(ErrTranscriptionFailed, parseErr)
+				return transcription.Transcript{}, errors.Join(ErrTranscriptionFailed, ErrOutputInvalid, parseErr)
 			}
 			segments = append(segments, parsed.Segments...)
 		} else {
@@ -214,7 +262,7 @@ func (transcriber *Transcriber) Transcribe(ctx context.Context, request Request)
 	}
 	content, err := mergeWhisperSegments(language, segments)
 	if err != nil {
-		return transcription.Transcript{}, errors.Join(ErrTranscriptionFailed, err)
+		return transcription.Transcript{}, errors.Join(ErrTranscriptionFailed, ErrOutputInvalid, err)
 	}
 	document := transcriptDocument{SchemaVersion: 1, ProfileReference: profile.Reference(), Content: content}
 	payload, err := json.Marshal(document)
@@ -235,13 +283,13 @@ func (transcriber *Transcriber) Transcribe(ctx context.Context, request Request)
 	}
 	if request.OutputRoot != nil {
 		if err := request.OutputRoot.WriteFile(request.TemporaryArtifactPath, payload, 0o600); err != nil {
-			return transcription.Transcript{}, err
+			return transcription.Transcript{}, errors.Join(ErrTranscriptionFailed, ErrPublish, err)
 		}
 	} else if err := os.WriteFile(request.TemporaryOutputPath, payload, 0o600); err != nil {
-		return transcription.Transcript{}, err
+		return transcription.Transcript{}, errors.Join(ErrTranscriptionFailed, ErrPublish, err)
 	}
 	if err := transcriber.publisher.Publish(request.TemporaryOutputPath, request.PublishedOutputPath); err != nil {
-		return transcription.Transcript{}, errors.Join(ErrTranscriptionFailed, err)
+		return transcription.Transcript{}, errors.Join(ErrTranscriptionFailed, ErrPublish, err)
 	}
 	return transcript, nil
 }

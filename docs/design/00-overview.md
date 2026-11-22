@@ -91,7 +91,7 @@ Worker가 다른 PC로 이동해도 Domain 계약과 Control API는 바뀌지 �
 | Archive Workspace | 사람 직접 실행과 Archivist 도구 호출의 공통 업무 문맥, ActionCard, Archive Workspace 상태 투영 | COL-001~002, DSH-001~004 |
 | MediaOperation 직접 실행 | Control 없이 단일 미디어 기능 실행, 관리 Runner와 같은 실행 경계 공유 | APP-009~010 |
 | Application Capabilities (planned) | 모든 영속 업무 기능의 공통 Registry와 직접 실행 Port | APP-001 |
-| Observability | 테스트의 구조화 증적. 모든 운영 Capability의 공통 Sink는 planned | TST-001, OBS-001(planned) |
+| Observability | Archivist 업무 판단의 근거, 미디어 실행·전사 진행·후속 반영의 관측과 누락 진단 | [운영 증적 설계](10-capabilities-observability.md), TST-001, OBS-002~005, OBS-011~012 |
 
 도메인 명령과 이벤트의 시간 순서, 일관성 경계 후보와 아직 결정되지 않은 핫스팟은 [이벤트 스토밍](08-event-storming.md)에 정리한다. 핫스팟을 결정한 뒤 요구사항 카탈로그로 내린다.
 

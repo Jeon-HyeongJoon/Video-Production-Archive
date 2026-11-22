@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"sort"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"videoarchive/internal/adapter/workerconfig"
@@ -62,6 +61,7 @@ type Assignment struct {
 }
 
 type ExecutionResult struct {
+	ProgressReportCount    uint64
 	Success                bool
 	FailureClass           workflow.FailureClass
 	WaitReason             vocabulary.WaitReason
@@ -473,16 +473,14 @@ func (client *Client) execute(ctx context.Context, assignment Assignment, report
 	client.setExecutionResourceClass(assignment.ResourceClass)
 	executionContext, cancelExecution := context.WithCancel(ctx)
 	defer cancelExecution()
-	var progressSequence atomic.Uint64
-	executionContext = execution.WithProgressReporter(executionContext, func(progressContext context.Context, update execution.ProgressUpdate) error {
-		err := client.reportProgress(progressContext, assignment, progressSequence.Add(1), update)
-		if err != nil && !errors.Is(err, context.Canceled) {
-			reportError(err)
-		}
-		return err
-	})
+	delivery := client.newProgressDelivery(executionContext, assignment, reportError)
+	executionContext = execution.WithProgressReporter(executionContext, delivery.observe)
 	resultChannel := make(chan ExecutionResult, 1)
-	go func() { resultChannel <- client.executor.Execute(executionContext, assignment) }()
+	go func() {
+		result := client.executor.Execute(executionContext, assignment)
+		result.ProgressReportCount = delivery.finish()
+		resultChannel <- result
+	}()
 	ticker := time.NewTicker(client.configuration.ClaimInterval)
 	defer ticker.Stop()
 	renewAfter := time.Duration(assignment.LeaseRenewAfterMillis) * time.Millisecond
@@ -570,17 +568,29 @@ func (client *Client) reportProgress(
 	if err != nil {
 		return err
 	}
-	response, err := client.workerRequest(ctx, "/worker/v1/steps/progress", payload)
-	if err != nil {
-		return err
+	for attempt := 0; ; attempt++ {
+		requestCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		response, err := client.workerRequest(requestCtx, "/worker/v1/steps/progress", payload)
+		retry := err != nil
+		if err == nil {
+			io.Copy(io.Discard, io.LimitReader(response.Body, 64<<10))
+			response.Body.Close()
+			if response.StatusCode == http.StatusOK {
+				cancel()
+				return nil
+			}
+			retry = response.StatusCode >= 500 || response.StatusCode == http.StatusRequestTimeout || response.StatusCode == http.StatusTooManyRequests
+			err = fmt.Errorf("%w: HTTP %d", ErrStepProgressRejected, response.StatusCode)
+		}
+		cancel()
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if !retry || attempt == 1 {
+			return err
+		}
 	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(response.Body, 64<<10))
-		return fmt.Errorf("%w: HTTP %d: %s", ErrStepProgressRejected, response.StatusCode, body)
-	}
-	io.Copy(io.Discard, io.LimitReader(response.Body, 64<<10))
-	return nil
+
 }
 
 func (client *Client) cancellationConfirmationTimeout() time.Duration {
@@ -758,7 +768,7 @@ func (client *Client) reportResult(ctx context.Context, assignment Assignment, r
 	}
 	payload, err := json.Marshal(map[string]any{
 		"job_id": assignment.JobID, "step_id": assignment.StepID, "fencing_token": assignment.FencingToken,
-		"success": result.Success, "failure_class": result.FailureClass, "wait_reason": result.WaitReason,
+		"progress_report_count": result.ProgressReportCount, "success": result.Success, "failure_class": result.FailureClass, "wait_reason": result.WaitReason,
 		"wait_target_storage_id": result.WaitTargetStorageID,
 		"error_class":            result.ErrorClass, "cause_code": result.CauseCode, "error_summary": result.ErrorSummary,
 		"process_exit_code": result.ProcessExitCode, "log_reference": result.LogReference, "process_log": result.ProcessLog, "output_record": outputRecord,

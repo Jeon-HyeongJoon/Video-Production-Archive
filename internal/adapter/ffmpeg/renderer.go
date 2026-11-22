@@ -28,9 +28,12 @@ var (
 type OSRunner struct{}
 
 func (OSRunner) Run(ctx context.Context, executable string, arguments []string) error {
+	return (OSRunner{}).RunStreams(ctx, executable, arguments, nil, nil)
+}
+
+func (OSRunner) RunStreams(ctx context.Context, executable string, arguments []string, stdout, stderr io.Writer) error {
 	process := exec.CommandContext(ctx, executable, arguments...)
-	process.Stdout = io.Discard
-	process.Stderr = io.Discard
+	process.Stdout, process.Stderr = stdout, stderr
 	return process.Run()
 }
 

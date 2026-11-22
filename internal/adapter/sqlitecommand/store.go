@@ -13,10 +13,12 @@ import (
 	"time"
 
 	"videoarchive/internal/adapter/sqlitebase"
+	"videoarchive/internal/application/systemstatus"
 	"videoarchive/internal/application/workdiagnostics"
 	"videoarchive/internal/application/workercontrol"
 	"videoarchive/internal/core/command"
 	"videoarchive/internal/core/dispatch"
+	"videoarchive/internal/core/execution"
 	"videoarchive/internal/core/job"
 	"videoarchive/internal/core/vocabulary"
 	"videoarchive/internal/core/workflow"
@@ -1021,7 +1023,7 @@ func (store *Store) SettleWorkerStep(ctx context.Context, report workercontrol.R
 		Actor: command.Actor{Type: command.WorkerActor, ID: report.WorkerID}, RequestedVia: "worker_api",
 		TargetID: report.JobID, ExpectedRevision: revision, IdempotencyKey: commandID, Reason: reason,
 		Parameters: lifecycleParameters(job.SettleWorkerStepParameters{
-			StepID: report.StepID, FencingToken: report.FencingToken, Success: report.Success,
+			ProgressReportCount: report.ProgressReportCount, StepID: report.StepID, FencingToken: report.FencingToken, Success: report.Success,
 			FailureClass: report.FailureClass, WaitReason: report.WaitReason, WaitTargetStorageID: report.WaitTargetStorageID,
 			ErrorClass: report.ErrorClass, CauseCode: report.CauseCode, ErrorSummary: report.ErrorSummary,
 			ProcessExitCode: report.ProcessExitCode, LogReference: report.LogReference, ProcessLog: report.ProcessLog, OutputRecord: report.OutputRecord,
@@ -1033,6 +1035,14 @@ func (store *Store) SettleWorkerStep(ctx context.Context, report workercontrol.R
 	}
 	if err != nil {
 		return job.State{}, err
+	}
+	if report.ProcessLog != nil {
+		step := stateStep(&state, compositeStepID)
+		if step != nil && step.ExecutionSpec != nil && step.ExecutionSpec.Operation == execution.OperationTranscribeAudio {
+			artifact := *report.ProcessLog
+			artifact.SanitizedTail = ""
+			envelope.Parameters["process_log"] = artifact
+		}
 	}
 	encoded = append(encoded[:0], change.State...)
 	expected := revision
@@ -1109,6 +1119,38 @@ func (store *Store) PendingWorkerCompletions(ctx context.Context, limit int) ([]
 		work = append(work, workercontrol.CompletionWork{ID: item.id, State: state})
 	}
 	return work, nil
+}
+
+// CompletionDelivery reads backlog and its oldest retry from one SQLite snapshot.
+func (store *Store) CompletionDelivery(ctx context.Context) (systemstatus.CompletionDelivery, error) {
+	var result systemstatus.CompletionDelivery
+	var oldest, attempt, stage string
+	err := store.db.QueryRowContext(ctx, `
+  SELECT COUNT(*) OVER (), SUM(CASE WHEN attempts>0 THEN 1 ELSE 0 END) OVER (), MIN(created_at) OVER (),
+         completion_id, job_id, COALESCE(last_attempt_at,''), last_error
+  FROM worker_completion_outbox WHERE delivered_at IS NULL
+  ORDER BY (attempts>0) DESC, created_at, completion_id LIMIT 1`).Scan(&result.Pending, &result.Retrying, &oldest, &result.CompletionID, &result.JobID, &attempt, &stage)
+	if errors.Is(err, sql.ErrNoRows) {
+		return result, nil
+	}
+	if err != nil {
+		return result, err
+	}
+	result.OldestPendingAt, err = time.Parse(time.RFC3339Nano, oldest)
+	if err != nil {
+		return result, err
+	}
+	if result.Retrying > 0 {
+		result.LastAttemptAt, err = time.Parse(time.RFC3339Nano, attempt)
+		// Legacy error strings can contain arbitrary process output or host paths.
+		switch stage {
+		case "JOB_PROJECTION", "COMPLETION_OBSERVER", "DISPATCH":
+			result.FailureStage = stage
+		default:
+			result.FailureStage = "UNKNOWN"
+		}
+	}
+	return result, err
 }
 
 func (store *Store) MarkWorkerCompletionDelivered(ctx context.Context, completionID string, deliveredAt time.Time) error {
@@ -1242,6 +1284,29 @@ func (store *Store) RecordWorkerProgress(
 		return job.State{}, workflow.ErrStaleFencingToken
 	}
 	commandID := fmt.Sprintf("worker-progress:%s:%s:%d:%d", report.JobID, report.StepID, report.FencingToken, report.ReportSequence)
+	// Older reports can be outside the bounded Step projection. Replay the indexed immutable event.
+	if step.ProgressHistoryOmitted > 0 && len(step.ProgressEvidence) > 0 && report.ReportSequence < step.ProgressEvidence[0].ReportSequence && report.FencingToken == step.ProgressEvidence[0].FencingToken {
+		var raw []byte
+		err := tx.QueryRowContext(ctx, "SELECT payload FROM domain_events WHERE event_id = ? AND target_id = ?", commandID+":event", report.JobID).Scan(&raw)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return job.State{}, err
+		}
+		if err == nil {
+			var event struct {
+				Payload struct {
+					Evidence job.StepProgressEvidence `json:"progress_evidence"`
+				} `json:"payload"`
+			}
+			if err := json.Unmarshal(raw, &event); err != nil {
+				return job.State{}, err
+			}
+			evidence := event.Payload.Evidence
+			if evidence.WorkerID == report.WorkerID && evidence.Update == report.Update {
+				return state, nil
+			}
+		}
+		return job.State{}, workflow.ErrStaleFencingToken
+	}
 	envelope := command.Envelope{
 		CommandID: commandID, CommandType: job.ReportWorkerStepProgressCommand,
 		Actor: command.Actor{Type: command.WorkerActor, ID: report.WorkerID}, RequestedVia: "worker_api",

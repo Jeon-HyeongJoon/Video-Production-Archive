@@ -35,20 +35,23 @@ type Job struct {
 }
 
 type StepStatus struct {
-	ID               string
-	State            workflow.StepState
-	Progress         float64
-	ExecutorKind     vocabulary.ExecutorKind
-	ActorID          string
-	WorkerID         string
-	WaitReason       vocabulary.WaitReason
-	ErrorClass       string
-	LogReference     string
-	LastEventAt      time.Time
-	DependencyIDs    []string
-	ProgressEvidence []corejob.StepProgressEvidence
-	FailureEvidence  []corejob.StepFailureEvidence
-	RecoveryEvidence []corejob.StepRecoveryEvidence
+	ID                        string
+	State                     workflow.StepState
+	Progress                  float64
+	ExecutorKind              vocabulary.ExecutorKind
+	ActorID                   string
+	WorkerID                  string
+	WaitReason                vocabulary.WaitReason
+	ErrorClass                string
+	LogReference              string
+	LastEventAt               time.Time
+	DependencyIDs             []string
+	HasVerificationReferences bool
+	ProgressReportCounts      map[uint64]uint64
+	ProgressHistoryOmitted    uint64
+	ProgressEvidence          []corejob.StepProgressEvidence
+	FailureEvidence           []corejob.StepFailureEvidence
+	RecoveryEvidence          []corejob.StepRecoveryEvidence
 }
 
 type ArchivistAction struct {

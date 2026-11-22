@@ -9,7 +9,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
+	"strings"
 	"testing"
 
 	"videoarchive/internal/core/execution"
@@ -94,6 +96,17 @@ media:
 	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil || !result.Success || result.Operation != execution.OperationOrganizeMedia ||
 		len(result.Outputs) != 1 || result.Outputs[0].RelativePath != spec.Outputs[0].RelativePath || result.Outputs[0].Checksum == "" {
 		t.Fatalf("standalone CLI result is incomplete: result=%+v err=%v", result, err)
+	}
+	var phases []execution.ProgressStatus
+	for i, line := range strings.Split(strings.TrimSpace(stderr.String()), "\n") {
+		var sample cliSample
+		if err := json.Unmarshal([]byte(line), &sample); err != nil || sample.JobID != spec.JobID || sample.Token != 41 || sample.Sequence != uint64(i+1) || sample.Update.Operation != spec.Operation || sample.At.IsZero() {
+			t.Fatalf("unbound standalone observation: %s", line)
+		}
+		phases = append(phases, sample.Update.Status)
+	}
+	if !slices.Equal(phases, []execution.ProgressStatus{execution.ProgressCheckingInputs, execution.ProgressExecuting, execution.ProgressCheckingOutputs}) {
+		t.Fatalf("package phases: %v", phases)
 	}
 	stored, err := os.ReadFile(filepath.Join(archiveRoot, filepath.FromSlash(spec.Outputs[0].RelativePath)))
 	if err != nil || !bytes.Contains(stored, []byte(`"original_name": "event.mov"`)) {

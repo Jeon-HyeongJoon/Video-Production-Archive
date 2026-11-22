@@ -55,6 +55,11 @@ type commandResult struct {
 	WaitReason             vocabulary.WaitReason                     `json:"wait_reason,omitempty"`
 	WaitTargetStorageID    string                                    `json:"wait_target_storage_id,omitempty"`
 	ErrorClass             string                                    `json:"error_class,omitempty"`
+	CauseCode              string                                    `json:"cause_code,omitempty"`
+	ErrorSummary           string                                    `json:"error_summary,omitempty"`
+	ProgressStreamFailed   bool                                      `json:"progress_stream_failed,omitempty"`
+	ProcessExitCode        *int                                      `json:"process_exit_code,omitempty"`
+	ProcessLog             *execution.ProcessLogArtifact             `json:"process_log,omitempty"`
 	LogReference           string                                    `json:"log_reference,omitempty"`
 	Outputs                []execution.StepOutput                    `json:"outputs,omitempty"`
 	VerificationReferences []string                                  `json:"verification_references,omitempty"`
@@ -156,11 +161,21 @@ func runOperation(ctx context.Context, arguments []string, stdin io.Reader, stdo
 			return 1
 		}
 	}
+	encoder := json.NewEncoder(stderr)
+	var evidenceErr error
+	var sequence uint64
+	ctx = execution.WithProgressReporter(ctx, func(_ context.Context, update execution.ProgressUpdate) error {
+		sequence++
+		if evidenceErr == nil {
+			evidenceErr = encoder.Encode(map[string]any{"job_id": spec.JobID, "step_id": spec.StepID, "execution_token": token, "report_sequence": sequence, "observed_at": time.Now().UTC(), "update": update})
+		}
+		return evidenceErr
+	})
 	result := executor.ExecuteOperation(ctx, spec, token)
 	response := commandResult{
-		Operation: spec.Operation, Success: result.Success, FailureClass: result.FailureClass,
+		ProgressStreamFailed: evidenceErr != nil, Operation: spec.Operation, Success: result.Success, FailureClass: result.FailureClass,
 		WaitReason: result.WaitReason, WaitTargetStorageID: result.WaitTargetStorageID,
-		ErrorClass: result.ErrorClass, LogReference: result.LogReference,
+		ErrorClass: result.ErrorClass, LogReference: result.LogReference, CauseCode: result.CauseCode, ErrorSummary: result.ErrorSummary, ProcessExitCode: result.ProcessExitCode, ProcessLog: result.ProcessLog,
 		Outputs: result.Outputs, VerificationReferences: result.VerificationReferences,
 		InspectedMedia: result.InspectedMedia, Cancellation: result.Cancellation,
 	}

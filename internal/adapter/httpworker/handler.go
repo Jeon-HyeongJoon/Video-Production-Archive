@@ -331,6 +331,7 @@ func (handler *Handler) claim(writer http.ResponseWriter, request *http.Request)
 }
 
 type resultRequest struct {
+	ProgressReportCount uint64                        `json:"progress_report_count,omitempty"`
 	JobID               string                        `json:"job_id"`
 	StepID              string                        `json:"step_id"`
 	FencingToken        uint64                        `json:"fencing_token"`
@@ -378,7 +379,7 @@ func (handler *Handler) result(writer http.ResponseWriter, request *http.Request
 	}
 	err := handler.execution.Report(request.Context(), workercontrol.Result{
 		WorkerID: workerID, JobID: payload.JobID, StepID: payload.StepID, FencingToken: payload.FencingToken,
-		Success: payload.Success, FailureClass: payload.FailureClass, WaitReason: payload.WaitReason,
+		ProgressReportCount: payload.ProgressReportCount, Success: payload.Success, FailureClass: payload.FailureClass, WaitReason: payload.WaitReason,
 		WaitTargetStorageID: strings.TrimSpace(payload.WaitTargetStorageID),
 		ErrorClass:          strings.TrimSpace(payload.ErrorClass), CauseCode: strings.TrimSpace(payload.CauseCode),
 		ErrorSummary: strings.TrimSpace(payload.ErrorSummary), ProcessExitCode: payload.ProcessExitCode,

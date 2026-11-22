@@ -331,6 +331,12 @@ func (fixture systemStatusDiagnostics) Diagnose(_ context.Context, reference arc
 	return fixture[reference.WorkID], nil
 }
 
+type completionStatusFixture struct{ err error }
+
+func (f *completionStatusFixture) CompletionDelivery(context.Context) (systemstatus.CompletionDelivery, error) {
+	return systemstatus.CompletionDelivery{Pending: 2, Retrying: 1, FailureStage: "DISPATCH", CompletionID: "COMPLETION-1", JobID: "JOB-FAILED"}, f.err
+}
+
 // Requirement: MCP-012
 func TestMCPReadsArchiveWideStatusWithoutSelectionAndKeepsEvidenceSanitized(t *testing.T) {
 	now := time.Date(2026, 11, 18, 11, 0, 0, 0, time.UTC)
@@ -353,6 +359,7 @@ func TestMCPReadsArchiveWideStatusWithoutSelectionAndKeepsEvidenceSanitized(t *t
 			Facts: []workdiagnostics.Fact{{EvidenceID: "EVD-WORKER-FAILED", Code: "WORKER_FAILURE_RECORDED", Summary: `C:\private\token-secret.log`, ObservedAt: now}},
 		},
 	}
+	delivery := &completionStatusFixture{}
 	status, err := systemstatus.New(
 		systemStatusWorks{
 			{WorkID: "RUN-ACTIVE", Revision: 2, Kind: archivework.ArchiveRunWork, State: archivework.StateActive, WorkerID: "worker-windows", LastEventAt: now.Add(-20 * time.Minute)},
@@ -367,7 +374,7 @@ func TestMCPReadsArchiveWideStatusWithoutSelectionAndKeepsEvidenceSanitized(t *t
 			Capacity: worker.Capacity{AvailableMemoryBytes: 8 << 30, ScratchFreeBytes: 300 << 30, HeavySlotsMaximum: 1, LightSlotsMaximum: 2, AdditionalWorkPossible: true},
 		}},
 		systemStatusHosts{{ArchivistHostID: "archivist-windows", State: "ONLINE", LastHeartbeat: now.Add(-2 * time.Second)}},
-		diagnostics, func() time.Time { return now },
+		diagnostics, delivery, func() time.Time { return now },
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -388,6 +395,7 @@ func TestMCPReadsArchiveWideStatusWithoutSelectionAndKeepsEvidenceSanitized(t *t
 	for _, expected := range []string{
 		`"worker_id":"worker-windows"`, `"archivist_host_id":"archivist-windows"`,
 		`"active":1`, `"attention":1`, `"failed":1`, `"completed":2`,
+		`"completion_id":"COMPLETION-1"`, `"retrying":1`, `"failure_stage":"DISPATCH"`,
 		`"work_id":"RUN-ACTIVE"`, `"work_id":"JOB-FAILED"`, `"work_id":"RUN-HOLD"`,
 		`"evidence_id":"EVD-LEASE-EXPIRED"`, `"evidence_id":"EVD-WORKER-FAILED"`,
 	} {
@@ -400,6 +408,12 @@ func TestMCPReadsArchiveWideStatusWithoutSelectionAndKeepsEvidenceSanitized(t *t
 			t.Fatalf("system status exposed private process data: %s", body)
 		}
 	}
+	delivery.err = errors.New("private read failure")
+	unavailable := mcpTestRequest(handler, http.MethodPost, "/mcp/v1/call", archiveToolCall("CALL-UNOBSERVED", ToolSystemStatusGet, `{}`), "secret")
+	if unavailable.Code != http.StatusOK || !strings.Contains(unavailable.Body.String(), `"completion_delivery":null`) || strings.Contains(unavailable.Body.String(), delivery.err.Error()) {
+		t.Fatalf("missing delivery observation: %s", unavailable.Body.String())
+	}
+
 }
 
 type capturingRecoveryCommands struct {

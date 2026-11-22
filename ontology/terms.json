@@ -746,10 +746,10 @@
       "definition": "장시간 Worker Step이 현재 실행 경계 안에서 어느 작업 단위와 원본 시간 범위까지 전진했는지 보존하는 변경 불가능한 구조화 증적 기록.",
       "rules": [
         "Worker·Step·typed operation·fencing token·보고 순번·Control 관측 시각을 기록한다.",
-        "계획·시작·완료·실패 상태, 청크 순번과 전체 수, 원본 시작·종료 millisecond와 완료 비율만 기록한다.",
+        "실행 단계 진입, 입력별 엔진 백분율·청크와 원본 시간 범위, 인코더 출력 위치를 구분한다. Worker 관측 시각과 Control 수신 시각은 별도 값으로 남긴다.",
         "원문 stdout·stderr, executable 인수, credential, 절대경로, 음성 내용과 전사문을 기록하지 않는다.",
         "Job 상태와 같은 transaction에서 추가하고 같은 fencing token과 보고 순번의 동일 재전송으로 중복하지 않는다.",
-        "ExecutionLease heartbeat와 구분하며 WorkDiagnostic은 실제 subprocess 전진 사실로 제공한다."
+        "ExecutionLease heartbeat와 구분한다. WorkDiagnostic은 실제 전진, 결과 검증, 수집 누락, 조회 창 이전 건수를 구분한다."
       ],
       "forbidden": {
         "words": [],
@@ -772,7 +772,7 @@
       "sources": [
         "docs/design/07-worker-fleet.md §4.1",
         "docs/design/10-capabilities-observability.md §3",
-        "requirements WRK-017",
+        "requirements WRK-017, WRK-020~021, TRN-008~009, OBS-005, OBS-011",
         "사용자 결정 2026-11-19: STT 청크별 모니터링과 로그 근거를 영속화"
       ],
       "decided": "2026-11-19"

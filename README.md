@@ -91,6 +91,8 @@ go run ./cmd/archive-control -config config.yaml
 
 [`media.example.yaml`](media.example.yaml)을 `media.yaml`로 복사해 Storage root와 로컬 도구 경로를 맞춘다. `archive-media operations`는 지원하는 모듈을 보여준다. `inspect`, `render`, `sequence`, `qc`, `package`, `audio`, `transcribe`, `subtitle`, `transcript-text`, `package-revise`, `catalog` 명령은 typed operation JSON 하나를 직접 실행하며 Control이나 아카이브 작업 공간을 시작하지 않는다.
 
+실행 중 stderr에는 Job·Step·실행 토큰과 순번이 있는 진행 JSON이 한 줄씩 나온다. stdout에는 최종 결과, 검증 참조 또는 실패 원인 코드가 나온다. 관리형 실행은 작업 상세의 **실행 근거**와 Archivist의 작업 진단에서 확인한다. [수집 항목과 관측 누락](docs/design/10-capabilities-observability.md#32-수집-비용과-관측-누락)
+
 ```bash
 go run ./cmd/archive-media operations
 go run ./cmd/archive-media check -config media.yaml

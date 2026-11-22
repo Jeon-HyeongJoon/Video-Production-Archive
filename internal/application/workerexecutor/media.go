@@ -323,7 +323,7 @@ func (operations *mediaOperations) renderRecording(ctx context.Context, spec exe
 		verifier := storageOutputVerifier{ctx: ctx, inspector: operations.inspector, root: outputRoot, relative: temporaryRelative, resolved: publisher.temporaryResolved}
 		renderer, err := ffmpeg.NewRenderer(
 			operations.configuration.Tools.FFmpeg.Executable, operations.configuration.Tools.FFmpeg.Version,
-			operations.configuration.ID, operations.runner, verifier, publisher,
+			operations.configuration.ID, ffmpeg.WithProgress(operations.runner, spec.Operation, index+1, len(spec.Outputs), input.DurationMillis), verifier, publisher,
 		)
 		if err != nil {
 			return nil, nil, err
@@ -372,7 +372,7 @@ func (operations *mediaOperations) renderSourceSequence(ctx context.Context, spe
 	verifier := storageOutputVerifier{ctx: ctx, inspector: operations.inspector, root: outputRoot, relative: temporaryVideo, resolved: publisher.temporaryResolved}
 	renderer, err := ffmpeg.NewSequenceRenderer(
 		operations.configuration.Tools.FFmpeg.Executable, operations.configuration.Tools.FFmpeg.Version,
-		operations.configuration.ID, operations.runner, verifier, publisher, outputRoot,
+		operations.configuration.ID, ffmpeg.WithProgress(operations.runner, spec.Operation, 1, 1, spec.Parameters.SourceTimeline.DurationMillis()), verifier, publisher, outputRoot,
 	)
 	if err != nil {
 		return nil, nil, err
@@ -527,7 +527,7 @@ func (operations *mediaOperations) extractSpeechAudio(ctx context.Context, spec 
 		return nil, nil, ErrProductionExecution
 	}
 	outputs := make([]execution.StepOutput, 0, len(spec.Outputs))
-	for _, target := range spec.Outputs {
+	for index, target := range spec.Outputs {
 		input, ok := inputForOriginal(spec.Inputs, target.OriginalAssetID, execution.OutputRendition, "")
 		if !ok || target.Kind != execution.OutputAudio {
 			return nil, nil, ErrProductionExecution
@@ -545,7 +545,7 @@ func (operations *mediaOperations) extractSpeechAudio(ctx context.Context, spec 
 		verifier := storageOutputVerifier{ctx: ctx, inspector: operations.inspector, root: outputRoot, relative: temporaryRelative, resolved: publisher.temporaryResolved}
 		extractor, err := ffmpeg.NewAudioExtractor(
 			operations.configuration.Tools.FFmpeg.Executable, operations.configuration.Tools.FFmpeg.Version,
-			operations.configuration.ID, operations.runner, verifier, publisher,
+			operations.configuration.ID, ffmpeg.WithProgress(operations.runner, spec.Operation, index+1, len(spec.Outputs), input.DurationMillis), verifier, publisher,
 		)
 		if err != nil {
 			return nil, nil, err
@@ -577,7 +577,7 @@ func (operations *mediaOperations) transcribeAudio(ctx context.Context, spec exe
 		return nil, nil, err
 	}
 	outputs := make([]execution.StepOutput, 0, len(spec.Outputs))
-	for _, target := range spec.Outputs {
+	for index, target := range spec.Outputs {
 		input, ok := inputForOriginal(spec.Inputs, target.OriginalAssetID, execution.OutputAudio)
 		if !ok || target.Kind != execution.OutputTranscript {
 			return nil, nil, ErrProductionExecution
@@ -613,6 +613,7 @@ func (operations *mediaOperations) transcribeAudio(ctx context.Context, spec exe
 			return nil, nil, err
 		}
 		result, err := transcriber.Transcribe(ctx, whispercpp.Request{
+			InputIndex: uint32(index + 1), InputCount: uint32(len(spec.Outputs)),
 			TranscriptID: target.ID, AudioArtifact: audioArtifact, InputRoot: inputRoot,
 			ResolvedAudioPath: audioPath, ResolvedModelPath: modelPath,
 			TemporaryOutputPath: publisher.temporaryResolved, PublishedOutputPath: publisher.publishedResolved,

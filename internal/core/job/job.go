@@ -53,6 +53,8 @@ type Step struct {
 	PhysicalDeviceIDs       []string                     `json:"physical_device_ids,omitempty"`
 	ExecutionSpec           *execution.StepExecutionSpec `json:"execution_spec,omitempty"`
 	OutputRecord            *execution.StepOutputRecord  `json:"output_record,omitempty"`
+	ProgressReportCounts    map[uint64]uint64            `json:"progress_report_counts,omitempty"`
+	ProgressHistoryOmitted  uint64                       `json:"progress_history_omitted,omitempty"`
 	ProgressEvidence        []StepProgressEvidence       `json:"progress_evidence,omitempty"`
 	FailureEvidence         []StepFailureEvidence        `json:"failure_evidence,omitempty"`
 	RecoveryEvidence        []StepRecoveryEvidence       `json:"recovery_evidence,omitempty"`

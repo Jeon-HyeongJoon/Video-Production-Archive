@@ -8,6 +8,7 @@ import (
 	"os"
 	osexec "os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -90,9 +91,20 @@ func TestProductionExecutorRoutesOneTypedOperationThroughRegisteredStorageRoots(
 	if err != nil {
 		t.Fatal(err)
 	}
-	result := registry.Execute(context.Background(), workerclient.Assignment{
+	var phases []execution.ProgressStatus
+	ctx := execution.WithProgressReporter(context.Background(), func(_ context.Context, update execution.ProgressUpdate) error {
+		if update.Operation != spec.Operation || update.Progress != 0 {
+			t.Fatalf("unexpected phase: %+v", update)
+		}
+		phases = append(phases, update.Status)
+		return nil
+	})
+	result := registry.Execute(ctx, workerclient.Assignment{
 		JobID: spec.JobID, StepID: spec.StepID, FencingToken: 1, LeaseExpiresAt: time.Now().Add(time.Minute), ExecutionSpec: spec,
 	})
+	if !slices.Equal(phases, []execution.ProgressStatus{execution.ProgressCheckingInputs, execution.ProgressExecuting, execution.ProgressCheckingOutputs}) {
+		t.Fatalf("managed package phases: %v", phases)
+	}
 	if !result.Success || len(result.Outputs) != 1 || result.Outputs[0].ID != "VP-20261031-0001" ||
 		len(result.VerificationReferences) != 1 {
 		t.Fatalf("supported operation was not executed exactly once: result=%+v", result)

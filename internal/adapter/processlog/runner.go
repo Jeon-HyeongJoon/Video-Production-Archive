@@ -55,20 +55,20 @@ func NewRunner(root *archive.StorageRoot, policy Policy) (*Runner, error) {
 }
 
 func (runner *Runner) Run(ctx context.Context, executable string, arguments []string) error {
-	return runner.execute(ctx, executable, arguments, nil)
+	return runner.RunStreams(ctx, executable, arguments, nil, nil)
 }
 
 // Output implements the ffprobe Runner contract while retaining the same
 // bounded failure evidence as processes that publish files.
 func (runner *Runner) Output(ctx context.Context, executable string, arguments []string) ([]byte, error) {
 	var output bytes.Buffer
-	if err := runner.execute(ctx, executable, arguments, &output); err != nil {
+	if err := runner.RunStreams(ctx, executable, arguments, &output, nil); err != nil {
 		return nil, err
 	}
 	return output.Bytes(), nil
 }
 
-func (runner *Runner) execute(ctx context.Context, executable string, arguments []string, output io.Writer) error {
+func (runner *Runner) RunStreams(ctx context.Context, executable string, arguments []string, output, diagnostic io.Writer) error {
 	boundary, ok := execution.ProcessContextFrom(ctx)
 	if runner == nil || runner.root == nil || !ok || strings.TrimSpace(executable) == "" {
 		return errors.New("process log execution boundary is invalid")
@@ -99,11 +99,17 @@ func (runner *Runner) execute(ctx context.Context, executable string, arguments 
 	writer := newBoundedWriter(file, runner.policy.MaxFileBytes, runner.policy.TailBytes)
 	command := exec.CommandContext(ctx, executable, append([]string(nil), arguments...)...)
 	stdout := io.Writer(streamWriter{target: writer, label: "stdout"})
+	if boundary.Operation == execution.OperationTranscribeAudio {
+		stdout = io.Discard
+	}
 	if output != nil {
 		stdout = io.MultiWriter(output, stdout)
 	}
 	command.Stdout = stdout
 	command.Stderr = streamWriter{target: writer, label: "stderr"}
+	if diagnostic != nil {
+		command.Stderr = io.MultiWriter(diagnostic, command.Stderr)
+	}
 	runErr := command.Run()
 	if runErr != nil {
 		_, _ = fmt.Fprintf(writer, "[process] error=%s\n", runErr)
@@ -119,6 +125,9 @@ func (runner *Runner) execute(ctx context.Context, executable string, arguments 
 		ID: logID, Reference: "evidence://process-log/" + logID,
 		State: execution.ProcessLogCaptureFailed, CapturedBytes: writer.captured(), TotalBytes: writer.total(),
 		Truncated: writer.total() > writer.captured(), SanitizedTail: SanitizeTail(writer.tail()),
+	}
+	if boundary.Operation == execution.OperationTranscribeAudio {
+		artifact.SanitizedTail = ""
 	}
 	if createErr == nil && closeErr == nil {
 		captured, digest, digestErr := runner.root.FileSHA256(temporary)
@@ -156,7 +165,7 @@ func (runner *Runner) execute(ctx context.Context, executable string, arguments 
 		artifact = execution.ProcessLogArtifact{
 			ID: logID, Reference: "evidence://process-log/" + logID,
 			State: execution.ProcessLogCaptureFailed, CapturedBytes: 0, TotalBytes: max64(writer.total(), 0),
-			Truncated: writer.total() > 0, SanitizedTail: SanitizeTail(writer.tail()),
+			Truncated: writer.total() > 0, SanitizedTail: artifact.SanitizedTail,
 		}
 	}
 	return &execution.ProcessFailure{Cause: runErr, Artifact: artifact}
