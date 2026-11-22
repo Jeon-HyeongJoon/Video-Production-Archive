@@ -90,6 +90,12 @@ jobs:
         shell: bash
         run: GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build ./... 2>&1 | tee "$EVIDENCE_DIR/build-windows-amd64.log"
 
+      - name: Verify Windows release executables
+        shell: bash
+        run: |
+          CGO_ENABLED=0 make build-windows
+          pwsh -NoProfile -NonInteractive -File deploy/windows/run-integration.ps1 -CheckOnly -BinaryDirectory bin/windows-amd64
+
       - name: Upload CI evidence
         if: always()
         uses: actions/upload-artifact@v7

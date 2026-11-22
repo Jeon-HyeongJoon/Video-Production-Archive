@@ -1,7 +1,22 @@
+[CmdletBinding()]
+param(
+    [string]$BinaryDirectory = 'C:\Archive\bin',
+    [switch]$CheckOnly
+)
+
 $ErrorActionPreference = 'Stop'
 
 $root = 'C:\Archive'
-$bin = Join-Path $root 'bin'
+$bin = $BinaryDirectory
+foreach ($name in @('archive-control.exe', 'archive-media.exe', 'archivist-host.exe', 'archive-secret.exe')) {
+    $required = Join-Path $bin $name
+    if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
+        throw "Missing integration executable: $required"
+    }
+}
+if ($CheckOnly) {
+    return
+}
 $config = Join-Path $root 'config'
 $logs = Join-Path $root 'logs'
 $secrets = Join-Path $root 'secrets'
@@ -21,21 +36,26 @@ try {
     }
 }
 
-$credentialBytes = New-Object byte[] 24
-$generator = [Security.Cryptography.RandomNumberGenerator]::Create()
-$generator.GetBytes($credentialBytes)
-$generator.Dispose()
-$credential = ([BitConverter]::ToString($credentialBytes)).Replace('-', '')
 $secretTool = Join-Path $bin 'archive-secret.exe'
-$workerReference = 'dpapi://C:/Archive/secrets/worker-windows.dpapi'
-$archivistReference = 'dpapi://C:/Archive/secrets/archivist-windows.dpapi'
-$credential | & $secretTool -dpapi-reference $workerReference | Out-Null
-if ($LASTEXITCODE -ne 0) {
-    throw 'Windows Worker DPAPI bootstrap failed'
-}
-$credential | & $secretTool -dpapi-reference $archivistReference | Out-Null
-if ($LASTEXITCODE -ne 0) {
-    throw 'Windows Archivist Host DPAPI bootstrap failed'
+foreach ($name in @('worker-windows.dpapi', 'archivist-windows.dpapi')) {
+    $path = Join-Path $secrets $name
+    if (Test-Path -LiteralPath $path -PathType Leaf) {
+        continue
+    }
+    $credentialBytes = New-Object byte[] 24
+    $generator = [Security.Cryptography.RandomNumberGenerator]::Create()
+    try {
+        $generator.GetBytes($credentialBytes)
+        $credential = ([BitConverter]::ToString($credentialBytes)).Replace('-', '')
+        $credential | & $secretTool -dpapi-reference ("dpapi://" + $path.Replace('\', '/')) | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw "Windows DPAPI bootstrap failed for $name"
+        }
+    } finally {
+        $generator.Dispose()
+        [Array]::Clear($credentialBytes, 0, $credentialBytes.Length)
+        $credential = $null
+    }
 }
 
 $control = Start-Process -FilePath (Join-Path $bin 'archive-control.exe') `

@@ -141,6 +141,8 @@ C:\Archive\
 
 Windows release 묶음은 `make build-windows`로 만들며 Tray만 Windows GUI subsystem으로 링크해 console 창을 만들지 않는다.
 
+서비스를 정지하기 전에 후보 release를 `manage-runtime-layout.ps1 -Mode Stage`로 검증한다. 통합 기동 스크립트를 쓰는 설치에서는 `run-integration.ps1 -CheckOnly -BinaryDirectory <후보 디렉터리>`로 기동에 필요한 실행 파일을 먼저 확인한다. 두 경로 모두 DPAPI 초기화 도구 `archive-secret.exe`를 확인한다. 통합 기동 시 이미 존재하는 Worker·Archivist Host의 DPAPI 파일은 재사용하고 누락된 역할의 파일만 생성한다. `CFG-014`, `LRH-010`
+
 실제 설치를 전환하고 이전 경로를 격리한 뒤 다음 acceptance를 실행한다. 증적 디렉터리는 전환 전후 API·예약 작업·프로세스·DB migration·패키지 manifest 검증과 이동 목록을 포함해야 한다.
 
 ```powershell

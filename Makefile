@@ -17,6 +17,7 @@ build-windows:
 	GOOS=windows GOARCH=amd64 go build -o bin/windows-amd64/archive-media.exe ./cmd/archive-media
 	GOOS=windows GOARCH=amd64 go build -o bin/windows-amd64/archive-codex.exe ./cmd/archive-codex
 	GOOS=windows GOARCH=amd64 go build -o bin/windows-amd64/archivist-host.exe ./cmd/archivist-host
+	GOOS=windows GOARCH=amd64 go build -o bin/windows-amd64/archive-secret.exe ./cmd/archive-secret
 	GOOS=windows GOARCH=amd64 go build -ldflags '-H=windowsgui' -o bin/windows-amd64/archive-tray.exe ./cmd/archive-tray
 
 test:

@@ -29,7 +29,7 @@ func TestWindowsRuntimeUsesSingleRootAndRetainsLegacyEvidence(t *testing.T) {
 	} {
 		requireWindowsRuntimeDirectory(t, filepath.Join(root, filepath.FromSlash(relative)))
 	}
-	for _, name := range []string{"archive-control.exe", "archive-media.exe", "archivist-host.exe"} {
+	for _, name := range []string{"archive-control.exe", "archive-media.exe", "archivist-host.exe", "archive-secret.exe"} {
 		requireWindowsRuntimeFile(t, filepath.Join(root, "runtime", "current", name))
 	}
 

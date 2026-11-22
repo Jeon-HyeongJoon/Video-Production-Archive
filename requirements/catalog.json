@@ -3331,7 +3331,7 @@
       "statement": "Windows 배포는 하나의 C:\\Archive root 아래에서 실행 파일·설정·DB·로그·scratch·증적을 역할별 디렉터리로 분리하고 기존 배포와 ArchivePackage를 검증 없이 삭제하지 않아야 한다.",
       "given": "여러 이전 배포 디렉터리와 기존 ArchivePackage가 있는 Windows Worker PC가 있다.",
       "when": "새 release를 설치하고 기존 작업 공간을 정리한다.",
-      "then": "서비스가 표준 root의 current release와 역할별 디렉터리만 사용하고 이전 경로는 inventory와 복구 가능한 격리 위치로 남으며 패키지 checksum 검증 전에는 삭제되지 않는다.",
+      "then": "current release에는 서비스 실행 파일과 DPAPI 초기화 도구가 있고 서비스는 표준 root의 역할별 디렉터리를 사용하며 이전 경로는 inventory와 복구 가능한 격리 위치로 남고 패키지 checksum 검증 전에는 삭제되지 않는다.",
       "test_file": "internal/application/controlruntime/windows_runtime_layout_acceptance_test.go",
       "test_name": "TestWindowsRuntimeUsesSingleRootAndRetainsLegacyEvidence",
       "status": "implemented",
