@@ -2,7 +2,9 @@ package worker
 
 import (
 	"errors"
+	"io/fs"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -76,7 +78,18 @@ type MediaFileObservation struct {
 	ModifiedAt   time.Time `json:"modified_at,omitempty"`
 }
 
+type DiscoveryGap struct {
+	Count       int    `json:"unreadable_folder_count"`
+	FirstFolder string `json:"first_unreadable_folder"`
+	Cause       string `json:"cause_code"`
+}
+
+func (gap DiscoveryGap) Valid() bool {
+	return gap.Count > 0 && fs.ValidPath(gap.FirstFolder) && gap.FirstFolder != "." && !strings.ContainsAny(gap.FirstFolder, "\\:\r\n") && (gap.Cause == "DIRECTORY_PERMISSION_DENIED" || gap.Cause == "DIRECTORY_READ_FAILED")
+}
+
 type StorageObservation struct {
+	DiscoveryGap      *DiscoveryGap                   `json:"discovery_gap,omitempty"`
 	StorageID         string                          `json:"storage_id"`
 	Connected         bool                            `json:"connected"`
 	AccessKind        vocabulary.StorageAccessKind    `json:"access_kind"`
@@ -370,6 +383,10 @@ func cloneStorageObservations(source []StorageObservation) []StorageObservation 
 	observations := make([]StorageObservation, 0, len(source))
 	for _, observation := range source {
 		copy := observation
+		if observation.DiscoveryGap != nil {
+			gap := *observation.DiscoveryGap
+			copy.DiscoveryGap = &gap
+		}
 		copy.Folders = append([]MediaFolderObservation(nil), observation.Folders...)
 		for index := range copy.Folders {
 			copy.Folders[index].Videos = append([]MediaFileObservation(nil), observation.Folders[index].Videos...)
@@ -414,6 +431,9 @@ func validateMetrics(metrics Metrics) error {
 	for _, observation := range metrics.StorageObservations {
 		if observation.StorageID == "" || seenStorages[observation.StorageID] || !observation.DiscoveryState.Valid() ||
 			observation.FreeBytes > observation.CapacityBytes || !metrics.AccessibleStorageIDs[observation.StorageID] {
+			return ErrInvalidSnapshot
+		}
+		if observation.DiscoveryGap != nil && (!observation.DiscoveryGap.Valid() || observation.DiscoveryState != vocabulary.FolderDiscoveryFailed) {
 			return ErrInvalidSnapshot
 		}
 		if (observation.DiscoveryState == vocabulary.FolderDiscoveryReady) != (observation.DiscoveryRevision != 0) ||

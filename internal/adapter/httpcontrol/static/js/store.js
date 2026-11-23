@@ -315,6 +315,7 @@ export function folderDiscoveryText(current) {
   const folders = formatCount(current?.discovered_folder_count || 0);
   const videos = formatCount(current?.discovered_file_count || 0);
   if (current?.folder_discovery_state === "SCANNING") return `검색 중 · ${folders} 폴더 · ${videos} 영상`;
+  if (current?.discovery_gap) return `읽지 못한 폴더 ${current.discovery_gap.unreadable_folder_count}개 · ${current.discovery_gap.first_unreadable_folder}`;
   if (current?.folder_discovery_state === "FAILED") return "검색 실패";
   if (folderDiscoveryReady(current)) return `${folders} 폴더 · ${videos} 영상`;
   return "검색 대기";

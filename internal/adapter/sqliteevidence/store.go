@@ -8,31 +8,32 @@ import (
 
 	_ "modernc.org/sqlite"
 
+	"videoarchive/internal/adapter/sqlitebase"
 	"videoarchive/internal/application/capability"
 )
 
 type Store struct {
-	db *sql.DB
+	db      *sql.DB
+	release func() error
 }
 
 var _ capability.EvidenceSink = (*Store)(nil)
 
 func Open(path string) (*Store, error) {
-	db, err := sql.Open("sqlite", path)
+	db, release, err := sqlitebase.Acquire(path)
 	if err != nil {
 		return nil, err
 	}
-	db.SetMaxOpenConns(1)
-	store := &Store{db: db}
+	store := &Store{db: db, release: release}
 	if err := store.migrate(context.Background()); err != nil {
-		db.Close()
+		release()
 		return nil, err
 	}
 	return store, nil
 }
 
 func (store *Store) Close() error {
-	return store.db.Close()
+	return store.release()
 }
 
 func (store *Store) migrate(ctx context.Context) error {
@@ -47,6 +48,7 @@ func (store *Store) migrate(ctx context.Context) error {
 			payload BLOB NOT NULL,
 			UNIQUE(run_id, phase)
 		)`,
+		`CREATE INDEX IF NOT EXISTS capability_evidence_recent ON capability_evidence(phase,sequence)`,
 		`CREATE INDEX IF NOT EXISTS capability_evidence_run_sequence
 			ON capability_evidence(run_id, sequence)`,
 	}
@@ -93,6 +95,30 @@ func (store *Store) ByRun(ctx context.Context, runID string) ([]capability.Evide
 			return nil, err
 		}
 		evidence = append(evidence, record)
+	}
+	return evidence, rows.Err()
+}
+
+func (store *Store) RecentCapabilityRuns(ctx context.Context) ([]capability.Evidence, error) {
+	// Include interrupted invocations at their last recorded phase.
+	rows, err := store.db.QueryContext(ctx, `SELECT e.payload FROM capability_evidence e WHERE NOT EXISTS (
+ SELECT 1 FROM capability_evidence n WHERE n.run_id=e.run_id AND n.sequence>e.sequence)
+ ORDER BY e.sequence DESC LIMIT 50`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	evidence := []capability.Evidence{}
+	for rows.Next() {
+		var payload []byte
+		var item capability.Evidence
+		if err := rows.Scan(&payload); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(payload, &item); err != nil {
+			return nil, err
+		}
+		evidence = append(evidence, item)
 	}
 	return evidence, rows.Err()
 }

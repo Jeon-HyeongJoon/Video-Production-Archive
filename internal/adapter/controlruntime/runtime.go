@@ -3,6 +3,7 @@ package controlruntime
 import (
 	"context"
 	"crypto/subtle"
+	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -28,6 +29,7 @@ import (
 	"videoarchive/internal/adapter/sqlitearchivist"
 	"videoarchive/internal/adapter/sqlitecatalog"
 	"videoarchive/internal/adapter/sqlitecommand"
+	"videoarchive/internal/adapter/sqliteevidence"
 	"videoarchive/internal/adapter/sqlitestorage"
 	"videoarchive/internal/adapter/windowstask"
 	"videoarchive/internal/application/archiveintake"
@@ -39,6 +41,7 @@ import (
 	"videoarchive/internal/application/archivistadvisory"
 	"videoarchive/internal/application/archivistcontrol"
 	"videoarchive/internal/application/archivisthostactivation"
+	"videoarchive/internal/application/capability"
 	"videoarchive/internal/application/dispatchcoordinator"
 	"videoarchive/internal/application/jobcontrol"
 	"videoarchive/internal/application/systemstatus"
@@ -81,6 +84,7 @@ func (verifier credentialVerifier) Verify(_ string, credentialReference, present
 }
 
 type Runtime struct {
+	evidence               *sqliteevidence.Store
 	configuration          bootconfig.Configuration
 	catalog                *sqlitecatalog.Store
 	archiveWorkspace       *sqlitearchiveworkspace.Store
@@ -134,6 +138,10 @@ func OpenWithDependencies(ctx context.Context, configuration bootconfig.Configur
 		return fail(err)
 	}
 	runtime.commands = commandStore
+	runtime.evidence, err = sqliteevidence.Open(configuration.DatabasePath)
+	if err != nil {
+		return fail(err)
+	}
 	organizationStore, err := sqlitearchiveorganization.Open(configuration.DatabasePath)
 	if err != nil {
 		return fail(err)
@@ -183,7 +191,11 @@ func OpenWithDependencies(ctx context.Context, configuration bootconfig.Configur
 		}
 		return nil
 	}, jobHandler.Handle)
-	jobCommands, err := jobcontrol.New(executor, commandStore, archiveWorkspaceStore)
+	observedJobs, err := capability.NewCommandObserver(executor, runtime.evidence, true)
+	if err != nil {
+		return fail(err)
+	}
+	jobCommands, err := jobcontrol.New(observedJobs, commandStore, archiveWorkspaceStore)
 	if err != nil {
 		return fail(err)
 	}
@@ -217,9 +229,13 @@ func OpenWithDependencies(ctx context.Context, configuration bootconfig.Configur
 	if batchErr != nil {
 		return fail(batchErr)
 	}
-	batchCommands := command.NewAuthorizedCreatingExecutor(commandStore, func(envelope command.Envelope) error {
+	batchExecutor := command.NewAuthorizedCreatingExecutor(commandStore, func(envelope command.Envelope) error {
 		return authorizeArchiveRunEnvelope(envelope, configuration.Access.Mode)
 	}, batchHandler.Handle)
+	batchCommands, err := capability.NewCommandObserver(batchExecutor, runtime.evidence, false)
+	if err != nil {
+		return fail(err)
+	}
 	for _, topology := range configuration.Storages {
 		if topology.Role != vocabulary.StorageSourceMedia {
 			continue
@@ -248,7 +264,7 @@ func OpenWithDependencies(ctx context.Context, configuration bootconfig.Configur
 		}
 		starter, startErr := archiveorganization.NewStartService(
 			archiveIntakeRepository, storageRepository, workerRegistry, catalogStore, organizationStore,
-			coordinatorJobBus{service: jobCommands}, executorCommandBus{executor: batchCommands}, analyzerFactory, dependencies.Now,
+			coordinatorJobBus{service: jobCommands}, batchCommands, analyzerFactory, dependencies.Now,
 		)
 		if startErr != nil {
 			return fail(startErr)
@@ -257,7 +273,7 @@ func OpenWithDependencies(ctx context.Context, configuration bootconfig.Configur
 	} else {
 		starter, startErr := archiveorganization.NewRemoteStartService(
 			archiveIntakeRepository, storageRepository, workerRegistry, organizationStore,
-			coordinatorJobBus{service: jobCommands}, executorCommandBus{executor: batchCommands}, commandStore, dependencies.Now,
+			coordinatorJobBus{service: jobCommands}, batchCommands, commandStore, dependencies.Now,
 		)
 		if startErr != nil {
 			return fail(startErr)
@@ -320,6 +336,7 @@ func OpenWithDependencies(ctx context.Context, configuration bootconfig.Configur
 	if err != nil {
 		return fail(err)
 	}
+	systemStatus.SetCapabilityReader(runtime.evidence)
 	workRecovery, err := workrecovery.New(workDiagnostics, jobCommands, commandStore)
 	if err != nil {
 		return fail(err)
@@ -469,10 +486,9 @@ func (runtime *Runtime) monitorArchivistAdvisories(ctx context.Context) {
 	if runtime == nil || runtime.archivistAdvisories == nil {
 		return
 	}
+	health := newMonitorHealth(runtime.commands, runtime.now)
 	evaluate := func() {
-		if err := runtime.archivistAdvisories.Evaluate(ctx); err != nil && ctx.Err() == nil {
-			slog.Warn("Archivist advisory evaluation failed", "error", err)
-		}
+		health.observe(ctx, monitorKey{operation: "ARCHIVIST_ADVISORY"}, 0, runtime.archivistAdvisories.Evaluate(ctx))
 	}
 	evaluate()
 	// Inventory commits wake this monitor immediately. The low-frequency tick
@@ -494,21 +510,71 @@ func (runtime *Runtime) monitorArchivistAdvisories(ctx context.Context) {
 
 // Track outages per monitored operation and run. The set contains only open outages.
 type monitorKey struct{ operation, runID string }
-type monitorHealth map[monitorKey]bool
+type monitorHealth struct {
+	writeFailed bool
+	last        map[monitorKey]string
+	store       *sqlitecommand.Store
+	now         func() time.Time
+}
 
-func (health monitorHealth) observe(ctx context.Context, key monitorKey, revision uint64, err error) {
-	if ctx.Err() != nil || health[key] == (err != nil) {
+func newMonitorHealth(store *sqlitecommand.Store, now func() time.Time) monitorHealth {
+	return monitorHealth{last: make(map[monitorKey]string), store: store, now: now}
+}
+func monitorCause(err error) string {
+	switch {
+	case err == nil:
+		return ""
+	case errors.Is(err, context.DeadlineExceeded):
+		return "DEADLINE_EXCEEDED"
+	case errors.Is(err, command.ErrRevisionConflict):
+		return "REVISION_CONFLICT"
+	case errors.Is(err, command.ErrTargetNotFound), errors.Is(err, sql.ErrNoRows):
+		return "RECORD_MISSING"
+	case errors.Is(err, archivetranscription.ErrInvalidStoredResult):
+		return "STORED_RESULT_INVALID"
+	case errors.Is(err, archivetranscription.ErrStageOneProjection):
+		return "STAGE_ONE_PROJECTION_INCOMPLETE"
+	case errors.Is(err, archivistcontrol.ErrSessionBusy):
+		return "ARCHIVIST_SESSION_BUSY"
+	case errors.Is(err, archive.ErrStorageFull):
+		return "STORAGE_FULL"
+	case errors.Is(err, os.ErrPermission):
+		return "ACCESS_DENIED"
+	default:
+		return "CAUSE_UNCLASSIFIED"
+	}
+}
+func (health *monitorHealth) observe(ctx context.Context, key monitorKey, revision uint64, err error) {
+	cause := monitorCause(err)
+	if ctx.Err() != nil {
+		return
+	}
+	if last, known := health.last[key]; known && last == cause {
+		return
+	}
+	changed, persistErr := health.store.RecordMonitorTransition(ctx, key.operation, key.runID, revision, cause, health.now().UTC())
+	if persistErr != nil {
+		if ctx.Err() == nil && !health.writeFailed {
+			slog.Warn("Control monitor evidence write failed", "operation", key.operation)
+			health.writeFailed = true
+		}
+		return
+	}
+	if health.writeFailed {
+		slog.Info("Control monitor evidence writes resumed", "operation", key.operation)
+		health.writeFailed = false
+	}
+	health.last[key] = cause
+	if !changed {
 		return
 	}
 	fields := []any{"operation", key.operation}
 	if key.runID != "" {
 		fields = append(fields, "archive_run_id", key.runID, "revision", revision)
 	}
-	if err != nil {
-		health[key] = true
-		slog.Warn("Archive Control monitor failed", fields...)
+	if cause != "" {
+		slog.Warn("Archive Control monitor failed", append(fields, "cause_code", cause)...)
 	} else {
-		delete(health, key)
 		slog.Info("Archive Control monitor recovered", fields...)
 	}
 }
@@ -517,14 +583,14 @@ func (runtime *Runtime) monitorArchiveRuns(ctx context.Context) {
 	if runtime == nil || runtime.archiveIntakeWorkspace == nil || runtime.archiveTranscriptions == nil || runtime.now == nil {
 		return
 	}
-	health := make(monitorHealth)
+	health := newMonitorHealth(runtime.commands, runtime.now)
 	project := func() {
 		views, err := runtime.archiveIntakeWorkspace.Projection(ctx)
 		health.observe(ctx, monitorKey{operation: "ARCHIVE_RUN_PROJECTION"}, 0, err)
 		if err != nil {
 			return
 		}
-		seen := make(map[string]bool, len(health))
+		seen := make(map[string]bool, len(health.last))
 		for _, view := range views {
 			if view.ArchiveRunID == "" || view.ArchiveRunRevision == 0 {
 				continue
@@ -558,9 +624,9 @@ func (runtime *Runtime) monitorArchiveRuns(ctx context.Context) {
 			}
 			health.observe(ctx, monitorKey{"AUTO_TRANSCRIPTION_START", view.ArchiveRunID}, view.ArchiveRunRevision, err)
 		}
-		for key := range health {
+		for key := range health.last {
 			if key.runID != "" && !seen[key.runID] {
-				delete(health, key)
+				delete(health.last, key)
 			}
 		}
 	}
@@ -581,7 +647,7 @@ func (runtime *Runtime) monitorWorkerCompletions(ctx context.Context) {
 	if runtime == nil || runtime.workerExecution == nil {
 		return
 	}
-	health := make(monitorHealth)
+	health := newMonitorHealth(runtime.commands, runtime.now)
 	reconcile := func() {
 		health.observe(ctx, monitorKey{operation: "WORKER_COMPLETION_DELIVERY"}, 0, runtime.workerExecution.ReconcileCompletions(ctx))
 	}
@@ -605,6 +671,9 @@ func (runtime *Runtime) Close() error {
 		runtime.backgroundWait.Wait()
 	}
 	var combined error
+	if runtime.evidence != nil {
+		combined = errors.Join(combined, runtime.evidence.Close())
+	}
 	if runtime.archiveIntake != nil {
 		combined = errors.Join(combined, runtime.archiveIntake.Close())
 	}
@@ -631,14 +700,6 @@ func (runtime *Runtime) Close() error {
 
 type coordinatorJobBus struct {
 	service *jobcontrol.Service
-}
-
-type executorCommandBus struct {
-	executor *command.Executor
-}
-
-func (bus executorCommandBus) Execute(envelope command.Envelope) (command.Result, error) {
-	return bus.executor.Execute(envelope)
 }
 
 func (bus coordinatorJobBus) Execute(envelope command.Envelope) (command.Result, error) {

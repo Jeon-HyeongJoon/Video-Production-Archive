@@ -31,6 +31,7 @@ import (
 	corejob "videoarchive/internal/core/job"
 	"videoarchive/internal/core/mediaanalysis"
 	"videoarchive/internal/core/organization"
+	"videoarchive/internal/core/qc"
 	"videoarchive/internal/core/vocabulary"
 	"videoarchive/internal/core/worker"
 	"videoarchive/internal/core/workflow"
@@ -524,6 +525,17 @@ func TestMCPReadsOnlyBoundSanitizedFailureEvidenceDetail(t *testing.T) {
 	if len(definitions) != 1 || mapping["archive_work_failure_evidence_get_v1"].Name != ToolWorkFailureEvidenceGet {
 		t.Fatalf("Archivist loop did not expose failure detail capability: definitions=%+v mapping=%+v", definitions, mapping)
 	}
+	detail.Operation = execution.OperationQCRendition
+	detail.CauseCode = "QC_CHECK_FAILED"
+	detail.QCFailure = &qc.Failure{AssessmentID: "QC-1", TargetArtifactID: "RENDITION-1", SourceInspectionID: "INSPECTION-1", Checks: []qc.Check{{Kind: qc.CheckDuration, Expected: "9000±1500ms", Actual: "1000ms"}}}
+	handler.workFailureEvidence = fixedFailureEvidenceReader{reference: reference, detail: detail}
+	actual := mcpTestRequest(handler, http.MethodPost, "/mcp/v1/call", archiveToolCall("CALL-QC-DETAIL", ToolWorkFailureEvidenceGet, `{"evidence_id":"EVD-WORKER-DETAIL"}`), "secret")
+	for _, expected := range []string{"RENDITION-1", "INSPECTION-1", "9000±1500ms", "1000ms"} {
+		if actual.Code != http.StatusOK || !strings.Contains(actual.Body.String(), expected) {
+			t.Fatalf("missing QC evidence: %d %s", actual.Code, actual.Body.String())
+		}
+	}
+
 }
 
 // Requirement: MCP-010

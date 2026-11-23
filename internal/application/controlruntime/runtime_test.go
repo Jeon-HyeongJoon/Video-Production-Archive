@@ -24,11 +24,14 @@ import (
 	"videoarchive/internal/adapter/controlruntime"
 	"videoarchive/internal/adapter/mcpproxy"
 	"videoarchive/internal/adapter/sqlitecommand"
+	"videoarchive/internal/adapter/sqliteevidence"
 	"videoarchive/internal/adapter/sqlitestorage"
 	"videoarchive/internal/adapter/windowstask"
 	"videoarchive/internal/adapter/workerconfig"
 	"videoarchive/internal/application/archiveorganization"
 	"videoarchive/internal/application/archivistcontrol"
+	"videoarchive/internal/application/capability"
+	"videoarchive/internal/application/systemstatus"
 	"videoarchive/internal/application/workdiagnostics"
 	"videoarchive/internal/application/workerclient"
 	"videoarchive/internal/core/archive"
@@ -2136,4 +2139,59 @@ func ledgerTargetValue(table string) string {
 		return "JOB-HTTP-1:create"
 	}
 	return "JOB-HTTP-1"
+}
+
+// Requirement: OBS-013
+func TestArchivistReadsDurableCommandAttemptsWithOneCorrelationPerInvocation(t *testing.T) {
+	cfg := runtimeTestConfiguration(t)
+	now := time.Date(2026, 11, 23, 1, 0, 0, 0, time.UTC)
+	rt, err := controlruntime.OpenWithDependencies(context.Background(), cfg, "evidence-test", controlruntime.Dependencies{Secrets: runtimeSecret("runtime-service-secret"), Now: func() time.Time { return now }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rt.Close()
+	cookie, token := runtimeSession(t, rt.Handler())
+	origin := "http://127.0.0.1:8080"
+	payload := `{"job_id":"JOB-EVIDENCE","command_id":"COMMAND-EVIDENCE","idempotency_key":"ID-CREATE","reason":"private reason","template_name":"occasion-recording","target_title":"private title","expected_revision":0}`
+	if got := runtimeRequest(rt.Handler(), http.MethodPost, "/api/v1/jobs", payload, cookie, token, origin); got.Code != http.StatusCreated {
+		t.Fatalf("create %d %s", got.Code, got.Body.String())
+	}
+	cancel := `{"command_id":"COMMAND-STALE","idempotency_key":"ID-STALE","reason":"private reason","expected_revision":9}`
+	if got := runtimeRequest(rt.Handler(), http.MethodPost, "/api/v1/jobs/JOB-EVIDENCE/cancel", cancel, cookie, token, origin); got.Code != http.StatusConflict {
+		t.Fatalf("cancel %d", got.Code)
+	}
+	setupRunningArchivistTurn(t, rt, "SESSION-TRACE", "TURN-TRACE", "REQUEST-TRACE")
+	call := `{"session_id":"SESSION-TRACE","turn_id":"TURN-TRACE","fencing_token":1,"tool_call_id":"CALL-TRACE","command_id":"READ-TRACE","idempotency_key":"READ-TRACE","input_digest":"sha256:read","tool":"archive.system.status.get.v1","input":{}}`
+	got := mcpRequest(rt.MCPHandler(), http.MethodPost, "/mcp/v1/call", call, "runtime-service-secret")
+	var body struct{ Data systemstatus.Snapshot }
+	if got.Code != http.StatusOK || json.Unmarshal(got.Body.Bytes(), &body) != nil || strings.Contains(got.Body.String(), "private reason") {
+		t.Fatalf("status %d %s", got.Code, got.Body.String())
+	}
+	if !strings.Contains(got.Body.String(), "DISPATCH_BLOCKED") {
+		t.Fatalf("queued admission basis missing from system status: %s", got.Body.String())
+	}
+	store, err := sqliteevidence.Open(cfg.DatabasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	found := map[string]bool{}
+	for _, e := range body.Data.CapabilityRuns {
+		if e.JobID != "JOB-EVIDENCE" {
+			continue
+		}
+		phases, err := store.ByRun(context.Background(), e.RunID)
+		if err != nil || len(phases) != 3 || phases[0].Phase != capability.EvidenceRequested || phases[1].Phase != capability.EvidenceStarted || e.FinishedAt.IsZero() {
+			t.Fatalf("missing correlated attempt: %+v, %v", phases, err)
+		}
+		switch e.CommandID {
+		case "COMMAND-EVIDENCE":
+			found[e.CommandID] = e.Phase == capability.EvidenceCompleted
+		case "COMMAND-STALE":
+			found[e.CommandID] = e.Phase == capability.EvidenceFailed && e.ErrorClass == "REVISION_CONFLICT"
+		}
+	}
+	if !found["COMMAND-EVIDENCE"] || !found["COMMAND-STALE"] {
+		t.Fatalf("missing outcomes %+v", body.Data.CapabilityRuns)
+	}
 }

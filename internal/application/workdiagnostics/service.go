@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"path"
 	"slices"
 	"sort"
@@ -16,8 +17,10 @@ import (
 	"videoarchive/internal/application/archivework"
 	"videoarchive/internal/application/archiveworkspace"
 	"videoarchive/internal/core/archivistruntime"
+	"videoarchive/internal/core/dispatch"
 	"videoarchive/internal/core/execution"
 	corejob "videoarchive/internal/core/job"
+	"videoarchive/internal/core/qc"
 	"videoarchive/internal/core/vocabulary"
 	"videoarchive/internal/core/worker"
 	"videoarchive/internal/core/workflow"
@@ -155,6 +158,7 @@ type FailureDetail struct {
 	StepID          string                       `json:"step_id"`
 	EvidenceID      string                       `json:"evidence_id"`
 	Operation       execution.Operation          `json:"operation"`
+	QCFailure       *qc.Failure                  `json:"qc_failure,omitempty"`
 	ProcessExitCode *int                         `json:"process_exit_code,omitempty"`
 	ObservedAt      time.Time                    `json:"observed_at"`
 	ProcessLog      execution.ProcessLogArtifact `json:"process_log"`
@@ -162,6 +166,7 @@ type FailureDetail struct {
 
 func SanitizeFailureDetail(source FailureDetail) FailureDetail {
 	result := source
+	result.QCFailure = source.QCFailure.Safe()
 	result.CauseCode = safeDiagnosticCode(source.CauseCode, "")
 	result.Summary = safeDiagnosticSummary(source.Summary)
 	result.EvidenceID = safeEvidenceID(source.EvidenceID, source.JobID+"\x00"+source.StepID)
@@ -292,7 +297,7 @@ func (service *Service) FailureEvidence(ctx context.Context, reference archivist
 				return FailureDetail{
 					CauseCode: evidence.CauseCode, Summary: evidence.Summary, WorkflowAttempt: evidence.WorkflowAttempt,
 					WorkKind: reference.Kind, WorkID: reference.WorkID, JobID: jobID, StepID: evidence.StepID,
-					EvidenceID: evidence.EvidenceID, Operation: evidence.Operation, ProcessExitCode: evidence.ProcessExitCode,
+					EvidenceID: evidence.EvidenceID, Operation: evidence.Operation, QCFailure: evidence.QCFailure, ProcessExitCode: evidence.ProcessExitCode,
 					ObservedAt: evidence.ObservedAt, ProcessLog: *evidence.ProcessLog,
 				}, nil
 			}
@@ -333,6 +338,12 @@ func (service *Service) diagnoseJob(ctx context.Context, view archiveworkspace.J
 	stateFact := diagnosticFact("STEP_STATE_OBSERVED", "Step "+summary.CurrentStepID+" is "+string(summary.StepState), summary.LastEventAt,
 		summary.JobID, strconv.FormatUint(summary.Revision, 10), summary.CurrentStepID, string(summary.StepState))
 	facts := []Fact{stateFact}
+	for _, step := range view.Steps {
+		for _, id := range step.ReusedOutputIDs {
+			fact := diagnosticFact("VERIFIED_PUBLICATION_REUSED", "Reused verified published output "+id, step.LastEventAt, summary.JobID, step.ID, id, step.LastEventAt.UTC().Format(time.RFC3339Nano))
+			facts = append(facts, fact)
+		}
+	}
 	for _, evidence := range item.ProgressEvidence {
 		facts = append(facts, progressFact(evidence))
 	}
@@ -383,18 +394,41 @@ func (service *Service) diagnoseJob(ctx context.Context, view archiveworkspace.J
 	var actions []SuggestedAction
 	var recoveries []RecoveryAction
 	report := false
+	if source, ok := service.executions.(interface {
+		DispatchObservations(context.Context, string, uint64) ([]dispatch.Observation, error)
+	}); ok {
+		observations, err := source.DispatchObservations(ctx, summary.JobID, summary.Revision)
+		if err != nil {
+			return JobDiagnostic{}, nil, nil, nil, nil, false, err
+		}
+		for _, item := range observations {
+			for _, b := range item.Blockers {
+				text := fmt.Sprintf("Step %s admission %s, Worker %s snapshot %d", item.StepID, b.Code, b.WorkerID, b.SnapshotID)
+				facts = append(facts, diagnosticFact("DISPATCH_BLOCKED", text, item.ObservedAt, summary.JobID, item.StepID, b.WorkerID, b.Code, string(b.WaitReason), item.ObservedAt.UTC().Format(time.RFC3339Nano)))
+				if b.Code != "RESOURCE" {
+					report = true
+				}
+			}
+		}
+	}
 	active := summary.StepState == workflow.Reserved || summary.StepState == workflow.Running || summary.StepState == workflow.Verifying
 	if summary.StepState == workflow.Failed || item.ErrorClass != "" {
 		report = true
 		facts = append(facts, diagnosticFact("REPORTED_FAILURE", "The Step reported "+item.ErrorClass, summary.LastEventAt,
 			summary.JobID, summary.CurrentStepID, item.ErrorClass, summary.LastEventAt.Format(time.RFC3339Nano)))
-		if latestProcessLog(item.FailureEvidence) == execution.ProcessLogAvailable {
+		latest, actionCode := terminalRecovery(item, summary.TemplateName)
+		if latest.QCFailure != nil {
+			actions = append(actions, SuggestedAction{Code: "INSPECT_FAILURE_DETAIL", Summary: "Read the failed QC checks and compare the expected and measured values for the affected file"})
+		} else if latestProcessLog(item.FailureEvidence) == execution.ProcessLogAvailable {
 			actions = append(actions, SuggestedAction{Code: "INSPECT_FAILURE_DETAIL", Summary: "Read the available persisted failure evidence detail before retrying"})
 		} else {
 			actions = append(actions, SuggestedAction{Code: "FAILURE_DETAIL_UNAVAILABLE", Summary: "Use the structured failure fields because process detail was not recorded"})
 		}
-		latest, actionCode := terminalRecovery(item, summary.TemplateName)
 		switch latest.CauseCode {
+		case "QC_CHECK_FAILED":
+			actions = append(actions, SuggestedAction{Code: "REVIEW_QC_MEASUREMENTS", Summary: "Compare the failed checks with their expected values before changing the source or rendering profile"})
+		case "INPUT_FILE_MISSING", "INPUT_FILE_ACCESS_DENIED":
+			actions = append(actions, SuggestedAction{Code: "CHECK_REGISTERED_INPUT", Summary: "Check the referenced input on the accessible Storage before scheduling a new execution"})
 		case "WHISPER_MODEL_INVALID":
 			actions = append(actions, SuggestedAction{Code: "VERIFY_TRANSCRIPTION_MODEL", Summary: "Verify the configured model against its trusted checksum before scheduling transcription"})
 		case "WHISPER_OUTPUT_OPEN_FAILED":
@@ -425,7 +459,7 @@ func (service *Service) diagnoseJob(ctx context.Context, view archiveworkspace.J
 		}
 	}
 	if summary.StepState == workflow.Waiting {
-		report = summary.WaitReason == vocabulary.WaitInput || summary.WaitReason == vocabulary.WaitApproval || summary.WaitReason == vocabulary.WaitDevice
+		report = report || summary.WaitReason == vocabulary.WaitInput || summary.WaitReason == vocabulary.WaitApproval || summary.WaitReason == vocabulary.WaitDevice
 		facts = append(facts, diagnosticFact("REPORTED_WAIT", "The Step is waiting for "+string(summary.WaitReason), summary.LastEventAt,
 			summary.JobID, summary.CurrentStepID, string(summary.WaitReason), summary.LastEventAt.Format(time.RFC3339Nano)))
 		if report {
@@ -526,6 +560,7 @@ func sanitizeFailureEvidence(source corejob.StepFailureEvidence) corejob.StepFai
 func sanitizeFailureEvidenceWithTail(source corejob.StepFailureEvidence) corejob.StepFailureEvidence {
 	result := source
 	result.EvidenceID = safeEvidenceID(source.EvidenceID, source.StepID+"\x00"+strconv.FormatUint(source.FencingToken, 10))
+	result.QCFailure = source.QCFailure.Safe()
 	result.ErrorClass = safeDiagnosticCode(source.ErrorClass, "WORKER_REPORTED_FAILURE")
 	result.CauseCode = safeDiagnosticCode(source.CauseCode, result.ErrorClass)
 	result.LogReference = safeLogReference(source.LogReference)
@@ -766,6 +801,9 @@ func fingerprint(snapshot Snapshot) string {
 	for _, value := range snapshot.Facts {
 		source.WriteByte(0)
 		source.WriteString(value.Code)
+		if value.Code == "DISPATCH_BLOCKED" {
+			source.WriteString("/" + value.EvidenceID)
+		}
 	}
 	for _, value := range snapshot.Hypotheses {
 		source.WriteByte(0)

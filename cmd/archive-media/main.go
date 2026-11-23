@@ -26,6 +26,7 @@ import (
 	"videoarchive/internal/application/workerclient"
 	mediaexecutor "videoarchive/internal/application/workerexecutor"
 	"videoarchive/internal/core/execution"
+	"videoarchive/internal/core/qc"
 	"videoarchive/internal/core/vocabulary"
 	"videoarchive/internal/core/workflow"
 )
@@ -58,6 +59,7 @@ type commandResult struct {
 	CauseCode              string                                    `json:"cause_code,omitempty"`
 	ErrorSummary           string                                    `json:"error_summary,omitempty"`
 	ProgressStreamFailed   bool                                      `json:"progress_stream_failed,omitempty"`
+	QCFailure              *qc.Failure                               `json:"qc_failure,omitempty"`
 	ProcessExitCode        *int                                      `json:"process_exit_code,omitempty"`
 	ProcessLog             *execution.ProcessLogArtifact             `json:"process_log,omitempty"`
 	LogReference           string                                    `json:"log_reference,omitempty"`
@@ -175,7 +177,7 @@ func runOperation(ctx context.Context, arguments []string, stdin io.Reader, stdo
 	response := commandResult{
 		ProgressStreamFailed: evidenceErr != nil, Operation: spec.Operation, Success: result.Success, FailureClass: result.FailureClass,
 		WaitReason: result.WaitReason, WaitTargetStorageID: result.WaitTargetStorageID,
-		ErrorClass: result.ErrorClass, LogReference: result.LogReference, CauseCode: result.CauseCode, ErrorSummary: result.ErrorSummary, ProcessExitCode: result.ProcessExitCode, ProcessLog: result.ProcessLog,
+		ErrorClass: result.ErrorClass, LogReference: result.LogReference, CauseCode: result.CauseCode, ErrorSummary: result.ErrorSummary, QCFailure: result.QCFailure, ProcessExitCode: result.ProcessExitCode, ProcessLog: result.ProcessLog,
 		Outputs: result.Outputs, VerificationReferences: result.VerificationReferences,
 		InspectedMedia: result.InspectedMedia, Cancellation: result.Cancellation,
 	}

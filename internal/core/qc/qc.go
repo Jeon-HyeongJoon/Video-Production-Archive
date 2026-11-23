@@ -3,6 +3,7 @@ package qc
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -45,6 +46,58 @@ type OutputObservation struct {
 	Width          int      `json:"width"`
 	Height         int      `json:"height"`
 	Decodable      bool     `json:"decodable"`
+}
+
+// Failure carries the failed measurements without publishing an accepted QC output.
+type Failure struct {
+	AssessmentID       string  `json:"assessment_id"`
+	TargetArtifactID   string  `json:"target_artifact_id"`
+	SourceInspectionID string  `json:"source_inspection_id,omitempty"`
+	SourceTimelineID   string  `json:"source_timeline_id,omitempty"`
+	Checks             []Check `json:"checks"`
+}
+
+func (failure *Failure) Error() string { return "rendition failed measured QC checks" }
+
+var evidenceID = regexp.MustCompile(`^[a-zA-Z0-9_.:-]{1,160}$`)
+var measurement = regexp.MustCompile(`^[a-zA-Z0-9±=<> ,._-]{0,128}$`)
+
+func (failure *Failure) Safe() *Failure {
+	if failure == nil || !evidenceID.MatchString(failure.AssessmentID) || !evidenceID.MatchString(failure.TargetArtifactID) ||
+		(failure.SourceInspectionID != "" && !evidenceID.MatchString(failure.SourceInspectionID)) || (failure.SourceTimelineID != "" && !evidenceID.MatchString(failure.SourceTimelineID)) || len(failure.Checks) == 0 || len(failure.Checks) > 8 {
+		return nil
+	}
+	safe := *failure
+	safe.Checks = make([]Check, 0, len(failure.Checks))
+	seen := map[CheckKind]bool{}
+	for _, check := range failure.Checks {
+		switch check.Kind {
+		case CheckDecodable, CheckChecksum, CheckFileSize, CheckContainer, CheckVideoCodec, CheckAudioCodec, CheckDimensions, CheckDuration:
+		default:
+			return nil
+		}
+		if seen[check.Kind] || check.Passed {
+			return nil
+		}
+		seen[check.Kind] = true
+		for _, value := range []*string{&check.Expected, &check.Actual} {
+			lower := strings.ToLower(*value)
+			if !measurement.MatchString(*value) || strings.Contains(lower, "password") || strings.Contains(lower, "secret") || strings.Contains(lower, "credential") || strings.Contains(lower, "token") {
+				*value = "withheld"
+			}
+		}
+		safe.Checks = append(safe.Checks, check)
+	}
+	return &safe
+}
+func (assessment QCAssessment) Failure() *Failure {
+	failure := Failure{AssessmentID: assessment.ID, TargetArtifactID: assessment.TargetArtifactID, SourceInspectionID: assessment.SourceInspectionID, SourceTimelineID: assessment.SourceTimelineID}
+	for _, check := range assessment.Checks {
+		if !check.Passed {
+			failure.Checks = append(failure.Checks, check)
+		}
+	}
+	return failure.Safe()
 }
 
 type Policy struct {

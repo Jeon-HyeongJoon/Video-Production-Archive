@@ -6,8 +6,8 @@
 
 ## 1. 검증 기준선
 
-- 요구사항 337개 중 implemented 295개, planned 42개
-- implemented 요구사항과 주석 테스트 295개가 1:1 연결
+- 요구사항 342개 중 implemented 300개, planned 42개
+- implemented 요구사항과 주석 테스트 300개가 1:1 연결
 - `make verify`, `go vet ./...` 통과를 변경 인계 조건으로 사용
 - Core는 Application·Adapter와 HTTP·SQLite·FFmpeg·Windows API를 import하지 않음
 - 실제 제품 수직 경로는 Archive Intake와 별도 STT, layout v3 compact 게시·카탈로그 대조까지 연결
@@ -234,3 +234,5 @@ Archivist는 메시지 본문에서 원본·아카이브 Storage·폴더 범위�
 | 7 | 확정·복원·네트워크 Storage·실계정 Archivist acceptance | 현재 planned 요구사항 순서대로 수직 검증 |
 
 현재 기준선에서는 Archive Intake 수직 경로를 우선 보존한다. 구조 정리는 공개 Command·StepExecutionSpec·ArchivePackage 형식을 바꾸지 않는 작은 변경으로 나누며, 요구사항 의미가 바뀌면 설계·카탈로그·semantic lock·단일 테스트를 한 묶음으로 갱신한다.
+
+원본 탐색 누락, 실패 QC, 파일 단위 입력 오류, 후보별 배정 차단은 작업 판단 근거로 연결한다. 개별 녹화·오디오 게시 중단 정산은 `EXE-004`, 운영 Command 증적의 현재 적용 범위는 `OBS-013`이다. 전체 Capability 범위와 복합 출력 게시 정산은 각각 `OBS-001`, `EXE-003`에서 추적한다.

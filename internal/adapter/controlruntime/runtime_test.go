@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"videoarchive/internal/adapter/sqlitecommand"
 	"videoarchive/internal/core/command"
 	"videoarchive/internal/core/security"
 	"videoarchive/internal/core/vocabulary"
@@ -44,12 +45,18 @@ func TestControlMonitorLogsEachOutageAndRecoveryWithItsRunBoundary(t *testing.T)
 	prior := slog.Default()
 	slog.SetDefault(slog.New(slog.NewJSONHandler(&out, nil)))
 	defer slog.SetDefault(prior)
-	health := make(monitorHealth)
+	store, err := sqlitecommand.Open(t.TempDir() + "/monitor.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	health := newMonitorHealth(store, time.Now)
 	ctx := context.Background()
 	failed := errors.New("private-error-sentinel")
 	a, b := monitorKey{"AUTO_TRANSCRIPTION_START", "RUN-A"}, monitorKey{"ARCHIVIST_RECALL", "RUN-B"}
 	health.observe(ctx, a, 4, nil)
 	health.observe(ctx, a, 4, failed)
+	health = newMonitorHealth(store, time.Now)
 	health.observe(ctx, a, 4, failed)
 	health.observe(ctx, b, 7, failed)
 	health.observe(ctx, a, 5, nil)
@@ -57,6 +64,13 @@ func TestControlMonitorLogsEachOutageAndRecoveryWithItsRunBoundary(t *testing.T)
 	canceled, cancel := context.WithCancel(ctx)
 	cancel()
 	health.observe(canceled, b, 7, context.Canceled)
+	history, err := store.RecentMonitorTransitions(ctx)
+	if err != nil || len(history) != 3 || history[0].State != "RECOVERED" || history[0].Revision != 5 || history[1].Cause != "CAUSE_UNCLASSIFIED" || history[2].EvidenceID == "" {
+		t.Fatalf("missing durable monitor history: %+v %v", history, err)
+	}
+	if monitorCause(command.ErrRevisionConflict) != "REVISION_CONFLICT" {
+		t.Fatal("lost typed control cause")
+	}
 	if strings.Contains(out.String(), "private-error-sentinel") {
 		t.Fatal("raw application error disclosed")
 	}

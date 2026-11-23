@@ -225,3 +225,7 @@ Control의 StepExecutionSpec은 Storage ID, 정규화 상대경로, checksum, pr
 | Q15 | 폴더와 ArchiveCatalog 대조 | typed `verify`와 검증 뒤 원자 교체하는 `rebuild`, package는 수정·삭제하지 않음 |
 
 Q1~Q12는 사용자의 “테스트 버전까지 권장안으로 진행” 결정에 따라 2026-10-31에 확정했다. Q13~Q15는 2026-11-09에 확정했고 layout v2 writer·대조·재생성을 typed MediaOperation과 CLI에 연결해 integration test로 검증했다. 2026-11-12에는 layout v3 compact writer와 v2·v3 대조·재생성을 추가했다. 기존 layout v1·v2 기록은 자동 migration하지 않는다.
+
+### 실패한 QC의 인수
+
+측정 결과가 기준을 벗어나면 실패 판단을 작업 원장으로 보낸다. 평가 ID, 검사 대상 ID, 원본 검사 또는 타임라인 ID와 실패한 항목별 기대값·실측값을 보존한다. 길이 검사는 허용차도 제공한다. 원본 Job에서 실패 증적 ID로 상세를 조회해 어떤 입력이나 프로필을 확인할지 결정할 수 있다. 검사를 실행할 수 없었던 도구 장애는 독립적으로 분류한다. `QCT-005`

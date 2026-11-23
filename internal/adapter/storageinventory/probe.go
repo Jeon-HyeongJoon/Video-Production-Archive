@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"io/fs"
 	"os"
@@ -93,7 +94,7 @@ func (probe *Probe) Observe(ctx context.Context) ([]worker.StorageObservation, e
 		}
 		observed, observeErr := observeRoot(ctx, observation, root, capacity, free, nil)
 		if observeErr != nil {
-			result = append(result, observation)
+			result = append(result, observed)
 			continue
 		}
 		result = append(result, observed)
@@ -185,6 +186,10 @@ func scanningObservation(storageID string, volume device.ConnectedVolume) worker
 }
 
 func cloneObservation(observation worker.StorageObservation) worker.StorageObservation {
+	if observation.DiscoveryGap != nil {
+		gap := *observation.DiscoveryGap
+		observation.DiscoveryGap = &gap
+	}
 	observation.Folders = append([]worker.MediaFolderObservation(nil), observation.Folders...)
 	return observation
 }
@@ -205,7 +210,7 @@ func scanAttachedRoot(ctx context.Context, task attachedScanTask, report func([]
 		task.volume.CapacityBytes, task.volume.FreeBytes, report)
 	closeErr := root.Close()
 	if observeErr != nil || closeErr != nil {
-		return worker.StorageObservation{}, ErrObservationFailed
+		return observation, ErrObservationFailed
 	}
 	return observation, nil
 }
@@ -235,10 +240,12 @@ func (probe *AttachedProbe) finish(task attachedScanTask, observation worker.Sto
 	if succeeded {
 		state.observation = cloneObservation(observation)
 		state.ready = true
-	} else if !state.ready {
+	} else {
+		state.ready = false
 		state.observation = scanningObservation(task.storageID, task.volume)
 		state.observation.DiscoveryState = vocabulary.FolderDiscoveryFailed
 		state.observation.Folders = nil
+		state.observation.DiscoveryGap = observation.DiscoveryGap
 	}
 }
 
@@ -256,6 +263,19 @@ func observeRoot(ctx context.Context, observation worker.StorageObservation, roo
 	}
 	folders, err := scanner.DiscoverWithProgressContext(ctx, progress)
 	if err != nil {
+		var missing *mediafolder.IncompleteScan
+		if errors.As(err, &missing) {
+			observation.DiscoveryState = vocabulary.FolderDiscoveryFailed
+			observation.Connected = true
+			observation.CapacityBytes = capacity
+			observation.FreeBytes = free
+			gap := &worker.DiscoveryGap{Count: missing.Count, FirstFolder: missing.FirstFolder, Cause: missing.Cause}
+			if !gap.Valid() {
+				digest := sha256.Sum256([]byte(missing.FirstFolder))
+				gap.FirstFolder = "FOLDER-" + hex.EncodeToString(digest[:12])
+			}
+			observation.DiscoveryGap = gap
+		}
 		return observation, ErrObservationFailed
 	}
 	observation.Connected = true

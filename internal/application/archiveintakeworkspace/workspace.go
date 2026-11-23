@@ -11,6 +11,7 @@ import (
 	"videoarchive/internal/core/organization"
 	"videoarchive/internal/core/transcription"
 	"videoarchive/internal/core/vocabulary"
+	"videoarchive/internal/core/worker"
 	"videoarchive/internal/core/workflow"
 )
 
@@ -129,6 +130,7 @@ type DriveView struct {
 	ArchiveRunRevision         uint64
 	CandidateRevision          uint64
 	FolderDiscoveryRevision    uint64
+	DiscoveryGap               *worker.DiscoveryGap `json:"discovery_gap,omitempty"`
 	FolderDiscoveryState       vocabulary.FolderDiscoveryState
 	SessionID                  string
 	SelectionSessionID         string

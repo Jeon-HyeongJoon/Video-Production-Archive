@@ -147,3 +147,12 @@ func pathFolder(relativePath string) string {
 	}
 	return relativePath[:index]
 }
+
+// PublicationReference identifies the verified output of a fresh or resumed file publication.
+func PublicationReference(specDigest string, output StepOutput, reused bool) string {
+	scheme := "publish"
+	if reused {
+		scheme = "publish-reused"
+	}
+	return scheme + "://" + specDigest + "/" + output.ID + "/" + output.Checksum
+}

@@ -10,6 +10,7 @@ import (
 	"videoarchive/internal/application/jobcontrol"
 	"videoarchive/internal/core/execution"
 	"videoarchive/internal/core/job"
+	"videoarchive/internal/core/qc"
 	"videoarchive/internal/core/vocabulary"
 	"videoarchive/internal/core/workflow"
 )
@@ -54,6 +55,7 @@ type Result struct {
 	ErrorClass          string
 	CauseCode           string
 	ErrorSummary        string
+	QCFailure           *qc.Failure `json:"qc_failure,omitempty"`
 	ProcessExitCode     *int
 	LogReference        string
 	ProcessLog          *execution.ProcessLogArtifact

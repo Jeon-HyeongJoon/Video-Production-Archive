@@ -106,10 +106,32 @@ type WorkerRequest struct {
 	Resources   resource.Request
 }
 
+type Observation struct {
+	JobID       string    `json:"job_id"`
+	JobRevision uint64    `json:"job_revision"`
+	StepID      string    `json:"step_id"`
+	ObservedAt  time.Time `json:"observed_at"`
+	Blockers    []Blocker `json:"blockers"`
+}
+
+func (o Observation) SameDecision(other Observation) bool {
+	if o.JobID != other.JobID || o.JobRevision != other.JobRevision || o.StepID != other.StepID || len(o.Blockers) != len(other.Blockers) {
+		return false
+	}
+	for i, a := range o.Blockers {
+		b := other.Blockers[i]
+		if a.WorkerID != b.WorkerID || a.Code != b.Code || a.WaitReason != b.WaitReason {
+			return false
+		}
+	}
+	return true
+}
+
 type Blocker struct {
-	WorkerID   string
-	Code       string
-	WaitReason vocabulary.WaitReason
+	WorkerID   string                `json:"worker_id,omitempty"`
+	Code       string                `json:"code"`
+	WaitReason vocabulary.WaitReason `json:"wait_reason,omitempty"`
+	SnapshotID uint64                `json:"snapshot_id,omitempty"`
 }
 
 type WorkerDecision struct {
@@ -131,7 +153,7 @@ func SelectWorker(candidates []worker.DispatchCandidate, request WorkerRequest, 
 	for _, candidate := range ordered {
 		workerID := candidate.Definition.ID
 		if code := staticBlocker(candidate, request.Requirement, now, ttl); code != "" {
-			decision.Blockers = append(decision.Blockers, Blocker{WorkerID: workerID, Code: code})
+			decision.Blockers = append(decision.Blockers, Blocker{WorkerID: workerID, Code: code, SnapshotID: candidate.Metrics.SnapshotID})
 			continue
 		}
 		snapshot := resource.Snapshot{
@@ -144,7 +166,7 @@ func SelectWorker(candidates []worker.DispatchCandidate, request WorkerRequest, 
 		resourceDecision := scheduler.Evaluate(snapshot, request.Resources)
 		if !resourceDecision.Start {
 			decision.Blockers = append(decision.Blockers, Blocker{
-				WorkerID: workerID, Code: "RESOURCE", WaitReason: resourceDecision.Reason,
+				WorkerID: workerID, SnapshotID: candidate.Metrics.SnapshotID, Code: "RESOURCE", WaitReason: resourceDecision.Reason,
 			})
 			continue
 		}

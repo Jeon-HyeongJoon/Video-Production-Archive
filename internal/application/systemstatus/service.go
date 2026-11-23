@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"videoarchive/internal/application/archivework"
+	"videoarchive/internal/application/capability"
 	"videoarchive/internal/application/workdiagnostics"
 	"videoarchive/internal/core/archivistruntime"
 	"videoarchive/internal/core/vocabulary"
@@ -91,11 +92,28 @@ type CompletionDelivery struct {
 	LastAttemptAt   time.Time `json:"last_attempt_at,omitzero"`
 }
 
+type MonitorTransition struct {
+	EvidenceID   string    `json:"evidence_id"`
+	Operation    string    `json:"operation"`
+	ArchiveRunID string    `json:"archive_run_id,omitempty"`
+	Revision     uint64    `json:"revision,omitempty"`
+	State        string    `json:"state"`
+	Cause        string    `json:"cause_code,omitempty"`
+	ObservedAt   time.Time `json:"observed_at"`
+}
+type MonitorReader interface {
+	RecentMonitorTransitions(context.Context) ([]MonitorTransition, error)
+}
 type CompletionReader interface {
 	CompletionDelivery(context.Context) (CompletionDelivery, error)
 }
 
+type CapabilityReader interface {
+	RecentCapabilityRuns(context.Context) ([]capability.Evidence, error)
+}
 type Snapshot struct {
+	CapabilityRuns     []capability.Evidence   `json:"capability_runs"`
+	MonitorTransitions []MonitorTransition     `json:"monitor_transitions"`
 	CompletionDelivery *CompletionDelivery     `json:"completion_delivery"`
 	ObservedAt         time.Time               `json:"observed_at"`
 	Workers            []WorkerSnapshot        `json:"workers"`
@@ -106,12 +124,13 @@ type Snapshot struct {
 }
 
 type Service struct {
-	delivery    CompletionReader
-	works       WorkReader
-	workers     WorkerReader
-	hosts       ArchivistHostReader
-	diagnostics DiagnosticReader
-	now         func() time.Time
+	capabilities CapabilityReader
+	delivery     CompletionReader
+	works        WorkReader
+	workers      WorkerReader
+	hosts        ArchivistHostReader
+	diagnostics  DiagnosticReader
+	now          func() time.Time
 }
 
 func New(works WorkReader, workers WorkerReader, hosts ArchivistHostReader, diagnostics DiagnosticReader, delivery CompletionReader, now func() time.Time) (*Service, error) {
@@ -120,6 +139,8 @@ func New(works WorkReader, workers WorkerReader, hosts ArchivistHostReader, diag
 	}
 	return &Service{delivery: delivery, works: works, workers: workers, hosts: hosts, diagnostics: diagnostics, now: now}, nil
 }
+
+func (service *Service) SetCapabilityReader(reader CapabilityReader) { service.capabilities = reader }
 
 func (service *Service) Snapshot(ctx context.Context) (Snapshot, error) {
 	now := service.now().UTC()
@@ -132,6 +153,12 @@ func (service *Service) Snapshot(ctx context.Context) (Snapshot, error) {
 		return Snapshot{}, err
 	}
 	result := Snapshot{ObservedAt: now}
+	if service.capabilities != nil {
+		result.CapabilityRuns, _ = service.capabilities.RecentCapabilityRuns(ctx)
+	}
+	if reader, ok := service.delivery.(MonitorReader); ok {
+		result.MonitorTransitions, _ = reader.RecentMonitorTransitions(ctx)
+	}
 	if delivery, err := service.delivery.CompletionDelivery(ctx); err == nil {
 		result.CompletionDelivery = &delivery
 	}
@@ -159,7 +186,7 @@ func (service *Service) Snapshot(ctx context.Context) (Snapshot, error) {
 	for _, work := range works {
 		state := effectiveState(work)
 		incrementCount(&result.WorkCounts, state)
-		if work.ReplacementWorkID != "" || state == archivework.StateCompleted || state == archivework.StateQueued {
+		if work.ReplacementWorkID != "" || state == archivework.StateCompleted {
 			continue
 		}
 		reference := archivistruntime.WorkReference{Kind: workKind(work.Kind), WorkID: work.WorkID, Revision: work.Revision}

@@ -13,14 +13,14 @@ const (
 	windowsFileAttributeSystem = 0x4
 )
 
-func hidden(entry fs.DirEntry) bool {
+func hidden(entry fs.DirEntry) (bool, error) {
 	if entry == nil || strings.HasPrefix(entry.Name(), ".") {
-		return true
+		return true, nil
 	}
 	info, err := entry.Info()
 	if err != nil {
-		return true
+		return false, err
 	}
 	attributes, ok := info.Sys().(*syscall.Win32FileAttributeData)
-	return ok && attributes.FileAttributes&(windowsFileAttributeHidden|windowsFileAttributeSystem) != 0
+	return ok && attributes.FileAttributes&(windowsFileAttributeHidden|windowsFileAttributeSystem) != 0, nil
 }

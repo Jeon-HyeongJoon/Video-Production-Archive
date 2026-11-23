@@ -49,7 +49,7 @@ Archive Control를 띄우지 않은 상태에서 영속 업무 Capability를 공
 
 이 시스템은 사무실 영상을 정리·검사·보관하고 Archivist가 그 업무를 인수해 자동으로 수행하는 아카이브다. 각 작업은 대상과 실행 이유, 현재 확인한 진행, 결과 검증, 실패 시 다음 판단의 근거를 남겨야 한다. Archivist가 작업을 재개할 때는 원장의 상태·리비전과 증적 ID를 확인한다. 부족한 근거는 관측 누락으로 표시하고 재시도·완료·복구 결정에는 해당 작업의 권한과 검증 근거를 사용한다.
 
-목표 경계에서 모니터링은 각 도메인 모듈에 로그 코드를 흩뿌리지 않고 Capability Executor를 감싸는 Evidence Sink가 담당한다. 현재 Evidence 타입·SQLite prototype은 있으나 Archive Control의 모든 실행 Port를 감싸지 않으므로 `OBS-001`은 planned다.
+목표 경계에서 모니터링은 각 도메인 모듈에 로그 코드를 흩뿌리지 않고 Capability Executor를 감싸는 Evidence Sink가 담당한다. Job·ArchiveRun Command는 SQLite Evidence Sink에 연결됐고 Archive Control의 모든 실행 Port를 감싸지 않으므로 `OBS-001`은 planned다.
 
 ```text
 CapabilityRequested
@@ -102,6 +102,14 @@ Worker가 보고한 `ProcessLogArtifact` 메타데이터와 이중 정제된 제
 FFmpeg는 첫 전진 위치와 30초 간격 표본 및 종료 시 마지막 전진 위치를 남긴다. 전사는 청크별 엔진 백분율의 10% 구간에서 실제로 보고된 값 하나를 남긴다. 여러 입력에서는 입력별 진행과 전체 Step 진행을 구분한다. 작업 진단의 `evidence_gaps`는 순번 누락, 조회 창 이전 이력, 완료 결과의 검증 참조 미관측을 구분한다. Windows 장비의 모델·음성 품질 인수는 `TRN-003`의 별도 계약이다. `OBS-005`, `OBS-011`, `TRN-008~009`, `DSH-044`
 
 전체 현황의 `completion_delivery`는 같은 SQLite 읽기에서 미전달·재시도 건수, 가장 오래된 대기 시각, 대표 완료 ID·Job ID와 마지막 실패 단계를 조회한다. 조회 실패는 null로 구분한다. 오래된 자유 형식 오류는 단계 미상으로 제공한다. Control 모니터는 후속 전달·입고 조회·Archivist 재호출·자동 전사 시작의 장애 진입과 회복을 기록한다. 자동 처리의 반복 폴링은 같은 경보를 누적하지 않는다. `WRK-014`, `MCP-012`, `OBS-012`
+
+### 원인 근거를 조회하는 운영 경로
+
+- 드라이브 후보 조회는 탐색 누락 수·첫 상대 폴더·원인을 제공한다. `DEV-017`
+- Job 진단은 현재 리비전의 후보별 배정 거부를 제공한다. QC 실패 상세는 측정 기준과 대상별 불일치를 반환한다. `DSP-005`, `QCT-005`
+- 전체 현황의 `monitor_transitions`는 최근 장애·원인 변경·회복 50건을 저장 순으로 반환한다. 원인 미분류는 `CAUSE_UNCLASSIFIED`로 기록한다. 재시작 후 첫 관측도 직전 영속 기록에 대조한다. `OBS-012`
+- `capability_runs`는 Job 관리 및 ArchiveRun 생성 Command의 최근 호출 50건을 각 호출의 마지막 기록으로 제공한다. 요청·시작 이후 종료 기록이 없는 호출의 완료 여부는 미확인이다. 각 호출에는 독립 실행 ID가 있으며 같은 Command의 재전송도 업무 효과의 멱등성을 유지한다. `OBS-013`
+- 개별 녹화 렌더·음성 추출은 파일 게시 근거를 재배정 시 재검증한다. `EXE-004`
 
 ## 4. 요구사항 테스트와 증적 묶음
 

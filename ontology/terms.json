@@ -1039,6 +1039,7 @@
       "code_name": "DispatchPolicy",
       "definition": "실행 준비가 된 Step 가운데 다음 Worker lease를 시도할 후보와 Worker를 결정적으로 선택하는 정책.",
       "rules": [
+        "배정 차단의 현재 판단은 Job 리비전별로 조회하며 증적 기록 자체로 Job 리비전을 변경하지 않는다.",
         "Dispatch Queue는 별도 업무 원장이 아니라 저장된 Job·Step에서 다시 만드는 projection이며 아카이브 작업 공간의 작업 큐도 이 projection만 표시한다.",
         "IMMEDIATE와 aging 기준을 넘긴 BACKGROUND는 같은 높은 유효 우선순위로 평가한다.",
         "같은 Job의 후보를 연속 선점시키지 않고 저장된 dispatch sequence로 Job 사이의 공정성을 보장한다.",
@@ -3542,6 +3543,7 @@
         }
       ],
       "rules": [
+        "숨김 등 정책 제외와 열람 실패를 구분하고, 열람 실패의 수와 첫 상대 폴더·사유를 FAILED에 남긴다.",
         "SCANNING의 부분 집계는 heartbeat와 화면에 보이지만 ArchiveRun의 폴더 범위로 선택할 수 없다.",
         "READY만 0이 아닌 folder discovery revision을 가진다.",
         "FAILED는 빈 폴더 목록과 같지 않으며 화면에서 검색 실패로 구분한다.",
@@ -4233,6 +4235,7 @@
       "code_name": "QCAssessment",
       "definition": "게시된 렌더 결과를 독립 관찰해 원본 기술정보와 렌더 Profile에 맞는지 필수 검사별로 판정한 추가 전용 기록.",
       "rules": [
+        "측정 불일치로 종결된 Worker 실행도 실패 항목의 기대값과 관측값을 같은 실패 증적에 남긴다.",
         "렌더 요청값을 출력 관찰값으로 재사용하지 않는다.",
         "모든 필수 검사가 통과해야 PASSED이며 실패 검사도 기대값과 실제값을 남긴다.",
         "QCReport는 QC 평가를 provenance와 함께 게시한 sidecar 아티팩트다."

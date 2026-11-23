@@ -195,3 +195,7 @@ Core 메타데이터 round-trip 계약은 `ARC-005`, manifest 계약은 `ARC-003
 ## 8. DB 재구축
 
 중앙 DB를 잃은 경우 ArchiveCatalog를 빠른 목록으로 읽되 진실로 간주하지 않는다. layout version별 복구 문서와 checksum을 검증하고 `video-info.csv`의 OriginalAsset 참조를 복원한 뒤 ArchiveCatalog를 대조하거나 다시 만든다. layout v2·v3 대조와 재생성은 typed MediaOperation과 CLI에 연결되어 있다. import는 기존 ID와 checksum이 같은 항목은 멱등하게 병합하고 충돌은 자동 덮어쓰기하지 않으며 과거 Event를 중복 생성하지 않는다. 이 import 흐름은 제품 명령과 실제 패키지에 연결하는 integration test가 생길 때까지 `ARC-007` planned다. `ARC-017~018`
+
+### 게시 후 완료 보고가 중단된 개별 파일
+
+녹화 렌더와 음성 추출은 출력 잠금 안에서 검증한 임시 파일의 크기와 SHA-256, 명세 digest, 출력 ID와 실행 토큰을 등록 Storage의 별도 게시 기록에 동기화한 뒤 파일을 게시한다. 재배정 시 같은 명세의 최종 파일 또는 이전 토큰의 검증된 임시 파일을 대조한다. 일치할 때 현재 토큰으로 결과를 정산하며 원래 작업 진단에 재사용한 출력 ID를 남긴다., 기록이 없거나 파일이 충돌하면 기존 게시물을 보존해 확인 대상으로 남긴다. `EXE-004`. 여러 파일을 함께 확정하는 operation의 범용 게시 정산은 `EXE-003`이 소유한다.

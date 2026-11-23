@@ -3,9 +3,12 @@ package jobcontrol
 import (
 	"context"
 	"errors"
+	"slices"
 
 	"videoarchive/internal/application/archiveworkspace"
+	"videoarchive/internal/application/capability"
 	"videoarchive/internal/core/command"
+	"videoarchive/internal/core/execution"
 	"videoarchive/internal/core/job"
 )
 
@@ -28,7 +31,7 @@ type Dispatcher interface {
 }
 
 type Service struct {
-	executor   *command.Executor
+	executor   capability.CommandBus
 	states     SnapshotLoader
 	projection ProjectionWriter
 	dispatcher Dispatcher
@@ -42,7 +45,7 @@ func (service *Service) SetDispatcher(dispatcher Dispatcher) error {
 	return nil
 }
 
-func New(executor *command.Executor, states SnapshotLoader, projection ProjectionWriter) (*Service, error) {
+func New(executor capability.CommandBus, states SnapshotLoader, projection ProjectionWriter) (*Service, error) {
 	if executor == nil || states == nil || projection == nil {
 		return nil, ErrProjectionUnavailable
 	}
@@ -110,7 +113,15 @@ func (service *Service) Execute(ctx context.Context, envelope command.Envelope) 
 func Project(state job.State) (archiveworkspace.JobView, error) {
 	steps := make([]archiveworkspace.StepStatus, 0, len(state.Steps))
 	for _, step := range state.Steps {
-		steps = append(steps, archiveworkspace.StepStatus{
+		var reused []string
+		if r := step.OutputRecord; r != nil {
+			for _, output := range r.Outputs {
+				if slices.Contains(r.VerificationReferences, execution.PublicationReference(r.SpecDigest, output, true)) {
+					reused = append(reused, output.ID)
+				}
+			}
+		}
+		steps = append(steps, archiveworkspace.StepStatus{ReusedOutputIDs: reused,
 			ID: step.Workflow.ID, State: step.Workflow.State, Progress: step.Progress,
 			ExecutorKind: step.ExecutorKind, ActorID: step.ActorID, WorkerID: step.WorkerID,
 			WaitReason: step.Workflow.WaitReason, ErrorClass: step.ErrorClass, LogReference: step.LogReference,

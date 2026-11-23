@@ -116,6 +116,17 @@ func (port *ObservedPort) Execute(ctx context.Context, input Input) (Receipt, er
 		InputIDs:          append([]string(nil), input.Correlation.InputIDs...),
 		ObservedAt:        requestedAt,
 	}
+	base.CommandID = safeReference(base.CommandID)
+	base.TargetID = safeReference(base.TargetID)
+	base.Actor.ID = safeReference(base.Actor.ID)
+	base.CapabilityName = safeReference(base.CapabilityName)
+	base.RequestedVia = safeReference(base.RequestedVia)
+	base.JobID = safeReference(base.JobID)
+	base.StepID = safeReference(base.StepID)
+	base.WorkerID = safeReference(base.WorkerID)
+	for i, v := range base.WorkspaceDriveIDs {
+		base.WorkspaceDriveIDs[i] = safeReference(v)
+	}
 	if err := port.sink.Append(evidenceCtx, base); err != nil {
 		return Receipt{}, err
 	}
@@ -151,7 +162,7 @@ func (port *ObservedPort) Execute(ctx context.Context, input Input) (Receipt, er
 		terminal.StepID = receipt.Reference.StepID
 	}
 	if receipt.Reference.ResultID != "" {
-		terminal.ResultIDs = []string{receipt.Reference.ResultID}
+		terminal.ResultIDs = []string{safeReference(receipt.Reference.ResultID)}
 	}
 	terminal.VerificationReferences = append([]string(nil), receipt.Reference.VerificationReferences...)
 	if evidenceErr := port.sink.Append(evidenceCtx, terminal); evidenceErr != nil {
@@ -163,6 +174,16 @@ func (port *ObservedPort) Execute(ctx context.Context, input Input) (Receipt, er
 func classifyFailure(err error) (EvidencePhase, string, string) {
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return EvidenceCancelled, "CANCELLED", "CANCELLED"
+	}
+	var failure *command.ExecutionFailure
+	if errors.As(err, &failure) {
+		return EvidenceFailed, "FAILED", safeReference(failure.Code)
+	}
+	if errors.Is(err, command.ErrRevisionConflict) {
+		return EvidenceFailed, "FAILED", "REVISION_CONFLICT"
+	}
+	if errors.Is(err, command.ErrIdempotencyConflict) {
+		return EvidenceFailed, "FAILED", "IDEMPOTENCY_CONFLICT"
 	}
 	return EvidenceFailed, "FAILED", "CAPABILITY_EXECUTION"
 }

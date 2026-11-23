@@ -583,6 +583,7 @@ func (service *Service) mergeInventory(ctx context.Context, drives map[string]*p
 			continue
 		}
 		state.view.FolderDiscoveryState = observation.DiscoveryState
+		state.view.DiscoveryGap = observation.DiscoveryGap
 		state.view.FolderDiscoveryRevision = observation.DiscoveryRevision
 		state.view.DiscoveredFileCount = 0
 		for _, folder := range observation.Folders {

@@ -514,6 +514,13 @@ func TestProductionExecutorClassifiesInputTransientAndStorageFailures(t *testing
 		t.Fatal(err)
 	}
 	assignment.ExecutionSpec = spec
+	missing := transientRegistry.Execute(context.Background(), assignment)
+	if missing.CauseCode != "INPUT_FILE_MISSING" || missing.FailureClass != workflow.FailureInput || missing.WaitReason != "" {
+		t.Fatalf("unconfirmed device failure: %+v", missing)
+	}
+	if err := roots.MustRoot("source").Close(); err != nil {
+		t.Fatal(err)
+	}
 	deviceWait := transientRegistry.Execute(context.Background(), assignment)
 	if deviceWait.FailureClass != workflow.FailureResource || deviceWait.WaitReason != vocabulary.WaitDevice ||
 		deviceWait.WaitTargetStorageID != "source" || deviceWait.CauseCode != "STORAGE_UNAVAILABLE" || deviceWait.ErrorSummary == "" {
@@ -722,8 +729,8 @@ func TestProductionInputInspectionHashesRegisteredStorageFileReadOnly(t *testing
 	TestWorkerArchiveIntakeInspectionUsesLocalFFprobeAndReturnsOnlyNormalizedPaths(t)
 }
 
-// Requirement: QCT-004
-func TestQCRenditionUsesEachReadyInputProfileForMultiFileAsIsFolder(t *testing.T) {
+func mediaVerificationFixture(t *testing.T, expectedMillis int64) (workerconfig.Configuration, *workerconfig.StorageRoots, execution.StepExecutionSpec) {
+	t.Helper()
 	ffmpegPath, ffmpegErr := osexec.LookPath("ffmpeg")
 	ffprobePath, ffprobeErr := osexec.LookPath("ffprobe")
 	if ffmpegErr != nil || ffprobeErr != nil {
@@ -771,7 +778,7 @@ func TestQCRenditionUsesEachReadyInputProfileForMultiFileAsIsFolder(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer roots.Close()
+	t.Cleanup(func() { roots.Close() })
 	inputs := make([]execution.InputReference, 0, len(ready))
 	outputs := make([]execution.OutputTarget, 0, len(ready))
 	for _, item := range ready {
@@ -781,7 +788,7 @@ func TestQCRenditionUsesEachReadyInputProfileForMultiFileAsIsFolder(t *testing.T
 		}
 		inputs = append(inputs, execution.InputReference{
 			OriginalAssetID: item.assetID, OriginalName: item.name, InspectionID: "INSPECTION-" + item.assetID,
-			StorageID: "source", RelativePath: item.name, Checksum: checksum, DurationMillis: 1_000,
+			StorageID: "source", RelativePath: item.name, Checksum: checksum, DurationMillis: expectedMillis,
 			VideoCodec: "h264", Width: 320, Height: 180, VideoBitRateBPS: item.bitrate, ProfileReference: item.profile,
 		})
 		outputs = append(outputs, execution.OutputTarget{
@@ -801,6 +808,12 @@ func TestQCRenditionUsesEachReadyInputProfileForMultiFileAsIsFolder(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
+	return configuration, roots, spec
+}
+
+// Requirement: QCT-004
+func TestQCRenditionUsesEachReadyInputProfileForMultiFileAsIsFolder(t *testing.T) {
+	configuration, roots, spec := mediaVerificationFixture(t, 1000)
 	registry, err := NewProduction(configuration, roots)
 	if err != nil {
 		t.Fatal(err)
@@ -809,15 +822,81 @@ func TestQCRenditionUsesEachReadyInputProfileForMultiFileAsIsFolder(t *testing.T
 		JobID: spec.JobID, StepID: spec.StepID, FencingToken: 1,
 		LeaseExpiresAt: time.Now().Add(time.Minute), ExecutionSpec: spec,
 	})
-	if !result.Success || len(result.Outputs) != len(ready) {
+	if !result.Success || len(result.Outputs) != len(spec.Inputs) {
 		t.Fatalf("multi-file as-is QC did not use the persisted per-input profiles: %+v", result)
 	}
-	for _, item := range ready {
-		payload, err := roots.MustRoot("archive").ReadFile("staging/JOB-MULTI-QC/qc/" + item.assetID + ".json")
-		if err != nil || !strings.Contains(string(payload), `"profile_reference":"`+item.profile+`"`) ||
+	for _, item := range spec.Inputs {
+		payload, err := roots.MustRoot("archive").ReadFile("staging/JOB-MULTI-QC/qc/" + item.OriginalAssetID + ".json")
+		if err != nil || !strings.Contains(string(payload), `"profile_reference":"`+item.ProfileReference+`"`) ||
 			!strings.Contains(string(payload), `"outcome":"PASSED"`) {
-			t.Fatalf("QC evidence for %s does not preserve its ready profile: %s err=%v", item.assetID, payload, err)
+			t.Fatalf("QC evidence for %s does not preserve its ready profile: %s err=%v", item.OriginalAssetID, payload, err)
 		}
+	}
+}
+
+// Requirement: QCT-005
+func TestFailedQCReportsMeasuredDifferenceForTheOriginalInput(t *testing.T) {
+	config, roots, spec := mediaVerificationFixture(t, 9000)
+	registry, err := NewProduction(config, roots)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := registry.ExecuteDirect(context.Background(), spec, 1)
+	detail := result.QCFailure
+	if result.Success || result.FailureClass != workflow.FailureInput || result.CauseCode != "QC_CHECK_FAILED" || detail == nil || detail.AssessmentID != spec.Outputs[0].ID || detail.TargetArtifactID != spec.Inputs[0].OriginalAssetID || detail.SourceInspectionID != spec.Inputs[0].InspectionID || len(detail.Checks) != 1 {
+		t.Fatalf("missing failed assessment: %+v %+v", result, detail)
+	}
+	check := detail.Checks[0]
+	if check.Kind != "DURATION" || check.Expected != "9000±1500ms" || check.Actual != "1000ms" || check.Passed {
+		t.Fatalf("unexpected measured discrepancy: %+v", check)
+	}
+	exists, err := roots.MustRoot("archive").Exists(spec.Outputs[0].RelativePath)
+	if err != nil || exists {
+		t.Fatalf("failed QC published as successful: %t %v", exists, err)
+	}
+}
+
+// Requirement: EXE-004
+func TestPublishedRecordingReusesReceiptAfterWorkerRestart(t *testing.T) {
+	config, roots, base := mediaVerificationFixture(t, 1000)
+	target := base.Outputs[0]
+	target.Kind = execution.OutputRendition
+	target.ID = "RENDER-1"
+	target.RelativePath = "staging/recording.mp4"
+	spec, err := execution.NewStepExecutionSpec(execution.StepExecutionSpec{JobID: "RECORDING-1", StepID: "render", TemplateName: "archive-intake-render", Operation: execution.OperationRenderRecording, ProfileReference: base.Inputs[0].ProfileReference, Inputs: base.Inputs[:1], Outputs: []execution.OutputTarget{target}, Parameters: base.Parameters})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := NewProduction(config, roots)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := first.ExecuteDirect(context.Background(), spec, 1)
+	if !r.Success {
+		t.Fatalf("first publish: %+v", r)
+	}
+	// Discard the result as if the Worker stopped before reporting to Control.
+	config.Tools.FFmpeg.Executable = filepath.Join(t.TempDir(), "absent-encoder")
+	reopened, err := workerconfig.OpenStorageRoots(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	next, err := NewProduction(config, reopened)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replay := next.ExecuteDirect(context.Background(), spec, 2)
+	if !replay.Success || len(replay.Outputs) != 1 || replay.Outputs[0].Checksum != r.Outputs[0].Checksum || len(replay.VerificationReferences) != 2 || replay.VerificationReferences[1] != execution.PublicationReference(spec.Digest, replay.Outputs[0], true) {
+		t.Fatalf("receipt replay failed: %+v", replay)
+	}
+	root := reopened.MustRoot("archive")
+	if err := root.WriteFile(target.RelativePath, []byte("different"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	conflict := next.ExecuteDirect(context.Background(), spec, 3)
+	if conflict.Success || conflict.CauseCode != "PUBLICATION_EVIDENCE_CONFLICT" {
+		t.Fatalf("unproven bytes accepted: %+v", conflict)
 	}
 }
 

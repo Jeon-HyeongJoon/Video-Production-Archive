@@ -116,6 +116,7 @@ type driveView struct {
 	ArchiveRunRevision         uint64                   `json:"archive_run_revision"`
 	CandidateRevision          uint64                   `json:"candidate_revision"`
 	FolderDiscoveryRevision    uint64                   `json:"folder_discovery_revision"`
+	DiscoveryGap               *worker.DiscoveryGap     `json:"discovery_gap,omitempty"`
 	FolderDiscoveryState       string                   `json:"folder_discovery_state"`
 	SessionID                  string                   `json:"session_id"`
 	SelectionSessionID         string                   `json:"selection_session_id"`

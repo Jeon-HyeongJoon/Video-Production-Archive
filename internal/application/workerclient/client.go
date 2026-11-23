@@ -15,6 +15,7 @@ import (
 	"videoarchive/internal/adapter/workerconfig"
 	"videoarchive/internal/core/device"
 	"videoarchive/internal/core/execution"
+	"videoarchive/internal/core/qc"
 	"videoarchive/internal/core/vocabulary"
 	"videoarchive/internal/core/worker"
 	"videoarchive/internal/core/workflow"
@@ -69,6 +70,7 @@ type ExecutionResult struct {
 	ErrorClass             string
 	CauseCode              string
 	ErrorSummary           string
+	QCFailure              *qc.Failure `json:"qc_failure,omitempty"`
 	ProcessExitCode        *int
 	LogReference           string
 	ProcessLog             *execution.ProcessLogArtifact
@@ -771,7 +773,7 @@ func (client *Client) reportResult(ctx context.Context, assignment Assignment, r
 		"progress_report_count": result.ProgressReportCount, "success": result.Success, "failure_class": result.FailureClass, "wait_reason": result.WaitReason,
 		"wait_target_storage_id": result.WaitTargetStorageID,
 		"error_class":            result.ErrorClass, "cause_code": result.CauseCode, "error_summary": result.ErrorSummary,
-		"process_exit_code": result.ProcessExitCode, "log_reference": result.LogReference, "process_log": result.ProcessLog, "output_record": outputRecord,
+		"qc_failure": result.QCFailure, "process_exit_code": result.ProcessExitCode, "log_reference": result.LogReference, "process_log": result.ProcessLog, "output_record": outputRecord,
 	})
 	if err != nil {
 		return err

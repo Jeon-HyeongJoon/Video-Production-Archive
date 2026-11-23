@@ -1,6 +1,7 @@
 package command
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -183,6 +184,7 @@ type Store interface {
 }
 
 type DispatchStore interface {
+	RecordDispatchObservation(context.Context, dispatch.Observation) error
 	Store
 	ListSnapshots() ([]Snapshot, error)
 	ListActiveReservations() ([]dispatch.ResourceReservation, error)
@@ -225,6 +227,7 @@ func (store *MemoryStore) ListActiveReservations() ([]dispatch.ResourceReservati
 
 // MemoryStore is the executable reference implementation of Store atomicity.
 type MemoryStore struct {
+	dispatchObservations []dispatch.Observation
 	mu                   sync.Mutex
 	states               map[string]Snapshot
 	records              []CommandRecord
@@ -562,4 +565,39 @@ func commandDigest(envelope Envelope) (string, error) {
 	}
 	sum := sha256.Sum256(payload)
 	return hex.EncodeToString(sum[:]), nil
+}
+
+func (store *MemoryStore) RecordDispatchObservation(_ context.Context, item dispatch.Observation) error {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if store.states[item.JobID].Revision != item.JobRevision {
+		return nil
+	}
+	for i := len(store.dispatchObservations) - 1; i >= 0; i-- {
+		last := store.dispatchObservations[i]
+		if last.JobID == item.JobID && last.StepID == item.StepID {
+			if last.SameDecision(item) {
+				return nil
+			}
+			break
+		}
+	}
+	item.Blockers = append([]dispatch.Blocker(nil), item.Blockers...)
+	store.dispatchObservations = append(store.dispatchObservations, item)
+	return nil
+}
+func (store *MemoryStore) DispatchObservations(_ context.Context, jobID string, revision uint64) ([]dispatch.Observation, error) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	var items []dispatch.Observation
+	seen := map[string]bool{}
+	for i := len(store.dispatchObservations) - 1; i >= 0; i-- {
+		item := store.dispatchObservations[i]
+		if item.JobID == jobID && item.JobRevision == revision && !seen[item.StepID] {
+			item.Blockers = append([]dispatch.Blocker(nil), item.Blockers...)
+			items = append(items, item)
+			seen[item.StepID] = true
+		}
+	}
+	return items, nil
 }

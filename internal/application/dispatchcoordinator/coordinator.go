@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -140,9 +141,12 @@ func (coordinator *Coordinator) dispatchOnce(ctx context.Context, ignored map[st
 			quarantinedWorkers[reservation.WorkerID] = true
 		}
 	}
+	var excluded []dispatch.Blocker
 	filteredCandidates := candidates[:0]
 	for _, candidate := range candidates {
-		if !quarantinedWorkers[candidate.Definition.ID] {
+		if quarantinedWorkers[candidate.Definition.ID] {
+			excluded = append(excluded, dispatch.Blocker{WorkerID: candidate.Definition.ID, Code: "WORKER_QUARANTINED", SnapshotID: candidate.Metrics.SnapshotID})
+		} else {
 			filteredCandidates = append(filteredCandidates, candidate)
 		}
 	}
@@ -163,10 +167,19 @@ func (coordinator *Coordinator) dispatchOnce(ctx context.Context, ignored map[st
 		},
 	}, now, coordinator.heartbeatTTL, coordinator.scheduler)
 	if workerDecision.WorkerID == "" {
-		if reason := resourceWaitReason(workerDecision.Blockers); reason.Valid() {
+		blockers := append(workerDecision.Blockers, excluded...)
+		if len(blockers) == 0 {
+			blockers = []dispatch.Blocker{{Code: "NO_CONFIGURED_WORKER"}}
+		}
+		sort.Slice(blockers, func(i, j int) bool { return blockers[i].WorkerID < blockers[j].WorkerID })
+		if reason := resourceWaitReason(blockers); reason.Valid() {
 			if err := coordinator.persistResourceWait(ctx, &state, stateSnapshots[state.ID], step, reason, now); err != nil {
 				return dispatchBlocked, candidateKey, err
 			}
+		}
+		err := coordinator.store.RecordDispatchObservation(ctx, dispatch.Observation{JobID: state.ID, JobRevision: state.Revision, StepID: step.Workflow.ID, ObservedAt: now, Blockers: blockers})
+		if err != nil {
+			return dispatchBlocked, candidateKey, err
 		}
 		return dispatchBlocked, candidateKey, nil
 	}
@@ -189,6 +202,7 @@ func (coordinator *Coordinator) dispatchOnce(ctx context.Context, ignored map[st
 	if err := step.Workflow.AssignExecutionLease(workerDecision.WorkerID, now, coordinator.leaseTTL, fencingToken); err != nil {
 		return dispatchBlocked, candidateKey, err
 	}
+
 	step.WorkerID = workerDecision.WorkerID
 	step.LastEventAt = now
 	state.CurrentStepID = step.Workflow.ID

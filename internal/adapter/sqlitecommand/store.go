@@ -60,6 +60,11 @@ func (store *Store) migrate(ctx context.Context) error {
 		`PRAGMA busy_timeout = 5000`,
 		`PRAGMA journal_mode = WAL`,
 		`PRAGMA foreign_keys = ON`,
+		`CREATE TABLE IF NOT EXISTS dispatch_observations(sequence INTEGER PRIMARY KEY,job_id TEXT NOT NULL,step_id TEXT NOT NULL,revision INTEGER NOT NULL,decision TEXT NOT NULL,payload BLOB NOT NULL)`,
+		`CREATE INDEX IF NOT EXISTS dispatch_observation_scope ON dispatch_observations(job_id,revision,step_id,sequence)`,
+		`CREATE TABLE IF NOT EXISTS control_monitor_transitions (
+ sequence INTEGER PRIMARY KEY, operation TEXT NOT NULL, run_id TEXT NOT NULL, revision INTEGER NOT NULL, cause TEXT NOT NULL, observed_at TEXT NOT NULL)`,
+		`CREATE INDEX IF NOT EXISTS control_monitor_scope ON control_monitor_transitions(operation,run_id,sequence)`,
 		`CREATE TABLE IF NOT EXISTS aggregate_states (
 			target_id TEXT PRIMARY KEY,
 			revision INTEGER NOT NULL,
@@ -1026,7 +1031,7 @@ func (store *Store) SettleWorkerStep(ctx context.Context, report workercontrol.R
 			ProgressReportCount: report.ProgressReportCount, StepID: report.StepID, FencingToken: report.FencingToken, Success: report.Success,
 			FailureClass: report.FailureClass, WaitReason: report.WaitReason, WaitTargetStorageID: report.WaitTargetStorageID,
 			ErrorClass: report.ErrorClass, CauseCode: report.CauseCode, ErrorSummary: report.ErrorSummary,
-			ProcessExitCode: report.ProcessExitCode, LogReference: report.LogReference, ProcessLog: report.ProcessLog, OutputRecord: report.OutputRecord,
+			QCFailure: report.QCFailure, ProcessExitCode: report.ProcessExitCode, LogReference: report.LogReference, ProcessLog: report.ProcessLog, OutputRecord: report.OutputRecord,
 		}),
 	}
 	change, state, err := workerLifecycleChange(envelope, command.Snapshot{TargetID: report.JobID, Revision: revision, State: encoded}, now)
@@ -1718,4 +1723,80 @@ func (store *Store) RecoverExpiredReservations(ctx context.Context, now time.Tim
 		recovered = append(recovered, nextState)
 	}
 	return recovered, nil
+}
+
+func (store *Store) RecordMonitorTransition(ctx context.Context, operation, runID string, revision uint64, cause string, at time.Time) (bool, error) {
+	result, err := store.db.ExecContext(ctx, `INSERT INTO control_monitor_transitions(operation,run_id,revision,cause,observed_at)
+ SELECT ?,?,?,?,? WHERE COALESCE((SELECT cause FROM control_monitor_transitions WHERE operation=? AND run_id=? ORDER BY sequence DESC LIMIT 1),'')<>?`, operation, runID, revision, cause, formatTime(at), operation, runID, cause)
+	if err != nil {
+		return false, err
+	}
+	n, err := result.RowsAffected()
+	return n > 0, err
+}
+func (store *Store) RecentMonitorTransitions(ctx context.Context) ([]systemstatus.MonitorTransition, error) {
+	rows, err := store.db.QueryContext(ctx, `SELECT sequence,operation,run_id,revision,cause,observed_at FROM control_monitor_transitions ORDER BY sequence DESC LIMIT 50`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []systemstatus.MonitorTransition{}
+	for rows.Next() {
+		var item systemstatus.MonitorTransition
+		var seq int64
+		var at string
+		if err := rows.Scan(&seq, &item.Operation, &item.ArchiveRunID, &item.Revision, &item.Cause, &at); err != nil {
+			return nil, err
+		}
+		item.ObservedAt, err = time.Parse(time.RFC3339Nano, at)
+		if err != nil {
+			return nil, err
+		}
+		item.EvidenceID = fmt.Sprintf("EVD-MONITOR-%016X", seq)
+		item.State = "FAILED"
+		if item.Cause == "" {
+			item.State = "RECOVERED"
+		}
+		result = append(result, item)
+	}
+	return result, rows.Err()
+}
+
+func (store *Store) RecordDispatchObservation(ctx context.Context, item dispatch.Observation) error {
+	payload, err := json.Marshal(item)
+	if err != nil {
+		return err
+	}
+	reasons := append([]dispatch.Blocker(nil), item.Blockers...)
+	for i := range reasons {
+		reasons[i].SnapshotID = 0
+	}
+	decision, err := json.Marshal(reasons)
+	if err != nil {
+		return err
+	}
+	_, err = store.db.ExecContext(ctx, `INSERT INTO dispatch_observations(job_id,step_id,revision,decision,payload)
+ SELECT ?,?,?,?,? WHERE EXISTS(SELECT 1 FROM aggregate_states WHERE target_id=? AND revision=?)
+ AND COALESCE((SELECT decision FROM dispatch_observations WHERE job_id=? AND revision=? AND step_id=? ORDER BY sequence DESC LIMIT 1),'')<>?`, item.JobID, item.StepID, item.JobRevision, string(decision), payload, item.JobID, item.JobRevision, item.JobID, item.JobRevision, item.StepID, string(decision))
+	return err
+}
+func (store *Store) DispatchObservations(ctx context.Context, jobID string, revision uint64) ([]dispatch.Observation, error) {
+	rows, err := store.db.QueryContext(ctx, `SELECT payload FROM dispatch_observations WHERE sequence IN (SELECT MAX(sequence) FROM dispatch_observations WHERE job_id=? AND revision=? GROUP BY step_id) ORDER BY sequence DESC`, jobID, revision)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []dispatch.Observation
+	for rows.Next() {
+		var payload []byte
+		var item dispatch.Observation
+		if err := rows.Scan(&payload); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(payload, &item); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
 }

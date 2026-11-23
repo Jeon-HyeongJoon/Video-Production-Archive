@@ -35,6 +35,7 @@ type Job struct {
 }
 
 type StepStatus struct {
+	ReusedOutputIDs           []string `json:"reused_output_ids,omitempty"`
 	ID                        string
 	State                     workflow.StepState
 	Progress                  float64
@@ -233,11 +234,13 @@ func cloneSteps(source []StepStatus) []StepStatus {
 		steps[index].ProgressEvidence = append([]corejob.StepProgressEvidence(nil), steps[index].ProgressEvidence...)
 		steps[index].FailureEvidence = append([]corejob.StepFailureEvidence(nil), steps[index].FailureEvidence...)
 		for evidenceIndex := range steps[index].FailureEvidence {
+			steps[index].FailureEvidence[evidenceIndex].QCFailure = steps[index].FailureEvidence[evidenceIndex].QCFailure.Safe()
 			if steps[index].FailureEvidence[evidenceIndex].ProcessExitCode != nil {
 				value := *steps[index].FailureEvidence[evidenceIndex].ProcessExitCode
 				steps[index].FailureEvidence[evidenceIndex].ProcessExitCode = &value
 			}
 		}
+		steps[index].ReusedOutputIDs = append([]string(nil), steps[index].ReusedOutputIDs...)
 		steps[index].RecoveryEvidence = append([]corejob.StepRecoveryEvidence(nil), steps[index].RecoveryEvidence...)
 		for evidenceIndex := range steps[index].RecoveryEvidence {
 			steps[index].RecoveryEvidence[evidenceIndex].Basis = append([]string(nil), steps[index].RecoveryEvidence[evidenceIndex].Basis...)

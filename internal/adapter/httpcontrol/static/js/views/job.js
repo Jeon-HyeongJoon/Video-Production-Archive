@@ -130,7 +130,7 @@ function stepLine(step) {
 
 function FailureEvidence({ items }) {
   if (!items?.length) return null;
-  const available = items.filter((item) => item.process_log?.state === "AVAILABLE").length;
+  const available = items.filter((item) => item.process_log?.state === "AVAILABLE" || item.qc_failure?.checks?.length).length;
   return html`<details class="step-evidence failure-evidence"><summary>실패 근거 <span class="num">${items.length}</span> · 상세 ${available}</summary>
     <ol>${items.map((evidence) => {
       const processLog = evidence.process_log || {};
@@ -138,7 +138,8 @@ function FailureEvidence({ items }) {
       const detail = state === "AVAILABLE" ? (processLog.sanitized_tail || "상세 없음") : "기록되지 않음";
       return html`<li key=${evidence.evidence_id} data-log-state=${state}>
         <time>${clockTime(evidence.observed_at, true)}</time><span><b>${evidence.evidence_id}</b> · ${evidence.operation || "—"} · ${evidence.process_exit_code ?? "종료 코드 없음"} · ${state}
-          <code class="failure-tail">${detail}</code>${processLog.reference ? html`<small>${processLog.reference}</small>` : null}</span>
+          ${evidence.summary ? html`<small>${evidence.cause_code} · ${evidence.summary}</small>` : null}
+          ${evidence.qc_failure ? html`<small>${evidence.qc_failure.target_artifact_id}</small><ul>${evidence.qc_failure.checks.map((c) => html`<li key=${c.kind}>${c.kind} · 기대 ${c.expected} · 실측 ${c.actual}</li>`)}</ul>` : html`<code class="failure-tail">${detail}</code>`}${processLog.reference ? html`<small>${processLog.reference}</small>` : null}</span>
       </li>`;
     })}</ol>
   </details>`;

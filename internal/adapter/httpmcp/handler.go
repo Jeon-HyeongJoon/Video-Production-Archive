@@ -581,8 +581,8 @@ func (handler *Handler) searchArchiveIntakeCandidates(writer http.ResponseWriter
 			"source_storage_id": drive.SourceStorageID, "candidate_revision": drive.CandidateRevision,
 			"selection_session_id":      drive.SelectionSessionID,
 			"folder_discovery_revision": drive.FolderDiscoveryRevision,
-			"folder_discovery_state":    drive.FolderDiscoveryState,
-			"matched_folders":           folders, "archive_storage_candidates": archives,
+			"folder_discovery_state":    drive.FolderDiscoveryState, "discovery_gap": drive.DiscoveryGap,
+			"matched_folders": folders, "archive_storage_candidates": archives,
 		})
 	}
 	_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, "", "COMPLETED")

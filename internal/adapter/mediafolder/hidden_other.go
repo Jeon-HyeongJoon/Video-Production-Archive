@@ -7,6 +7,6 @@ import (
 	"strings"
 )
 
-func hidden(entry fs.DirEntry) bool {
-	return entry == nil || strings.HasPrefix(entry.Name(), ".")
+func hidden(entry fs.DirEntry) (bool, error) {
+	return entry == nil || strings.HasPrefix(entry.Name(), "."), nil
 }

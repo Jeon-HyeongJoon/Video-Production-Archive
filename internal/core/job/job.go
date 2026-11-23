@@ -14,6 +14,7 @@ import (
 	"videoarchive/internal/core/command"
 	"videoarchive/internal/core/execution"
 	"videoarchive/internal/core/pipeline"
+	"videoarchive/internal/core/qc"
 	"videoarchive/internal/core/resource"
 	"videoarchive/internal/core/vocabulary"
 	"videoarchive/internal/core/workflow"
@@ -90,6 +91,7 @@ type StepFailureEvidence struct {
 	ErrorClass          string                        `json:"error_class"`
 	CauseCode           string                        `json:"cause_code"`
 	Summary             string                        `json:"summary"`
+	QCFailure           *qc.Failure                   `json:"qc_failure,omitempty"`
 	ProcessExitCode     *int                          `json:"process_exit_code,omitempty"`
 	LogReference        string                        `json:"log_reference,omitempty"`
 	ProcessLog          *execution.ProcessLogArtifact `json:"process_log,omitempty"`

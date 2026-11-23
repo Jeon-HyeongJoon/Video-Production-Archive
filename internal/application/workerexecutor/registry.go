@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io/fs"
 	osexec "os/exec"
 	"path"
 	"sort"
@@ -23,6 +24,7 @@ import (
 	"videoarchive/internal/application/workerclient"
 	"videoarchive/internal/core/archive"
 	"videoarchive/internal/core/execution"
+	"videoarchive/internal/core/qc"
 	"videoarchive/internal/core/vocabulary"
 	"videoarchive/internal/core/workflow"
 )
@@ -95,17 +97,27 @@ func (registry *Registry) ExecuteOperation(ctx context.Context, spec execution.S
 		_ = execution.ReportProgress(ctx, execution.ProgressUpdate{Operation: spec.Operation, Status: status})
 	}
 	reportPhase(execution.ProgressCheckingInputs)
-	for _, input := range spec.Inputs {
+	for index, input := range spec.Inputs {
 		root, registered := registry.roots.Root(input.StorageID)
 		if !registered {
 			return inputFailure("UNREGISTERED_STORAGE")
 		}
 		size, checksum, err := root.FileSHA256(input.RelativePath)
 		if err != nil {
-			if failure, classified := storageFailure(err, input.StorageID); classified {
+			if !root.Accessible() {
+				failure, _ := storageFailure(archive.ErrStorageUnavailable, input.StorageID)
 				return failure
 			}
-			return inputFailure("INPUT_CHECKSUM_UNAVAILABLE")
+			code := "INPUT_CHECKSUM_UNAVAILABLE"
+			if errors.Is(err, fs.ErrNotExist) {
+				code = "INPUT_FILE_MISSING"
+			}
+			if errors.Is(err, fs.ErrPermission) {
+				code = "INPUT_FILE_ACCESS_DENIED"
+			}
+			failure := inputFailure(code)
+			failure.ErrorSummary = fmt.Sprintf("Input %d of %d could not be verified on its accessible registered Storage (%s)", index+1, len(spec.Inputs), code)
+			return failure
 		}
 		if size <= 0 || checksum != input.Checksum {
 			return inputFailure("INPUT_CHECKSUM_MISMATCH")
@@ -161,8 +173,15 @@ func (registry *Registry) ExecuteOperation(ctx context.Context, spec execution.S
 				},
 			}
 		}
+		if errors.Is(err, errPublicationConflict) {
+			return workerclient.ExecutionResult{FailureClass: workflow.FailureInput, ErrorClass: "PUBLICATION_EVIDENCE_CONFLICT", CauseCode: "PUBLICATION_EVIDENCE_CONFLICT", ErrorSummary: "Existing published or staged bytes could not be matched to the verified receipt", LogReference: "worker://publication-conflict"}
+		}
 		if failure, classified := storageFailure(err, operationStorageID(spec)); classified {
 			return failure
+		}
+		var failedQC *qc.Failure
+		if errors.As(err, &failedQC) {
+			return workerclient.ExecutionResult{FailureClass: workflow.FailureInput, ErrorClass: "QC_CHECK_FAILED", CauseCode: "QC_CHECK_FAILED", ErrorSummary: failedQC.Error(), QCFailure: failedQC, LogReference: "worker://qc-check-failed"}
 		}
 		causeCode, summary, exitCode := operationFailureDetails(spec.Operation, err)
 		var processFailure *execution.ProcessFailure

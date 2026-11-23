@@ -3,6 +3,7 @@ package storageinventory
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"videoarchive/internal/core/archive"
 	"videoarchive/internal/core/device"
 	"videoarchive/internal/core/vocabulary"
 	"videoarchive/internal/core/worker"
@@ -226,5 +228,49 @@ func createDirectoryLink(t *testing.T, target, link string) {
 	}
 	if err := os.Symlink(target, link); err != nil {
 		t.Fatal(err)
+	}
+}
+
+type deniedDirectory struct{ *archive.ReadOnlyStorageRoot }
+
+func (root deniedDirectory) ReadDir(name string) ([]fs.DirEntry, error) {
+	if name == "camera-B" {
+		return nil, fs.ErrPermission
+	}
+	return root.ReadOnlyStorageRoot.ReadDir(name)
+}
+
+// Requirement: DEV-017
+func TestIncompleteInventoryRevokesReadyRevisionAndIdentifiesUnreadableFolder(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"camera-A", "camera-B", ".ignored"} {
+		if err := os.Mkdir(filepath.Join(dir, name), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, name, "video.mov"), []byte("clip"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	root, err := archive.OpenReadOnlyStorageRoot(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	base := worker.StorageObservation{StorageID: "source", Connected: true}
+	good, err := observeRoot(context.Background(), base, root, 1000, 500, nil)
+	if err != nil || len(good.Folders) != 2 {
+		t.Fatalf("initial scan: %+v %v", good, err)
+	}
+	failed, err := observeRoot(context.Background(), base, deniedDirectory{root}, 1000, 500, nil)
+	if err == nil {
+		t.Fatal("incomplete source scan accepted")
+	}
+	task := attachedScanTask{storageID: "source", attempt: 2}
+	probe := NewAttachedProbe()
+	probe.states["source"] = &attachedScanState{attempt: 2, ready: true, scanning: true, observation: good}
+	probe.finish(task, failed, false)
+	result := probe.states["source"].observation
+	if result.DiscoveryState != vocabulary.FolderDiscoveryFailed || result.DiscoveryRevision != 0 || len(result.Folders) != 0 || result.DiscoveryGap == nil || result.DiscoveryGap.Count != 1 || result.DiscoveryGap.FirstFolder != "camera-B" || result.DiscoveryGap.Cause != "DIRECTORY_PERMISSION_DENIED" {
+		t.Fatalf("incomplete scan misreported: %+v", result)
 	}
 }

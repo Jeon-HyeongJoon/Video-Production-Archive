@@ -245,6 +245,7 @@ func (operations *mediaOperations) handler(operation execution.Operation, execut
 }
 
 type storagePublisher struct {
+	receipt           publicationReceipt
 	root              *archive.StorageRoot
 	temporaryRelative string
 	publishedRelative string
@@ -274,15 +275,21 @@ func (publisher *storagePublisher) Publish(temporaryPath, publishedPath string) 
 	if temporaryPath != publisher.temporaryResolved || publishedPath != publisher.publishedResolved {
 		return ErrProductionExecution
 	}
+	if publisher.receipt.SpecDigest != "" {
+		if err := publisher.recordBeforePublish(); err != nil {
+			return err
+		}
+	}
 	return publisher.root.Rename(publisher.temporaryRelative, publisher.publishedRelative)
 }
 
 type storageOutputVerifier struct {
-	ctx       context.Context
-	inspector *ffprobe.Inspector
-	root      *archive.StorageRoot
-	relative  string
-	resolved  string
+	publication *storagePublisher
+	ctx         context.Context
+	inspector   *ffprobe.Inspector
+	root        *archive.StorageRoot
+	relative    string
+	resolved    string
 }
 
 func (verifier storageOutputVerifier) Verify(resolvedPath string) error {
@@ -292,6 +299,10 @@ func (verifier storageOutputVerifier) Verify(resolvedPath string) error {
 	observed, err := verifier.inspector.InspectStorageOutput(verifier.ctx, verifier.root, verifier.relative)
 	if err != nil || !observed.Decodable || observed.SizeBytes <= 0 {
 		return errors.Join(ErrProductionExecution, err)
+	}
+	if verifier.publication != nil {
+		verifier.publication.receipt.Size = observed.SizeBytes
+		verifier.publication.receipt.Checksum = observed.Checksum
 	}
 	return nil
 }
@@ -304,6 +315,7 @@ func (operations *mediaOperations) renderRecording(ctx context.Context, spec exe
 	if err != nil {
 		return nil, nil, err
 	}
+	reused := make(map[string]bool)
 	outputs := make([]execution.StepOutput, 0, len(spec.Outputs))
 	for index, target := range spec.Outputs {
 		input := spec.Inputs[index]
@@ -320,7 +332,17 @@ func (operations *mediaOperations) renderRecording(ctx context.Context, spec exe
 		if err != nil {
 			return nil, nil, err
 		}
-		verifier := storageOutputVerifier{ctx: ctx, inspector: operations.inspector, root: outputRoot, relative: temporaryRelative, resolved: publisher.temporaryResolved}
+		token, _ := ctx.Value(executionAttemptContextKey{}).(uint64)
+		checksum, err := publisher.resume(spec, target, token)
+		if err != nil {
+			return nil, nil, err
+		}
+		if checksum != "" {
+			reused[target.ID] = true
+			outputs = append(outputs, stepOutput(target, checksum))
+			continue
+		}
+		verifier := storageOutputVerifier{publication: publisher, ctx: ctx, inspector: operations.inspector, root: outputRoot, relative: temporaryRelative, resolved: publisher.temporaryResolved}
 		renderer, err := ffmpeg.NewRenderer(
 			operations.configuration.Tools.FFmpeg.Executable, operations.configuration.Tools.FFmpeg.Version,
 			operations.configuration.ID, ffmpeg.WithProgress(operations.runner, spec.Operation, index+1, len(spec.Outputs), input.DurationMillis), verifier, publisher,
@@ -336,9 +358,12 @@ func (operations *mediaOperations) renderRecording(ctx context.Context, spec exe
 		if err != nil {
 			return nil, nil, err
 		}
+		if result.Artifact.Checksum != publisher.receipt.Checksum || result.Artifact.Size != publisher.receipt.Size {
+			return nil, nil, errPublicationConflict
+		}
 		outputs = append(outputs, stepOutput(target, result.Artifact.Checksum))
 	}
-	return outputs, verificationReferences(spec.Operation, outputs), nil
+	return outputs, attachPublishReferences(verificationReferences(spec.Operation, outputs), outputs, spec, reused), nil
 }
 
 func (operations *mediaOperations) renderSourceSequence(ctx context.Context, spec execution.StepExecutionSpec, roots *workerconfig.StorageRoots) ([]execution.StepOutput, []string, error) {
@@ -458,8 +483,14 @@ func (operations *mediaOperations) qcRendition(ctx context.Context, spec executi
 			}
 			assessment, err = qc.Evaluate(target.ID, rendition, profile, source, observed, qc.Policy{DurationToleranceMillis: 1_500}, operations.configuration.ID, operations.now())
 		}
-		if err != nil || assessment.Outcome != qc.Passed {
+		if err != nil {
 			return nil, nil, errors.Join(ErrProductionExecution, err)
+		}
+		if assessment.Outcome != qc.Passed {
+			if failure := assessment.Failure(); failure != nil {
+				return nil, nil, failure
+			}
+			return nil, nil, ErrProductionExecution
 		}
 		payload, err := json.Marshal(assessment)
 		if err != nil {
@@ -526,6 +557,7 @@ func (operations *mediaOperations) extractSpeechAudio(ctx context.Context, spec 
 	if err != nil || spec.ProfileReference != profile.Reference() {
 		return nil, nil, ErrProductionExecution
 	}
+	reused := make(map[string]bool)
 	outputs := make([]execution.StepOutput, 0, len(spec.Outputs))
 	for index, target := range spec.Outputs {
 		input, ok := inputForOriginal(spec.Inputs, target.OriginalAssetID, execution.OutputRendition, "")
@@ -542,7 +574,17 @@ func (operations *mediaOperations) extractSpeechAudio(ctx context.Context, spec 
 		if err != nil {
 			return nil, nil, err
 		}
-		verifier := storageOutputVerifier{ctx: ctx, inspector: operations.inspector, root: outputRoot, relative: temporaryRelative, resolved: publisher.temporaryResolved}
+		token, _ := ctx.Value(executionAttemptContextKey{}).(uint64)
+		checksum, err := publisher.resume(spec, target, token)
+		if err != nil {
+			return nil, nil, err
+		}
+		if checksum != "" {
+			reused[target.ID] = true
+			outputs = append(outputs, stepOutput(target, checksum))
+			continue
+		}
+		verifier := storageOutputVerifier{publication: publisher, ctx: ctx, inspector: operations.inspector, root: outputRoot, relative: temporaryRelative, resolved: publisher.temporaryResolved}
 		extractor, err := ffmpeg.NewAudioExtractor(
 			operations.configuration.Tools.FFmpeg.Executable, operations.configuration.Tools.FFmpeg.Version,
 			operations.configuration.ID, ffmpeg.WithProgress(operations.runner, spec.Operation, index+1, len(spec.Outputs), input.DurationMillis), verifier, publisher,
@@ -558,9 +600,12 @@ func (operations *mediaOperations) extractSpeechAudio(ctx context.Context, spec 
 		if err != nil {
 			return nil, nil, err
 		}
+		if result.Artifact.Checksum != publisher.receipt.Checksum || result.Artifact.Size != publisher.receipt.Size {
+			return nil, nil, errPublicationConflict
+		}
 		outputs = append(outputs, stepOutput(target, result.Artifact.Checksum))
 	}
-	return outputs, verificationReferences(spec.Operation, outputs), nil
+	return outputs, attachPublishReferences(verificationReferences(spec.Operation, outputs), outputs, spec, reused), nil
 }
 
 func (operations *mediaOperations) transcribeAudio(ctx context.Context, spec execution.StepExecutionSpec, roots *workerconfig.StorageRoots) ([]execution.StepOutput, []string, error) {

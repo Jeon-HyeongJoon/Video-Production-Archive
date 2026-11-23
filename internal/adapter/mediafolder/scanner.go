@@ -16,6 +16,26 @@ type Folder struct {
 	VideoPaths   []string
 }
 
+// IncompleteScan counts unreadable directories and identifies the first in traversal order.
+type IncompleteScan struct {
+	Count       int
+	FirstFolder string
+	Cause       string
+}
+
+func (missing *IncompleteScan) record(directory string, err error) {
+	missing.Count++
+	if missing.Count == 1 {
+		missing.FirstFolder = directory
+		missing.Cause = "DIRECTORY_READ_FAILED"
+		if errors.Is(err, fs.ErrPermission) {
+			missing.Cause = "DIRECTORY_PERMISSION_DENIED"
+		}
+	}
+}
+func (e *IncompleteScan) Error() string { return "media folder inventory incomplete" }
+func (e *IncompleteScan) Unwrap() error { return ErrScanFailed }
+
 type Scanner struct {
 	root directoryReader
 }
@@ -52,11 +72,15 @@ func (scanner *Scanner) DiscoverWithProgressContext(ctx context.Context, report 
 	}
 	grouped := make(map[string][]string)
 	changedDirectories, lastReported, nextReportAt := 0, 0, 1
-	if err := scanner.walk(ctx, "", grouped, report, &changedDirectories, &lastReported, &nextReportAt); err != nil {
+	var missing IncompleteScan
+	if err := scanner.walk(ctx, "", grouped, &missing, report, &changedDirectories, &lastReported, &nextReportAt); err != nil {
 		return nil, err
 	}
 	if report != nil && changedDirectories > lastReported {
 		report(snapshot(grouped))
+	}
+	if missing.Count > 0 {
+		return nil, &missing
 	}
 	return snapshot(grouped), nil
 }
@@ -72,16 +96,14 @@ func snapshot(grouped map[string][]string) []Folder {
 	return folders
 }
 
-func (scanner *Scanner) walk(ctx context.Context, directory string, grouped map[string][]string, report func([]Folder), changedDirectories, lastReported, nextReportAt *int) error {
+func (scanner *Scanner) walk(ctx context.Context, directory string, grouped map[string][]string, missing *IncompleteScan, report func([]Folder), changedDirectories, lastReported, nextReportAt *int) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	entries, err := scanner.root.ReadDir(directory)
 	if err != nil {
-		// Protected operating-system folders on an otherwise readable source
-		// drive are not media input. The selected root itself must remain
-		// readable, but an inaccessible descendant is isolated and skipped.
 		if directory != "" {
+			missing.record(directory, err)
 			return nil
 		}
 		return ErrScanFailed
@@ -95,7 +117,15 @@ func (scanner *Scanner) walk(ctx context.Context, directory string, grouped map[
 		if entry.Type()&(fs.ModeSymlink|fs.ModeIrregular) != 0 {
 			continue
 		}
-		if hidden(entry) {
+		excluded, metadataErr := hidden(entry)
+		if metadataErr != nil {
+			if entry.IsDir() {
+				missing.record(path.Join(directory, entry.Name()), metadataErr)
+				continue
+			}
+			return ErrScanFailed
+		}
+		if excluded {
 			continue
 		}
 		relative := path.Join(directory, entry.Name())
@@ -126,7 +156,7 @@ func (scanner *Scanner) walk(ctx context.Context, directory string, grouped map[
 		}
 	}
 	for _, child := range children {
-		if err := scanner.walk(ctx, child, grouped, report, changedDirectories, lastReported, nextReportAt); err != nil {
+		if err := scanner.walk(ctx, child, grouped, missing, report, changedDirectories, lastReported, nextReportAt); err != nil {
 			return err
 		}
 	}

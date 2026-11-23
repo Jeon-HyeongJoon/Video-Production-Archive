@@ -13,6 +13,7 @@ import (
 	"videoarchive/internal/core/command"
 	"videoarchive/internal/core/execution"
 	"videoarchive/internal/core/pipeline"
+	"videoarchive/internal/core/qc"
 	"videoarchive/internal/core/vocabulary"
 	"videoarchive/internal/core/workflow"
 )
@@ -53,6 +54,7 @@ type SettleWorkerStepParameters struct {
 	ErrorClass          string                        `json:"error_class,omitempty"`
 	CauseCode           string                        `json:"cause_code,omitempty"`
 	ErrorSummary        string                        `json:"error_summary,omitempty"`
+	QCFailure           *qc.Failure                   `json:"qc_failure,omitempty"`
 	ProcessExitCode     *int                          `json:"process_exit_code,omitempty"`
 	LogReference        string                        `json:"log_reference,omitempty"`
 	ProcessLog          *execution.ProcessLogArtifact `json:"process_log,omitempty"`
@@ -269,7 +271,13 @@ func (handler *WorkerLifecycleHandler) settle(
 		if processLog != nil && step.ExecutionSpec.Operation == execution.OperationTranscribeAudio {
 			processLog.SanitizedTail = ""
 		}
-		failureEvidence := StepFailureEvidence{
+		failedQC := parameters.QCFailure.Safe()
+		if parameters.QCFailure != nil || parameters.CauseCode == "QC_CHECK_FAILED" {
+			if parameters.CauseCode != "QC_CHECK_FAILED" || parameters.FailureClass != workflow.FailureInput || !matchesFailedQC(step.ExecutionSpec, failedQC) {
+				return command.Change{}, ErrInvalidWorkerLifecycle
+			}
+		}
+		failureEvidence := StepFailureEvidence{QCFailure: failedQC,
 			EvidenceID: failureEvidenceID(state.ID, step.Workflow.ID, parameters.FencingToken),
 			StepID:     step.Workflow.ID, Operation: step.ExecutionSpec.Operation,
 			FailureSequence: uint64(len(step.FailureEvidence) + 1), WorkflowAttempt: step.Workflow.Attempt,
@@ -311,6 +319,34 @@ func (handler *WorkerLifecycleHandler) settle(
 		payload["failure_evidence"] = step.FailureEvidence[len(step.FailureEvidence)-1]
 	}
 	return stateChange(envelope, state, eventType, payload)
+}
+
+func matchesFailedQC(spec *execution.StepExecutionSpec, failure *qc.Failure) bool {
+	if failure == nil || spec.Operation != execution.OperationQCRendition {
+		return false
+	}
+	for index, output := range spec.Outputs {
+		if output.Kind != execution.OutputQCAssessment || output.ID != failure.AssessmentID || index >= len(spec.Inputs) {
+			continue
+		}
+		in := spec.Inputs[index]
+		id := in.ArtifactID
+		if id == "" {
+			id = in.OriginalAssetID
+		}
+		if id != failure.TargetArtifactID {
+			return false
+		}
+		if timeline := spec.Parameters.SourceTimeline; timeline != nil {
+			return failure.SourceTimelineID == timeline.ID && failure.SourceInspectionID == ""
+		}
+		for _, source := range spec.Parameters.SourceInputs {
+			if source.OriginalAssetID == in.OriginalAssetID && source.InspectionID != "" && source.InspectionID == failure.SourceInspectionID {
+				return failure.SourceTimelineID == ""
+			}
+		}
+	}
+	return false
 }
 
 func failureEvidenceID(jobID, stepID string, fencingToken uint64) string {

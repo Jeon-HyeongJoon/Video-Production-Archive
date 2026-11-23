@@ -568,6 +568,33 @@ func (root *StorageRoot) FileSHA256(requested string) (int64, string, error) {
 	return size, hex.EncodeToString(hash.Sum(nil)), nil
 }
 
+// Accessible checks whether the configured directory still names the same registered root.
+func (root *StorageRoot) Accessible() bool {
+	if root == nil || root.root == nil {
+		return false
+	}
+	configured, err := os.OpenRoot(root.root.Name())
+	if err != nil {
+		return false
+	}
+	defer configured.Close()
+	expected, err := root.root.Stat(".")
+	if err != nil {
+		return false
+	}
+	current, err := configured.Stat(".")
+	if err != nil || !os.SameFile(expected, current) {
+		return false
+	}
+	dir, err := configured.Open(".")
+	if err != nil {
+		return false
+	}
+	defer dir.Close()
+	_, err = dir.ReadDir(1)
+	return err == nil || errors.Is(err, io.EOF)
+}
+
 // Stat observes an entry through the registered root without opening its content.
 func (root *StorageRoot) Stat(requested string) (os.FileInfo, error) {
 	clean, err := root.safeRelative(requested)

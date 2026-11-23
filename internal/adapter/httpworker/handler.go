@@ -12,6 +12,7 @@ import (
 
 	"videoarchive/internal/application/workercontrol"
 	"videoarchive/internal/core/execution"
+	"videoarchive/internal/core/qc"
 	"videoarchive/internal/core/vocabulary"
 	"videoarchive/internal/core/worker"
 	"videoarchive/internal/core/workflow"
@@ -342,6 +343,7 @@ type resultRequest struct {
 	ErrorClass          string                        `json:"error_class"`
 	CauseCode           string                        `json:"cause_code"`
 	ErrorSummary        string                        `json:"error_summary"`
+	QCFailure           *qc.Failure                   `json:"qc_failure,omitempty"`
 	ProcessExitCode     *int                          `json:"process_exit_code"`
 	LogReference        string                        `json:"log_reference"`
 	ProcessLog          *execution.ProcessLogArtifact `json:"process_log"`
@@ -382,7 +384,7 @@ func (handler *Handler) result(writer http.ResponseWriter, request *http.Request
 		ProgressReportCount: payload.ProgressReportCount, Success: payload.Success, FailureClass: payload.FailureClass, WaitReason: payload.WaitReason,
 		WaitTargetStorageID: strings.TrimSpace(payload.WaitTargetStorageID),
 		ErrorClass:          strings.TrimSpace(payload.ErrorClass), CauseCode: strings.TrimSpace(payload.CauseCode),
-		ErrorSummary: strings.TrimSpace(payload.ErrorSummary), ProcessExitCode: payload.ProcessExitCode,
+		ErrorSummary: strings.TrimSpace(payload.ErrorSummary), QCFailure: payload.QCFailure, ProcessExitCode: payload.ProcessExitCode,
 		LogReference: strings.TrimSpace(payload.LogReference), ProcessLog: payload.ProcessLog, OutputRecord: payload.OutputRecord,
 	})
 	if errors.Is(err, workflow.ErrStaleFencingToken) {

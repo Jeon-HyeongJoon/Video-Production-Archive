@@ -158,3 +158,79 @@ func seedActiveReservation(t *testing.T, store *command.MemoryStore, now time.Ti
 		t.Fatal(err)
 	}
 }
+
+// Requirement: DSP-005
+func TestDispatchPreservesStaticBlockerUntilEligibilityChanges(t *testing.T) {
+	now := time.Date(2026, time.October, 31, 12, 0, 0, 0, time.UTC)
+	target := job.State{
+		ID: "JOB-TARGET", Revision: 1, TemplateName: "resource-test", TargetTitle: "대기 후 재개",
+		CurrentStepID: "render",
+		Steps: []job.Step{{
+			Workflow:      workflow.Step{ID: "render", State: workflow.Queued, MaxAttempts: 3},
+			ResourceClass: vocabulary.ResourceHeavy, ExecutorKind: vocabulary.ExecutorWorker,
+			RequiredProcessingKinds: []vocabulary.ProcessingKind{vocabulary.ProcessingRender},
+			LastEventAt:             now, ReadyAt: now.Add(-time.Minute), ExecutionPriority: resource.Background,
+			EstimatedMemoryBytes: resource.DefaultHeavyMemoryBytes, EstimatedScratchBytes: resource.DefaultHeavyScratchBytes,
+			RequiredStorageIDs: []string{"archive-main"},
+		}},
+	}
+	targetState, err := json.Marshal(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := command.NewMemoryStore(map[string]command.Snapshot{
+		target.ID:    {TargetID: target.ID, Revision: target.Revision, State: targetState},
+		"JOB-ACTIVE": {TargetID: "JOB-ACTIVE", Revision: 1, State: json.RawMessage(`{"seed":true}`)},
+	})
+	seedActiveReservation(t, store, now)
+
+	registry := worker.NewRegistry([]worker.Definition{{
+		ID: "WORKER-1", Enabled: true, CredentialRef: "worker-secret",
+		ProcessingKinds:   map[vocabulary.ProcessingKind]bool{vocabulary.ProcessingRender: true},
+		AllowedStorageIDs: map[string]bool{"archive-main": true},
+	}}, acceptingVerifier{}, time.Minute)
+	metrics := worker.Metrics{
+		SnapshotID: 1, ObservedAt: now, AverageCPU5m: 10, AverageGPU5m: 5, IdleStableFor: 10 * time.Minute,
+		AvailableMemoryBytes: 13 << 30, ScratchFreeBytes: 100 << 30, AcceptingWork: true,
+		BusyPhysicalDeviceIDs: map[string]bool{}, AccessibleStorageIDs: map[string]bool{},
+	}
+	if err := registry.Connect("WORKER-1", "presented", now, metrics); err != nil {
+		t.Fatal(err)
+	}
+	projection := &recordingProjection{}
+	coordinator, err := dispatchcoordinator.New(store, registry, projection, func() time.Time { return now }, time.Minute, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for i := 0; i < 2; i++ {
+		if err := coordinator.DispatchAvailable(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	blocked := loadJob(t, store, target.ID)
+	step := blocked.Steps[0]
+	items, err := store.DispatchObservations(context.Background(), target.ID, blocked.Revision)
+	if err != nil || blocked.Revision != 1 || step.Workflow.State != workflow.Queued || len(items) != 1 || len(items[0].Blockers) != 1 || !items[0].ObservedAt.Equal(now) {
+		t.Fatalf("missing independent dispatch evidence: %+v %v", items, err)
+	}
+	b := items[0].Blockers[0]
+	if b.Code != "STORAGE_UNAVAILABLE" || b.SnapshotID != 1 || b.WorkerID != "WORKER-1" {
+		t.Fatalf("missing admission basis %+v", b)
+	}
+	now = now.Add(time.Second)
+	metrics.SnapshotID = 2
+	metrics.ObservedAt = now
+	metrics.AvailableMemoryBytes = 20 << 30
+	metrics.AccessibleStorageIDs = map[string]bool{"archive-main": true}
+	if err := registry.Heartbeat("WORKER-1", now, metrics); err != nil {
+		t.Fatal(err)
+	}
+	if err := coordinator.DispatchAvailable(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	step = loadJob(t, store, target.ID).Steps[0]
+	if step.Workflow.State != workflow.Reserved {
+		t.Fatalf("obsolete blockers retained: %+v", step)
+	}
+}
