@@ -1,5 +1,7 @@
 # 11. 로컬 CLI Archivist Host 설계
 
+원본 분류 시험의 진행량·실패 사유·행사별 게시 증적은 Windows Host에서 읽기 전용으로 조회한다. 운영 ArchiveRun의 채널별 MCP 계약과 구체적인 시험 명령은 [원본 분류 정책](17-source-classification-policy.md#4-archivist가-인수할-근거)에 있다.
+
 ## 1. 결정
 
 v1의 Archivist 실행 경로는 Orca 전체 애플리케이션을 운영 의존성으로 두지 않는다. Archive Control와 별도인 `archivist-host`가 필요한 최소 런타임 기능만 제공하고, Orca CLI는 같은 Port를 구현하는 선택형 backend로 둔다.

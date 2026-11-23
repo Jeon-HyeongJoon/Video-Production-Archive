@@ -4140,6 +4140,102 @@
       "test_name": "TestMeasuredHintsSeparateReviewFromExecutableSequences",
       "status": "implemented",
       "level": "unit"
+    },
+    {
+      "id": "ORG-019",
+      "design": "directory-evidence-inventory",
+      "statement": "완료된 원본 탐색은 영상 선택 목록과 같은 revision에 속한 디렉터리별 근거 목록을 제공해야 한다.",
+      "given": "선택한 원본에 지원 영상, 빈 형제, 카드 보조물, 미지원 .m4v, 보호 경로가 있다.",
+      "when": "Worker가 탐색을 완료하고 빈 형제만 추가한 뒤 다시 탐색한다.",
+      "then": "안전 범위의 각 폴더와 직속 확장자별 개수가 제공되고 빈 폴더도 식별된다. 보호 경로는 열거하지 않으며 선택 가능한 영상은 동일해도 구조 변경 후 revision이 달라진다.",
+      "test_file": "",
+      "test_name": "",
+      "status": "planned",
+      "level": "integration"
+    },
+    {
+      "id": "ORG-020",
+      "design": "inventory-file-context",
+      "statement": "탐색 화면은 같은 완료 목록의 실제 형제와 대응 원본을 근거로 직접 파일별 검토 맥락을 표시해야 한다.",
+      "given": "Source와 Output이 같은 프로젝트와 서로 다른 프로젝트에 있고 한 카드 SUB에 대응·미대응 파일이 섞여 있다.",
+      "when": "READY 목록과 아직 탐색 중인 목록의 파일별 근거를 조회한다.",
+      "then": "완료 목록에서 같은 부모의 Source에만 편집 입력 관계가, 같은 카드의 대응 SUB에만 렌더 제외 근거와 원본 경로가 붙는다. 미대응 SUB는 찾을 원본이 있는 보류로 표시하고 부분 목록은 관계를 확정하지 않는다.",
+      "test_file": "",
+      "test_name": "",
+      "status": "planned",
+      "level": "integration"
+    },
+    {
+      "id": "ORG-021",
+      "design": "role-evidence-render-gate",
+      "statement": "정책 v3의 드라이브 자동 분류는 촬영 역할과 입력 조건이 함께 입증된 직접 폴더만 렌더하도록 결정해야 한다.",
+      "given": "명시 VJ의 연속 컷과 단일 PGM, 역할 미상의 짧은 연속 컷·단일 규격 입력·장시간 파일, 복구·편집 입력과 다른 날짜 행사에도 같은 전체 컷 목록이 있는 입력이 있다.",
+      "when": "같은 직접 입력을 v3로 판정하고 과거 v2 단일 입력의 판정을 대조한다.",
+      "then": "검증된 VJ와 PGM은 각각 20Mbps 합본과 6Mbps 렌더가 되고 역할 미상·복구·편집 또는 행사 귀속이 충돌하는 입력은 실행 없는 HOLD가 된다. v2의 기존 기술 판정은 재현 가능하다.",
+      "test_file": "",
+      "test_name": "",
+      "status": "planned",
+      "level": "unit"
+    },
+    {
+      "id": "ORG-022",
+      "design": "folder-copy-candidate-evidence",
+      "statement": "완료 탐색은 직속 지원 영상의 파일명과 크기 목록 전체가 대응하는 폴더를 양방향 사본 후보로 표시해야 한다.",
+      "given": "같은 이름·크기 전체 목록을 가진 두 폴더, 일부만 같은 폴더와 한 파일의 크기만 다른 폴더가 있다.",
+      "when": "완료된 탐색의 폴더별 사본 후보와 입력 목록을 조회한다.",
+      "then": "전체가 같은 두 폴더만 서로 후보로 표시하고 각 폴더의 모든 원래 입력 경로를 유지한다. 진행 중 목록에서는 후보를 확정하지 않는다.",
+      "test_file": "",
+      "test_name": "",
+      "status": "planned",
+      "level": "integration"
+    },
+    {
+      "id": "ORG-023",
+      "design": "archivist-classification-evidence",
+      "statement": "Archivist는 선택된 HOLD 상세에서 결정 당시의 파일별 분류 근거와 다음 확인 방법을 조회할 수 있어야 한다.",
+      "given": "선택된 HOLD의 파일마다 v3 정책과 관측 근거·사유·확인 방법이 기록되었거나 과거 결정에 해당 기록이 없다.",
+      "when": "Archivist가 고정된 선택의 단일 HOLD를 조회한다.",
+      "then": "run·결정·입력 revision에 연결된 기록에서 정책 버전, 각 파일의 사유 코드·근거 참조·다음 확인 방법을 반환한다. 과거 결정에는 근거 미수집을 표시한다.",
+      "test_file": "",
+      "test_name": "",
+      "status": "planned",
+      "level": "integration"
+    },
+    {
+      "id": "ORG-024",
+      "design": "event-folder-layout-preview",
+      "statement": "작업 공간의 행사 배치 미리보기는 원본 경로에서 식별한 같은 행사의 결과를 목적지 바로 아래 한 폴더에 배치해야 한다.",
+      "given": "촬영 구역에 같은 날짜의 서로 다른 두 행사와 한 행사 안의 VJ·PGM·천장캠이 있다.",
+      "when": "행사별 단층 배치의 예상 영상·자막·메타데이터 이름을 조회한다.",
+      "then": "같은 행사 결과는 원래 행사명에서 만든 동일 디렉터리 한 단계에 서로 다른 영상 stem으로 모이고 자막·메타데이터는 각각 같은 stem을 사용한다. 다른 행사는 별도 폴더다.",
+      "test_file": "",
+      "test_name": "",
+      "status": "planned",
+      "level": "integration"
+    },
+    {
+      "id": "ORG-025",
+      "design": "position-recording-routing",
+      "statement": "명시적인 행사 내 단일 위치 녹화는 각 채널의 촬영 분량 전체를 개별 6Mbps 결과로 보존할 수 있어야 한다.",
+      "given": "동일 행사 경계에서 PGM과 병렬인 천장캠·측면캠의 단일 장시간 유음 HD 입력, 단독 위치 표기와 분할 여부가 불명인 복수 파일이 있다.",
+      "when": "v3가 행사·병렬 채널 근거와 검사 결과로 위치별 촬영분을 판정한다.",
+      "then": "근거가 있는 단일 채널만 개별 6Mbps 렌더가 되고 단독 이름, 같은 위치의 부모·자식에 중복 범위가 의심되는 촬영분, 불명확한 복수 파일은 HOLD다. 행사 전체 수록 여부를 추정하지 않는다.",
+      "test_file": "",
+      "test_name": "",
+      "status": "planned",
+      "level": "unit"
+    },
+    {
+      "id": "ORG-026",
+      "design": "event-output-agent-evidence",
+      "level": "integration",
+      "status": "planned",
+      "statement": "Archivist는 선택한 ArchiveRun의 행사별 결과 영상에 대해 현재 작업 단계와 이를 뒷받침하는 기록을 함께 조회할 수 있어야 한다.",
+      "given": "같은 실행에 렌더 중인 채널, 인코더 오류로 중단된 채널, QC와 manifest가 확인된 채널, 자막 게시 후 텍스트 검토가 필요한 채널이 있다.",
+      "when": "Archivist가 고정한 실행의 상태를 조회한다.",
+      "then": "각 영상의 상대 목적지와 고정된 실행·입력 revision에서 진행량·단위·진행 근거, 실패 원인·실패 근거, 게시 검증 참조 또는 자막 검토 사유·개수·원출력 참조를 반환한다.",
+      "test_file": "",
+      "test_name": ""
     }
   ]
 }

@@ -1,13 +1,14 @@
 # 15. 현재 구현 기준선
 
-검증 기준선 갱신일: 2026-11-23
+검증 기준선 갱신일: 2026-11-24
 
 이 문서는 설계 목표, 실제 운영 진입점, 현재 연결된 기능과 planned 경계를 한 곳에서 대조한다. 상세 규칙은 각 소유 설계와 `requirements/catalog.json`이 우선하며, 이 문서는 현재 상태를 찾는 인덱스다.
 
 ## 1. 검증 기준선
 
-- 요구사항 345개 중 implemented 303개, planned 42개
+- 요구사항 353개 중 implemented 303개, planned 50개
 - implemented 요구사항과 주석 테스트 303개가 1:1 연결
+- 설계 분기에 추가한 분류 계약 8개는 planned이며 각각 실행 가능한 선행 테스트 한 개를 갖는다. [분류 사례](16-source-classification-cases.md) · [설계 및 인수 기준](17-source-classification-policy.md)
 - `make verify`, `go vet ./...` 통과를 변경 인계 조건으로 사용
 - Core는 Application·Adapter와 HTTP·SQLite·FFmpeg·Windows API를 import하지 않음
 - 실제 제품 수직 경로는 Archive Intake와 별도 STT, layout v3 compact 게시·카탈로그 대조까지 연결
