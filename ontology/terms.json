@@ -5536,6 +5536,7 @@
       "definition": "MediaFolder의 고정된 입력 revision과 policy version에 대해 정리 판정·Profile·CutMarker·STT 가능 여부·보류 사유를 남긴 추가 전용 기록.",
       "rules": [
         "같은 입력과 policy version은 같은 자동 판정을 만든다.",
+        "v3 자동 결정은 선택 시점의 행사·채널·사본 후보 근거를 고정하고 보류한 직접 파일마다 관찰 사유와 다음 확인 방법을 기록한다. 형식별 폴더명은 파일의 손상·복구 이력을 증명하지 않는다.",
         "사람 또는 Archivist의 명시적 분류는 기존 기록을 수정하지 않고 ActorType·행위자 ID·사유·근거를 가진 새 기록을 추가한다.",
         "HOLD가 비HOLD 결정으로 해소되면 같은 ArchiveRun의 고정 실행 문맥에 후속 Folder Job을 멱등하게 연결한다.",
         "HOLD에는 하나 이상의 정리 보류 사유가 있어야 한다."

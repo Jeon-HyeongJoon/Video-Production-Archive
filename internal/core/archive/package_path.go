@@ -72,19 +72,19 @@ func PreviewFlatPackage(archiveDate, mediaFolder string, originalNames []string,
 	if len(names) > 0 {
 		firstName = names[0]
 	}
-	individualStem := safeWindowsFileStem(strings.TrimSuffix(firstName, path.Ext(firstName)))
+	individualStem := SafeWindowsFileStem(strings.TrimSuffix(firstName, path.Ext(firstName)))
 	if individualStem == "" {
 		individualStem = "video"
 	}
 	combinedStem := individualStem
 	if sourceCount > 1 {
-		combinedStem = safeWindowsFileStem(path.Base(folder))
+		combinedStem = SafeWindowsFileStem(path.Base(folder))
 		if combinedStem == "" {
 			combinedStem = "video"
 		}
 	}
 	directoryPattern := func(stem string) string {
-		return safeWindowsFileStem(archiveDate+"_"+stem) + "__XXXXXXXXXXXX"
+		return SafeWindowsFileStem(archiveDate+"_"+stem) + "__XXXXXXXXXXXX"
 	}
 	return FlatPackagePreview{
 		ArchiveDate: archiveDate, MinimumResultCount: 1, MaximumResultCount: sourceCount,
@@ -116,7 +116,7 @@ func PresentPackage(packageID, mediaFolder string, originalNames []string) (Pack
 		label = path.Base(folder)
 		stem = label
 	}
-	stem = safeWindowsFileStem(stem)
+	stem = SafeWindowsFileStem(stem)
 	if stem == "" {
 		stem = "video"
 	}
@@ -146,7 +146,7 @@ func PresentFlatPackage(packageID, mediaFolder string, originalNames []string) (
 		runes := []rune(resultStem)
 		resultStem = string(runes[:48])
 	}
-	directoryName := safeWindowsFileStem(presentation.ArchiveDate + "_" + resultStem + "__" + suffix)
+	directoryName := SafeWindowsFileStem(presentation.ArchiveDate + "_" + resultStem + "__" + suffix)
 	if directoryName == "" {
 		return PackagePresentation{}, ErrInvalidPackagePresentation
 	}
@@ -194,7 +194,7 @@ func normalizePackageRelative(value string) (string, bool) {
 	return clean, true
 }
 
-func safeWindowsFileStem(value string) string {
+func SafeWindowsFileStem(value string) string {
 	var builder strings.Builder
 	lastReplacement := false
 	for _, character := range strings.TrimSpace(value) {

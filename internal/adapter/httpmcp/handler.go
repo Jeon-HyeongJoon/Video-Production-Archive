@@ -790,12 +790,18 @@ func (handler *Handler) getArchiveRunStatus(writer http.ResponseWriter, request 
 		return
 	}
 	for _, drive := range drives {
-		if drive.WorkspaceDriveID == selection.WorkspaceDriveID {
+		if drive.WorkspaceDriveID == selection.WorkspaceDriveID && (selection.ArchiveRunID == "" || drive.ArchiveRunID == selection.ArchiveRunID) {
+			var outputs []archiveintakeworkspace.EventOutputEvidence
+			for _, o := range drive.EventOutputEvidence {
+				if o.ArchiveRunID == drive.ArchiveRunID && o.InputRevision == drive.InputRevision {
+					outputs = append(outputs, o)
+				}
+			}
 			_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, selection.ArchiveRunID, "COMPLETED")
 			writeJSON(writer, http.StatusOK, map[string]any{"data": map[string]any{
 				"workspace_drive_id": drive.WorkspaceDriveID, "worker_id": drive.WorkerID, "state": drive.State,
 				"input_revision": drive.InputRevision, "file_count": drive.FileCount,
-				"folder_count": drive.FolderCount, "folders": drive.Folders,
+				"archive_run_id": drive.ArchiveRunID, "event_output_evidence": outputs, "folder_count": drive.FolderCount, "folders": drive.Folders,
 			}})
 			return
 		}
@@ -887,12 +893,16 @@ func (handler *Handler) getOrganizationHold(writer http.ResponseWriter, request 
 		handler.failHoldTool(writer, request, call, http.StatusNotFound, "MCP_HOLD_NOT_FOUND", input.Folder)
 		return
 	}
+	evidence := folder.ClassificationEvidence
+	if evidence == nil {
+		evidence = &organization.ClassificationEvidence{State: "NOT_RECORDED"}
+	}
 	_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, folder.DecisionID, "COMPLETED")
 	writeJSON(writer, http.StatusOK, map[string]any{"data": map[string]any{
 		"archive_run_id": selection.ArchiveRunID, "workspace_drive_id": selection.WorkspaceDriveID,
 		"folder": folder.Folder, "decision_id": folder.DecisionID, "decision_sequence": folder.DecisionSequence,
 		"input_revision": folder.InputRevision, "hold_reasons": folder.HoldReasons,
-		"assets": folder.ClassificationAssets, "source_role": folder.SourceRole,
+		"classification_evidence": evidence, "assets": folder.ClassificationAssets, "source_role": folder.SourceRole,
 	}})
 }
 

@@ -2,6 +2,7 @@ package organization
 
 import (
 	"path"
+	"strings"
 	"testing"
 	"time"
 
@@ -47,6 +48,9 @@ func TestSourceRoleRoutesOriginalsAndPreservesReviewFolders(t *testing.T) {
 		if d.SourceRole == nil || d.SourceRole.Role != tc.role || d.Disposition != tc.disposition || d.ProfileReference != tc.profile || len(d.DecisionBasis) < 2 {
 			t.Fatalf("%s: %+v", tc.folder, d)
 		}
+		if strings.Contains(tc.folder, "영상_") && strings.Contains(d.SourceRole.Basis, "복구") {
+			t.Fatal("folder name alone asserted a recovery history")
+		}
 		if tc.disposition == vocabulary.OrganizationCompileSourceSequence {
 			timeline, err := BuildSourceTimeline("T", 1, d)
 			if err != nil || len(timeline.Markers) != 1 || timeline.Markers[0].AtMillis != 60_000 || timeline.Clips[0].OriginalAssetID != "C0001.MP4" {
@@ -63,7 +67,7 @@ func TestSourceRoleRoutesOriginalsAndPreservesReviewFolders(t *testing.T) {
 // Requirement: ORG-018
 func TestMeasuredHintsSeparateReviewFromExecutableSequences(t *testing.T) {
 	inspection := organizationInput("A", "C0001.MP4", 180_000, 25_000_000, 1920, 1080).Inspection
-	folder := "복구/영상_mov"
+	folder := "37년도/영상_mov"
 	if got := SourceMetadataHint(folder, inspection); got != ShortCameraHint {
 		t.Fatal(got)
 	}

@@ -31,7 +31,7 @@ func DefaultPolicy() Policy {
 }
 
 func (policy Policy) validate() error {
-	if policy.Version == 0 || policy.ShortClipMaxDurationMillis <= 0 || policy.SequenceMinFiles < 2 ||
+	if policy.Version == 0 || policy.Version > DrivePolicyVersion || policy.ShortClipMaxDurationMillis <= 0 || policy.SequenceMinFiles < 2 ||
 		policy.ReadyBitRateTolerancePermille < 0 || policy.ReadyBitRateTolerancePermille > 500 {
 		return ErrInvalidDecision
 	}
@@ -46,6 +46,7 @@ type Input struct {
 }
 
 type AutoRequest struct {
+	EventContext     EventContext
 	CameraOriginals  CameraOriginalIndex
 	DecisionID       string
 	WorkspaceDriveID string
@@ -68,7 +69,9 @@ const (
 )
 
 type OrganizationDecision struct {
-	SourceRole              *SourceRoleEvidence `json:",omitempty"`
+	ClassificationEvidence  *ClassificationEvidence `json:",omitempty"`
+	EventPreview            *EventPreview           `json:",omitempty"`
+	SourceRole              *SourceRoleEvidence     `json:",omitempty"`
 	ID                      string
 	Sequence                uint64
 	WorkspaceDriveID        string
@@ -88,7 +91,7 @@ type OrganizationDecision struct {
 	DecidedAt               time.Time
 }
 
-func Classify(request AutoRequest) (OrganizationDecision, error) {
+func Classify(request AutoRequest) (decision OrganizationDecision, err error) {
 	if request.Policy.validate() != nil || strings.TrimSpace(request.DecisionID) == "" || strings.TrimSpace(request.WorkspaceDriveID) == "" ||
 		request.InputRevision == 0 || request.DecidedAt.IsZero() {
 		return OrganizationDecision{}, ErrInvalidDecision
@@ -97,12 +100,25 @@ func Classify(request AutoRequest) (OrganizationDecision, error) {
 	if !ok {
 		return OrganizationDecision{}, ErrInvalidDecision
 	}
-	decision := OrganizationDecision{
+	decision = OrganizationDecision{
 		ID: strings.TrimSpace(request.DecisionID), Sequence: 1, WorkspaceDriveID: strings.TrimSpace(request.WorkspaceDriveID),
 		Folder: folder, InputRevision: request.InputRevision, PolicyVersion: request.Policy.Version,
 		Disposition: vocabulary.OrganizationHold, DecidedByType: vocabulary.ActorSystem, DecidedBy: "SYSTEM",
 		DecisionReason: "versioned automatic organization policy", DecisionBasis: []string{"policy:" + strconv.FormatUint(uint64(request.Policy.Version), 10)},
 		DecidedAt: request.DecidedAt.UTC(),
+	}
+	if request.Policy.Version == DrivePolicyVersion {
+		request.EventContext.ListingChanged = !request.EventContext.matchesInputs(folder, request.Inputs)
+		ctx := request.EventContext
+		if ctx.InputRevision != 0 && ctx.InputRevision != request.InputRevision {
+			return OrganizationDecision{}, ErrInvalidDecision
+		}
+		decision.EventPreview = ctx.Preview
+		defer func() {
+			if err == nil {
+				decision.recordHold(ctx, request.Inputs)
+			}
+		}()
 	}
 	if len(request.Inputs) == 0 {
 		decision.HoldReasons = []vocabulary.OrganizationHoldReason{vocabulary.OrganizationHoldNoMedia}
@@ -139,8 +155,25 @@ func Classify(request AutoRequest) (OrganizationDecision, error) {
 		}
 		decision.SourceRole = &role
 		decision.DecisionBasis = append(decision.DecisionBasis, role.Basis)
+		positionVerified := false
+		if request.Policy.Version == DrivePolicyVersion {
+			ctx := request.EventContext
+			if (ctx.InputRevision != 0 && ctx.EventFolder == "") || ctx.ListingChanged || len(ctx.ConflictingEventFolders) > 0 || len(ctx.OverlappingPositionFolders) > 0 || ctx.EditorialWitness != "" || editorialPath(folder) {
+				decision.HoldReasons = []vocabulary.OrganizationHoldReason{vocabulary.OrganizationHoldSourceRole}
+				return decision, nil
+			}
+			if pos, _ := positionBranch(folder, ctx.EventFolder); pos != "" {
+				positionVerified = role.Role == RoleRecording && ctx.InputRevision == request.InputRevision && corroboratedPosition(folder, ctx, inputs)
+				if !positionVerified {
+					decision.HoldReasons = []vocabulary.OrganizationHoldReason{vocabulary.OrganizationHoldSourceRole}
+					return decision, nil
+				}
+				decision.DecisionBasis = append(decision.DecisionBasis, ctx.EventFolder)
+				decision.DecisionBasis = append(decision.DecisionBasis, ctx.ChannelFolders...)
+			}
+		}
 		// Multiple recorder files may be consecutive parts or separate channels.
-		if role.Role == RoleRecording && role.Strength == roleExplicit && len(inputs) == 1 {
+		if (role.Role == RoleRecording && role.Strength == roleExplicit && len(inputs) == 1) || positionVerified {
 			decision.Disposition = vocabulary.OrganizationRenderRecordings
 			decision.ProfileReference = mustOrganizationProfile(6_000).Reference()
 			decision.Actions = []Action{ActionRender, ActionOrganize}
@@ -159,7 +192,7 @@ func Classify(request AutoRequest) (OrganizationDecision, error) {
 				decision.DecisionBasis = append(decision.DecisionBasis, ShortCameraHint)
 			}
 		}
-		if role.Strength != roleUnknown && !sourceEvidence {
+		if (role.Strength != roleUnknown || request.Policy.Version == DrivePolicyVersion) && !sourceEvidence {
 			decision.HoldReasons = []vocabulary.OrganizationHoldReason{vocabulary.OrganizationHoldSourceRole}
 			return decision, nil
 		}

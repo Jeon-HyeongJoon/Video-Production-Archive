@@ -40,31 +40,35 @@ type StageOwnership struct {
 }
 
 type State struct {
-	ID                      string           `json:"id"`
-	Revision                uint64           `json:"revision"`
-	WorkerID                string           `json:"worker_id"`
-	SourceStorageID         string           `json:"source_storage_id"`
-	SourceVolumeID          string           `json:"source_volume_id"`
-	SourcePhysicalDeviceID  string           `json:"source_physical_device_id"`
-	ArchiveStorageID        string           `json:"archive_storage_id"`
-	StartIdempotencyKey     string           `json:"start_idempotency_key"`
-	FolderDiscoveryRevision uint64           `json:"folder_discovery_revision"`
-	FolderIDs               []string         `json:"folder_ids"`
-	SelectedBy              command.Actor    `json:"selected_by"`
-	StageOwnerships         []StageOwnership `json:"stage_ownerships"`
-	CreatedAt               time.Time        `json:"created_at"`
+	ClassificationPolicy    uint32                               `json:"classification_policy,omitempty"`
+	ClassificationContexts  map[string]organization.EventContext `json:"classification_contexts,omitempty"`
+	ID                      string                               `json:"id"`
+	Revision                uint64                               `json:"revision"`
+	WorkerID                string                               `json:"worker_id"`
+	SourceStorageID         string                               `json:"source_storage_id"`
+	SourceVolumeID          string                               `json:"source_volume_id"`
+	SourcePhysicalDeviceID  string                               `json:"source_physical_device_id"`
+	ArchiveStorageID        string                               `json:"archive_storage_id"`
+	StartIdempotencyKey     string                               `json:"start_idempotency_key"`
+	FolderDiscoveryRevision uint64                               `json:"folder_discovery_revision"`
+	FolderIDs               []string                             `json:"folder_ids"`
+	SelectedBy              command.Actor                        `json:"selected_by"`
+	StageOwnerships         []StageOwnership                     `json:"stage_ownerships"`
+	CreatedAt               time.Time                            `json:"created_at"`
 }
 
 type CreateParameters struct {
-	WorkerID                string        `json:"worker_id"`
-	SourceStorageID         string        `json:"source_storage_id"`
-	SourceVolumeID          string        `json:"source_volume_id"`
-	SourcePhysicalDeviceID  string        `json:"source_physical_device_id"`
-	ArchiveStorageID        string        `json:"archive_storage_id"`
-	StartIdempotencyKey     string        `json:"start_idempotency_key"`
-	FolderDiscoveryRevision uint64        `json:"folder_discovery_revision"`
-	FolderIDs               []string      `json:"folder_ids"`
-	SelectedBy              command.Actor `json:"selected_by"`
+	ClassificationPolicy    uint32                               `json:"classification_policy,omitempty"`
+	ClassificationContexts  map[string]organization.EventContext `json:"classification_contexts,omitempty"`
+	WorkerID                string                               `json:"worker_id"`
+	SourceStorageID         string                               `json:"source_storage_id"`
+	SourceVolumeID          string                               `json:"source_volume_id"`
+	SourcePhysicalDeviceID  string                               `json:"source_physical_device_id"`
+	ArchiveStorageID        string                               `json:"archive_storage_id"`
+	StartIdempotencyKey     string                               `json:"start_idempotency_key"`
+	FolderDiscoveryRevision uint64                               `json:"folder_discovery_revision"`
+	FolderIDs               []string                             `json:"folder_ids"`
+	SelectedBy              command.Actor                        `json:"selected_by"`
 }
 
 type Handler struct {
@@ -115,7 +119,16 @@ func (handler *Handler) Handle(envelope command.Envelope, snapshot command.Snaps
 		return command.Change{}, command.DeterministicFailure("INVALID_ARCHIVE_RUN", ErrInvalidArchiveRun)
 	}
 
+	if parameters.ClassificationPolicy != 0 && (parameters.ClassificationPolicy != organization.DrivePolicyVersion || len(parameters.ClassificationContexts) != len(folderScope.FolderIDs())) {
+		return command.Change{}, command.DeterministicFailure("INVALID_ARCHIVE_RUN", ErrInvalidArchiveRun)
+	}
+	for folder, c := range parameters.ClassificationContexts {
+		if !folderScope.Includes(folder) || c.InputRevision != parameters.FolderDiscoveryRevision {
+			return command.Change{}, command.DeterministicFailure("INVALID_ARCHIVE_RUN", ErrInvalidArchiveRun)
+		}
+	}
 	state := State{
+		ClassificationPolicy: parameters.ClassificationPolicy, ClassificationContexts: parameters.ClassificationContexts,
 		ID:                      envelope.TargetID,
 		Revision:                1,
 		WorkerID:                parameters.WorkerID,

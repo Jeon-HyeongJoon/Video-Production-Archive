@@ -210,6 +210,7 @@ func (client *Client) Heartbeat(ctx context.Context) error {
 	heartbeatStorage := make([]worker.StorageObservation, 0, len(snapshot.StorageObservations))
 	for _, observation := range snapshot.StorageObservations {
 		observation.Folders = nil
+		observation.Directories = nil
 		heartbeatStorage = append(heartbeatStorage, observation)
 	}
 	payload, err := json.Marshal(map[string]any{

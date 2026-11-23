@@ -75,6 +75,8 @@ func (history *DecisionHistory) RecordOverride(request OverrideRequest) (Organiz
 	decision.ID = strings.TrimSpace(request.DecisionID)
 	decision.Sequence++
 	decision.Disposition = request.Disposition
+	decision.ClassificationEvidence = nil
+	decision.EventPreview = nil
 	decision.ProfileReference = ""
 	decision.Actions = nil
 	decision.HoldReasons = nil
@@ -179,6 +181,18 @@ func (history *DecisionHistory) Decisions() []OrganizationDecision {
 
 func cloneDecision(source OrganizationDecision) OrganizationDecision {
 	value := source
+	if source.EventPreview != nil {
+		preview := *source.EventPreview
+		value.EventPreview = &preview
+	}
+	if source.ClassificationEvidence != nil {
+		ev := *source.ClassificationEvidence
+		ev.Files = append([]FileEvidence(nil), ev.Files...)
+		for i := range ev.Files {
+			ev.Files[i].Basis = append([]string(nil), ev.Files[i].Basis...)
+		}
+		value.ClassificationEvidence = &ev
+	}
 	if source.SourceRole != nil {
 		role := *source.SourceRole
 		value.SourceRole = &role

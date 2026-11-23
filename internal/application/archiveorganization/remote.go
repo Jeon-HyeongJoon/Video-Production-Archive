@@ -95,12 +95,16 @@ func (service *RemoteStartService) Start(ctx context.Context, request StartReque
 	if err != nil || !definition.Enabled || definition.ID != candidate.WorkerID {
 		return Result{}, ErrStartRejected
 	}
-	discovered, selectedBytes, archiveFree, err := service.validateLiveScope(candidate.WorkerID, candidate.StorageID, archiveStorage.StorageID, request.InputRevision, request.FolderIDs)
+	inventory, selectedBytes, archiveFree, err := service.validateLiveScope(candidate.WorkerID, candidate.StorageID, archiveStorage.StorageID, request.InputRevision, request.FolderIDs)
 	if err != nil || selectedBytes == 0 {
 		return Result{}, errors.Join(ErrStartRejected, err)
 	}
 	if err := ValidateArchiveCapacity(archiveStorage.StorageID, selectedBytes, archiveFree); err != nil {
 		return Result{}, err
+	}
+	discovered := make([]string, 0, len(inventory.Folders))
+	for _, f := range inventory.Folders {
+		discovered = append(discovered, f.Folder)
 	}
 	folderScope, err := organization.FixFolderScope(organization.FixFolderScopeRequest{
 		DiscoveryRevision: request.InputRevision, DiscoveredFolderIDs: discovered, SelectedFolderIDs: request.FolderIDs,
@@ -139,8 +143,10 @@ func (service *RemoteStartService) Start(ctx context.Context, request StartReque
 		Actor: request.SelectedBy, RequestedVia: selectionRequestedVia(request.SelectedBy), TargetID: request.ArchiveRunID, ExpectedRevision: 0,
 		IdempotencyKey: request.IdempotencyKey + ":archive-run",
 		Parameters: map[string]any{
-			"start_idempotency_key": request.IdempotencyKey,
-			"worker_id":             candidate.WorkerID, "source_storage_id": candidate.StorageID,
+			"classification_policy":   organization.DrivePolicyVersion,
+			"classification_contexts": selectedContexts(inventory, folderScope),
+			"start_idempotency_key":   request.IdempotencyKey,
+			"worker_id":               candidate.WorkerID, "source_storage_id": candidate.StorageID,
 			"source_volume_id": candidate.VolumeID, "source_physical_device_id": candidate.PhysicalDeviceID,
 			"archive_storage_id": archiveStorage.StorageID, "folder_discovery_revision": request.InputRevision,
 			"folder_ids": folderScope.FolderIDs(), "selected_by": request.SelectedBy,
@@ -208,12 +214,23 @@ func pendingOrganizationReceipt(request StartRequest, session coreintake.Session
 	return pending
 }
 
-func (service *RemoteStartService) validateLiveScope(workerID, sourceStorageID, archiveStorageID string, revision uint64, selected []string) ([]string, uint64, uint64, error) {
+func selectedContexts(inventory worker.StorageObservation, scope organization.FolderScope) map[string]organization.EventContext {
+	all := organization.InspectListing(inventory)
+	selected := make(map[string]organization.EventContext)
+	for _, p := range scope.FolderIDs() {
+		if c := all[p]; c != nil {
+			selected[p] = c.EventContext
+		}
+	}
+	return selected
+}
+
+func (service *RemoteStartService) validateLiveScope(workerID, sourceStorageID, archiveStorageID string, revision uint64, selected []string) (worker.StorageObservation, uint64, uint64, error) {
 	for _, status := range service.workers.Statuses(service.now().UTC()) {
 		if status.WorkerID != workerID || (status.State != "ONLINE" && status.State != "BUSY") {
 			continue
 		}
-		var discovered []string
+		var inventory worker.StorageObservation
 		var selectedBytes, archiveFree uint64
 		var archiveConnected bool
 		selectedSet := make(map[string]bool, len(selected))
@@ -224,10 +241,10 @@ func (service *RemoteStartService) validateLiveScope(workerID, sourceStorageID, 
 			switch observation.StorageID {
 			case sourceStorageID:
 				if observation.DiscoveryState != vocabulary.FolderDiscoveryReady || observation.DiscoveryRevision != revision {
-					return nil, 0, 0, ErrStartRejected
+					return worker.StorageObservation{}, 0, 0, ErrStartRejected
 				}
+				inventory = observation
 				for _, folder := range observation.Folders {
-					discovered = append(discovered, folder.Folder)
 					if selectedSet[folder.Folder] {
 						selectedBytes += folder.InputBytes
 					}
@@ -239,11 +256,11 @@ func (service *RemoteStartService) validateLiveScope(workerID, sourceStorageID, 
 				}
 			}
 		}
-		if len(discovered) > 0 && archiveConnected {
-			return discovered, selectedBytes, archiveFree, nil
+		if len(inventory.Folders) > 0 && archiveConnected {
+			return inventory, selectedBytes, archiveFree, nil
 		}
 	}
-	return nil, 0, 0, ErrStartRejected
+	return worker.StorageObservation{}, 0, 0, ErrStartRejected
 }
 
 func normalizeStartRequest(request StartRequest) StartRequest {
@@ -360,7 +377,7 @@ func (coordinator *InspectionCompletionCoordinator) ObserveCompletion(ctx contex
 	}
 	_, err = coordinator.coordinator.ExecuteInspected(ctx, Request{
 		ArchiveRunID: run.ID, IdempotencyKey: spec.Parameters.StartIdempotencyKey,
-		InputRevision: run.FolderDiscoveryRevision, FolderScope: folderScope,
+		PolicyVersion: run.ClassificationPolicy, Contexts: run.ClassificationContexts, InputRevision: run.FolderDiscoveryRevision, FolderScope: folderScope,
 		Session: &appintake.SessionAccess{Session: session}, ArchiveStorageID: run.ArchiveStorageID,
 		ActorID: run.SelectedBy.ID, StartedAt: spec.Parameters.RequestedAt.UTC(), ExecutionPriority: resource.Immediate,
 	}, record.InspectedMedia)

@@ -18,32 +18,35 @@ import (
 const ClassifyHoldCommand = "organization.hold.classify"
 
 type FolderView struct {
-	SourceRole           *organization.SourceRoleEvidence
-	Folder               string
-	DecisionID           string
-	InputRevision        uint64
-	DecisionSequence     uint64
-	Disposition          vocabulary.OrganizationDisposition
-	ProfileReference     string
-	HoldReasons          []vocabulary.OrganizationHoldReason
-	WorkOptions          []WorkOptionView
-	ClassificationAssets []ClassificationAssetView
-	Videos               []SourceVideoView
-	VideoCount           int
-	EstimatedOutputBytes uint64
-	ExpectedResult       archive.FlatPackagePreview
-	JobID                string
-	TranscriptionJobID   string
-	CurrentStepID        string
-	StepState            workflow.StepState
-	Stages               []StageView
-	ArchivePackageID     string
-	ArchiveDate          string
-	ArchiveDisplayName   string
-	ArchiveVideoFileName string
-	ArchiveState         archive.PackageState
-	CanAddTranscription  bool
-	TranscriptQualities  []TranscriptQualityView
+	ClassificationEvidence *organization.ClassificationEvidence
+	EventPreview           *organization.EventPreview
+	CopyCandidates         []string
+	SourceRole             *organization.SourceRoleEvidence
+	Folder                 string
+	DecisionID             string
+	InputRevision          uint64
+	DecisionSequence       uint64
+	Disposition            vocabulary.OrganizationDisposition
+	ProfileReference       string
+	HoldReasons            []vocabulary.OrganizationHoldReason
+	WorkOptions            []WorkOptionView
+	ClassificationAssets   []ClassificationAssetView
+	Videos                 []SourceVideoView
+	VideoCount             int
+	EstimatedOutputBytes   uint64
+	ExpectedResult         archive.FlatPackagePreview
+	JobID                  string
+	TranscriptionJobID     string
+	CurrentStepID          string
+	StepState              workflow.StepState
+	Stages                 []StageView
+	ArchivePackageID       string
+	ArchiveDate            string
+	ArchiveDisplayName     string
+	ArchiveVideoFileName   string
+	ArchiveState           archive.PackageState
+	CanAddTranscription    bool
+	TranscriptQualities    []TranscriptQualityView
 }
 
 type SourceMeasurement struct {
@@ -54,7 +57,13 @@ type SourceMeasurement struct {
 	VideoBitRate   int64  `json:"video_bitrate_bps,omitempty"`
 }
 
+type ContextEvidence struct {
+	Case    string `json:"case"`
+	Witness string `json:"witness"`
+}
+
 type SourceVideoView struct {
+	ContextEvidence *ContextEvidence
 	Measurement     *SourceMeasurement
 	MatchedOriginal string
 	MetadataHint    string
@@ -137,6 +146,7 @@ type CompletedWorkView struct {
 }
 
 type DriveView struct {
+	EventOutputEvidence        []EventOutputEvidence
 	WorkspaceDriveID           string
 	ConnectionState            vocabulary.VolumeConnectionState
 	ConnectionObservedAt       time.Time
@@ -167,6 +177,7 @@ type DriveView struct {
 	Folders                    []FolderView
 	DiscoveredFileCount        int
 	DiscoveredFolderCount      int
+	DiscoveredDirectories      []worker.DirectoryObservation
 	DiscoveredFolders          []FolderView
 	StorageCandidates          []StorageView
 	CompletedWork              []CompletedWorkView

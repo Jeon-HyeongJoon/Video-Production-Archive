@@ -19,6 +19,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"videoarchive/internal/adapter/storageinventory"
 
 	"videoarchive/internal/adapter/bootconfig"
 	"videoarchive/internal/adapter/controlruntime"
@@ -196,12 +197,12 @@ storage:
 		t.Fatal(err)
 	}
 	defer runtime.Close()
-	heartbeat := `{"worker_id":"worker-main","snapshot_id":1,"observed_at":"2026-11-04T03:00:00Z","cpu_average_5m":2,"gpu_average_5m":0,"idle_stable_millis":60000,"available_memory_bytes":34359738368,"available_vram_bytes":8589934592,"scratch_free_bytes":536870912000,"heavy_running":0,"light_running":0,"busy_physical_device_ids":[],"accepting_work":true,"accessible_storage_ids":["source-attached","source-attached-archive","archive-main"],"attached_volumes":[{"physical_device_id":"source-device","volume_id":"source-volume","storage_id":"source-attached","archive_storage_id":"source-attached-archive","model":"TEST DISK","label":"10GB 선택","file_system":"NTFS","capacity_bytes":2000000000000,"free_bytes":1000000000000}],"storage_observations":[{"storage_id":"source-attached","connected":true,"access_kind":"ATTACHED_VOLUME","discovery_state":"READY","capacity_bytes":2000000000000,"free_bytes":1000000000000,"discovery_revision":41,"folders":[{"folder":"event-a","video_count":1,"input_bytes":10000000000},{"folder":"event-b","video_count":2,"input_bytes":20000000000}]},{"storage_id":"archive-main","connected":true,"access_kind":"LOCAL","discovery_state":"READY","capacity_bytes":500000000000,"free_bytes":300000000000,"discovery_revision":1,"folders":[]}]}`
+	heartbeat := `{"worker_id":"worker-main","snapshot_id":1,"observed_at":"2026-11-04T03:00:00Z","cpu_average_5m":2,"gpu_average_5m":0,"idle_stable_millis":60000,"available_memory_bytes":34359738368,"available_vram_bytes":8589934592,"scratch_free_bytes":536870912000,"heavy_running":0,"light_running":0,"busy_physical_device_ids":[],"accepting_work":true,"accessible_storage_ids":["source-attached","source-attached-archive","archive-main"],"attached_volumes":[{"physical_device_id":"source-device","volume_id":"source-volume","storage_id":"source-attached","archive_storage_id":"source-attached-archive","model":"TEST DISK","label":"10GB 선택","file_system":"NTFS","capacity_bytes":2000000000000,"free_bytes":1000000000000}],"storage_observations":[{"storage_id":"source-attached","connected":true,"access_kind":"ATTACHED_VOLUME","discovery_state":"READY","capacity_bytes":2000000000000,"free_bytes":1000000000000,"discovery_revision":41,"folders":[{"folder":"391216-event-a/PGM","video_count":1,"input_bytes":10000000000,"videos":[{"file_name":"clip.mp4","relative_path":"391216-event-a/PGM/clip.mp4","size_bytes":1024}]},{"folder":"event-b","video_count":2,"input_bytes":20000000000}]},{"storage_id":"archive-main","connected":true,"access_kind":"LOCAL","discovery_state":"READY","capacity_bytes":500000000000,"free_bytes":300000000000,"discovery_revision":1,"folders":[]}]}`
 	if response := workerHeartbeatRequest(runtime.Handler(), heartbeat, "service-secret"); response.Code != http.StatusOK {
 		t.Fatalf("dynamic Worker inventory returned %d: %s", response.Code, response.Body.String())
 	}
 	cookie, csrfToken := runtimeSession(t, runtime.Handler())
-	requestBody := `{"archive_run_id":"RUN-REMOTE-1","idempotency_key":"remote:start:1","session_id":"SESSION-REMOTE-1","source_volume_id":"source-volume","expected_candidate_revision":1,"archive_storage_id":"archive-main","input_revision":41,"folder_ids":["event-a"]}`
+	requestBody := `{"archive_run_id":"RUN-REMOTE-1","idempotency_key":"remote:start:1","session_id":"SESSION-REMOTE-1","source_volume_id":"source-volume","expected_candidate_revision":1,"archive_storage_id":"archive-main","input_revision":41,"folder_ids":["391216-event-a/PGM"]}`
 	created := runtimeRequest(runtime.Handler(), http.MethodPost, "/api/v1/archive-intake/runs", requestBody, cookie, csrfToken, "http://127.0.0.1:8080")
 	if created.Code != http.StatusCreated || !strings.Contains(created.Body.String(), `"folder_count":1`) {
 		t.Fatalf("remote Archive Run start returned %d: %s", created.Code, created.Body.String())
@@ -228,14 +229,14 @@ storage:
 		Data workerclient.Assignment `json:"data"`
 	}
 	if err := json.Unmarshal(claimResponse.Body.Bytes(), &claim); err != nil || claim.Data.ExecutionSpec.Operation != execution.OperationInspectMedia ||
-		len(claim.Data.ExecutionSpec.Inputs) != 0 || len(claim.Data.ExecutionSpec.Parameters.FolderIDs) != 1 || claim.Data.ExecutionSpec.Parameters.FolderIDs[0] != "event-a" {
+		len(claim.Data.ExecutionSpec.Inputs) != 0 || len(claim.Data.ExecutionSpec.Parameters.FolderIDs) != 1 || claim.Data.ExecutionSpec.Parameters.FolderIDs[0] != "391216-event-a/PGM" {
 		t.Fatalf("invalid remote inspection assignment: %+v err=%v", claim.Data, err)
 	}
 	checksum := strings.Repeat("a", 64)
-	identity := []string{claim.Data.ExecutionSpec.Parameters.ArchiveIntakeSessionID, "41", "event-a/clip.mp4"}
+	identity := []string{claim.Data.ExecutionSpec.Parameters.ArchiveIntakeSessionID, "41", "391216-event-a/PGM/clip.mp4"}
 	observation, err := intake.NewInputFileObservation(intake.InputFileObservation{
 		ID: runtimeStableID("OBSERVATION", identity...), StorageID: "source-attached", WorkspaceDriveID: "source-volume",
-		RelativePath: "event-a/clip.mp4", OriginalName: "clip.mp4", SizeBytes: 1_024, Checksum: checksum,
+		RelativePath: "391216-event-a/PGM/clip.mp4", OriginalName: "clip.mp4", SizeBytes: 1_024, Checksum: checksum,
 		ObservedBy: "worker-main", ObservedAt: now,
 	})
 	if err != nil {
@@ -264,7 +265,7 @@ storage:
 	record, err := execution.NewStepOutputRecordWithInspections(
 		claim.Data.ExecutionSpec, claim.Data.FencingToken, "worker-main", now.Add(time.Second),
 		[]execution.StepOutput{output}, []string{"worker://inspection/verified"},
-		[]execution.InspectedMedia{{Folder: "event-a", Observation: observation, Original: original, Inspection: inspection}},
+		[]execution.InspectedMedia{{Folder: "391216-event-a/PGM", Observation: observation, Original: original, Inspection: inspection}},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -288,12 +289,12 @@ storage:
 	}
 	jobs := runtimeRequest(runtime.Handler(), http.MethodGet, "/api/v1/jobs", "", nil, "", "")
 	for deadline := time.Now().Add(3 * time.Second); time.Now().Before(deadline) &&
-		strings.Count(jobs.Body.String(), `"template_name":"archive-intake-as-is"`) != 1; {
+		strings.Count(jobs.Body.String(), `"template_name":"archive-intake-render-recordings"`) != 1; {
 		time.Sleep(20 * time.Millisecond)
 		jobs = runtimeRequest(runtime.Handler(), http.MethodGet, "/api/v1/jobs", "", nil, "", "")
 	}
 	if jobs.Code != http.StatusOK || strings.Count(jobs.Body.String(), `"template_name":"archive-intake-inspection"`) != 1 ||
-		strings.Count(jobs.Body.String(), `"template_name":"archive-intake-as-is"`) != 1 || strings.Contains(jobs.Body.String(), "event-b") {
+		strings.Count(jobs.Body.String(), `"template_name":"archive-intake-render-recordings"`) != 1 || strings.Contains(jobs.Body.String(), "event-b") {
 		t.Fatalf("selected Folder Job was not created exactly once: %d %s", jobs.Code, jobs.Body.String())
 	}
 	replayed := runtimeRequest(runtime.Handler(), http.MethodPost, "/api/v1/archive-intake/runs", requestBody, cookie, csrfToken, "http://127.0.0.1:8080")
@@ -323,13 +324,13 @@ func TestControlRuntimeStartsArchiveOrganizationFromRegisteredSourceStorage(t *t
 	directory := t.TempDir()
 	sourceRoot := filepath.Join(directory, "source")
 	workingRoot := filepath.Join(directory, "working")
-	if err := os.MkdirAll(filepath.Join(sourceRoot, "recordings"), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Join(sourceRoot, "391216-event/PGM"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(workingRoot, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(sourceRoot, "recordings", "master.mov"), []byte("immutable-source-fixture"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(sourceRoot, "391216-event/PGM", "master.mov"), []byte("immutable-source-fixture"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	executable, err := os.Executable()
@@ -395,14 +396,24 @@ archive_organization:
 	}
 	cookie, csrfToken := runtimeSession(t, runtime.Handler())
 	origin := "http://127.0.0.1:8080"
-	requestBody := `{"archive_run_id":"RUN-DRIVE-1","idempotency_key":"drive:start:1","session_id":"SESSION-DRIVE-1","source_volume_id":"source-volume","expected_candidate_revision":1,"archive_storage_id":"archive-main","input_revision":1,"folder_ids":["recordings"]}`
+	requestBody := `{"archive_run_id":"RUN-DRIVE-1","idempotency_key":"drive:start:1","session_id":"SESSION-DRIVE-1","source_volume_id":"source-volume","expected_candidate_revision":1,"archive_storage_id":"archive-main","input_revision":1,"folder_ids":["391216-event/PGM"]}`
+	source, err := archive.OpenReadOnlyStorageRoot(sourceRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observed, err := storageinventory.ScanSource(context.Background(), source)
+	source.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	requestBody = strings.Replace(requestBody, `"input_revision":1`, fmt.Sprintf(`"input_revision":%d`, observed.DiscoveryRevision), 1)
 	created := runtimeRequest(runtime.Handler(), http.MethodPost, "/api/v1/archive-intake/runs", requestBody, cookie, csrfToken, origin)
 	if created.Code != http.StatusCreated || !strings.Contains(created.Body.String(), `"folder_count":1`) ||
 		strings.Contains(created.Body.String(), executable) {
 		t.Fatalf("Archive Run start returned %d: %s", created.Code, created.Body.String())
 	}
 	projection := runtimeRequest(runtime.Handler(), http.MethodGet, "/api/v1/archive-intake", "", nil, "", "")
-	if projection.Code != http.StatusOK || !strings.Contains(projection.Body.String(), `"folder":"recordings"`) ||
+	if projection.Code != http.StatusOK || !strings.Contains(projection.Body.String(), `"folder":"391216-event/PGM"`) ||
 		!strings.Contains(projection.Body.String(), `"disposition":"RENDER_RECORDINGS"`) ||
 		!strings.Contains(projection.Body.String(), `"current_step_id":"render"`) {
 		t.Fatalf("Archive Organization projection is incomplete: %d %s", projection.Code, projection.Body.String())

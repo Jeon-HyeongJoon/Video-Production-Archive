@@ -42,6 +42,7 @@ func (reason QualityReason) Valid() bool {
 // should be checked by a person. It is not a ContentReview and does not change
 // successful STT workflow completion.
 type QualityAssessment struct {
+	IssueCount         int             `json:"issue_count,omitempty"`
 	PolicyReference    string          `json:"policy_reference"`
 	State              QualityState    `json:"state"`
 	Reasons            []QualityReason `json:"reasons"`
@@ -65,6 +66,7 @@ func AssessQuality(source Content) (QualityAssessment, error) {
 	for _, segment := range content.Segments {
 		if segment.EndMillis-segment.StartMillis > qualityMaximumSegmentMillis {
 			segmentTooLong = true
+			assessment.IssueCount++
 		}
 		for _, character := range strings.TrimSpace(segment.Text) {
 			if unicode.IsLetter(character) || unicode.IsDigit(character) {
@@ -77,6 +79,7 @@ func AssessQuality(source Content) (QualityAssessment, error) {
 	}
 	if assessment.DurationMillis >= qualityMinimumDurationMillis &&
 		int64(assessment.TextCharacterCount)*1_000 < assessment.DurationMillis*qualityMinimumCharactersPerSecond {
+		assessment.IssueCount++
 		assessment.Reasons = append(assessment.Reasons, QualityReasonLowTextDensity)
 	}
 	if len(assessment.Reasons) > 0 {
@@ -90,7 +93,7 @@ func AssessQuality(source Content) (QualityAssessment, error) {
 
 func (assessment QualityAssessment) Validate() error {
 	if assessment.PolicyReference != QualityPolicyReference || !assessment.State.Valid() || assessment.DurationMillis <= 0 ||
-		assessment.SegmentCount <= 0 || assessment.TextCharacterCount < 0 {
+		assessment.SegmentCount <= 0 || assessment.TextCharacterCount < 0 || assessment.IssueCount < 0 || (assessment.State == QualityPassed && assessment.IssueCount > 0) {
 		return ErrInvalidQualityAssessment
 	}
 	if (assessment.State == QualityPassed) != (len(assessment.Reasons) == 0) {

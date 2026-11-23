@@ -215,7 +215,7 @@ func (service *Service) Projection(ctx context.Context) ([]DriveView, error) {
 				}
 			}
 			view := FolderView{
-				SourceRole: decision.SourceRole, Folder: coordinated.Folder, DecisionID: decision.ID, InputRevision: decision.InputRevision,
+				ClassificationEvidence: decision.ClassificationEvidence, EventPreview: decision.EventPreview, SourceRole: decision.SourceRole, Folder: coordinated.Folder, DecisionID: decision.ID, InputRevision: decision.InputRevision,
 				DecisionSequence: decision.Sequence, Disposition: decision.Disposition,
 				ProfileReference:     decision.ProfileReference,
 				HoldReasons:          append([]vocabulary.OrganizationHoldReason(nil), decision.HoldReasons...),
@@ -235,6 +235,7 @@ func (service *Service) Projection(ctx context.Context) ([]DriveView, error) {
 				ID: "classification", State: classificationState, WaitReason: classificationWaitReason,
 				CompletedCount: completedItemCount(classificationState, 0, view.VideoCount), TotalCount: view.VideoCount,
 			})
+			var stageOneJob job.State
 			if view.JobID != "" {
 				snapshot, err := service.jobs.Load(view.JobID)
 				if err != nil {
@@ -244,6 +245,7 @@ func (service *Service) Projection(ctx context.Context) ([]DriveView, error) {
 				if err != nil {
 					return nil, err
 				}
+				stageOneJob = jobState
 				projectCatalogUpdatedAt(&state.view, jobState)
 				view.CurrentStepID = jobState.CurrentStepID
 				view.StepState = currentStepState(jobState)
@@ -281,6 +283,7 @@ func (service *Service) Projection(ctx context.Context) ([]DriveView, error) {
 				})
 				view.CanAddTranscription = false
 			}
+			state.view.EventOutputEvidence = append(state.view.EventOutputEvidence, eventOutput(receipt.ID, decision, stageOneJob, transcriptionJobs[receipt.ID+"\x00"+coordinated.Folder])...)
 			view.Stages = orderedStages(view.Stages)
 			previous, exists := state.folders[coordinated.Folder]
 			if !exists || view.InputRevision > previous.InputRevision ||
@@ -586,8 +589,10 @@ func (service *Service) mergeInventory(ctx context.Context, drives map[string]*p
 		state.view.DiscoveryGap = observation.DiscoveryGap
 		state.view.FolderDiscoveryRevision = observation.DiscoveryRevision
 		state.view.DiscoveredFileCount = 0
+		contexts := organization.InspectListing(observation)
 		originals := make(organization.CameraOriginalIndex)
 		if observation.DiscoveryState == vocabulary.FolderDiscoveryReady {
+			state.view.DiscoveredDirectories = observation.Directories
 			for _, folder := range observation.Folders {
 				for _, video := range folder.Videos {
 					originals.Observe(video.RelativePath, video.SizeBytes)
@@ -618,6 +623,20 @@ func (service *Service) mergeInventory(ctx context.Context, drives map[string]*p
 				SourceRole: &role, Folder: folder.Folder, InputRevision: observation.DiscoveryRevision,
 				VideoCount: folder.VideoCount, EstimatedOutputBytes: folder.InputBytes, Videos: videos,
 			}
+			if context := contexts[folder.Folder]; context != nil {
+				view.CopyCandidates = context.CopyCandidates
+				view.EventPreview = context.Preview
+				for i, v := range videos {
+					switch {
+					case v.MatchedOriginal != "":
+						videos[i].ContextEvidence = &ContextEvidence{"MATCHED_PROXY", v.MatchedOriginal}
+					case organization.CameraProxyDirectory(folder.Folder):
+						videos[i].ContextEvidence = &ContextEvidence{"UNPAIRED_PROXY", folder.Folder}
+					case context.EditorialWitness != "":
+						videos[i].ContextEvidence = &ContextEvidence{"EDITORIAL_INPUT", context.EditorialWitness}
+					}
+				}
+			}
 			if preview, previewErr := archive.PreviewFlatPackage(previewDate, folder.Folder, originalNames, folder.VideoCount); previewErr == nil {
 				view.ExpectedResult = preview
 			}
@@ -627,6 +646,10 @@ func (service *Service) mergeInventory(ctx context.Context, drives map[string]*p
 				scoped.EstimatedOutputBytes = folder.InputBytes
 				scoped.Videos = append([]SourceVideoView(nil), videos...)
 				if scoped.InputRevision == observation.DiscoveryRevision {
+					scoped.CopyCandidates = view.CopyCandidates
+					if scoped.DecisionID == "" {
+						scoped.EventPreview = view.EventPreview
+					}
 					if scoped.SourceRole == nil {
 						scoped.SourceRole = view.SourceRole
 					}
@@ -649,6 +672,7 @@ func (service *Service) mergeInventory(ctx context.Context, drives map[string]*p
 				} else {
 					for i := range scoped.Videos {
 						scoped.Videos[i].MatchedOriginal = ""
+						scoped.Videos[i].ContextEvidence = nil
 					}
 				}
 				state.folders[folder.Folder] = scoped

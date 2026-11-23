@@ -51,6 +51,8 @@ type MediaAnalyzer interface {
 }
 
 type Request struct {
+	PolicyVersion     uint32
+	Contexts          map[string]organization.EventContext
 	ArchiveRunID      string
 	IdempotencyKey    string
 	InputRevision     uint64
@@ -219,6 +221,10 @@ func (coordinator *Coordinator) ExecuteInspected(ctx context.Context, request Re
 }
 
 func (coordinator *Coordinator) settleFolders(ctx context.Context, request Request, receipt organization.ArchiveOrganizationReceipt, folderInputs map[string][]organization.Input) (Result, error) {
+	policy := organization.DefaultPolicy()
+	if request.PolicyVersion != 0 {
+		policy.Version = request.PolicyVersion
+	}
 	originals := make(organization.CameraOriginalIndex)
 	for _, inputs := range folderInputs {
 		for _, input := range inputs {
@@ -228,10 +234,10 @@ func (coordinator *Coordinator) settleFolders(ctx context.Context, request Reque
 	for _, folderID := range request.FolderScope.FolderIDs() {
 		inputs := folderInputs[folderID]
 		decision, err := organization.Classify(organization.AutoRequest{
-			CameraOriginals:  originals,
+			CameraOriginals: originals, EventContext: request.Contexts[folderID],
 			DecisionID:       stableID("DECISION", request.ArchiveRunID, request.Session.Session.ID, strconv.FormatUint(request.InputRevision, 10), folderID),
 			WorkspaceDriveID: request.Session.Session.WorkspaceDriveID, Folder: folderID,
-			InputRevision: request.InputRevision, Inputs: inputs, Policy: organization.DefaultPolicy(), DecidedAt: request.StartedAt,
+			InputRevision: request.InputRevision, Inputs: inputs, Policy: policy, DecidedAt: request.StartedAt,
 		})
 		if err != nil {
 			return Result{}, err

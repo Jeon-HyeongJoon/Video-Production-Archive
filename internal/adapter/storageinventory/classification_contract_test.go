@@ -1,5 +1,3 @@
-//go:build classification_contract
-
 package storageinventory
 
 import (

@@ -1,12 +1,12 @@
-//go:build classification_contract
-
 package organization
 
 import (
 	"encoding/json"
 	"path"
+	"slices"
 	"testing"
 	"time"
+	"videoarchive/internal/core/worker"
 
 	"videoarchive/internal/core/vocabulary"
 )
@@ -28,7 +28,7 @@ func TestV3RoutesOnlyRoleSupportedInputs(t *testing.T) {
 		{"미지/묶음", []string{"C0001.MP4", "C0002.MP4"}, 40_000, 30_000_000, 3, hold, ""},
 		{"미지/단독", []string{"event.mp4"}, 1_500_000, 6_000_000, 3, hold, ""},
 		{"미지/장시간", []string{"event.mp4"}, 1_500_000, 30_000_000, 3, hold, ""},
-		{"복구/영상_mov/PGM", []string{"event.mp4"}, 1_500_000, 30_000_000, 3, hold, ""},
+		{"37년도/영상_mov/PGM", []string{"event.mp4"}, 1_500_000, 30_000_000, 3, hold, ""},
 		{"편집/Output/PGM", []string{"event.mp4"}, 1_500_000, 30_000_000, 3, hold, ""},
 		{"미지/장시간", []string{"event.mp4"}, 1_500_000, 30_000_000, 2, vocabulary.OrganizationRenderRecordings, "archive-1080p-6mbps@v1"},
 	} {
@@ -95,6 +95,33 @@ func TestV3PreservesEachCorroboratedPositionRecording(t *testing.T) {
 			}
 		} else if d.Disposition != vocabulary.OrganizationHold || len(d.Actions) > 0 {
 			t.Errorf("unverified position rendered: %+v", tc)
+		}
+	}
+}
+
+// Once the selection has been pinned, losing the first or last file must not
+// silently publish a shorter, still-consecutive sequence.
+func TestPinnedListingHoldsAMissingEndCutWithItsInspectionEvidence(t *testing.T) {
+	const folder = "391216-행사/VJ"
+	var files []worker.MediaFileObservation
+	var inputs []Input
+	for _, name := range []string{"C0001.MP4", "C0002.MP4", "C0003.MP4"} {
+		v := organizationInput(name, path.Join(folder, name), 40_000, 30_000_000, 1920, 1080)
+		files = append(files, worker.MediaFileObservation{FileName: name, RelativePath: v.RelativePath, SizeBytes: uint64(v.Inspection.SizeBytes)})
+		inputs = append(inputs, v)
+	}
+	ctx := InspectListing(worker.StorageObservation{DiscoveryRevision: 7, DiscoveryState: vocabulary.FolderDiscoveryReady, Folders: []worker.MediaFolderObservation{{Folder: folder, VideoCount: 3, Videos: files}}})[folder]
+	policy := DefaultPolicy()
+	policy.Version = DrivePolicyVersion
+	for _, remaining := range [][]Input{inputs[1:], inputs[:2]} {
+		d, err := Classify(AutoRequest{DecisionID: "D", WorkspaceDriveID: "W", Folder: folder, InputRevision: 7, EventContext: ctx.EventContext, Inputs: remaining, Policy: policy, DecidedAt: time.Unix(1, 0)})
+		if err != nil || d.Disposition != vocabulary.OrganizationHold || d.ClassificationEvidence == nil || len(d.ClassificationEvidence.Files) != 2 {
+			t.Fatalf("incomplete card: %+v %v", d, err)
+		}
+		for i, ev := range d.ClassificationEvidence.Files {
+			if ev.ReasonCode != "LISTING_CHANGED" || ev.NextCheck != "RESCAN_AND_COMPARE_CARD_LIST" || !slices.Contains(ev.Basis, remaining[i].Inspection.ID) {
+				t.Fatalf("missing evidence: %+v", ev)
+			}
 		}
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"io/fs"
 	"os"
@@ -190,6 +191,7 @@ func cloneObservation(observation worker.StorageObservation) worker.StorageObser
 		gap := *observation.DiscoveryGap
 		observation.DiscoveryGap = &gap
 	}
+	observation.Directories = worker.CloneDirectories(observation.Directories)
 	observation.Folders = append([]worker.MediaFolderObservation(nil), observation.Folders...)
 	return observation
 }
@@ -253,6 +255,17 @@ func observeRoot(ctx context.Context, observation worker.StorageObservation, roo
 	if root == nil || capacity == 0 || free > capacity {
 		return observation, ErrObservationFailed
 	}
+	observation.CapacityBytes = capacity
+	observation.FreeBytes = free
+	return scanContents(ctx, observation, root, report)
+}
+
+// ScanSource returns the same versioned inventory used by an attached Worker.
+func ScanSource(ctx context.Context, root *archive.ReadOnlyStorageRoot) (worker.StorageObservation, error) {
+	return scanContents(ctx, worker.StorageObservation{}, root, nil)
+}
+
+func scanContents(ctx context.Context, observation worker.StorageObservation, root inventoryRoot, report func([]worker.MediaFolderObservation)) (worker.StorageObservation, error) {
 	scanner, err := mediafolder.NewScanner(root)
 	if err != nil {
 		return observation, ErrObservationFailed
@@ -261,14 +274,19 @@ func observeRoot(ctx context.Context, observation worker.StorageObservation, roo
 	if report != nil {
 		progress = func(folders []mediafolder.Folder) { report(summarizeFolders(folders)) }
 	}
-	folders, err := scanner.DiscoverWithProgressContext(ctx, progress)
+	var directories []worker.DirectoryObservation
+	folders, err := scanner.DiscoverInventory(ctx, progress, func(folder string, extensions map[string]int) {
+		if folder == "" {
+			folder = "."
+		}
+		directories = append(directories, worker.DirectoryObservation{RelativePath: folder, DirectExtensions: extensions})
+	})
 	if err != nil {
 		var missing *mediafolder.IncompleteScan
 		if errors.As(err, &missing) {
 			observation.DiscoveryState = vocabulary.FolderDiscoveryFailed
 			observation.Connected = true
-			observation.CapacityBytes = capacity
-			observation.FreeBytes = free
+
 			gap := &worker.DiscoveryGap{Count: missing.Count, FirstFolder: missing.FirstFolder, Cause: missing.Cause}
 			if !gap.Valid() {
 				digest := sha256.Sum256([]byte(missing.FirstFolder))
@@ -280,9 +298,13 @@ func observeRoot(ctx context.Context, observation worker.StorageObservation, roo
 	}
 	observation.Connected = true
 	observation.DiscoveryState = vocabulary.FolderDiscoveryReady
-	observation.CapacityBytes = capacity
-	observation.FreeBytes = free
+
+	sort.Slice(directories, func(i, j int) bool { return directories[i].RelativePath < directories[j].RelativePath })
+	observation.Directories = directories
 	digest := sha256.New()
+	if err := json.NewEncoder(digest).Encode(directories); err != nil {
+		return observation, err
+	}
 	for _, folder := range folders {
 		if err := ctx.Err(); err != nil {
 			return observation, err

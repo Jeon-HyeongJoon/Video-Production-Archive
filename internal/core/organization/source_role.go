@@ -92,10 +92,10 @@ func AssessSourceRole(folder string, names []string) SourceRoleEvidence {
 	parts := strings.Split(p, "/")
 	last := parts[len(parts)-1]
 	seg := map[string]bool{}
-	recovery := false
+	formatGroup := false
 	for _, s := range parts {
 		seg[strings.Trim(s, " -_#().[]")] = true
-		recovery = recovery || strings.HasPrefix(s, "영상_") || s == "디렉터리 완전한 파일"
+		formatGroup = formatGroup || strings.HasPrefix(s, "영상_") || s == "디렉터리 완전한 파일"
 	}
 	evidence := func(role, strength, basis string) SourceRoleEvidence {
 		return SourceRoleEvidence{Role: role, Strength: strength, Basis: basis}
@@ -103,8 +103,8 @@ func AssessSourceRole(folder string, names []string) SourceRoleEvidence {
 	if CameraProxyDirectory(p) {
 		return evidence(RoleProxy, "REVIEW", "카메라 SUB 경로, 동일 카드의 CLIP 원본 대조 필요")
 	}
-	if recovery {
-		return evidence(RoleUnresolved, "REVIEW", "복구·형식별 폴더로 행사와 컷 순서 미확인")
+	if formatGroup {
+		return evidence(RoleUnresolved, "REVIEW", "형식별 묶음·일반 폴더명으로 행사와 컷 순서 미확인")
 	}
 	if seg["output"] || seg["렌더링"] || seg["자료"] || seg["서류"] || strings.Contains(p, "참고자료") || strings.Contains(p, ".fcpbundle/") || strings.Contains(p, "(footage)") || strings.Contains(p, ". 서류") {
 		return evidence(RoleEditorial, roleExplicit, "편집 출력·프로젝트·참고자료 경로")
@@ -115,7 +115,7 @@ func AssessSourceRole(folder string, names []string) SourceRoleEvidence {
 	for _, name := range names {
 		s := strings.ToLower(name)
 		if strings.HasPrefix(s, "파일명 손실된 파일") {
-			return evidence(RoleUnresolved, "REVIEW", "손실된 원본 파일명으로 행사와 컷 순서 미확인")
+			return evidence(RoleUnresolved, "REVIEW", "파일명에 손실 표기, 행사와 컷 순서 미확인")
 		}
 		allCamera = allCamera && rawCameraName.MatchString(s)
 		anyEdited = anyEdited || editedLabel.MatchString(s)

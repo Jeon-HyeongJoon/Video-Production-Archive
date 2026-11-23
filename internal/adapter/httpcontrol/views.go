@@ -110,39 +110,40 @@ type archivistHostStatusView struct {
 }
 
 type driveView struct {
-	WorkspaceDriveID           string                   `json:"workspace_drive_id"`
-	ConnectionState            string                   `json:"connection_state"`
-	ConnectionObservedAt       time.Time                `json:"connection_observed_at,omitempty"`
-	ConnectionWorkerID         string                   `json:"connection_worker_id,omitempty"`
-	ArchiveRunID               string                   `json:"archive_run_id"`
-	ArchiveRunRevision         uint64                   `json:"archive_run_revision"`
-	CandidateRevision          uint64                   `json:"candidate_revision"`
-	FolderDiscoveryRevision    uint64                   `json:"folder_discovery_revision"`
-	DiscoveryGap               *worker.DiscoveryGap     `json:"discovery_gap,omitempty"`
-	FolderDiscoveryState       string                   `json:"folder_discovery_state"`
-	SessionID                  string                   `json:"session_id"`
-	SelectionSessionID         string                   `json:"selection_session_id"`
-	WorkerID                   string                   `json:"worker_id"`
-	SourceVolumeID             string                   `json:"source_volume_id"`
-	SourceStorageID            string                   `json:"source_storage_id"`
-	ArchiveStorageID           string                   `json:"archive_storage_id"`
-	State                      string                   `json:"state"`
-	ArchiveRunState            string                   `json:"archive_run_state"`
-	InputRevision              uint64                   `json:"input_revision"`
-	FileCount                  int                      `json:"file_count"`
-	FolderCount                int                      `json:"folder_count"`
-	StageOneRemaining          int                      `json:"stage_one_remaining"`
-	StageTwoRemaining          int                      `json:"stage_two_remaining"`
-	HoldCount                  int                      `json:"hold_count"`
-	EligibleTranscriptionCount int                      `json:"eligible_transcription_count"`
-	CatalogRowCount            int                      `json:"catalog_row_count"`
-	CatalogUpdatedAt           time.Time                `json:"catalog_updated_at,omitempty"`
-	Folders                    []driveFolderView        `json:"folders"`
-	DiscoveredFileCount        int                      `json:"discovered_file_count"`
-	DiscoveredFolderCount      int                      `json:"discovered_folder_count"`
-	DiscoveredFolders          []driveFolderView        `json:"discovered_folders"`
-	StorageCandidates          []driveStorageView       `json:"storage_candidates"`
-	CompletedWork              []driveCompletedWorkView `json:"completed_work"`
+	WorkspaceDriveID           string                        `json:"workspace_drive_id"`
+	ConnectionState            string                        `json:"connection_state"`
+	ConnectionObservedAt       time.Time                     `json:"connection_observed_at,omitempty"`
+	ConnectionWorkerID         string                        `json:"connection_worker_id,omitempty"`
+	ArchiveRunID               string                        `json:"archive_run_id"`
+	ArchiveRunRevision         uint64                        `json:"archive_run_revision"`
+	CandidateRevision          uint64                        `json:"candidate_revision"`
+	FolderDiscoveryRevision    uint64                        `json:"folder_discovery_revision"`
+	DiscoveryGap               *worker.DiscoveryGap          `json:"discovery_gap,omitempty"`
+	FolderDiscoveryState       string                        `json:"folder_discovery_state"`
+	SessionID                  string                        `json:"session_id"`
+	SelectionSessionID         string                        `json:"selection_session_id"`
+	WorkerID                   string                        `json:"worker_id"`
+	SourceVolumeID             string                        `json:"source_volume_id"`
+	SourceStorageID            string                        `json:"source_storage_id"`
+	ArchiveStorageID           string                        `json:"archive_storage_id"`
+	State                      string                        `json:"state"`
+	ArchiveRunState            string                        `json:"archive_run_state"`
+	InputRevision              uint64                        `json:"input_revision"`
+	FileCount                  int                           `json:"file_count"`
+	FolderCount                int                           `json:"folder_count"`
+	StageOneRemaining          int                           `json:"stage_one_remaining"`
+	StageTwoRemaining          int                           `json:"stage_two_remaining"`
+	HoldCount                  int                           `json:"hold_count"`
+	EligibleTranscriptionCount int                           `json:"eligible_transcription_count"`
+	CatalogRowCount            int                           `json:"catalog_row_count"`
+	CatalogUpdatedAt           time.Time                     `json:"catalog_updated_at,omitempty"`
+	Folders                    []driveFolderView             `json:"folders"`
+	DiscoveredFileCount        int                           `json:"discovered_file_count"`
+	DiscoveredFolderCount      int                           `json:"discovered_folder_count"`
+	DiscoveredDirectories      []worker.DirectoryObservation `json:"discovered_directories,omitempty"`
+	DiscoveredFolders          []driveFolderView             `json:"discovered_folders"`
+	StorageCandidates          []driveStorageView            `json:"storage_candidates"`
+	CompletedWork              []driveCompletedWorkView      `json:"completed_work"`
 }
 
 type driveCompletedWorkView struct {
@@ -176,31 +177,34 @@ type driveStorageView struct {
 }
 
 type driveFolderView struct {
-	SourceRole           *organization.SourceRoleEvidence `json:"source_role,omitempty"`
-	Folder               string                           `json:"folder"`
-	DecisionID           string                           `json:"decision_id"`
-	InputRevision        uint64                           `json:"input_revision"`
-	DecisionSequence     uint64                           `json:"decision_sequence"`
-	Disposition          string                           `json:"disposition"`
-	ProfileReference     string                           `json:"profile_reference,omitempty"`
-	HoldReasons          []string                         `json:"hold_reasons"`
-	WorkOptions          []driveWorkOptionView            `json:"work_options"`
-	Videos               []driveSourceVideoView           `json:"videos"`
-	VideoCount           int                              `json:"video_count"`
-	EstimatedOutputBytes uint64                           `json:"estimated_output_bytes"`
-	ExpectedResult       *driveExpectedResultView         `json:"expected_result,omitempty"`
-	JobID                string                           `json:"job_id,omitempty"`
-	TranscriptionJobID   string                           `json:"transcription_job_id,omitempty"`
-	CurrentStepID        string                           `json:"current_step_id"`
-	StepState            string                           `json:"step_state"`
-	Stages               []driveStageView                 `json:"stages"`
-	ArchivePackageID     string                           `json:"archive_package_id,omitempty"`
-	ArchiveDate          string                           `json:"archive_date,omitempty"`
-	ArchiveDisplayName   string                           `json:"archive_display_name,omitempty"`
-	ArchiveVideoFileName string                           `json:"archive_video_file_name,omitempty"`
-	ArchiveState         string                           `json:"archive_state,omitempty"`
-	CanAddTranscription  bool                             `json:"can_add_transcription"`
-	TranscriptQualities  []transcriptQualityView          `json:"transcript_qualities"`
+	ClassificationEvidence *organization.ClassificationEvidence `json:"classification_evidence,omitempty"`
+	EventPreview           *organization.EventPreview           `json:"event_preview,omitempty"`
+	CopyCandidates         []string                             `json:"copy_candidates,omitempty"`
+	SourceRole             *organization.SourceRoleEvidence     `json:"source_role,omitempty"`
+	Folder                 string                               `json:"folder"`
+	DecisionID             string                               `json:"decision_id"`
+	InputRevision          uint64                               `json:"input_revision"`
+	DecisionSequence       uint64                               `json:"decision_sequence"`
+	Disposition            string                               `json:"disposition"`
+	ProfileReference       string                               `json:"profile_reference,omitempty"`
+	HoldReasons            []string                             `json:"hold_reasons"`
+	WorkOptions            []driveWorkOptionView                `json:"work_options"`
+	Videos                 []driveSourceVideoView               `json:"videos"`
+	VideoCount             int                                  `json:"video_count"`
+	EstimatedOutputBytes   uint64                               `json:"estimated_output_bytes"`
+	ExpectedResult         *driveExpectedResultView             `json:"expected_result,omitempty"`
+	JobID                  string                               `json:"job_id,omitempty"`
+	TranscriptionJobID     string                               `json:"transcription_job_id,omitempty"`
+	CurrentStepID          string                               `json:"current_step_id"`
+	StepState              string                               `json:"step_state"`
+	Stages                 []driveStageView                     `json:"stages"`
+	ArchivePackageID       string                               `json:"archive_package_id,omitempty"`
+	ArchiveDate            string                               `json:"archive_date,omitempty"`
+	ArchiveDisplayName     string                               `json:"archive_display_name,omitempty"`
+	ArchiveVideoFileName   string                               `json:"archive_video_file_name,omitempty"`
+	ArchiveState           string                               `json:"archive_state,omitempty"`
+	CanAddTranscription    bool                                 `json:"can_add_transcription"`
+	TranscriptQualities    []transcriptQualityView              `json:"transcript_qualities"`
 }
 
 type driveExpectedResultView struct {
@@ -214,6 +218,7 @@ type driveExpectedResultView struct {
 }
 
 type driveSourceVideoView struct {
+	ContextEvidence *archiveintakeworkspace.ContextEvidence   `json:"context_evidence,omitempty"`
 	Measurement     *archiveintakeworkspace.SourceMeasurement `json:"measurement,omitempty"`
 	MatchedOriginal string                                    `json:"matched_original,omitempty"`
 	MetadataHint    string                                    `json:"metadata_hint,omitempty"`

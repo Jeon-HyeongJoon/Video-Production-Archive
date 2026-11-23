@@ -67,13 +67,18 @@ func (scanner *Scanner) DiscoverWithProgress(report func([]Folder)) ([]Folder, e
 // spaced geometrically after the first 64 changed directories so a large
 // source does not repeatedly copy its entire inventory at a linear cadence.
 func (scanner *Scanner) DiscoverWithProgressContext(ctx context.Context, report func([]Folder)) ([]Folder, error) {
+	return scanner.DiscoverInventory(ctx, report, nil)
+}
+
+// DiscoverInventory observes all visible directories during the same protected walk.
+func (scanner *Scanner) DiscoverInventory(ctx context.Context, report func([]Folder), directoryFacts func(string, map[string]int)) ([]Folder, error) {
 	if ctx == nil {
 		return nil, ErrScanFailed
 	}
 	grouped := make(map[string][]string)
 	changedDirectories, lastReported, nextReportAt := 0, 0, 1
 	var missing IncompleteScan
-	if err := scanner.walk(ctx, "", grouped, &missing, report, &changedDirectories, &lastReported, &nextReportAt); err != nil {
+	if err := scanner.walk(ctx, "", grouped, &missing, report, &changedDirectories, &lastReported, &nextReportAt, directoryFacts); err != nil {
 		return nil, err
 	}
 	if report != nil && changedDirectories > lastReported {
@@ -96,7 +101,7 @@ func snapshot(grouped map[string][]string) []Folder {
 	return folders
 }
 
-func (scanner *Scanner) walk(ctx context.Context, directory string, grouped map[string][]string, missing *IncompleteScan, report func([]Folder), changedDirectories, lastReported, nextReportAt *int) error {
+func (scanner *Scanner) walk(ctx context.Context, directory string, grouped map[string][]string, missing *IncompleteScan, report func([]Folder), changedDirectories, lastReported, nextReportAt *int, directoryFacts func(string, map[string]int)) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -110,6 +115,10 @@ func (scanner *Scanner) walk(ctx context.Context, directory string, grouped map[
 	}
 	children := make([]string, 0, len(entries))
 	changed := false
+	var extensions map[string]int
+	if directoryFacts != nil {
+		extensions = make(map[string]int)
+	}
 	for _, entry := range entries {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -133,7 +142,14 @@ func (scanner *Scanner) walk(ctx context.Context, directory string, grouped map[
 			children = append(children, relative)
 			continue
 		}
-		if !entry.Type().IsRegular() || !supported(path.Ext(entry.Name())) {
+		if !entry.Type().IsRegular() {
+			continue
+		}
+		ext := strings.ToLower(path.Ext(entry.Name()))
+		if extensions != nil {
+			extensions[ext]++
+		}
+		if !supported(ext) {
 			continue
 		}
 		folder := path.Dir(relative)
@@ -142,6 +158,9 @@ func (scanner *Scanner) walk(ctx context.Context, directory string, grouped map[
 		}
 		grouped[folder] = append(grouped[folder], relative)
 		changed = true
+	}
+	if directoryFacts != nil {
+		directoryFacts(directory, extensions)
 	}
 	if changed && report != nil {
 		(*changedDirectories)++
@@ -156,7 +175,7 @@ func (scanner *Scanner) walk(ctx context.Context, directory string, grouped map[
 		}
 	}
 	for _, child := range children {
-		if err := scanner.walk(ctx, child, grouped, missing, report, changedDirectories, lastReported, nextReportAt); err != nil {
+		if err := scanner.walk(ctx, child, grouped, missing, report, changedDirectories, lastReported, nextReportAt, directoryFacts); err != nil {
 			return err
 		}
 	}

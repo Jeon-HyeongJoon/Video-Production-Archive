@@ -3,6 +3,8 @@ package worker
 import (
 	"errors"
 	"io/fs"
+	"maps"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -88,7 +90,13 @@ func (gap DiscoveryGap) Valid() bool {
 	return gap.Count > 0 && fs.ValidPath(gap.FirstFolder) && gap.FirstFolder != "." && !strings.ContainsAny(gap.FirstFolder, "\\:\r\n") && (gap.Cause == "DIRECTORY_PERMISSION_DENIED" || gap.Cause == "DIRECTORY_READ_FAILED")
 }
 
+type DirectoryObservation struct {
+	RelativePath     string         `json:"relative_path"`
+	DirectExtensions map[string]int `json:"direct_extensions"`
+}
+
 type StorageObservation struct {
+	Directories       []DirectoryObservation          `json:"directories,omitempty"`
 	DiscoveryGap      *DiscoveryGap                   `json:"discovery_gap,omitempty"`
 	StorageID         string                          `json:"storage_id"`
 	Connected         bool                            `json:"connected"`
@@ -98,6 +106,14 @@ type StorageObservation struct {
 	FreeBytes         uint64                          `json:"free_bytes"`
 	DiscoveryRevision uint64                          `json:"discovery_revision"`
 	Folders           []MediaFolderObservation        `json:"folders"`
+}
+
+func CloneDirectories(src []DirectoryObservation) []DirectoryObservation {
+	dirs := slices.Clone(src)
+	for i := range dirs {
+		dirs[i].DirectExtensions = maps.Clone(src[i].DirectExtensions)
+	}
+	return dirs
 }
 
 type runtimeState struct {
@@ -387,6 +403,7 @@ func cloneStorageObservations(source []StorageObservation) []StorageObservation 
 			gap := *observation.DiscoveryGap
 			copy.DiscoveryGap = &gap
 		}
+		copy.Directories = CloneDirectories(observation.Directories)
 		copy.Folders = append([]MediaFolderObservation(nil), observation.Folders...)
 		for index := range copy.Folders {
 			copy.Folders[index].Videos = append([]MediaFileObservation(nil), observation.Folders[index].Videos...)
@@ -441,6 +458,21 @@ func validateMetrics(metrics Metrics) error {
 			return ErrInvalidSnapshot
 		}
 		seenStorages[observation.StorageID] = true
+		if len(observation.Directories) > 0 && observation.DiscoveryState != vocabulary.FolderDiscoveryReady {
+			return ErrInvalidSnapshot
+		}
+		seenDirs := make(map[string]bool, len(observation.Directories))
+		for _, d := range observation.Directories {
+			if (d.RelativePath != "." && (!fs.ValidPath(d.RelativePath) || strings.ContainsAny(d.RelativePath, "\\:\r\n"))) || seenDirs[d.RelativePath] {
+				return ErrInvalidSnapshot
+			}
+			seenDirs[d.RelativePath] = true
+			for ext, count := range d.DirectExtensions {
+				if count <= 0 || (ext != "" && (!strings.HasPrefix(ext, ".") || strings.ContainsAny(ext, "/\\") || ext != strings.ToLower(ext))) {
+					return ErrInvalidSnapshot
+				}
+			}
+		}
 		seenFolders := make(map[string]bool, len(observation.Folders))
 		for _, folder := range observation.Folders {
 			if folder.Folder == "" || folder.VideoCount <= 0 || seenFolders[folder.Folder] {

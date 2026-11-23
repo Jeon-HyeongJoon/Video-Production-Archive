@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"videoarchive/internal/adapter/storageinventory"
 	appintake "videoarchive/internal/application/archiveintake"
 	"videoarchive/internal/core/archive"
 	coreintake "videoarchive/internal/core/archiveintake"
@@ -137,12 +138,28 @@ func (service *StartService) Start(ctx context.Context, request StartRequest) (R
 		return Result{}, ErrStartRejected
 	}
 
+	folderScope, err := organization.FixFolderScope(organization.FixFolderScopeRequest{
+		DiscoveryRevision: request.InputRevision, DiscoveredFolderIDs: request.FolderIDs, SelectAll: true,
+	})
+	if err != nil {
+		return Result{}, errors.Join(ErrStartRejected, err)
+	}
 	var sessionAccess *appintake.SessionAccess
 	stored, sessionErr := service.intakeRepository.Session(ctx, request.SessionID)
 	if sessionErr == nil {
 		if stored.VolumeID != candidate.VolumeID || stored.CandidateRevision != candidate.Revision || stored.StorageID != candidate.StorageID ||
 			stored.WorkerID != candidate.WorkerID {
 			return Result{}, ErrStartRejected
+		}
+		if receipt, found, err := service.receipts.FindReceipt(ctx, request.IdempotencyKey); err != nil {
+			return Result{}, err
+		} else if found {
+			expected := requestDigest(Request{ArchiveRunID: request.ArchiveRunID, InputRevision: request.InputRevision,
+				Session: &appintake.SessionAccess{Session: stored}, ArchiveStorageID: archiveStorage.StorageID, FolderScope: folderScope})
+			if receipt.InputDigest != expected {
+				return Result{}, command.ErrIdempotencyConflict
+			}
+			return Result{Receipt: receipt, Replayed: true}, nil
 		}
 		root, err := archive.OpenReadOnlyStorageRoot(candidate.Root)
 		if err != nil {
@@ -167,17 +184,20 @@ func (service *StartService) Start(ctx context.Context, request StartRequest) (R
 	if err != nil {
 		return Result{}, err
 	}
-	folderScope, err := organization.FixFolderScope(organization.FixFolderScopeRequest{
-		DiscoveryRevision: request.InputRevision, DiscoveredFolderIDs: request.FolderIDs, SelectAll: true,
-	})
-	if err != nil {
+	inventory, err := storageinventory.ScanSource(ctx, sessionAccess.Root)
+	if err != nil || inventory.DiscoveryRevision != request.InputRevision {
 		return Result{}, errors.Join(ErrStartRejected, err)
+	}
+	contexts := selectedContexts(inventory, folderScope)
+	if len(contexts) != len(folderScope.FolderIDs()) {
+		return Result{}, ErrStartRejected
 	}
 	if _, err := service.archiveRuns.Execute(command.Envelope{
 		CommandID: request.ArchiveRunID + ":create", CommandType: archiverun.CreateCommand,
 		Actor: request.SelectedBy, RequestedVia: selectionRequestedVia(request.SelectedBy), TargetID: request.ArchiveRunID, ExpectedRevision: 0,
 		IdempotencyKey: request.IdempotencyKey + ":archive-run",
 		Parameters: map[string]any{
+			"classification_policy": organization.DrivePolicyVersion, "classification_contexts": contexts,
 			"start_idempotency_key": request.IdempotencyKey,
 			"worker_id":             candidate.WorkerID, "source_storage_id": candidate.StorageID,
 			"source_volume_id": candidate.VolumeID, "source_physical_device_id": candidate.PhysicalDeviceID,
@@ -190,7 +210,7 @@ func (service *StartService) Start(ctx context.Context, request StartRequest) (R
 	}
 	return coordinator.Execute(ctx, Request{
 		ArchiveRunID: request.ArchiveRunID, IdempotencyKey: request.IdempotencyKey, InputRevision: request.InputRevision,
-		FolderScope: folderScope, Session: sessionAccess, ArchiveStorageID: archiveStorage.StorageID,
+		PolicyVersion: organization.DrivePolicyVersion, Contexts: contexts, FolderScope: folderScope, Session: sessionAccess, ArchiveStorageID: archiveStorage.StorageID,
 		ActorID: request.Actor.ID, StartedAt: request.StartedAt,
 		ExecutionPriority: resource.Immediate,
 	})
