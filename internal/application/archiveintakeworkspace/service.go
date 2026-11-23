@@ -215,7 +215,7 @@ func (service *Service) Projection(ctx context.Context) ([]DriveView, error) {
 				}
 			}
 			view := FolderView{
-				Folder: coordinated.Folder, DecisionID: decision.ID, InputRevision: decision.InputRevision,
+				SourceRole: decision.SourceRole, Folder: coordinated.Folder, DecisionID: decision.ID, InputRevision: decision.InputRevision,
 				DecisionSequence: decision.Sequence, Disposition: decision.Disposition,
 				ProfileReference:     decision.ProfileReference,
 				HoldReasons:          append([]vocabulary.OrganizationHoldReason(nil), decision.HoldReasons...),
@@ -586,6 +586,14 @@ func (service *Service) mergeInventory(ctx context.Context, drives map[string]*p
 		state.view.DiscoveryGap = observation.DiscoveryGap
 		state.view.FolderDiscoveryRevision = observation.DiscoveryRevision
 		state.view.DiscoveredFileCount = 0
+		originals := make(organization.CameraOriginalIndex)
+		if observation.DiscoveryState == vocabulary.FolderDiscoveryReady {
+			for _, folder := range observation.Folders {
+				for _, video := range folder.Videos {
+					originals.Observe(video.RelativePath, video.SizeBytes)
+				}
+			}
+		}
 		for _, folder := range observation.Folders {
 			videos := make([]SourceVideoView, 0, len(folder.Videos))
 			originalNames := make([]string, 0, len(folder.Videos))
@@ -596,8 +604,18 @@ func (service *Service) mergeInventory(ctx context.Context, drives map[string]*p
 				})
 				originalNames = append(originalNames, video.FileName)
 			}
+			role := organization.AssessSourceRole(folder.Folder, originalNames)
+			if role.Role == organization.RoleProxy {
+				for i, video := range videos {
+					if original := originals.Match(video.RelativePath, video.SizeBytes); original != "" {
+						videos[i].MatchedOriginal = original
+						role.MatchedProxies++
+					}
+				}
+				role.UnpairedProxies = folder.VideoCount - role.MatchedProxies
+			}
 			view := FolderView{
-				Folder: folder.Folder, InputRevision: observation.DiscoveryRevision,
+				SourceRole: &role, Folder: folder.Folder, InputRevision: observation.DiscoveryRevision,
 				VideoCount: folder.VideoCount, EstimatedOutputBytes: folder.InputBytes, Videos: videos,
 			}
 			if preview, previewErr := archive.PreviewFlatPackage(previewDate, folder.Folder, originalNames, folder.VideoCount); previewErr == nil {
@@ -607,7 +625,32 @@ func (service *Service) mergeInventory(ctx context.Context, drives map[string]*p
 			if scoped, exists := state.folders[folder.Folder]; exists && state.view.ArchiveRunID != "" {
 				scoped.VideoCount = folder.VideoCount
 				scoped.EstimatedOutputBytes = folder.InputBytes
-				scoped.Videos = videos
+				scoped.Videos = append([]SourceVideoView(nil), videos...)
+				if scoped.InputRevision == observation.DiscoveryRevision {
+					if scoped.SourceRole == nil {
+						scoped.SourceRole = view.SourceRole
+					}
+					inspections := make(map[string]ClassificationAssetView, len(scoped.ClassificationAssets))
+					for _, asset := range scoped.ClassificationAssets {
+						inspections[asset.RelativePath] = asset
+					}
+					for i, video := range scoped.Videos {
+						asset, ok := inspections[video.RelativePath]
+						if !ok || len(asset.VideoStreams) == 0 {
+							continue
+						}
+						primary := asset.VideoStreams[0]
+						if scoped.SourceRole != nil && scoped.SourceRole.Role == organization.RoleProxy {
+							scoped.Videos[i].MatchedOriginal = asset.MatchedOriginal
+						}
+						scoped.Videos[i].MetadataHint = asset.MetadataHint
+						scoped.Videos[i].Measurement = &SourceMeasurement{InspectionID: asset.InspectionID, Width: primary.Width, Height: primary.Height, DurationMillis: asset.DurationMillis, VideoBitRate: primary.BitRate}
+					}
+				} else {
+					for i := range scoped.Videos {
+						scoped.Videos[i].MatchedOriginal = ""
+					}
+				}
 				state.folders[folder.Folder] = scoped
 			}
 			state.view.DiscoveredFileCount += folder.VideoCount
@@ -764,6 +807,7 @@ func classificationAssets(decision organization.OrganizationDecision) []Classifi
 	for _, input := range decision.Inputs {
 		inspection := input.Inspection
 		assets = append(assets, ClassificationAssetView{
+			MatchedOriginal: input.MatchedOriginal, InspectionID: inspection.ID, MetadataHint: organization.SourceMetadataHint(decision.Folder, inspection),
 			OriginalAssetID: input.OriginalAssetID, RelativePath: input.RelativePath,
 			Checksum: inspection.OriginalChecksum, DurationMillis: inspection.DurationMillis,
 			SizeBytes: inspection.SizeBytes, BitRate: inspection.BitRate,

@@ -2188,7 +2188,7 @@
     {
       "id": "ORG-002",
       "design": "deterministic-media-folder-classification",
-      "statement": "자동 OrganizationDecision은 versioned policy와 고정된 파일명·MediaInspection 입력만 사용해 하나의 판정 또는 구조화된 HOLD를 결정해야 한다.",
+      "statement": "자동 OrganizationDecision은 고정된 입력 revision의 상대 폴더·파일·MediaInspection과 versioned policy로 하나의 판정 또는 구조화된 HOLD를 결정해야 한다.",
       "given": "같은 MediaFolder 입력 revision과 policy version 및 누락·혼합·모호한 여러 영상 조합이 있다.",
       "when": "Archivist와 Provider 없이 자동 분류를 반복 실행한다.",
       "then": "동일 입력은 byte-equivalent 판정을 반환하고 규칙이 하나의 결과를 만들지 못한 조합은 하나 이상의 OrganizationHoldReason을 가진 HOLD이며 렌더·STT 계획이 없다.",
@@ -4104,6 +4104,42 @@
       "test_name": "TestArchivistReadsDurableCommandAttemptsWithOneCorrelationPerInvocation",
       "status": "implemented",
       "level": "integration"
+    },
+    {
+      "id": "ORG-016",
+      "design": "folder-role-routing",
+      "statement": "자동 정리는 폴더 역할과 입력 기술 조건을 대조해 실행할 처리 방식과 근거를 남겨야 한다.",
+      "given": "같은 행사의 VJ 원본, 단일 PGM, 분할 또는 고정캠, 편집·선별본, 복구 폴더가 있다.",
+      "when": "같은 입력 리비전의 폴더들을 정책 v2로 판정한다.",
+      "then": "연속·호환되는 짧은 VJ 컷은 경계 마커가 있는 20Mbps 시퀀스, 명시된 단일 녹화는 6Mbps 렌더가 된다. 역할 충돌·불완전한 순서·편집·복구 자료는 사유를 남기고 보류한다.",
+      "test_file": "internal/core/organization/source_role_test.go",
+      "test_name": "TestSourceRoleRoutesOriginalsAndPreservesReviewFolders",
+      "status": "implemented",
+      "level": "unit"
+    },
+    {
+      "id": "ORG-017",
+      "design": "camera-proxy-inventory",
+      "statement": "드라이브 탐색은 카드 프록시의 대응 원본과 미확인 파일을 구분해 원본 상대경로를 제공해야 한다.",
+      "given": "같은 카드의 CLIP 원본, 다른 카드의 같은 번호, 원본보다 작지 않은 SUB가 있다.",
+      "when": "완료되거나 진행 중인 단일 탐색 목록을 조회한다.",
+      "then": "완료 목록의 같은 M4ROOT 아래 번호가 일치하고 더 작은 SUB만 원본과 연결한다. 나머지는 미확인으로 남고 적용 결과를 폴더별로 집계한다.",
+      "test_file": "internal/application/archiveintakeworkspace/inventory_test.go",
+      "test_name": "TestReadyInventoryPairsProxiesOnlyWithinTheSameCard",
+      "status": "implemented",
+      "level": "integration"
+    },
+    {
+      "id": "ORG-018",
+      "design": "inspected-source-role-evidence",
+      "statement": "원본 기술정보는 보류 파일의 촬영컷·장시간 녹화 후보를 제시하고, 순서와 원본 맥락이 검증된 경우에만 자동 소스 시퀀스 판정을 보강해야 한다.",
+      "given": "짧은 고비트레이트 영상과 긴 유음 영상, 영상 stream bitrate가 없거나 SUB·복구·고정캠인 입력이 있다.",
+      "when": "검사된 입력별 단서를 계산하고 같은 카메라 폴더의 자동 판정을 요청한다.",
+      "then": "3분 이하·1920×1080 이상·영상 stream 25Mbps 이상은 촬영컷 후보, 20분 이상·1280×720 이상·유음은 장시간 녹화 후보다. SUB는 단서를 생략하며 복구 폴더는 보류한다. 보조 촬영 단서는 모든 컷의 기술 근거·연속 번호·호환 규격이 함께 있을 때 합본에 사용한다.",
+      "test_file": "internal/core/organization/source_role_test.go",
+      "test_name": "TestMeasuredHintsSeparateReviewFromExecutableSequences",
+      "status": "implemented",
+      "level": "unit"
     }
   ]
 }

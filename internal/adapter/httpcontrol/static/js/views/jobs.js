@@ -327,7 +327,7 @@ function ExpectedResults({ selected, archive }) {
         const preview = folder.expected_result;
         const multiple = preview.maximum_result_count > 1;
         return html`<div class="expected-result-row" key=${folder.folder} data-folder-id=${folder.folder}>
-          <span class="expected-source">${folder.folder}</span>
+          <span class="expected-source">${folder.folder}${folder.source_role ? html`<small>${label("sourceRole", folder.source_role.role)}</small>` : null}</span>
           <code>${preview.combined_directory_pattern}/</code>
           <small>${multiple ? `통합 1개 또는 영상별 최대 ${formatCount(preview.maximum_result_count)}개 · ${preview.first_individual_directory_pattern}/` : preview.combined_video_file_name}</small>
         </div>`;

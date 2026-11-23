@@ -12,6 +12,7 @@ import (
 	"videoarchive/internal/core/archiveintake"
 	"videoarchive/internal/core/archiverun"
 	"videoarchive/internal/core/command"
+	"videoarchive/internal/core/mediaanalysis"
 	"videoarchive/internal/core/organization"
 	"videoarchive/internal/core/storage"
 	"videoarchive/internal/core/vocabulary"
@@ -195,4 +196,62 @@ func (inventory sessionInventory) Session(_ context.Context, id string) (archive
 
 func (inventory sessionInventory) ListSessions(context.Context) ([]archiveintake.Session, error) {
 	return append([]archiveintake.Session(nil), inventory...), nil
+}
+
+// Requirement: ORG-017
+func TestReadyInventoryPairsProxiesOnlyWithinTheSameCard(t *testing.T) {
+	now := time.Now().UTC()
+	file := func(dir, name string, size uint64) worker.MediaFileObservation {
+		return worker.MediaFileObservation{RelativePath: dir + "/" + name, FileName: name, SizeBytes: size}
+	}
+	clip, sub, other := "card/M4ROOT/CLIP", "card/M4ROOT/SUB", "other/M4ROOT/CLIP"
+	folders := []worker.MediaFolderObservation{
+		{Folder: sub, VideoCount: 3, Videos: []worker.MediaFileObservation{file(sub, "C0001S03.MP4", 10), file(sub, "C0002S03.MP4", 10), file(sub, "C0003S03.MP4", 10)}},
+		{Folder: clip, VideoCount: 2, Videos: []worker.MediaFileObservation{file(clip, "C0001.MP4", 100), file(clip, "C0003.MP4", 10)}},
+		{Folder: other, VideoCount: 1, Videos: []worker.MediaFileObservation{file(other, "C0002.MP4", 100)}},
+	}
+	for _, state := range []vocabulary.FolderDiscoveryState{vocabulary.FolderDiscoveryReady, vocabulary.FolderDiscoveryScanning} {
+		statuses := statusInventory{{WorkerID: "W", State: "ONLINE", Metrics: worker.Metrics{ObservedAt: now, StorageObservations: []worker.StorageObservation{{StorageID: "S", Connected: true, DiscoveryState: state, DiscoveryRevision: 4, Folders: folders}}}}}
+		service, err := archiveintakeworkspace.New(workstationStore{}, workstationJobs{}, archiveintakeworkspace.WithInventory(candidateInventory{{VolumeID: "V", Revision: 1, WorkerID: "W", StorageID: "S", Connected: true}}, storageInventory{}, statuses, func() time.Time { return now }))
+		if err != nil {
+			t.Fatal(err)
+		}
+		views, err := service.Projection(context.Background())
+		if err != nil || len(views) != 1 {
+			t.Fatalf("views=%v, err=%v", views, err)
+		}
+		found := false
+		for _, folder := range views[0].DiscoveredFolders {
+			if folder.Folder != sub {
+				continue
+			}
+			found = true
+			expect := 0
+			if state == vocabulary.FolderDiscoveryReady {
+				expect = 1
+			}
+			if folder.SourceRole == nil || folder.SourceRole.Role != organization.RoleProxy || folder.SourceRole.MatchedProxies != expect || folder.SourceRole.UnpairedProxies != 3-expect {
+				t.Fatalf("wrong proxy evidence: %+v", folder.SourceRole)
+			}
+			if (folder.Videos[0].MatchedOriginal == clip+"/C0001.MP4") != (expect == 1) || folder.Videos[1].MatchedOriginal != "" || folder.Videos[2].MatchedOriginal != "" {
+				t.Fatal(folder.Videos)
+			}
+		}
+		if !found {
+			t.Fatal("SUB missing from inventory")
+		}
+	}
+	originals := make(organization.CameraOriginalIndex)
+	originals.Observe(clip+"/C0001.MP4", 100)
+	inspected := worker.MediaFileObservation{RelativePath: sub + "/C0001S03.MP4", SizeBytes: 10}
+	input := organization.Input{OriginalAssetID: "A", RelativePath: inspected.RelativePath, Inspection: mediaanalysis.MediaInspection{
+		ID: "I", OriginalAssetID: "A", OriginalChecksum: strings.Repeat("a", 64), Containers: []string{"mp4"}, SizeBytes: 10, BitRate: 80, DurationMillis: 1000,
+		VideoStreams:     []mediaanalysis.VideoStream{{Codec: "h264", Width: 1280, Height: 720, FrameRate: mediaanalysis.Rational{Numerator: 30, Denominator: 1}}},
+		ProcessorVersion: "probe", ObservedBy: "W", InspectedAt: now,
+	}}
+	decision, err := organization.Classify(organization.AutoRequest{CameraOriginals: originals, DecisionID: "D", WorkspaceDriveID: "V", Folder: sub, InputRevision: 4, Inputs: []organization.Input{input}, Policy: organization.DefaultPolicy(), DecidedAt: now})
+	if err != nil || decision.Disposition != vocabulary.OrganizationHold || decision.SourceRole == nil || decision.SourceRole.MatchedProxies != 1 || decision.Inputs[0].MatchedOriginal != clip+"/C0001.MP4" || len(decision.Actions) != 0 {
+		t.Fatalf("invalid persisted proxy decision: %+v %v", decision, err)
+	}
+
 }

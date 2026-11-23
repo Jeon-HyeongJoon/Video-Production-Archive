@@ -5405,7 +5405,7 @@
         }
       ],
       "rules": [
-        "자동 판정은 Archivist 결과나 자유 텍스트를 입력으로 사용하지 않는다.",
+        "자동 판정은 고정된 상대 폴더·파일명·검사에서 역할 단서를 추출한다. 기술 단서만으로 행사 경계나 촬영 순서를 확정하지 않는다.",
         "Archivist 추론은 자동 판정과 섞지 않고 현재 HOLD에 대한 별도 추가 전용 OrganizationDecision으로만 기록한다.",
         "구조화된 근거로도 하나의 흐름을 정하지 못하면 HOLD를 유지한다."
       ],
@@ -5495,6 +5495,10 @@
         {
           "id": "INCOMPATIBLE_SEQUENCE",
           "description": "소스 후보의 video 또는 audio 기술 규격이 서로 다르다."
+        },
+        {
+          "id": "SOURCE_ROLE_REVIEW",
+          "description": "폴더 역할·프록시 근거·행사 경계 또는 입력 순서가 자동 렌더를 뒷받침하지 않는다."
         },
         {
           "id": "INVALID_OVERRIDE",

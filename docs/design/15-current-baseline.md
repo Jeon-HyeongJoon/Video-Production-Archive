@@ -6,8 +6,8 @@
 
 ## 1. 검증 기준선
 
-- 요구사항 342개 중 implemented 300개, planned 42개
-- implemented 요구사항과 주석 테스트 300개가 1:1 연결
+- 요구사항 345개 중 implemented 303개, planned 42개
+- implemented 요구사항과 주석 테스트 303개가 1:1 연결
 - `make verify`, `go vet ./...` 통과를 변경 인계 조건으로 사용
 - Core는 Application·Adapter와 HTTP·SQLite·FFmpeg·Windows API를 import하지 않음
 - 실제 제품 수직 경로는 Archive Intake와 별도 STT, layout v3 compact 게시·카탈로그 대조까지 연결

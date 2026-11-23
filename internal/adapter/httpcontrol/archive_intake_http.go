@@ -104,12 +104,13 @@ func projectDriveFolder(folder archiveintakeworkspace.FolderView) driveFolderVie
 	videos := make([]driveSourceVideoView, 0, len(folder.Videos))
 	for _, video := range folder.Videos {
 		videos = append(videos, driveSourceVideoView{
+			Measurement: video.Measurement, MatchedOriginal: video.MatchedOriginal, MetadataHint: video.MetadataHint,
 			RelativePath: video.RelativePath, FileName: video.FileName,
 			SizeBytes: video.SizeBytes, ModifiedAt: video.ModifiedAt,
 		})
 	}
 	projected := driveFolderView{
-		Folder: folder.Folder, DecisionID: folder.DecisionID, InputRevision: folder.InputRevision,
+		SourceRole: folder.SourceRole, Folder: folder.Folder, DecisionID: folder.DecisionID, InputRevision: folder.InputRevision,
 		DecisionSequence: folder.DecisionSequence, Disposition: string(folder.Disposition),
 		ProfileReference: folder.ProfileReference, HoldReasons: holdReasons, WorkOptions: workOptions, Videos: videos, VideoCount: folder.VideoCount,
 		EstimatedOutputBytes: folder.EstimatedOutputBytes, JobID: folder.JobID,

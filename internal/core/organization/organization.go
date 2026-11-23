@@ -27,7 +27,7 @@ type Policy struct {
 }
 
 func DefaultPolicy() Policy {
-	return Policy{Version: 1, ShortClipMaxDurationMillis: 180_000, SequenceMinFiles: 2, ReadyBitRateTolerancePermille: 150}
+	return Policy{Version: 2, ShortClipMaxDurationMillis: 180_000, SequenceMinFiles: 2, ReadyBitRateTolerancePermille: 150}
 }
 
 func (policy Policy) validate() error {
@@ -39,12 +39,14 @@ func (policy Policy) validate() error {
 }
 
 type Input struct {
+	MatchedOriginal string `json:",omitempty"`
 	OriginalAssetID string
 	RelativePath    string
 	Inspection      mediaanalysis.MediaInspection
 }
 
 type AutoRequest struct {
+	CameraOriginals  CameraOriginalIndex
 	DecisionID       string
 	WorkspaceDriveID string
 	Folder           string
@@ -66,6 +68,7 @@ const (
 )
 
 type OrganizationDecision struct {
+	SourceRole              *SourceRoleEvidence `json:",omitempty"`
 	ID                      string
 	Sequence                uint64
 	WorkspaceDriveID        string
@@ -115,6 +118,53 @@ func Classify(request AutoRequest) (OrganizationDecision, error) {
 		decision.OrderedOriginalAssetIDs = append(decision.OrderedOriginalAssetIDs, input.OriginalAssetID)
 	}
 
+	if request.Policy.Version >= 2 {
+		names := make([]string, 0, len(inputs))
+		for _, input := range inputs {
+			parent := path.Dir(input.RelativePath)
+			if parent != folder && !(parent == "." && folder == "root") {
+				return OrganizationDecision{}, ErrInvalidDecision
+			}
+			names = append(names, path.Base(input.RelativePath))
+		}
+		role := AssessSourceRole(folder, names)
+		if role.Role == RoleProxy {
+			for i, input := range inputs {
+				if original := request.CameraOriginals.Match(input.RelativePath, uint64(input.Inspection.SizeBytes)); original != "" {
+					decision.Inputs[i].MatchedOriginal = original
+					role.MatchedProxies++
+				}
+			}
+			role.UnpairedProxies = len(inputs) - role.MatchedProxies
+		}
+		decision.SourceRole = &role
+		decision.DecisionBasis = append(decision.DecisionBasis, role.Basis)
+		// Multiple recorder files may be consecutive parts or separate channels.
+		if role.Role == RoleRecording && role.Strength == roleExplicit && len(inputs) == 1 {
+			decision.Disposition = vocabulary.OrganizationRenderRecordings
+			decision.ProfileReference = mustOrganizationProfile(6_000).Reference()
+			decision.Actions = []Action{ActionRender, ActionOrganize}
+			return decision, nil
+		}
+		sourceEvidence := role.Role == RoleSource && role.Strength == roleExplicit
+		if role.Role == RoleSource && role.Strength == roleSuggested && len(inputs) >= request.Policy.SequenceMinFiles {
+			sourceEvidence = true
+			for _, input := range inputs {
+				if !rawCameraName.MatchString(strings.ToLower(path.Base(input.RelativePath))) || SourceMetadataHint(folder, input.Inspection) != ShortCameraHint {
+					sourceEvidence = false
+					break
+				}
+			}
+			if sourceEvidence {
+				decision.DecisionBasis = append(decision.DecisionBasis, ShortCameraHint)
+			}
+		}
+		if role.Strength != roleUnknown && !sourceEvidence {
+			decision.HoldReasons = []vocabulary.OrganizationHoldReason{vocabulary.OrganizationHoldSourceRole}
+			return decision, nil
+		}
+	}
+
 	if len(inputs) >= request.Policy.SequenceMinFiles && allShort(inputs, request.Policy.ShortClipMaxDurationMillis) {
 		ordered, nameStatus := orderNumberedSequence(inputs)
 		switch nameStatus {
@@ -138,6 +188,10 @@ func Classify(request AutoRequest) (OrganizationDecision, error) {
 		}
 	}
 
+	if decision.SourceRole != nil && decision.SourceRole.Role == RoleSource {
+		decision.HoldReasons = []vocabulary.OrganizationHoldReason{vocabulary.OrganizationHoldSourceRole}
+		return decision, nil
+	}
 	readyCount := 0
 	for _, input := range inputs {
 		if readyProfile(input.Inspection, request.Policy) != "" {
@@ -205,6 +259,7 @@ func normalizeInputs(source []Input) ([]Input, bool) {
 	seen := make(map[string]bool, len(inputs))
 	for index := range inputs {
 		input := &inputs[index]
+		input.MatchedOriginal = ""
 		input.OriginalAssetID = strings.TrimSpace(input.OriginalAssetID)
 		input.RelativePath = path.Clean(strings.ReplaceAll(strings.TrimSpace(input.RelativePath), "\\", "/"))
 		normalized, err := mediaanalysis.NewMediaInspection(input.Inspection)

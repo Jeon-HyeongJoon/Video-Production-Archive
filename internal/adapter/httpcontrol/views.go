@@ -3,11 +3,13 @@ package httpcontrol
 import (
 	"time"
 
+	"videoarchive/internal/application/archiveintakeworkspace"
 	"videoarchive/internal/application/archivework"
 	"videoarchive/internal/application/archiveworkspace"
 	"videoarchive/internal/application/workdiagnostics"
 	"videoarchive/internal/core/archivistruntime"
 	corejob "videoarchive/internal/core/job"
+	"videoarchive/internal/core/organization"
 	"videoarchive/internal/core/summary"
 	"videoarchive/internal/core/worker"
 	"videoarchive/internal/core/workflow"
@@ -174,30 +176,31 @@ type driveStorageView struct {
 }
 
 type driveFolderView struct {
-	Folder               string                   `json:"folder"`
-	DecisionID           string                   `json:"decision_id"`
-	InputRevision        uint64                   `json:"input_revision"`
-	DecisionSequence     uint64                   `json:"decision_sequence"`
-	Disposition          string                   `json:"disposition"`
-	ProfileReference     string                   `json:"profile_reference,omitempty"`
-	HoldReasons          []string                 `json:"hold_reasons"`
-	WorkOptions          []driveWorkOptionView    `json:"work_options"`
-	Videos               []driveSourceVideoView   `json:"videos"`
-	VideoCount           int                      `json:"video_count"`
-	EstimatedOutputBytes uint64                   `json:"estimated_output_bytes"`
-	ExpectedResult       *driveExpectedResultView `json:"expected_result,omitempty"`
-	JobID                string                   `json:"job_id,omitempty"`
-	TranscriptionJobID   string                   `json:"transcription_job_id,omitempty"`
-	CurrentStepID        string                   `json:"current_step_id"`
-	StepState            string                   `json:"step_state"`
-	Stages               []driveStageView         `json:"stages"`
-	ArchivePackageID     string                   `json:"archive_package_id,omitempty"`
-	ArchiveDate          string                   `json:"archive_date,omitempty"`
-	ArchiveDisplayName   string                   `json:"archive_display_name,omitempty"`
-	ArchiveVideoFileName string                   `json:"archive_video_file_name,omitempty"`
-	ArchiveState         string                   `json:"archive_state,omitempty"`
-	CanAddTranscription  bool                     `json:"can_add_transcription"`
-	TranscriptQualities  []transcriptQualityView  `json:"transcript_qualities"`
+	SourceRole           *organization.SourceRoleEvidence `json:"source_role,omitempty"`
+	Folder               string                           `json:"folder"`
+	DecisionID           string                           `json:"decision_id"`
+	InputRevision        uint64                           `json:"input_revision"`
+	DecisionSequence     uint64                           `json:"decision_sequence"`
+	Disposition          string                           `json:"disposition"`
+	ProfileReference     string                           `json:"profile_reference,omitempty"`
+	HoldReasons          []string                         `json:"hold_reasons"`
+	WorkOptions          []driveWorkOptionView            `json:"work_options"`
+	Videos               []driveSourceVideoView           `json:"videos"`
+	VideoCount           int                              `json:"video_count"`
+	EstimatedOutputBytes uint64                           `json:"estimated_output_bytes"`
+	ExpectedResult       *driveExpectedResultView         `json:"expected_result,omitempty"`
+	JobID                string                           `json:"job_id,omitempty"`
+	TranscriptionJobID   string                           `json:"transcription_job_id,omitempty"`
+	CurrentStepID        string                           `json:"current_step_id"`
+	StepState            string                           `json:"step_state"`
+	Stages               []driveStageView                 `json:"stages"`
+	ArchivePackageID     string                           `json:"archive_package_id,omitempty"`
+	ArchiveDate          string                           `json:"archive_date,omitempty"`
+	ArchiveDisplayName   string                           `json:"archive_display_name,omitempty"`
+	ArchiveVideoFileName string                           `json:"archive_video_file_name,omitempty"`
+	ArchiveState         string                           `json:"archive_state,omitempty"`
+	CanAddTranscription  bool                             `json:"can_add_transcription"`
+	TranscriptQualities  []transcriptQualityView          `json:"transcript_qualities"`
 }
 
 type driveExpectedResultView struct {
@@ -211,10 +214,13 @@ type driveExpectedResultView struct {
 }
 
 type driveSourceVideoView struct {
-	RelativePath string    `json:"relative_path"`
-	FileName     string    `json:"file_name"`
-	SizeBytes    uint64    `json:"size_bytes"`
-	ModifiedAt   time.Time `json:"modified_at,omitempty"`
+	Measurement     *archiveintakeworkspace.SourceMeasurement `json:"measurement,omitempty"`
+	MatchedOriginal string                                    `json:"matched_original,omitempty"`
+	MetadataHint    string                                    `json:"metadata_hint,omitempty"`
+	RelativePath    string                                    `json:"relative_path"`
+	FileName        string                                    `json:"file_name"`
+	SizeBytes       uint64                                    `json:"size_bytes"`
+	ModifiedAt      time.Time                                 `json:"modified_at,omitempty"`
 }
 
 type driveWorkOptionView struct {

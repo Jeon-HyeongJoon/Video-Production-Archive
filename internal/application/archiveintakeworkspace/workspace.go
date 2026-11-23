@@ -18,6 +18,7 @@ import (
 const ClassifyHoldCommand = "organization.hold.classify"
 
 type FolderView struct {
+	SourceRole           *organization.SourceRoleEvidence
 	Folder               string
 	DecisionID           string
 	InputRevision        uint64
@@ -45,11 +46,22 @@ type FolderView struct {
 	TranscriptQualities  []TranscriptQualityView
 }
 
+type SourceMeasurement struct {
+	InspectionID   string `json:"inspection_id"`
+	Width          int    `json:"width"`
+	Height         int    `json:"height"`
+	DurationMillis int64  `json:"duration_millis"`
+	VideoBitRate   int64  `json:"video_bitrate_bps,omitempty"`
+}
+
 type SourceVideoView struct {
-	RelativePath string
-	FileName     string
-	SizeBytes    uint64
-	ModifiedAt   time.Time
+	Measurement     *SourceMeasurement
+	MatchedOriginal string
+	MetadataHint    string
+	RelativePath    string
+	FileName        string
+	SizeBytes       uint64
+	ModifiedAt      time.Time
 }
 
 type WorkOptionView struct {
@@ -68,6 +80,9 @@ type TranscriptQualityView struct {
 }
 
 type ClassificationAssetView struct {
+	MatchedOriginal string                      `json:"matched_original,omitempty"`
+	InspectionID    string                      `json:"inspection_id,omitempty"`
+	MetadataHint    string                      `json:"metadata_hint,omitempty"`
 	OriginalAssetID string                      `json:"original_asset_id"`
 	RelativePath    string                      `json:"relative_path"`
 	Checksum        string                      `json:"checksum"`

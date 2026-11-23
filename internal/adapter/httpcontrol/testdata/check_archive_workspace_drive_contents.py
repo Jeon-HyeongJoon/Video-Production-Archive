@@ -6,6 +6,16 @@ from playwright.sync_api import expect, sync_playwright
 with sync_playwright() as playwright:
     browser = playwright.chromium.launch(headless=True)
     page = browser.new_page(viewport={"width": 1440, "height": 900}, color_scheme="dark", locale="ko-KR")
+    if sys.argv[2:] == ["inspected"]:
+        page.goto(sys.argv[1] + "/#/drives/VOLUME-1?folder=hold", wait_until="networkidle")
+        page.locator('#drive-folders button[data-folder-id="hold"]').click()
+        detail = page.locator('#folder-detail[data-folder-id="hold"]')
+        expect(detail).to_contain_text("행사 경계 미확인")
+        expect(detail).to_contain_text("1920×1080 · 45초 · 34.0 Mbps")
+        expect(detail).to_contain_text("단시간 고비트레이트 촬영컷 후보")
+        browser.close()
+        sys.exit(0)
+
     page.goto(sys.argv[1] + "/#/drives/VOLUME-1", wait_until="networkidle")
 
     expect(page.locator("#drive-contents")).to_be_visible()

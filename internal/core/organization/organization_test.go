@@ -47,7 +47,7 @@ func TestAutomaticOrganizationDecisionIsDeterministicAndHoldsAmbiguousInputs(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(first, second) || first.Disposition != vocabulary.OrganizationHold ||
+	if first.PolicyVersion != 2 || first.SourceRole == nil || first.SourceRole.Role != RoleUnresolved || !reflect.DeepEqual(first, second) || first.Disposition != vocabulary.OrganizationHold ||
 		!reflect.DeepEqual(first.HoldReasons, []vocabulary.OrganizationHoldReason{vocabulary.OrganizationHoldAmbiguousMultipleVideos}) ||
 		len(first.Actions) != 0 {
 		t.Fatalf("ambiguous inputs were inferred or classification changed: first=%+v second=%+v", first, second)

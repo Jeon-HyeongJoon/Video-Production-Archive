@@ -195,7 +195,7 @@ func TestMCPListsSelectedHoldsAndReturnsSingleStructuredEvidenceWithoutStoragePa
 	detail := mcpTestRequest(handler, http.MethodPost, "/mcp/v1/call", archiveToolCall("CALL-HOLD-DETAIL", ToolOrganizationHoldGet, `{"folder":"recordings"}`), "secret")
 	detailBody := detail.Body.String()
 	for _, expected := range []string{`"decision_id":"DECISION-HOLD"`, `"input_revision":7`, `"relative_path":"recordings/a.mov"`,
-		`"checksum":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"`, `"codec":"h264"`, `"width":3840`, `"bit_rate":50000000`} {
+		`"checksum":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"`, `"codec":"h264"`, `"width":3840`, `"bit_rate":50000000`, `"metadata_hint":"LONG_HD_WITH_AUDIO"`, `"inspection_id":"INSPECTION-ASSET-A"`} {
 		if detail.Code != http.StatusOK || !strings.Contains(detailBody, expected) {
 			t.Fatalf("single HOLD evidence is incomplete, missing %s: %d %s", expected, detail.Code, detailBody)
 		}
@@ -880,7 +880,7 @@ func holdReviewDriveState(t *testing.T) *holdReviewState {
 			OriginalAssetID: assetID, RelativePath: relativePath,
 			Inspection: mediaanalysis.MediaInspection{
 				ID: "INSPECTION-" + assetID, OriginalAssetID: assetID, OriginalChecksum: checksum,
-				Containers: []string{"mov"}, DurationMillis: 600_000, SizeBytes: 4_000_000_000, BitRate: 50_192_000,
+				Containers: []string{"mov"}, DurationMillis: 1_200_000, SizeBytes: 4_000_000_000, BitRate: 50_192_000,
 				VideoStreams: []mediaanalysis.VideoStream{{
 					Index: 0, Codec: "h264", Width: 3840, Height: 2160,
 					FrameRate: mediaanalysis.Rational{Numerator: 30, Denominator: 1}, BitRate: 50_000_000,
@@ -907,7 +907,7 @@ func holdReviewDriveState(t *testing.T) *holdReviewState {
 	assets := make([]archiveintakeworkspace.ClassificationAssetView, 0, len(inputs))
 	for _, item := range inputs {
 		assets = append(assets, archiveintakeworkspace.ClassificationAssetView{
-			OriginalAssetID: item.OriginalAssetID, RelativePath: item.RelativePath,
+			InspectionID: item.Inspection.ID, MetadataHint: organization.SourceMetadataHint("recordings", item.Inspection), OriginalAssetID: item.OriginalAssetID, RelativePath: item.RelativePath,
 			Checksum: item.Inspection.OriginalChecksum, DurationMillis: item.Inspection.DurationMillis,
 			SizeBytes: item.Inspection.SizeBytes, BitRate: item.Inspection.BitRate,
 			Containers:   append([]string(nil), item.Inspection.Containers...),

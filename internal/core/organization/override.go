@@ -179,6 +179,10 @@ func (history *DecisionHistory) Decisions() []OrganizationDecision {
 
 func cloneDecision(source OrganizationDecision) OrganizationDecision {
 	value := source
+	if source.SourceRole != nil {
+		role := *source.SourceRole
+		value.SourceRole = &role
+	}
 	value.OrderedOriginalAssetIDs = append([]string(nil), source.OrderedOriginalAssetIDs...)
 	value.Inputs = cloneInputs(source.Inputs)
 	value.Actions = append([]Action(nil), source.Actions...)

@@ -383,11 +383,13 @@ function FolderDetail({ folder, current }) {
         ${folder.transcription_job_id && folder.step_state === "COMPLETED" ? html`<span class="note-tag folder-note">자막·텍스트 완료</span>` : null}
       </span>` : null}
     </div>
+    ${folder.source_role ? html`<p class="muted"><b>${label("sourceRole", folder.source_role.role)}</b> · ${folder.source_role.basis}
+      ${folder.source_role.role === "CAMERA_PROXY" ? ` · 대응 원본 ${folder.source_role.matched_proxies || 0}개 · 미확인 ${folder.source_role.unpaired_proxies || 0}개` : ""}</p>` : null}
     ${state.signal === "work" ? html`<${Meter} value=${folderProgress(folder)} label="진행" />` : null}
     ${videos.length ? html`<div class="source-video-list" role="table" aria-label=${`${folder.folder} 영상 기록물`}>
       <div class="source-video-row source-video-head" role="row"><span role="columnheader">영상</span><span role="columnheader">수정</span><span role="columnheader">용량</span></div>
       ${videos.map((video) => html`<div class="source-video-row" role="row" key=${video.relative_path} data-relative-path=${video.relative_path} title=${video.relative_path}>
-        <span class="source-video-name"><b>${video.file_name || video.relative_path}</b><small>${video.relative_path}</small></span>
+        <span class="source-video-name"><b>${video.file_name || video.relative_path}</b><small>${video.relative_path}</small>${video.matched_original ? html`<small>대응 원본 · ${video.matched_original}</small>` : null}${video.measurement ? html`<small title=${video.measurement.inspection_id}>${video.measurement.width}×${video.measurement.height} · ${Math.round(video.measurement.duration_millis / 1000)}초 · ${video.measurement.video_bitrate_bps ? (video.measurement.video_bitrate_bps / 1000000).toFixed(1) + " Mbps" : "영상 비트레이트 미확인"}</small>` : null}${video.metadata_hint ? html`<small>${label("metadataHint", video.metadata_hint)}</small>` : null}</span>
         <span class="num muted">${video.modified_at ? shortTime(video.modified_at) : "—"}</span>
         <span class="num muted">${video.size_bytes < 1024 ** 3 ? formatSize(video.size_bytes || 0) : formatBytes(video.size_bytes || 0)}</span>
       </div>`)}

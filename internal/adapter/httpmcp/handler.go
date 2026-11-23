@@ -554,7 +554,7 @@ func (handler *Handler) searchArchiveIntakeCandidates(writer http.ResponseWriter
 				continue
 			}
 			folders = append(folders, map[string]any{
-				"folder_id": folder.Folder, "video_count": folder.VideoCount,
+				"folder_id": folder.Folder, "video_count": folder.VideoCount, "source_role": folder.SourceRole,
 				"estimated_output_bytes": folder.EstimatedOutputBytes,
 			})
 			if len(folders) == input.Limit {
@@ -892,7 +892,7 @@ func (handler *Handler) getOrganizationHold(writer http.ResponseWriter, request 
 		"archive_run_id": selection.ArchiveRunID, "workspace_drive_id": selection.WorkspaceDriveID,
 		"folder": folder.Folder, "decision_id": folder.DecisionID, "decision_sequence": folder.DecisionSequence,
 		"input_revision": folder.InputRevision, "hold_reasons": folder.HoldReasons,
-		"assets": folder.ClassificationAssets,
+		"assets": folder.ClassificationAssets, "source_role": folder.SourceRole,
 	}})
 }
 

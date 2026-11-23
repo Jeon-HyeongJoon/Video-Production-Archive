@@ -73,12 +73,14 @@ export const finishedTurns = new Set(["COMPLETED", "FAILED", "CANCELLED"]);
 export const finishedSteps = new Set(["COMPLETED", "FAILED", "CANCELLED"]);
 
 export const labels = {
+  sourceRole: { VJ_SOURCE: "VJ 소스컷 후보", RECORDING: "풀녹화 후보", CAMERA_PROXY: "카메라 프록시 확인", EDITORIAL_OR_REFERENCE: "편집·참고자료", UNRESOLVED: "역할 미확인" },
+  metadataHint: { LONG_HD_WITH_AUDIO: "장시간 HD·오디오 녹화 후보", SHORT_HIGH_BITRATE_CAMERA_CANDIDATE: "단시간 고비트레이트 촬영컷 후보" },
   drive: { UNCLASSIFIED: "아직 처리 안 함", IN_PROGRESS: "처리 중", HAS_HOLD: "처리 방법 선택 필요", COMPLETED: "최근 작업 완료", CONTENT_CHANGED: "드라이브 내용 변경" },
   run: { STAGE_ONE_RUNNING: "영상 정리·저장 중", TRANSCRIPTION_READY: "자막·텍스트 자동 시작 중", STAGE_TWO_RUNNING: "자막·텍스트 만드는 중", COMPLETED: "작업 완료" },
   disposition: { ORGANIZE_AS_IS: "원본 그대로 저장", RENDER_RECORDINGS: "영상별 변환", COMPILE_SOURCE_SEQUENCE: "여러 영상 합치기", HOLD: "처리 방법 선택 필요" },
   wait: { INPUT: "직접 입력", APPROVAL: "승인", DEVICE: "장비 연결", MEMORY: "메모리 여유", SCRATCH: "작업 공간", SLOT: "처리 순서", DISK: "디스크 여유", IDLE: "시작 시점", PRIORITY: "우선순위" },
   hold: {
-    NO_MEDIA: "영상 없음", MISSING_INSPECTION: "검사 없음", AMBIGUOUS_MULTIPLE_VIDEOS: "영상 여러 개", MIXED_READY_STATE: "상태 혼재",
+    SOURCE_ROLE_REVIEW: "원본 역할·순서 확인 필요", NO_MEDIA: "영상 없음", MISSING_INSPECTION: "검사 없음", AMBIGUOUS_MULTIPLE_VIDEOS: "영상 여러 개", MIXED_READY_STATE: "상태 혼재",
     NONCONSECUTIVE_SEQUENCE: "영상 순서가 이어지지 않음", INCOMPATIBLE_SEQUENCE: "영상 형식이 서로 다름", INVALID_OVERRIDE: "선택한 처리 방법을 적용할 수 없음",
   },
   stage: {

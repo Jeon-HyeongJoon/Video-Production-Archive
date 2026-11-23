@@ -135,6 +135,7 @@ func (coordinator *Coordinator) Execute(ctx context.Context, request Request) (R
 		WorkspaceDriveID: request.Session.Session.WorkspaceDriveID, WorkerID: request.Session.Session.WorkerID,
 		CompletedAt: request.StartedAt.UTC(),
 	}
+	folderInputs := make(map[string][]organization.Input, len(selectedFolders))
 	for _, folder := range selectedFolders {
 		inputs := make([]organization.Input, 0, len(folder.VideoPaths))
 		for _, relativePath := range folder.VideoPaths {
@@ -145,28 +146,9 @@ func (coordinator *Coordinator) Execute(ctx context.Context, request Request) (R
 			receipt.Files = append(receipt.Files, fileLink)
 			inputs = append(inputs, input)
 		}
-		decision, err := organization.Classify(organization.AutoRequest{
-			DecisionID:       stableID("DECISION", request.ArchiveRunID, request.Session.Session.ID, strconv.FormatUint(request.InputRevision, 10), folder.RelativePath),
-			WorkspaceDriveID: request.Session.Session.WorkspaceDriveID, Folder: folder.RelativePath,
-			InputRevision: request.InputRevision, Inputs: inputs, Policy: organization.DefaultPolicy(), DecidedAt: request.StartedAt,
-		})
-		if err != nil {
-			return Result{}, err
-		}
-		folderResult := organization.CoordinatedFolder{Folder: folder.RelativePath, Decision: decision}
-		if decision.Disposition != vocabulary.OrganizationHold {
-			jobID, err := coordinator.createFolderJob(request, decision)
-			if err != nil {
-				return Result{}, err
-			}
-			folderResult.JobID = jobID
-		}
-		receipt.Folders = append(receipt.Folders, folderResult)
+		folderInputs[folder.RelativePath] = inputs
 	}
-	if err := coordinator.receipts.SaveReceipt(ctx, receipt); err != nil {
-		return Result{}, err
-	}
-	return Result{Receipt: receipt}, nil
+	return coordinator.settleFolders(ctx, request, receipt, folderInputs)
 }
 
 // ExecuteInspected continues one ArchiveRun from immutable Worker observations.
@@ -211,6 +193,7 @@ func (coordinator *Coordinator) ExecuteInspected(ctx context.Context, request Re
 		WorkspaceDriveID: request.Session.Session.WorkspaceDriveID, WorkerID: request.Session.Session.WorkerID,
 		CompletedAt: request.StartedAt.UTC(),
 	}
+	folderInputs := make(map[string][]organization.Input, len(byFolder))
 	for _, folderID := range request.FolderScope.FolderIDs() {
 		items := byFolder[folderID]
 		if len(items) == 0 {
@@ -230,7 +213,22 @@ func (coordinator *Coordinator) ExecuteInspected(ctx context.Context, request Re
 				OriginalAssetID: item.Original.ID, RelativePath: item.Observation.RelativePath, Inspection: item.Inspection,
 			})
 		}
+		folderInputs[folderID] = inputs
+	}
+	return coordinator.settleFolders(ctx, request, receipt, folderInputs)
+}
+
+func (coordinator *Coordinator) settleFolders(ctx context.Context, request Request, receipt organization.ArchiveOrganizationReceipt, folderInputs map[string][]organization.Input) (Result, error) {
+	originals := make(organization.CameraOriginalIndex)
+	for _, inputs := range folderInputs {
+		for _, input := range inputs {
+			originals.Observe(input.RelativePath, uint64(input.Inspection.SizeBytes))
+		}
+	}
+	for _, folderID := range request.FolderScope.FolderIDs() {
+		inputs := folderInputs[folderID]
 		decision, err := organization.Classify(organization.AutoRequest{
+			CameraOriginals:  originals,
 			DecisionID:       stableID("DECISION", request.ArchiveRunID, request.Session.Session.ID, strconv.FormatUint(request.InputRevision, 10), folderID),
 			WorkspaceDriveID: request.Session.Session.WorkspaceDriveID, Folder: folderID,
 			InputRevision: request.InputRevision, Inputs: inputs, Policy: organization.DefaultPolicy(), DecidedAt: request.StartedAt,

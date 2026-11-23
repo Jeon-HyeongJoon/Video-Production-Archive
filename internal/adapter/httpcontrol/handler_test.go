@@ -292,6 +292,9 @@ func TestDriveDetailShowsFolderStructureAndVideoRecordsWithoutWorkCreation(t *te
 	testControlHTTPScene(t, scenePreRun, func(t *testing.T, handler http.Handler) {
 		assertArchiveWorkspaceScript(t, handler, "check_archive_workspace_drive_contents.py")
 	})
+	testControlHTTPScene(t, sceneStageOne, func(t *testing.T, handler http.Handler) {
+		assertArchiveWorkspaceScript(t, handler, "check_archive_workspace_drive_contents.py", "inspected")
+	})
 }
 
 // Requirement: DSH-011
@@ -1280,6 +1283,11 @@ func (workspace *archiveIntakeWorkspaceFixture) Projection(context.Context) ([]a
 		folders[index].Videos = []archiveintakeworkspace.SourceVideoView{
 			{RelativePath: folders[index].Folder + "/C0001.MP4", FileName: "C0001.MP4", SizeBytes: 3 << 30, ModifiedAt: now.Add(-2 * time.Hour)},
 			{RelativePath: folders[index].Folder + "/C0002.MOV", FileName: "C0002.MOV", SizeBytes: 2 << 30, ModifiedAt: now.Add(-time.Hour)},
+		}
+		if folders[index].Folder == "hold" && workspace.scene == sceneStageOne {
+			folders[index].SourceRole = &organization.SourceRoleEvidence{Role: organization.RoleUnresolved, Basis: "행사 경계 미확인"}
+			folders[index].Videos[0].Measurement = &archiveintakeworkspace.SourceMeasurement{InspectionID: "INSPECT-A", Width: 1920, Height: 1080, DurationMillis: 45000, VideoBitRate: 34_000_000}
+			folders[index].Videos[0].MetadataHint = organization.ShortCameraHint
 		}
 		preview, err := archive.PreviewFlatPackage("2026-10-30", folders[index].Folder, []string{"C0001.MP4", "C0002.MOV"}, folders[index].VideoCount)
 		if err != nil {

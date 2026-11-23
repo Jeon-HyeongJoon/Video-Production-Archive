@@ -105,6 +105,7 @@ const (
 	OrganizationHoldMixedReadyState         OrganizationHoldReason = "MIXED_READY_STATE"
 	OrganizationHoldNonconsecutiveSequence  OrganizationHoldReason = "NONCONSECUTIVE_SEQUENCE"
 	OrganizationHoldIncompatibleSequence    OrganizationHoldReason = "INCOMPATIBLE_SEQUENCE"
+	OrganizationHoldSourceRole              OrganizationHoldReason = "SOURCE_ROLE_REVIEW"
 	OrganizationHoldInvalidOverride         OrganizationHoldReason = "INVALID_OVERRIDE"
 )
 
@@ -112,7 +113,7 @@ func (value OrganizationHoldReason) Valid() bool {
 	switch value {
 	case OrganizationHoldNoMedia, OrganizationHoldMissingInspection, OrganizationHoldAmbiguousMultipleVideos,
 		OrganizationHoldMixedReadyState, OrganizationHoldNonconsecutiveSequence,
-		OrganizationHoldIncompatibleSequence, OrganizationHoldInvalidOverride:
+		OrganizationHoldIncompatibleSequence, OrganizationHoldSourceRole, OrganizationHoldInvalidOverride:
 		return true
 	default:
 		return false
