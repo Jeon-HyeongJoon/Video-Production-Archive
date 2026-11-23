@@ -19,6 +19,7 @@ import (
 	"videoarchive/internal/core/job"
 	"videoarchive/internal/core/mediaanalysis"
 	"videoarchive/internal/core/organization"
+	"videoarchive/internal/core/pipeline"
 	"videoarchive/internal/core/storage"
 	"videoarchive/internal/core/transcription"
 	"videoarchive/internal/core/vocabulary"
@@ -820,7 +821,7 @@ func (service *Service) transcriptionJobs() (map[string][]job.State, error) {
 	}
 	for _, snapshot := range snapshots {
 		state, err := job.Decode(snapshot)
-		if err != nil || state.TemplateName != "archive-transcription" {
+		if err != nil || (state.TemplateName != "archive-transcription" && state.TemplateName != pipeline.ArchiveTranscriptionRecoveryName) {
 			continue
 		}
 		archiveRunID, folder := jobArchiveRunAndFolder(state)
@@ -831,7 +832,21 @@ func (service *Service) transcriptionJobs() (map[string][]job.State, error) {
 		result[key] = append(result[key], state)
 	}
 	for key := range result {
-		sort.Slice(result[key], func(i, j int) bool { return result[key][i].ID < result[key][j].ID })
+		jobs := result[key]
+		replaced := make(map[string]bool)
+		for _, item := range jobs {
+			if item.RecoverySource != nil && item.RecoverySource.ActionCode == job.RecoveryActionRetryTranscriptionShortPath {
+				replaced[item.RecoverySource.JobID] = true
+			}
+		}
+		active := jobs[:0]
+		for _, item := range jobs {
+			if !replaced[item.ID] {
+				active = append(active, item)
+			}
+		}
+		sort.Slice(active, func(i, j int) bool { return active[i].ID < active[j].ID })
+		result[key] = active
 	}
 	return result, nil
 }

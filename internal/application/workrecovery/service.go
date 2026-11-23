@@ -5,8 +5,10 @@ package workrecovery
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 
@@ -16,6 +18,7 @@ import (
 	"videoarchive/internal/core/execution"
 	"videoarchive/internal/core/job"
 	"videoarchive/internal/core/pipeline"
+	"videoarchive/internal/core/workflow"
 )
 
 const CreateTerminalRecoveryCommand = "job.create_terminal_recovery"
@@ -144,7 +147,7 @@ func (service *Service) Apply(ctx context.Context, reference archivistruntime.Wo
 }
 
 func (service *Service) terminalRecoveryEnvelope(request command.Envelope, parameters job.RecoverExpiredExecutionParameters, action workdiagnostics.RecoveryAction) (command.Envelope, error) {
-	if parameters.ActionCode != job.RecoveryActionRetryTerminalArchivePublication || action.RecoveryJobID == "" ||
+	if action.RecoveryJobID == "" || len(parameters.Basis) != 1 ||
 		action.RecoveryJobID != job.TerminalRecoveryJobID(request.TargetID, parameters.Basis[0]) {
 		return command.Envelope{}, ErrRecoveryNotSafe
 	}
@@ -172,10 +175,15 @@ func (service *Service) terminalRecoveryEnvelope(request command.Envelope, param
 		latest.FailureClass != "TRANSIENT" || latest.ResultingState != "FAILED" || latest.StepID != parameters.StepID {
 		return command.Envelope{}, ErrRecoveryNotSafe
 	}
-	if latest.Operation != execution.OperationReviseArchivePackage && latest.Operation != execution.OperationWriteArchiveCatalog {
+	if job.TerminalRecoveryAction(state.TemplateName, latest) != parameters.ActionCode || latest.Operation != source.ExecutionSpec.Operation {
 		return command.Envelope{}, ErrRecoveryNotSafe
 	}
-	recoverySpec, err := terminalRecoverySpec(action.RecoveryJobID, *source.ExecutionSpec)
+	var recoverySpec execution.StepExecutionSpec
+	if parameters.ActionCode == job.RecoveryActionRetryTranscriptionShortPath {
+		recoverySpec, err = transcriptionRecoverySpec(action.RecoveryJobID, state, *source.ExecutionSpec)
+	} else {
+		recoverySpec, err = terminalRecoverySpec(action.RecoveryJobID, *source.ExecutionSpec)
+	}
 	if err != nil {
 		return command.Envelope{}, ErrRecoveryNotSafe
 	}
@@ -185,12 +193,12 @@ func (service *Service) terminalRecoveryEnvelope(request command.Envelope, param
 		DiagnosticFingerprint: parameters.DiagnosticFingerprint, Basis: append([]string(nil), parameters.Basis...),
 	}
 	create := job.CreateParameters{
-		TemplateName:       pipeline.ArchivePublicationRecovery().Name,
+		TemplateName:       recoverySpec.TemplateName,
 		TargetTitle:        "Recovery for " + state.TargetTitle,
 		ExecutionPriority:  source.ExecutionPriority,
 		RequiredStorageIDs: append([]string(nil), source.RequiredStorageIDs...),
 		PhysicalDeviceIDs:  append([]string(nil), source.PhysicalDeviceIDs...),
-		StepExecutionSpecs: map[string]execution.StepExecutionSpec{"reconcile_archive_publication": recoverySpec},
+		StepExecutionSpecs: map[string]execution.StepExecutionSpec{recoverySpec.StepID: recoverySpec},
 		RecoverySource:     recoverySource,
 	}
 	payload, err := json.Marshal(create)
@@ -208,6 +216,31 @@ func (service *Service) terminalRecoveryEnvelope(request command.Envelope, param
 		IdempotencyKey: request.IdempotencyKey + ":recovery-job", Reason: request.Reason,
 		Parameters: values,
 	}, nil
+}
+
+func transcriptionRecoverySpec(id string, state job.State, source execution.StepExecutionSpec) (execution.StepExecutionSpec, error) {
+	// Recreate the failed input contract from the committed audio receipt.
+	// This verifies paths, checksums, profiles and package revision before a
+	// recovery can reuse the audio without extracting it again.
+	for _, step := range state.Steps {
+		if step.Workflow.ID != "audio" || step.Workflow.State != workflow.Completed || step.ExecutionSpec == nil || step.OutputRecord == nil {
+			continue
+		}
+		expected, err := execution.MaterializeDependentStepExecutionSpec(execution.MaterializeRequest{
+			JobID: state.ID, TemplateName: state.TemplateName, StepID: source.StepID,
+			Completed: []execution.CompletedStep{{StepID: "audio", Spec: *step.ExecutionSpec, OutputRecord: *step.OutputRecord}},
+		})
+		if err != nil || expected.Digest != source.Digest || source.Validate() != nil {
+			break
+		}
+		expected.JobID, expected.TemplateName = id, pipeline.ArchiveTranscriptionRecoveryName
+		for index, output := range expected.Outputs {
+			digest := sha256.Sum256([]byte(id + "\x00" + output.ID))
+			expected.Outputs[index].RelativePath = fmt.Sprintf("staging/%x.json", digest[:12])
+		}
+		return execution.NewStepExecutionSpec(expected)
+	}
+	return execution.StepExecutionSpec{}, ErrRecoveryNotSafe
 }
 
 func terminalRecoverySpec(recoveryJobID string, source execution.StepExecutionSpec) (execution.StepExecutionSpec, error) {

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"videoarchive/internal/core/archive"
+	"videoarchive/internal/core/pipeline"
 )
 
 var ErrCannotMaterializeStepExecutionSpec = errors.New("dependent Step execution spec cannot be materialized")
@@ -31,7 +32,7 @@ func MaterializeDependentStepExecutionSpec(request MaterializeRequest) (StepExec
 	request.TemplateName = strings.TrimSpace(request.TemplateName)
 	request.StepID = strings.TrimSpace(request.StepID)
 	if request.JobID == "" || request.TemplateName == "" || request.StepID == "" ||
-		!(strings.HasPrefix(request.TemplateName, "archive-intake-") || request.TemplateName == "archive-transcription") || len(request.Completed) == 0 {
+		!(strings.HasPrefix(request.TemplateName, "archive-intake-") || request.TemplateName == "archive-transcription" || request.TemplateName == pipeline.ArchiveTranscriptionRecoveryName) || len(request.Completed) == 0 {
 		return StepExecutionSpec{}, ErrCannotMaterializeStepExecutionSpec
 	}
 	completed := append([]CompletedStep(nil), request.Completed...)

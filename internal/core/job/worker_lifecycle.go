@@ -12,6 +12,7 @@ import (
 
 	"videoarchive/internal/core/command"
 	"videoarchive/internal/core/execution"
+	"videoarchive/internal/core/pipeline"
 	"videoarchive/internal/core/vocabulary"
 	"videoarchive/internal/core/workflow"
 )
@@ -534,7 +535,7 @@ func workerStepOutputIDs(record *execution.StepOutputRecord) []string {
 }
 
 func materializeDependentExecutionSpecs(state *State) error {
-	if state == nil || !(strings.HasPrefix(state.TemplateName, "archive-intake-") || state.TemplateName == "archive-transcription") {
+	if state == nil || !(strings.HasPrefix(state.TemplateName, "archive-intake-") || state.TemplateName == "archive-transcription" || state.TemplateName == pipeline.ArchiveTranscriptionRecoveryName) {
 		return nil
 	}
 	workflowSteps := make(map[string]*workflow.Step, len(state.Steps))

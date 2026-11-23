@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf16"
 
 	"videoarchive/internal/adapter/processprogress"
 	"videoarchive/internal/core/archive"
@@ -28,12 +29,31 @@ import (
 
 var (
 	ErrChunkPlan           = errors.New("speech audio chunk planning failed")
+	ErrInvalidModel        = errors.New("whisper rejected the model file signature")
 	ErrOutputRead          = errors.New("whisper output unavailable")
 	ErrOutputInvalid       = errors.New("whisper output is invalid")
 	ErrPublish             = errors.New("transcript publication failed")
 	ErrInvalidRequest      = errors.New("invalid whisper.cpp transcription request")
 	ErrTranscriptionFailed = errors.New("whisper.cpp transcription failed")
 )
+
+// OutputOpenFailure contains only observations safe to persist across the Worker boundary.
+type OutputOpenFailure struct {
+	WindowsPathUnits int
+	ExtendedPath     bool
+	TargetDirectory  bool
+}
+
+func (failure *OutputOpenFailure) Error() string {
+	summary := "Whisper could not open the requested temporary JSON for writing."
+	if failure.WindowsPathUnits > 0 {
+		summary += fmt.Sprintf(" Windows path length %d UTF-16 units, extended path used: %t.", failure.WindowsPathUnits, failure.ExtendedPath)
+	}
+	if failure.TargetDirectory {
+		summary += " The target was a directory when checked."
+	}
+	return summary
+}
 
 type OSRunner struct{}
 
@@ -197,7 +217,22 @@ func (transcriber *Transcriber) Transcribe(ctx context.Context, request Request)
 		var runErr error
 		if stream, ok := transcriber.runner.(execution.StreamRunner); ok && request.InputRoot != nil {
 			// Only numeric whisper progress reaches the reporter. Limit live updates to ten per chunk.
-			lines := processprogress.Lines{OnLine: func(line string) {
+			openFailureLine := "open: failed to open '" + outputArgument + ".json' for writing"
+			var observedFailure error
+			lines := processprogress.Lines{MaxLineBytes: max(256, len(openFailureLine)), OnLine: func(line string) {
+				switch line {
+				case openFailureLine:
+					failure := &OutputOpenFailure{}
+					if runtime.GOOS == "windows" {
+						failure.WindowsPathUnits = len(utf16.Encode([]rune(rawPath)))
+						failure.ExtendedPath = strings.HasPrefix(outputArgument, `\\?\`)
+					}
+					observedFailure = failure
+					return
+				case "whisper_model_load: invalid model data (bad magic)":
+					observedFailure = ErrInvalidModel
+					return
+				}
 				value, found := strings.CutPrefix(strings.TrimSpace(line), "whisper_print_progress_callback: progress =")
 				if !found {
 					return
@@ -215,11 +250,24 @@ func (transcriber *Transcriber) Transcribe(ctx context.Context, request Request)
 			arguments[len(arguments)-1] = "-pp"
 			runErr = stream.RunStreams(ctx, transcriber.executable, arguments, nil, &lines)
 			lines.Flush()
+			if runErr != nil && observedFailure != nil {
+				runErr = errors.Join(runErr, observedFailure)
+			}
 		} else {
 			runErr = transcriber.runner.Run(ctx, transcriber.executable, arguments)
 		}
 		if runErr != nil {
-			cleanupRaw()
+			// The engine never opened this target. Its existing contents may
+			// belong to another owner, including a conflicting directory.
+			var openFailure *OutputOpenFailure
+			if errors.As(runErr, &openFailure) {
+				if request.OutputRoot != nil {
+					info, statErr := request.OutputRoot.Stat(rawArtifactPath)
+					openFailure.TargetDirectory = statErr == nil && info.IsDir()
+				}
+			} else {
+				cleanupRaw()
+			}
 			reportChunk(execution.ProgressFailed, float64(index)/float64(len(chunks)))
 			return transcription.Transcript{}, errors.Join(ErrTranscriptionFailed, runErr)
 		}

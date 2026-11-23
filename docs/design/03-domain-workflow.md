@@ -103,6 +103,8 @@ Archivist의 직접 복구는 범용 retry가 아니다. `WorkDiagnostic.recover
 
 종결 실패는 원래 Step을 다시 열지 않는다. 마지막 `StepFailureEvidence`가 `TRANSIENT`이고 operation이 패키지 리비전 또는 아카이브 카탈로그 게시이며 활성 실행 경계가 없을 때만 진단이 `RETRY_TERMINAL_ARCHIVE_PUBLICATION`을 반환한다. 복구 서비스는 source Job·revision·Step·fencing token·진단 fingerprint·실패 증적 ID를 다시 대조하고, 그 증적에서 결정적으로 계산한 ID의 `archive-publication-recovery` Job을 새로 만든다. 새 Job의 `RecoverySource`는 원래 실패와 근거를 보존하고 Worker는 패키지의 현재 리비전과 동일 전사 산출물을 확인한 뒤 필요한 리비전과 최상위 카탈로그를 멱등하게 재조정한다. 원래 Job과 실패 증적은 계속 `FAILED`이며 입력 오류·장치 부재·취소·임의 operation은 이 경로에 포함하지 않는다. `WFL-015`, `WRK-018`
 
+원래 전사 Job에서 whisper.cpp가 요청받은 긴 Windows 임시 JSON을 쓰기용으로 열 수 없었다는 마지막 실패 증적과 완료된 오디오 검증 기록이 있으면 진단은 `RETRY_TRANSCRIPTION_SHORT_PATH`를 제공한다. 활성 예약이 없어야 하며 복구 명령은 원래 Job 리비전·실패 증적·fencing token·현재 진단 fingerprint와 오디오 결과로 재구성한 전사 명세 digest를 다시 대조한다. 새 Job은 같은 Storage의 짧고 독립된 staging 경로에서 오디오 checksum을 재검증한 후 전사·자막·텍스트·패키지 리비전·카탈로그 게시를 수행한다. 원래 Job과 충돌한 파일은 보관한다. 같은 실패에는 하나의 복구 Job만 연결되고 그 복구에서 같은 전사 실패가 발생하면 추가 전사 복구를 만들지 않는다. `WFL-016`
+
 ## 5. Retry 분류
 
 | 오류 | 기본 동작 |

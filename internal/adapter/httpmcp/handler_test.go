@@ -484,6 +484,7 @@ func TestMCPReadsOnlyBoundSanitizedFailureEvidenceDetail(t *testing.T) {
 	reference := archivistruntime.WorkReference{Kind: archivistruntime.WorkJob, WorkID: "JOB-DETAIL-1", Revision: 4}
 	detail := workdiagnostics.FailureDetail{
 		WorkKind: reference.Kind, WorkID: reference.WorkID, JobID: reference.WorkID, StepID: "render",
+		CauseCode: "PROCESS_EXIT_NONZERO", Summary: "Encoder exited", WorkflowAttempt: 2,
 		EvidenceID: "EVD-WORKER-DETAIL", Operation: execution.OperationRenderRecording,
 		ObservedAt: time.Date(2026, 11, 21, 10, 0, 0, 0, time.UTC),
 		ProcessLog: execution.ProcessLogArtifact{
@@ -506,7 +507,7 @@ func TestMCPReadsOnlyBoundSanitizedFailureEvidenceDetail(t *testing.T) {
 	body := response.Body.String()
 	if response.Code != http.StatusOK || !strings.Contains(body, `"evidence_id":"EVD-WORKER-DETAIL"`) ||
 		!strings.Contains(body, `"state":"AVAILABLE"`) || !strings.Contains(body, "unsupported codec profile") ||
-		!strings.Contains(body, `"reference":"evidence://process-log/PLOG-DETAIL"`) {
+		!strings.Contains(body, `"reference":"evidence://process-log/PLOG-DETAIL"`) || !strings.Contains(body, `"cause_code":"PROCESS_EXIT_NONZERO"`) || !strings.Contains(body, `"workflow_attempt":2`) {
 		t.Fatalf("bound failure detail was not returned: %d %s", response.Code, body)
 	}
 	for _, forbidden := range []string{`C:\private`, "secret-value", "password", "credential"} {

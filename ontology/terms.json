@@ -790,7 +790,7 @@
       "rules": [
         "Worker·Step·typed operation·fencing token·실패 순서·workflow 시도·failure class와 결과 StepState를 기록한다.",
         "정규화 오류와 원인 code·정제 summary·process exit code·Wait Reason과 대상 Storage ID·안전한 log reference·Control 관측 시각만 기록한다.",
-        "원문 stdout·stderr, executable 인수, credential과 절대경로를 기록하지 않는다.",
+        "전사 엔진의 출력 열기 실패는 실제 요청 경로와 일치하는 엔진 관측으로 식별한다. 원문 stdout·stderr, executable 인수, credential과 절대경로를 기록하지 않는다.",
         "Job 상태·Domain Event·Worker Result Receipt·예약과 리스 해제와 같은 transaction에서 추가하고 동일 결과 재전송으로 중복하지 않는다.",
         "후속 재시도 성공으로 현재 오류가 비워져도 이전 실패 증적은 유지한다."
       ],
@@ -838,7 +838,7 @@
         "source Job ID·revision·Step ID·fencing token·실패 증적 ID·진단 fingerprint·action code를 기록한다.",
         "같은 source Job과 실패 증적 ID는 하나의 결정적 복구 Job ID에만 대응한다.",
         "복구 Job 생성은 source StepState와 Step Failure Evidence를 수정하거나 삭제하지 않는다.",
-        "TRANSIENT 패키지 리비전 또는 아카이브 카탈로그 게시 실패에 대해 현재 Work Diagnostic이 action을 제공한 경우에만 만든다."
+        "현재 Work Diagnostic이 허용한 TRANSIENT 패키지·카탈로그 게시 실패 또는 검증된 오디오가 있는 긴 Windows 전사 임시 출력 열기 실패에 대해 만든다."
       ],
       "forbidden": {
         "words": [],

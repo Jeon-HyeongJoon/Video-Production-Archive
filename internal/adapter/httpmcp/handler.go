@@ -468,8 +468,8 @@ func (handler *Handler) applyWorkRecovery(writer http.ResponseWriter, request *h
 	input.DiagnosticFingerprint = strings.TrimSpace(input.DiagnosticFingerprint)
 	input.Reason = strings.TrimSpace(input.Reason)
 	expiredExecution := input.ActionCode == "RECONCILE_EXPIRED_EXECUTION" && input.ReservationID != ""
-	terminalPublication := input.ActionCode == job.RecoveryActionRetryTerminalArchivePublication && input.ReservationID == ""
-	if (!expiredExecution && !terminalPublication) || input.JobID == "" || input.ExpectedJobRevision == 0 ||
+	terminalRecovery := (input.ActionCode == job.RecoveryActionRetryTerminalArchivePublication || input.ActionCode == job.RecoveryActionRetryTranscriptionShortPath) && input.ReservationID == ""
+	if (!expiredExecution && !terminalRecovery) || input.JobID == "" || input.ExpectedJobRevision == 0 ||
 		input.StepID == "" || input.FencingToken == 0 || input.DiagnosticFingerprint == "" ||
 		len(input.Basis) == 0 || input.Reason == "" || len(input.Reason) > 256 {
 		handler.failRecoveryTool(writer, request, call, http.StatusBadRequest, "MCP_INPUT_INVALID", input.JobID)
@@ -481,7 +481,7 @@ func (handler *Handler) applyWorkRecovery(writer http.ResponseWriter, request *h
 		return
 	}
 	commandType := job.RecoverExpiredExecutionCommand
-	if terminalPublication {
+	if terminalRecovery {
 		commandType = workrecovery.CreateTerminalRecoveryCommand
 	}
 	decision, err := archivistruntime.PrepareToolCall(archivistruntime.ToolCallRequest{

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -36,6 +37,20 @@ func TestMain(m *testing.M) {
 	fmt.Fprintln(os.Stderr, "whisper_print_progress_callback: progress =  20%")
 	fmt.Fprintln(os.Stderr, "whisper_print_progress_callback: progress =  21%")
 	fmt.Fprint(os.Stderr, "whisper_print_progress_callback: progress =  80%\r")
+	switch mode {
+	case "output-open", "other-output":
+		name := prefix + ".json"
+		if mode == "other-output" {
+			name += ".unrelated"
+		} else if err := os.Mkdir(name, 0700); err != nil {
+			os.Exit(2)
+		}
+		fmt.Fprintf(os.Stderr, "open: failed to open '%s' for writing\n", name)
+		os.Exit(11)
+	case "bad-model":
+		fmt.Fprintln(os.Stderr, "whisper_model_load: invalid model data (bad magic)")
+		os.Exit(3)
+	}
 	if mode == "exit" {
 		os.Exit(17)
 	}
@@ -114,6 +129,9 @@ media:
 		spec.Inputs = append(spec.Inputs, execution.InputReference{OriginalAssetID: asset, ArtifactID: "AUDIO-" + asset, Kind: execution.OutputAudio, StorageID: "media", RelativePath: "source.wav", Checksum: fmt.Sprintf("%x", sha256.Sum256(wav))})
 		spec.Outputs = append(spec.Outputs, execution.OutputTarget{OriginalAssetID: asset, ID: "TEXT-" + asset, Kind: execution.OutputTranscript, StorageID: "media", RelativePath: "out/" + asset + ".json"})
 	}
+	if mode == "output-open" || mode == "other-output" {
+		spec.Outputs[0].RelativePath = "staging/" + strings.Repeat("a", 100) + "/" + strings.Repeat("b", 100) + "/transcript.json"
+	}
 	data, err := json.Marshal(spec)
 	if err != nil {
 		t.Fatal(err)
@@ -175,11 +193,18 @@ func TestTranscriptionReportsObservedEngineProgressForEachInput(t *testing.T) {
 
 // Requirement: TRN-009
 func TestTranscriptionFailureIdentifiesLastObservedBoundaryAndSafeCause(t *testing.T) {
-	for _, tc := range []struct{ mode, cause string }{{"bad-audio", "WHISPER_CHUNK_PLAN_FAILED"}, {"exit", "PROCESS_EXIT_NONZERO"}, {"invalid", "WHISPER_OUTPUT_INVALID"}, {"missing", "WHISPER_OUTPUT_UNAVAILABLE"}} {
+	openCause := "WHISPER_OUTPUT_OPEN_FAILED"
+	if runtime.GOOS == "windows" {
+		openCause = "WHISPER_LONG_OUTPUT_OPEN_FAILED"
+	}
+	for _, tc := range []struct{ mode, cause string }{{"output-open", openCause}, {"other-output", "PROCESS_EXIT_NONZERO"}, {"bad-model", "WHISPER_MODEL_INVALID"}, {"bad-audio", "WHISPER_CHUNK_PLAN_FAILED"}, {"exit", "PROCESS_EXIT_NONZERO"}, {"invalid", "WHISPER_OUTPUT_INVALID"}, {"missing", "WHISPER_OUTPUT_UNAVAILABLE"}} {
 		t.Run(tc.mode, func(t *testing.T) {
 			code, r, samples := runTranscriptionFixture(t, tc.mode)
 			if code != 1 || r.Success || r.CauseCode != tc.cause || len(r.VerificationReferences) != 0 {
 				t.Fatalf("failure result: %+v", r)
+			}
+			if tc.mode == "output-open" && (!strings.Contains(r.ErrorSummary, "target was a directory") || (runtime.GOOS == "windows" && !strings.Contains(r.ErrorSummary, "extended path used: true"))) {
+				t.Fatalf("missing output observations: %+v", r)
 			}
 			last := samples[len(samples)-1].Update
 			if tc.mode == "bad-audio" {
@@ -190,6 +215,15 @@ func TestTranscriptionFailureIdentifiesLastObservedBoundaryAndSafeCause(t *testi
 			}
 			if last.Status != execution.ProgressFailed || last.InputIndex != 1 || last.ProcessPercent != 80 {
 				t.Fatalf("lost failure position: %+v", last)
+			}
+			if tc.mode == "output-open" || tc.mode == "other-output" || tc.mode == "bad-model" {
+				want := 11
+				if tc.mode == "bad-model" {
+					want = 3
+				}
+				if r.ProcessExitCode == nil || *r.ProcessExitCode != want || r.ProcessLog == nil || r.ProcessLog.State != execution.ProcessLogAvailable {
+					t.Fatalf("lost failure evidence: %+v", r)
+				}
 			}
 			if tc.mode == "exit" && (r.ProcessExitCode == nil || *r.ProcessExitCode != 17 || r.ProcessLog == nil || r.ProcessLog.State != execution.ProcessLogAvailable) {
 				t.Fatalf("lost process failure: %+v", r)

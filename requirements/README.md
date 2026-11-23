@@ -48,7 +48,7 @@
 | 영역 | 요구사항 | 고정한 핵심 규칙 |
 |---|---|---|
 | Command와 Event | `CMD-001~010`, `PER-001~002` | 권한 선판정, 의미 기반 멱등성, 결정적 실패 receipt, Unit of Work, SQLite 원자성과 process-wide 연결 수명주기 |
-| Step 실행 | `WFL-001~014` | 단일 상태 전이표, 최신 Approval 결정, ExecutionLease 배타성, fencing, 게시 후 복구, 실패 분류, 증거 기반 만료 실행 직접 복구 |
+| Step 실행 | `WFL-001~016` | 단일 상태 전이표, 최신 Approval 결정, ExecutionLease 배타성, fencing, 게시 후 복구, 실패 분류, 증거 기반 만료 실행 직접 복구 |
 | Dispatch와 자원 | `RES-001~008`, `DSP-001~004` | 영속 ready queue, aging·Job 공정성, Worker 자원 판정, 활성 예약을 반영한 큐 admission·lease |
 | 실행 경계 | `EXE-001~002`, `EXE-003`(planned) | shell 없는 인수 배열, 임시 출력 검증 뒤 게시. 게시 뒤 결과 보고 전 중단 복구는 후속 통합 경계 |
 | 아카이브 | `ARC-001~020` | 원본 불변, provenance, 결정적 manifest, 보관됨·확정됨 분리, DB 없는 복원, 아카이브 Storage 선택·확정, flat 결과 폴더·카탈로그 대조와 안전 여유를 포함한 용량 admission |
@@ -65,8 +65,8 @@
 
 ## 5. 현재 기준선
 
-- 전체 요구사항: 336개
-- 구현됨: 294개, 주석 테스트 294개와 1:1 연결
+- 전체 요구사항: 337개
+- 구현됨: 295개, 주석 테스트 295개와 1:1 연결
 - 구현된 integration 테스트: `OBS-005`, `OBS-011`, `TRN-008~009`, `WRK-020~021`, `ARC-006`, `ARC-013`, `ARC-015~020`, `PER-001~002`, `NTF-002`, `DSH-001~002`, `DSH-004~007`, `DSH-009~014`, `DSH-016~026`, `DSH-031~035`, `DSH-037~040`, `DSH-042~045`, `DEV-006~008`, `DEV-010`, `DEV-013~014`, `APP-002~004`, `APP-006`, `APP-008`, `TST-001`, `MED-002`, `MED-004`, `MED-006~008`, `INT-001`, `INT-003~004`, `RND-002`, `RND-005~006`, `QCT-002`, `QCT-004`, `CAT-002~003`, `AUD-002`, `AUD-004`, `TRN-002`, `TRN-004`, `TRN-006`, `SUB-002`, `SUM-003`, `REV-002`, `CFG-006~011`, `CTL-001~009`, `WRK-005~006`, `WRK-008~017`, `WRK-019`, `LRH-001`, `LRH-012~013`, `LRH-016`, `LRH-021~022`, `MCP-001`, `MCP-003~005`, `MCP-008~013`, `ORG-001`, `ORG-008~009`, `ORG-015`, `ARC-011`, `COL-001`, `COL-003~004`, `DSP-003`, `CAN-001~005`, `AGT-016~018`, `AGT-021`
 - 구현된 실장비 acceptance 테스트: `ARC-008`, `ARC-014`, `MED-003`, `RND-003`, `AUD-003`, `LRH-010~011`, `LRH-020`, `APP-005`, `APP-007`, `CFG-014~016`
 - 계획됨: 42개
@@ -86,7 +86,7 @@ go test ./...
 현재 정상 출력:
 
 ```text
-traceability ok: 336 requirements (294 implemented, 42 planned), 294 one-to-one tests
+traceability ok: 337 requirements (295 implemented, 42 planned), 295 one-to-one tests
 ```
 
 ## 7. 새 요구사항 추가 절차

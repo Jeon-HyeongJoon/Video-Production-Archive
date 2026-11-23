@@ -568,6 +568,19 @@ func (root *StorageRoot) FileSHA256(requested string) (int64, string, error) {
 	return size, hex.EncodeToString(hash.Sum(nil)), nil
 }
 
+// Stat observes an entry through the registered root without opening its content.
+func (root *StorageRoot) Stat(requested string) (os.FileInfo, error) {
+	clean, err := root.safeRelative(requested)
+	if err != nil {
+		return nil, err
+	}
+	info, err := root.root.Stat(clean)
+	if err != nil {
+		return nil, storageIOError(err)
+	}
+	return info, nil
+}
+
 func (root *StorageRoot) Exists(requested string) (bool, error) {
 	clean, err := root.safeRelative(requested)
 	if err != nil {

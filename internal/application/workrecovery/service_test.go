@@ -3,6 +3,8 @@ package workrecovery
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -11,6 +13,7 @@ import (
 	"videoarchive/internal/core/command"
 	"videoarchive/internal/core/execution"
 	"videoarchive/internal/core/job"
+	"videoarchive/internal/core/pipeline"
 	"videoarchive/internal/core/vocabulary"
 	"videoarchive/internal/core/workflow"
 )
@@ -127,5 +130,90 @@ func TestTerminalArchiveFailureRecoveryCreatesLinkedJobAndKeepsOriginalFailed(t 
 	if json.Unmarshal(payload, &unchanged) != nil || unchanged.Steps[0].Workflow.State != workflow.Failed ||
 		len(unchanged.Steps[0].FailureEvidence) != 1 {
 		t.Fatalf("source terminal failure was mutated: %+v", unchanged)
+	}
+}
+
+// Requirement: WFL-016
+func TestTranscriptionRecoveryReusesVerifiedAudioAndIsBoundToOneOutputFailure(t *testing.T) {
+	now := time.Now().UTC()
+	const checksum = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	video := execution.InputReference{OriginalAssetID: "ASSET-1", ArtifactID: "VIDEO-1", StorageID: "archive", RelativePath: "package/video.mp4", Kind: execution.OutputRendition, Checksum: checksum}
+	audio := execution.OutputTarget{OriginalAssetID: "ASSET-1", ID: "AUDIO-1", StorageID: "archive", RelativePath: "staging/original/audio.wav", Kind: execution.OutputAudio}
+	base, err := execution.NewStepExecutionSpec(execution.StepExecutionSpec{
+		JobID: "STT-ORIGINAL", TemplateName: "archive-transcription", StepID: "audio", Operation: execution.OperationExtractSpeechAudio,
+		Inputs: []execution.InputReference{video}, Outputs: []execution.OutputTarget{audio}, ProfileReference: "speech-ko-enhanced-16k@v1",
+		Parameters: execution.StepExecutionParameters{ArchiveRunID: "RUN-1", WorkspaceDriveID: "VOLUME-1", ArchiveStorageID: "archive", InputRevision: 1, OrganizationDecisionID: "DECISION-1", ArchivePackageRevision: 1, SourceInputs: []execution.InputReference{video}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, err := execution.NewStepOutputRecord(base, 1, "worker", now, []execution.StepOutput{{ID: audio.ID, Kind: audio.Kind, StorageID: audio.StorageID, RelativePath: audio.RelativePath, Checksum: checksum}}, []string{"verified-audio"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec, err := execution.MaterializeDependentStepExecutionSpec(execution.MaterializeRequest{JobID: base.JobID, TemplateName: base.TemplateName, StepID: "transcript", Completed: []execution.CompletedStep{{StepID: "audio", Spec: base, OutputRecord: record}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	exit := 11
+	failure := job.StepFailureEvidence{EvidenceID: "EVD-TEMP-OPEN", Operation: spec.Operation, StepID: spec.StepID, FencingToken: 3, WorkflowAttempt: 3, FailureSequence: 3, FailureClass: workflow.FailureTransient, ResultingState: workflow.Failed, ProcessExitCode: &exit, CauseCode: execution.WhisperLongOutputOpenFailed}
+	source := job.State{ID: base.JobID, TemplateName: base.TemplateName, Revision: 23, CurrentStepID: spec.StepID, TargetTitle: "recording", Steps: []job.Step{
+		{Workflow: workflow.Step{ID: "audio", State: workflow.Completed}, ExecutionSpec: &base, OutputRecord: &record},
+		{Workflow: workflow.Step{ID: spec.StepID, State: workflow.Failed}, ExecutionSpec: &spec, FailureEvidence: []job.StepFailureEvidence{failure}},
+	}}
+	fingerprint := "0123456789abcdef01234567"
+	id := job.TerminalRecoveryJobID(source.ID, failure.EvidenceID)
+	action := workdiagnostics.RecoveryAction{ActionCode: job.RecoveryActionRetryTranscriptionShortPath, JobID: source.ID, JobRevision: source.Revision, StepID: spec.StepID, FencingToken: 3, Basis: []string{failure.EvidenceID}, DiagnosticFingerprint: fingerprint, RecoveryJobID: id}
+	diag := workdiagnostics.Snapshot{WorkKind: archivistruntime.WorkJob, WorkID: source.ID, WorkRevision: source.Revision, Fingerprint: fingerprint, Jobs: []workdiagnostics.JobDiagnostic{{JobID: source.ID}}, RecoveryActions: []workdiagnostics.RecoveryAction{action}}
+	envelope := command.Envelope{CommandType: CreateTerminalRecoveryCommand, CommandID: "CMD-STT-RECOVERY", Actor: command.Actor{Type: command.ArchivistActor, ID: "archivist:session"}, RequestedVia: "mcp", TargetID: source.ID, ExpectedRevision: source.Revision, IdempotencyKey: "recover-short", Reason: "verify a shorter staging path", Parameters: map[string]any{"action_code": action.ActionCode, "step_id": spec.StepID, "fencing_token": uint64(3), "diagnostic_fingerprint": fingerprint, "basis": action.Basis}}
+	for _, test := range []string{"observed failure", "legacy exit", "different cause", "unverified audio", "stale fencing token", "failed recovery Job"} {
+		t.Run(test, func(t *testing.T) {
+			state := source
+			state.Steps = append([]job.Step(nil), source.Steps...)
+			observation := failure
+			switch test {
+			case "legacy exit":
+				observation.CauseCode = "PROCESS_EXIT_NONZERO"
+			case "different cause":
+				observation.CauseCode = "WHISPER_MODEL_INVALID"
+			case "unverified audio":
+				state.Steps[0].OutputRecord = nil
+			case "stale fencing token":
+				observation.FencingToken++
+			case "failed recovery Job":
+				state.TemplateName = pipeline.ArchiveTranscriptionRecoveryName
+			}
+			state.Steps[1].FailureEvidence = []job.StepFailureEvidence{observation}
+			payload, err := json.Marshal(state)
+			if err != nil {
+				t.Fatal(err)
+			}
+			handler, _ := job.NewHandler(func() time.Time { return now })
+			commands := &creatingCommands{handler: handler}
+			svc, _ := New(fixedDiagnostics{snapshot: diag}, commands, fixedStates{snapshot: command.Snapshot{TargetID: state.ID, Revision: state.Revision, State: payload}})
+			result, err := svc.Apply(context.Background(), archivistruntime.WorkReference{Kind: archivistruntime.WorkJob, WorkID: state.ID, Revision: state.Revision}, envelope)
+			if test != "observed failure" {
+				if !errors.Is(err, ErrRecoveryNotSafe) || len(commands.seen) != 0 {
+					t.Fatalf("unexpected recovery: %+v %v", result, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			replacement := result.Command.Value.(job.State)
+			if replacement.ID != id || replacement.RecoverySource.FailureEvidenceID != failure.EvidenceID || replacement.CurrentStepID != "transcript" || len(replacement.Steps) != 5 {
+				t.Fatalf("unexpected replacement: %+v", replacement)
+			}
+			for _, step := range replacement.Steps {
+				if step.Workflow.ID != "transcript" {
+					continue
+				}
+				retry := step.ExecutionSpec
+				if retry == nil || retry.Validate() != nil || !reflect.DeepEqual(retry.Inputs, spec.Inputs) || retry.Outputs[0].ID != spec.Outputs[0].ID || retry.Outputs[0].StorageID != audio.StorageID || len(retry.Outputs[0].RelativePath) >= len(spec.Outputs[0].RelativePath) || retry.Parameters.ArchivePackageRevision != 1 {
+					t.Fatalf("unsafe replacement spec: %+v", retry)
+				}
+			}
+		})
 	}
 }

@@ -18,6 +18,7 @@ import (
 	"videoarchive/internal/core/command"
 	"videoarchive/internal/core/execution"
 	"videoarchive/internal/core/job"
+	"videoarchive/internal/core/pipeline"
 	"videoarchive/internal/core/vocabulary"
 	"videoarchive/internal/core/workflow"
 )
@@ -595,7 +596,7 @@ func childRole(template string) ChildRole {
 	switch template {
 	case "archive-intake-inspection":
 		return ChildInspection
-	case "archive-transcription":
+	case "archive-transcription", pipeline.ArchiveTranscriptionRecoveryName:
 		return ChildTranscription
 	default:
 		return ChildFolder

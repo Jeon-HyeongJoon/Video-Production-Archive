@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"path"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -103,7 +104,16 @@ type WorkerSnapshot struct {
 	ReportedLightRunning   int       `json:"reported_light_running"`
 }
 
+type LinkedRecoveryJob struct {
+	JobID             string             `json:"job_id"`
+	Revision          uint64             `json:"revision"`
+	StepID            string             `json:"step_id"`
+	State             workflow.StepState `json:"state"`
+	FailureEvidenceID string             `json:"failure_evidence_id"`
+}
+
 type JobDiagnostic struct {
+	RecoveryJob      *LinkedRecoveryJob             `json:"recovery_job,omitempty"`
 	EvidenceGaps     []EvidenceGap                  `json:"evidence_gaps,omitempty"`
 	JobID            string                         `json:"job_id"`
 	JobRevision      uint64                         `json:"job_revision"`
@@ -136,6 +146,9 @@ type Snapshot struct {
 }
 
 type FailureDetail struct {
+	CauseCode       string                       `json:"cause_code,omitempty"`
+	Summary         string                       `json:"summary,omitempty"`
+	WorkflowAttempt int                          `json:"workflow_attempt,omitempty"`
 	WorkKind        archivistruntime.WorkKind    `json:"work_kind"`
 	WorkID          string                       `json:"work_id"`
 	JobID           string                       `json:"job_id"`
@@ -149,6 +162,8 @@ type FailureDetail struct {
 
 func SanitizeFailureDetail(source FailureDetail) FailureDetail {
 	result := source
+	result.CauseCode = safeDiagnosticCode(source.CauseCode, "")
+	result.Summary = safeDiagnosticSummary(source.Summary)
 	result.EvidenceID = safeEvidenceID(source.EvidenceID, source.JobID+"\x00"+source.StepID)
 	result.ProcessLog.Reference = safeLogReference(source.ProcessLog.Reference)
 	result.ProcessLog.SanitizedTail = safeProcessTail(source.ProcessLog.SanitizedTail)
@@ -275,6 +290,7 @@ func (service *Service) FailureEvidence(ctx context.Context, reference archivist
 				}
 				evidence := sanitizeFailureEvidenceWithTail(source)
 				return FailureDetail{
+					CauseCode: evidence.CauseCode, Summary: evidence.Summary, WorkflowAttempt: evidence.WorkflowAttempt,
 					WorkKind: reference.Kind, WorkID: reference.WorkID, JobID: jobID, StepID: evidence.StepID,
 					EvidenceID: evidence.EvidenceID, Operation: evidence.Operation, ProcessExitCode: evidence.ProcessExitCode,
 					ObservedAt: evidence.ObservedAt, ProcessLog: *evidence.ProcessLog,
@@ -377,13 +393,30 @@ func (service *Service) diagnoseJob(ctx context.Context, view archiveworkspace.J
 		} else {
 			actions = append(actions, SuggestedAction{Code: "FAILURE_DETAIL_UNAVAILABLE", Summary: "Use the structured failure fields because process detail was not recorded"})
 		}
-		if latest, ok := retryableTerminalArchiveFailure(item, summary.CurrentStepID); ok && !found {
+		latest, actionCode := terminalRecovery(item, summary.TemplateName)
+		switch latest.CauseCode {
+		case "WHISPER_MODEL_INVALID":
+			actions = append(actions, SuggestedAction{Code: "VERIFY_TRANSCRIPTION_MODEL", Summary: "Verify the configured model against its trusted checksum before scheduling transcription"})
+		case "WHISPER_OUTPUT_OPEN_FAILED":
+			actions = append(actions, SuggestedAction{Code: "CHECK_TRANSCRIPTION_OUTPUT_DIRECTORY", Summary: "Check the target directory for write access, conflicting files and available space"})
+		}
+		if actionCode == corejob.RecoveryActionRetryTranscriptionShortPath {
+			if slices.ContainsFunc(view.Steps, func(s archiveworkspace.StepStatus) bool {
+				return s.ID == "audio" && s.State == workflow.Completed && s.HasVerificationReferences
+			}) {
+				facts = append(facts, diagnosticFact("RECOVERY_AUDIO_VERIFIED", "Audio extraction has a verified output record; the recovery Worker checks its checksum before reuse", latest.ObservedAt, summary.JobID, latest.EvidenceID))
+			} else {
+				actionCode = ""
+			}
+		}
+		if actionCode != "" && !found {
 			if recovery, exists := recoveryJobs[latest.EvidenceID]; exists {
+				item.RecoveryJob = &LinkedRecoveryJob{JobID: recovery.JobID, Revision: recovery.Revision, StepID: recovery.CurrentStepID, State: recovery.StepState, FailureEvidenceID: latest.EvidenceID}
 				facts = append(facts, diagnosticFact("TERMINAL_RECOVERY_JOB_CREATED", "A replacement recovery Job preserves and follows the terminal failure", recovery.LastEventAt,
 					summary.JobID, latest.EvidenceID, recovery.JobID, strconv.FormatUint(recovery.Revision, 10)))
 			} else {
 				recoveries = append(recoveries, RecoveryAction{
-					ActionCode: corejob.RecoveryActionRetryTerminalArchivePublication,
+					ActionCode: actionCode,
 					JobID:      summary.JobID, JobRevision: summary.Revision, StepID: summary.CurrentStepID,
 					FencingToken: latest.FencingToken, Basis: []string{latest.EvidenceID},
 					RecoveryJobID: corejob.TerminalRecoveryJobID(summary.JobID, latest.EvidenceID),
@@ -447,26 +480,16 @@ func (service *Service) diagnoseJob(ctx context.Context, view archiveworkspace.J
 	return item, facts, hypotheses, dedupeActions(actions), recoveries, report, nil
 }
 
-func retryableTerminalArchiveFailure(item JobDiagnostic, currentStepID string) (corejob.StepFailureEvidence, bool) {
-	if len(item.FailureEvidence) == 0 {
-		return corejob.StepFailureEvidence{}, false
-	}
+func terminalRecovery(item JobDiagnostic, template string) (corejob.StepFailureEvidence, string) {
 	var latest corejob.StepFailureEvidence
-	for index := len(item.FailureEvidence) - 1; index >= 0; index-- {
-		if item.FailureEvidence[index].StepID == currentStepID {
-			latest = item.FailureEvidence[index]
-			break
+	if item.StepState == workflow.Failed {
+		for _, failure := range item.FailureEvidence {
+			if failure.StepID == item.StepID && failure.FailureSequence > latest.FailureSequence {
+				latest = failure
+			}
 		}
 	}
-	if latest.EvidenceID == "" || latest.ResultingState != workflow.Failed || latest.FailureClass != workflow.FailureTransient {
-		return corejob.StepFailureEvidence{}, false
-	}
-	switch latest.Operation {
-	case execution.OperationReviseArchivePackage, execution.OperationWriteArchiveCatalog:
-		return latest, true
-	default:
-		return corejob.StepFailureEvidence{}, false
-	}
+	return latest, corejob.TerminalRecoveryAction(template, latest)
 }
 
 func sanitizeRecoveryEvidence(source corejob.StepRecoveryEvidence) corejob.StepRecoveryEvidence {
@@ -723,6 +746,9 @@ func fingerprint(snapshot Snapshot) string {
 		source.WriteString("/progress=" + strconv.FormatFloat(item.Progress, 'f', 6, 64) + "/at=" + item.LastProgressAt.UTC().Format(time.RFC3339Nano))
 		if item.Worker != nil {
 			source.WriteString("/" + item.Worker.State)
+		}
+		if item.RecoveryJob != nil {
+			source.WriteString("/replacement=" + item.RecoveryJob.JobID + ":" + strconv.FormatUint(item.RecoveryJob.Revision, 10))
 		}
 		if item.Execution != nil {
 			source.WriteString("/lease=" + boolString(item.Execution.HasLease))

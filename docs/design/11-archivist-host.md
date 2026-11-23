@@ -155,7 +155,7 @@ Codex app-server 경로는 ArchivistSession에 대응한 native thread를 proces
 
 Archivist가 작업 중단 원인을 요청받거나 자동 복구 Turn을 처리하면 `archive.work.diagnostics.get.v1`을 먼저 사용한다. 응답은 증적 ID가 있는 확인된 `facts`, 예측·확인 방법과 증적 ID basis가 있는 `hypotheses`, 설명용 `suggested_actions`, 실행 가능한 `recovery_actions`를 분리한다. Archivist는 확정 진술에 해당 증적 ID를 근거로 사용하고 가설을 사실로 바꾸지 않는다. `recovery_actions`가 있으면 필드를 바꾸지 않고 `archive.work.recovery.apply.v1`에 제출한 뒤 진단을 다시 읽어 복구 증적 ID·복구 Job ID와 결과 상태를 보고한다. 목록에 없는 retry·cancel·분류·단계 시작을 복구로 대신하지 않는다. subprocess의 정지를 직접 관측하지 못한 경우 확정 원인 대신 현재 확인 가능한 실행 리스·Worker 상태와 추가 확인 방법을 보고한다. 새 드라이브 자동 제안은 현재 후보 조회→원본 intake session→적격 아카이브와 명시적 폴더 범위 고정→아카이브 시작 ActionCard 제안 순서로 끝내며, 카드가 실행되기 전에는 시작했다고 말하지 않는다.
 
-진단에 `AVAILABLE` process 실패 증적이 있으면 Archivist는 원인을 추측하기 전에 해당 증적 ID로 `archive.work.failure_evidence.get.v1`을 호출한다. 반환된 정제 tail에 실제로 나타난 내용만 확인된 원인으로 인용하고, `CAPTURE_FAILED`·`EXPIRED`·`LEGACY_UNRESOLVABLE`이면 상세가 기록되지 않았거나 더는 가용하지 않다고 보고한다. “다”, “모두”, “전체”처럼 범위가 여러 작업인 질문은 현재 Turn에 WorkReference가 있어도 먼저 `archive.system.status.get.v1`으로 전체 미해결 범위를 확인한 뒤 각 WorkReference의 진단과 실패 상세로 좁힌다. `MCP-012~013`
+진단에 `AVAILABLE` process 실패 증적이 있으면 Archivist는 원인을 추측하기 전에 해당 증적 ID로 `archive.work.failure_evidence.get.v1`을 호출한다. 전사는 반환된 구조화 원인과 실제 시도·종료 코드를 인용하고, 그 밖의 process는 정제 tail에서 확인한 내용을 인용한다. 상태 조회 요청에는 진단과 가능한 조치를 보고한다. 복구 요청 또는 REMEDIATION Turn에서 현재 진단의 action·basis로 복구를 실행하고 연결 Job의 최종 단계를 확인한다. 상세 상태가, `CAPTURE_FAILED`·`EXPIRED`·`LEGACY_UNRESOLVABLE`이면 상세가 기록되지 않았거나 더는 가용하지 않다고 보고한다. “다”, “모두”, “전체”처럼 범위가 여러 작업인 질문은 현재 Turn에 WorkReference가 있어도 먼저 `archive.system.status.get.v1`으로 전체 미해결 범위를 확인한 뒤 각 WorkReference의 진단과 실패 상세로 좁힌다. `MCP-012~013`
 
 ## 7. 도구 호출 경계
 

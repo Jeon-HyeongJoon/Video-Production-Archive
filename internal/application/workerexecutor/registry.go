@@ -345,6 +345,19 @@ func operationFailureDetails(operation execution.Operation, err error) (string, 
 	var exitError *osexec.ExitError
 	if errors.As(err, &exitError) {
 		exitCode := exitError.ExitCode()
+		if operation == execution.OperationTranscribeAudio {
+			var openFailure *whispercpp.OutputOpenFailure
+			if errors.As(err, &openFailure) {
+				cause := "WHISPER_OUTPUT_OPEN_FAILED"
+				if openFailure.WindowsPathUnits >= 260 {
+					cause = execution.WhisperLongOutputOpenFailed
+				}
+				return cause, openFailure.Error(), &exitCode
+			}
+			if errors.Is(err, whispercpp.ErrInvalidModel) {
+				return "WHISPER_MODEL_INVALID", "Whisper rejected the configured model file signature", &exitCode
+			}
+		}
 		return "PROCESS_EXIT_NONZERO", summary, &exitCode
 	}
 	if causeCode, causeSummary, classified := typedFailureCause(err); classified {

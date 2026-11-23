@@ -77,6 +77,50 @@ func TestWorkDiagnosticsExposePersistedFailureEvidenceAsFactsWithoutRawProcessDa
 			t.Fatalf("diagnostic exposed raw process data: %s", payload)
 		}
 	}
+	t.Run("short path recovery requires the latest matching failure and verified audio", func(t *testing.T) {
+		failed := view.Steps[0].FailureEvidence[1]
+		failed.Operation, failed.StepID, failed.CauseCode = execution.OperationTranscribeAudio, "transcript", execution.WhisperLongOutputOpenFailed
+		view.Summary.TemplateName, view.Summary.CurrentStepID = "archive-transcription", failed.StepID
+		view.Steps = []archiveworkspace.StepStatus{{ID: "audio", State: workflow.Completed}, {ID: failed.StepID, State: workflow.Failed, FailureEvidence: []corejob.StepFailureEvidence{failed}}}
+		ref := archivistruntime.WorkReference{Kind: archivistruntime.WorkJob, WorkID: view.Summary.JobID, Revision: view.Summary.Revision}
+		read := func(inbox []archiveworkspace.JobSummary) Snapshot {
+			t.Helper()
+			reader, err := New(fixedWorkReader{}, fixedJobReader{view: view, inbox: inbox}, fixedWorkerReader{}, fixedExecutionReader{}, func() time.Time { return now }, time.Minute)
+			if err != nil {
+				t.Fatal(err)
+			}
+			snapshot, err := reader.Diagnose(context.Background(), ref)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return snapshot
+		}
+		if len(read(nil).RecoveryActions) != 0 {
+			t.Fatal("unverified audio produced a recovery action")
+		}
+		view.Steps[0].HasVerificationReferences = true
+		available := read(nil)
+		if len(available.RecoveryActions) != 1 || available.RecoveryActions[0].ActionCode != corejob.RecoveryActionRetryTranscriptionShortPath ||
+			available.RecoveryActions[0].Basis[0] != failed.EvidenceID || !hasFact(available.Facts, "RECOVERY_AUDIO_VERIFIED") {
+			t.Fatalf("missing recovery basis: %+v", available)
+		}
+		recovery := archiveworkspace.JobSummary{JobID: available.RecoveryActions[0].RecoveryJobID, Revision: 17, CurrentStepID: "archive_catalog", StepState: workflow.Completed, LastEventAt: now, RecoverySource: &corejob.RecoverySource{FailureEvidenceID: failed.EvidenceID, JobID: ref.WorkID}}
+		after := read([]archiveworkspace.JobSummary{recovery})
+		if len(after.RecoveryActions) != 0 || after.Jobs[0].RecoveryJob == nil || after.Jobs[0].RecoveryJob.State != workflow.Completed || after.Jobs[0].RecoveryJob.FailureEvidenceID != failed.EvidenceID {
+			t.Fatalf("missing linked result: %+v", after)
+		}
+		other := failed
+		other.FailureSequence++
+		other.CauseCode = "PROCESS_EXIT_NONZERO"
+		other.EvidenceID = "EVD-NEWER"
+		// Sequence, independent of observation time, selects the latest settlement.
+		other.ObservedAt = failed.ObservedAt.Add(-time.Second)
+		view.Steps[1].FailureEvidence = append(view.Steps[1].FailureEvidence, other)
+		if len(read(nil).RecoveryActions) != 0 {
+			t.Fatal("an older classified failure authorized a retry")
+		}
+	})
+
 }
 
 // Requirement: OBS-004
@@ -115,7 +159,7 @@ func TestWorkDiagnosticsExposeAvailableDetailAndMarkLegacyReferenceUnresolvable(
 		t.Fatalf("available detail was not projected safely: %+v", diagnostic)
 	}
 	detail, err := service.FailureEvidence(context.Background(), reference, failure.EvidenceID)
-	if err != nil || detail.ProcessLog.State != execution.ProcessLogAvailable ||
+	if err != nil || detail.CauseCode != failure.CauseCode || detail.WorkflowAttempt != failure.WorkflowAttempt || detail.Summary != failure.Summary || detail.ProcessLog.State != execution.ProcessLogAvailable ||
 		!strings.Contains(detail.ProcessLog.SanitizedTail, "decoder rejected") || strings.Contains(strings.ToLower(detail.ProcessLog.SanitizedTail), "should-not-leave") {
 		t.Fatalf("failure detail was not independently sanitized: detail=%+v err=%v", detail, err)
 	}

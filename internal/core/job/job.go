@@ -23,6 +23,7 @@ const (
 	CreateCommand                                 = "job.create"
 	CancelCommand                                 = "job.cancel"
 	RecoverExpiredExecutionCommand                = "job.recover_expired_execution"
+	RecoveryActionRetryTranscriptionShortPath     = "RETRY_TRANSCRIPTION_SHORT_PATH"
 	RecoveryActionRetryTerminalArchivePublication = "RETRY_TERMINAL_ARCHIVE_PUBLICATION"
 )
 
@@ -283,11 +284,12 @@ func (handler *Handler) create(envelope command.Envelope, snapshot command.Snaps
 	}
 	if parameters.RecoverySource != nil {
 		if envelope.Actor.Type != command.ArchivistActor || envelope.RequestedVia != "mcp" ||
-			template.Name != pipeline.ArchivePublicationRecovery().Name ||
+			template.Name != recoveryTemplate(parameters.RecoverySource.ActionCode) ||
+			envelope.TargetID != TerminalRecoveryJobID(parameters.RecoverySource.JobID, parameters.RecoverySource.FailureEvidenceID) ||
 			!validRecoverySource(*parameters.RecoverySource) {
 			return command.Change{}, command.DeterministicFailure("INVALID_JOB_RECOVERY_SOURCE", ErrInvalidJob)
 		}
-	} else if template.Name == pipeline.ArchivePublicationRecovery().Name {
+	} else if template.Name == pipeline.ArchivePublicationRecovery().Name || template.Name == pipeline.ArchiveTranscriptionRecoveryName {
 		return command.Change{}, command.DeterministicFailure("INVALID_JOB_RECOVERY_SOURCE", ErrInvalidJob)
 	}
 	priority := parameters.ExecutionPriority
@@ -403,8 +405,36 @@ func (handler *Handler) create(envelope command.Envelope, snapshot command.Snaps
 	})
 }
 
+func recoveryTemplate(action string) string {
+	switch action {
+	case RecoveryActionRetryTerminalArchivePublication:
+		return pipeline.ArchivePublicationRecovery().Name
+	case RecoveryActionRetryTranscriptionShortPath:
+		return pipeline.ArchiveTranscriptionRecoveryName
+	default:
+		return ""
+	}
+}
+
+// TerminalRecoveryAction selects a single recovery from the latest fenced failure.
+func TerminalRecoveryAction(template string, failure StepFailureEvidence) string {
+	if failure.ResultingState != workflow.Failed || failure.FailureClass != workflow.FailureTransient || failure.EvidenceID == "" || failure.FencingToken == 0 {
+		return ""
+	}
+	switch failure.Operation {
+	case execution.OperationReviseArchivePackage, execution.OperationWriteArchiveCatalog:
+		return RecoveryActionRetryTerminalArchivePublication
+	case execution.OperationTranscribeAudio:
+		if template == "archive-transcription" && failure.StepID == "transcript" && failure.CauseCode == execution.WhisperLongOutputOpenFailed &&
+			failure.ProcessExitCode != nil && *failure.ProcessExitCode > 0 {
+			return RecoveryActionRetryTranscriptionShortPath
+		}
+	}
+	return ""
+}
+
 func validRecoverySource(source RecoverySource) bool {
-	if source.ActionCode != "RETRY_TERMINAL_ARCHIVE_PUBLICATION" || strings.TrimSpace(source.JobID) == "" ||
+	if strings.TrimSpace(source.JobID) == "" ||
 		source.JobRevision == 0 || strings.TrimSpace(source.StepID) == "" || source.FencingToken == 0 ||
 		len(source.DiagnosticFingerprint) != 24 || len(source.Basis) != 1 ||
 		strings.TrimSpace(source.FailureEvidenceID) == "" || source.Basis[0] != source.FailureEvidenceID {
@@ -558,6 +588,8 @@ func templateByName(name string) (pipeline.Template, bool) {
 		return pipeline.ArchiveIntakeInspection(), true
 	case pipeline.ArchiveTranscription().Name:
 		return pipeline.ArchiveTranscription(), true
+	case pipeline.ArchiveTranscriptionRecoveryName:
+		return pipeline.ArchiveTranscriptionRecovery(), true
 	case pipeline.ArchivePublicationRecovery().Name:
 		return pipeline.ArchivePublicationRecovery(), true
 	default:

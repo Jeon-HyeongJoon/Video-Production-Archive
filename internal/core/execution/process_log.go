@@ -6,6 +6,10 @@ import (
 	"strings"
 )
 
+// WhisperLongOutputOpenFailed identifies an observed failure opening the exact
+// requested JSON on a Windows path of at least 260 UTF-16 code units.
+const WhisperLongOutputOpenFailed = "WHISPER_LONG_OUTPUT_OPEN_FAILED"
+
 type ProcessLogState string
 
 const (

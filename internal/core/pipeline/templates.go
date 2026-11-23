@@ -196,6 +196,17 @@ func ArchiveTranscription() Template {
 	)
 }
 
+const ArchiveTranscriptionRecoveryName = "archive-transcription-recovery"
+
+// ArchiveTranscriptionRecovery resumes from the verified audio of a terminal Job.
+func ArchiveTranscriptionRecovery() Template {
+	template := ArchiveTranscription()
+	template.Name = ArchiveTranscriptionRecoveryName
+	delete(template.Steps, "audio")
+	template.Steps["transcript"] = heavyStep("transcript", vocabulary.ProcessingSTT)
+	return template
+}
+
 // ArchivePublicationRecovery is a new Job that reconciles a failed package or
 // catalog publication without reopening the terminal source Step.
 func ArchivePublicationRecovery() Template {
