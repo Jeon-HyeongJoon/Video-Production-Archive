@@ -94,7 +94,7 @@ size + sha256
 
 `AudioArtifact`는 원본 자산에서 STT 입력 규격으로 추출한 파생 파일이다. v1은 WAV/PCM 16-bit little-endian, 16kHz, mono 규격을 사용하며 checksum·Profile·FFmpeg·Worker provenance를 가진다. `AUD-001~002`
 
-`Transcript`는 AudioArtifact에서 STT가 게시한 JSON Artifact이면서 언어와 순서 있는 전역 영상 millisecond 시간 구간을 제공하는 구조화 결과다. 긴 입력을 처리하는 내부 청크는 게시 Entity가 아니며, 무음 경계 우선 분할 뒤 나온 상대 시각을 원본 시간축으로 합치고 경계 겹침을 제거한다. 원본 `whisper.cpp` JSON의 host 정보와 모델 파일 경로는 게시하지 않고 Profile reference와 정규 구간만 sidecar에 남긴다. 공통 checksum·게시·provenance는 Artifact가 소유하고 전사문 검색과 타임코드 이동에 필요한 필드는 Transcript가 소유한다. `TRN-001~002`
+`Transcript`는 AudioArtifact에서 STT가 게시한 JSON Artifact이면서 언어와 순서 있는 전역 영상 millisecond 시간 구간을 제공하는 구조화 결과다. 긴 입력을 처리하는 내부 청크는 게시 Entity가 아니며, 무음 경계 우선 분할 뒤 나온 상대 시각을 원본 시간축으로 합치고 경계 겹침을 제거한다. Windows에서 whisper.cpp에 전달하는 모델·오디오·임시 JSON 경로는 최종 확장자를 포함해 일반 경로 길이 한계를 넘으면 같은 로컬 또는 UNC 파일의 확장 길이 표기를 사용한다. StorageRoot 상대경로와 게시 identity는 유지한다. 원본 `whisper.cpp` JSON의 host 정보와 모델 파일 경로는 게시하지 않고 Profile reference와 정규 구간만 sidecar에 남긴다. 공통 checksum·게시·provenance는 Artifact가 소유하고 전사문 검색과 타임코드 이동에 필요한 필드는 Transcript가 소유한다. `TRN-001~002`
 
 `Subtitle`은 Transcript의 시간 구간을 versioned SRT Profile로 직렬화한 게시 Artifact다. Subtitle provenance는 입력 Transcript ID를 하나만 가지며 등록 Storage root 안의 임시 파일을 검증한 뒤 게시한다. `SUB-001~002`
 

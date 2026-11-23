@@ -3,6 +3,7 @@
 package controlruntime_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/csv"
 	"encoding/json"
@@ -16,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"videoarchive/internal/adapter/archivebundle"
 	"videoarchive/internal/adapter/bootconfig"
 	"videoarchive/internal/adapter/controlruntime"
 	"videoarchive/internal/adapter/ossecret"
@@ -232,9 +234,7 @@ worker:
 		t.Fatalf("Windows QC evidence is incomplete: %s err=%v", qcPayload, err)
 	}
 	metadataPayload, err := workingCapability.ReadFile(outputPaths["organize"][0])
-	var metadata struct {
-		Disposition vocabulary.OrganizationDisposition `json:"organization_disposition"`
-	}
+	var metadata archivebundle.Metadata
 	if err != nil || json.Unmarshal(metadataPayload, &metadata) != nil || metadata.Disposition != vocabulary.OrganizationCompileSourceSequence {
 		t.Fatalf("Windows organized bundle is incomplete: %s err=%v", metadataPayload, err)
 	}
@@ -242,9 +242,23 @@ worker:
 	if err != nil {
 		t.Fatal(err)
 	}
-	records, err := csv.NewReader(strings.NewReader(string(catalogPayload))).ReadAll()
-	if err != nil || len(records) != 4 {
-		t.Fatalf("Windows ArchiveCatalog rows=%d err=%v payload=%s", len(records), err, catalogPayload)
+	packages := windowsCSVRows(t, catalogPayload, 1)
+	if packages[0]["archive_package_id"] != metadata.PackageID || packages[0]["result_video_path"] != metadata.VideoPath || packages[0]["source_count"] != "3" {
+		t.Fatalf("catalog does not identify the sequence package: %+v", packages[0])
+	}
+	info, err := workingCapability.ReadFile(metadata.VideoInfoPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	details := windowsCSVRows(t, info, len(originalChecksums))
+	seen := make(map[string]bool)
+	for _, row := range details {
+		name := row["source_relative_path"]
+		before, known := originalChecksums[name]
+		if !known || seen[name] || row["source_name"] != filepath.Base(name) || row["source_checksum"] != before {
+			t.Fatalf("unexpected source detail: %+v", row)
+		}
+		seen[name] = true
 	}
 	sourceCapability, err = archive.OpenStorageRoot(sourceRoot)
 	if err != nil {
@@ -261,7 +275,7 @@ worker:
 	evidence, _ := json.Marshal(map[string]any{
 		"requirement_id": "APP-005", "host": hostname, "job_id": jobID,
 		"worker_restarted": true, "sequence_output_count": len(outputPaths["sequence_render"]),
-		"qc": "PASSED", "catalog_rows": len(records) - 1, "source_checksum_unchanged": true,
+		"qc": "PASSED", "catalog_rows": len(packages), "source_detail_rows": len(details), "source_checksum_unchanged": true,
 	})
 	t.Logf("acceptance_evidence=%s", evidence)
 }
@@ -269,8 +283,9 @@ worker:
 type driveJobView struct {
 	Data struct {
 		Steps []struct {
-			ID    string             `json:"id"`
-			State workflow.StepState `json:"state"`
+			ID              string                    `json:"id"`
+			State           workflow.StepState        `json:"state"`
+			FailureEvidence []job.StepFailureEvidence `json:"failure_evidence"`
 		} `json:"steps"`
 	} `json:"data"`
 }
@@ -290,6 +305,15 @@ func readDriveJob(t *testing.T, handler http.Handler, jobID string) driveJobView
 	var view driveJobView
 	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &view) != nil {
 		return driveJobView{}
+	}
+	for _, step := range view.Data.Steps {
+		if step.State == workflow.Failed {
+			if n := len(step.FailureEvidence); n > 0 {
+				last := step.FailureEvidence[n-1]
+				t.Fatalf("Windows Job %s Step %s failed: cause=%s evidence=%s log=%s", jobID, step.ID, last.CauseCode, last.EvidenceID, last.LogReference)
+			}
+			t.Fatalf("Windows Job %s Step %s failed without failure evidence", jobID, step.ID)
+		}
 	}
 	return view
 }
@@ -322,4 +346,21 @@ func waitForDriveJobID(t *testing.T, handler http.Handler, workspaceDriveID stri
 	}
 	t.Fatalf("timed out waiting for Archive Organization Job ID: status=%d body=%s", lastStatus, lastBody)
 	return ""
+}
+
+func windowsCSVRows(t *testing.T, payload []byte, count int) []map[string]string {
+	t.Helper()
+	records, err := csv.NewReader(bytes.NewReader(payload)).ReadAll()
+	if err != nil || len(records) != count+1 {
+		t.Fatalf("CSV expected %d data rows, got %d records including header: %v", count, len(records), err)
+	}
+	var rows []map[string]string
+	for _, record := range records[1:] {
+		fields := make(map[string]string, len(record))
+		for column, header := range records[0] {
+			fields[header] = record[column]
+		}
+		rows = append(rows, fields)
+	}
+	return rows
 }

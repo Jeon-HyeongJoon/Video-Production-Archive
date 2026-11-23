@@ -225,7 +225,7 @@ Dispatcher는 [05. 실행, 자원과 배포 설계](05-runtime-deployment.md)의
 - 네트워크 공유는 매핑 드라이브 문자를 업무 identity로 쓰지 않는다. UNC root·Secret Store credential reference·루트 식별 파일 방식은 `CFG-012`, FTP·SFTP endpoint·원격 root·credential reference·안전 게시 검증은 `CFG-013` acceptance 전까지 `planned`다. SMTP는 Storage Adapter가 아니라 전달 채널이다.
 - SQLite 파일은 공유하지 않으며 모든 metadata write는 Control API를 통한다.
 
-Archive Intake operation은 탐색·검사·렌더·QC·ArchivePackage 게시·오디오·STT·자막·패키지 리비전·ArchiveCatalog 게시로 나눈다. 모든 외부 도구는 executable과 argument 배열로 실행하고 StorageRoot 안 임시 출력 검증 뒤 게시한다. 실제 Windows 수직 검증은 1단계 완료 후 별도 2단계 Command 순서를 따라야 한다. `APP-007`
+Archive Intake operation은 탐색·검사·렌더·QC·ArchivePackage 게시·오디오·STT·자막·패키지 리비전·ArchiveCatalog 게시로 나눈다. 모든 외부 도구는 executable과 argument 배열로 실행하고 StorageRoot 안 임시 출력 검증 뒤 게시한다. Windows 시퀀스 인수 검증은 Worker 재시작 후 루트 ArchiveCatalog의 패키지 1행과 video-info.csv의 원본별 경로·checksum을 확인한다. 녹화영상 인수 검증은 Control이 자동으로 별도 2단계 Command를 제출하는 경로를 사용한다. 같은 경로의 메타데이터와 CSV가 갱신되므로 1단계 게시 시점의 리비전 1을 확인하고, 2단계 완료 후 같은 패키지의 리비전 2와 전사·자막 경로를 대조한다. `APP-005`, `APP-007`
 
 ## 7. 장애와 중복 방지
 

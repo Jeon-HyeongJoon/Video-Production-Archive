@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -183,14 +184,16 @@ func (transcriber *Transcriber) Transcribe(ctx context.Context, request Request)
 			}
 		}
 		reportChunk(execution.ProgressStarted, float64(index)/float64(len(chunks)))
-		arguments := []string{"-m", request.ResolvedModelPath, "-f", request.ResolvedAudioPath}
+		arguments := []string{"-m", whisperPathArgument(request.ResolvedModelPath), "-f", whisperPathArgument(request.ResolvedAudioPath)}
 		if len(chunks) > 1 {
 			arguments = append(arguments,
 				"-ot", strconv.FormatInt(chunk.ProcessStartMillis, 10),
 				"-d", strconv.FormatInt(chunk.ProcessEndMillis-chunk.ProcessStartMillis, 10),
 			)
 		}
-		arguments = append(arguments, "-oj", "-of", rawPrefix, "-l", profile.Language, "-t", strconv.Itoa(profile.ThreadCount), "-np")
+		// whisper appends .json to -of before opening the file.
+		outputArgument := strings.TrimSuffix(whisperPathArgument(rawPath), ".json")
+		arguments = append(arguments, "-oj", "-of", outputArgument, "-l", profile.Language, "-t", strconv.Itoa(profile.ThreadCount), "-np")
 		var runErr error
 		if stream, ok := transcriber.runner.(execution.StreamRunner); ok && request.InputRoot != nil {
 			// Only numeric whisper progress reaches the reporter. Limit live updates to ten per chunk.
@@ -292,6 +295,22 @@ func (transcriber *Transcriber) Transcribe(ctx context.Context, request Request)
 		return transcription.Transcript{}, errors.Join(ErrTranscriptionFailed, ErrPublish, err)
 	}
 	return transcript, nil
+}
+
+// The Windows whisper.cpp CLI requires extended-length names beyond MAX_PATH.
+// Only its argument spelling changes. StorageRoot retains the original paths.
+func whisperPathArgument(name string) string {
+	if runtime.GOOS != "windows" || len(name) < 260 || !filepath.IsAbs(name) {
+		return name
+	}
+	clean := filepath.Clean(name)
+	if strings.HasPrefix(clean, `\\?\`) || strings.HasPrefix(clean, `\\.\`) {
+		return clean
+	}
+	if server, ok := strings.CutPrefix(clean, `\\`); ok {
+		return `\\?\UNC\` + server
+	}
+	return `\\?\` + clean
 }
 
 type transcriptDocument struct {

@@ -3,10 +3,12 @@
 package controlruntime_test
 
 import (
+	"bytes"
 	"context"
-	"encoding/csv"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -17,11 +19,13 @@ import (
 	"testing"
 	"time"
 
+	"videoarchive/internal/adapter/archivebundle"
 	"videoarchive/internal/adapter/bootconfig"
 	"videoarchive/internal/adapter/controlruntime"
 	"videoarchive/internal/adapter/ossecret"
 	"videoarchive/internal/adapter/sqlitecommand"
 	"videoarchive/internal/core/archive"
+	"videoarchive/internal/core/execution"
 	"videoarchive/internal/core/job"
 	"videoarchive/internal/core/vocabulary"
 	"videoarchive/internal/core/workflow"
@@ -41,7 +45,11 @@ func TestWindowsRecordingCompletesRenderingTranscriptionAndOrganization(t *testi
 
 	directory := t.TempDir()
 	sourceRoot := filepath.Join(directory, "source")
+	// Keep the native whisper JSON above MAX_PATH even with a short TEMP root.
 	workingRoot := filepath.Join(directory, "working")
+	for len(workingRoot) < 152 {
+		workingRoot = filepath.Join(workingRoot, "recording-archive")
+	}
 	sourceFolder := filepath.Join(sourceRoot, "recordings")
 	for _, value := range []string{sourceFolder, workingRoot} {
 		if err := os.MkdirAll(value, 0o700); err != nil {
@@ -119,7 +127,41 @@ archive_organization:
 		t.Fatal(err)
 	}
 	defer runtime.Close()
-	controlServer := httptest.NewServer(runtime.Handler())
+	workingCapability, err := archive.OpenStorageRoot(workingRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer workingCapability.Close()
+	// Both revisions publish to the same paths. Observe the first publication
+	// at its result boundary, before Control can dispatch the next revision.
+	firstPublication := map[string]chan []byte{"organize": make(chan []byte, 1), "archive_catalog": make(chan []byte, 1)}
+	controlServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/worker/v1/steps/result" {
+			raw, err := io.ReadAll(r.Body)
+			r.Body.Close()
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			r.Body = io.NopCloser(bytes.NewReader(raw))
+			var result struct {
+				StepID string                      `json:"step_id"`
+				Output *execution.StepOutputRecord `json:"output_record"`
+			}
+			if json.Unmarshal(raw, &result) == nil && firstPublication[result.StepID] != nil && result.Output != nil && len(result.Output.Outputs) == 1 {
+				out := result.Output.Outputs[0]
+				payload, err := workingCapability.ReadFile(out.RelativePath)
+				if err != nil || fmt.Sprintf("%x", sha256.Sum256(payload)) != out.Checksum {
+					t.Errorf("published %s differs from Worker receipt: %v", result.StepID, err)
+				}
+				select {
+				case firstPublication[result.StepID] <- payload:
+				default:
+				}
+			}
+		}
+		runtime.Handler().ServeHTTP(w, r)
+	}))
 	defer controlServer.Close()
 
 	credentialReference := "dpapi://" + filepath.ToSlash(filepath.Join(directory, "worker.dpapi"))
@@ -278,11 +320,6 @@ worker:
 		t.Fatalf("Windows two-stage output records are incomplete: count=%d outputs=%+v", workerOutputRecordCount, outputPaths)
 	}
 
-	workingCapability, err := archive.OpenStorageRoot(workingRoot)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer workingCapability.Close()
 	qcPayload, err := workingCapability.ReadFile(outputPaths["qc"][0])
 	if err != nil || !strings.Contains(string(qcPayload), `"outcome":"PASSED"`) ||
 		!strings.Contains(string(qcPayload), `"profile_reference":"archive-1080p-6mbps@v1"`) {
@@ -310,24 +347,29 @@ worker:
 	if err != nil || !strings.Contains(string(subtitlePayload), " --> ") {
 		t.Fatalf("Windows recording Subtitle is incomplete: %s err=%v", subtitlePayload, err)
 	}
-	stageOneMetadataPayload, err := workingCapability.ReadFile(outputPaths["organize"][0])
-	if err != nil {
-		t.Fatal(err)
+	captured := func(stepID string) []byte {
+		t.Helper()
+		select {
+		case payload := <-firstPublication[stepID]:
+			return payload
+		default:
+			t.Fatalf("missing first publication for %s", stepID)
+			return nil
+		}
 	}
-	var bundle struct {
-		Revision           uint64 `json:"revision"`
-		VideoPath          string `json:"video_path"`
-		TranscriptPath     string `json:"transcript_path"`
-		TranscriptTextPath string `json:"transcript_text_path"`
-		SubtitlePath       string `json:"subtitle_path"`
+	var initial, bundle archivebundle.Metadata
+	if err := json.Unmarshal(captured("organize"), &initial); err != nil || initial.Revision != 1 || initial.PackageID == "" || initial.VideoPath == "" ||
+		initial.TranscriptPath != "" || initial.TranscriptTextPath != "" || initial.SubtitlePath != "" {
+		t.Fatalf("initial package metadata: %+v err=%v", initial, err)
 	}
-	if json.Unmarshal(stageOneMetadataPayload, &bundle) != nil || bundle.Revision != 1 || bundle.VideoPath == "" ||
-		bundle.TranscriptPath != "" || bundle.TranscriptTextPath != "" || bundle.SubtitlePath != "" {
-		t.Fatalf("Windows stage-one stored package is incomplete: %s", stageOneMetadataPayload)
+	firstRow := windowsCSVRows(t, captured("archive_catalog"), 1)[0]
+	if firstRow["package_revision"] != "1" || firstRow["archive_package_id"] != initial.PackageID || firstRow["result_video_path"] != initial.VideoPath ||
+		firstRow["transcript_path"] != "" || firstRow["transcript_text_path"] != "" || firstRow["subtitle_path"] != "" {
+		t.Fatalf("initial catalog: %+v", firstRow)
 	}
 	revisionMetadataPath := outputPaths["archive_package_revision"][0]
 	metadataPayload, err := workingCapability.ReadFile(revisionMetadataPath)
-	if err != nil || json.Unmarshal(metadataPayload, &bundle) != nil || bundle.Revision != 2 ||
+	if err != nil || json.Unmarshal(metadataPayload, &bundle) != nil || bundle.Revision != 2 || bundle.PackageID != initial.PackageID || bundle.VideoPath != initial.VideoPath ||
 		path.Dir(bundle.VideoPath) != path.Dir(bundle.TranscriptPath) || path.Dir(bundle.VideoPath) != path.Dir(bundle.TranscriptTextPath) ||
 		path.Dir(bundle.VideoPath) != path.Dir(bundle.SubtitlePath) || path.Dir(bundle.VideoPath) != path.Dir(revisionMetadataPath) {
 		t.Fatalf("Windows recording revised package paths are incomplete: %s err=%v", metadataPayload, err)
@@ -341,10 +383,11 @@ worker:
 	if err != nil {
 		t.Fatal(err)
 	}
-	records, err := csv.NewReader(strings.NewReader(string(catalogPayload))).ReadAll()
-	if err != nil || len(records) != 2 || !strings.Contains(string(catalogPayload), bundle.TranscriptPath) ||
-		!strings.Contains(string(catalogPayload), bundle.TranscriptTextPath) || !strings.Contains(string(catalogPayload), bundle.SubtitlePath) {
-		t.Fatalf("Windows recording ArchiveCatalog is incomplete: rows=%d err=%v payload=%s", len(records), err, catalogPayload)
+	rows := windowsCSVRows(t, catalogPayload, 1)
+	finalRow := rows[0]
+	if finalRow["package_revision"] != "2" || finalRow["archive_package_id"] != bundle.PackageID || finalRow["result_video_path"] != bundle.VideoPath ||
+		finalRow["transcript_path"] != bundle.TranscriptPath || finalRow["transcript_text_path"] != bundle.TranscriptTextPath || finalRow["subtitle_path"] != bundle.SubtitlePath {
+		t.Fatalf("revised catalog: %+v", finalRow)
 	}
 	sourceCapability, err = archive.OpenStorageRoot(sourceRoot)
 	if err != nil {
@@ -359,8 +402,8 @@ worker:
 	evidence, _ := json.Marshal(map[string]any{
 		"requirement_id": "APP-007", "host": hostname, "stage_one_job_id": jobID, "stage_two_job_id": transcriptionJobID,
 		"profile": "archive-1080p-6mbps@v1", "qc": "PASSED", "transcript_language": transcript.Content.Language,
-		"transcript_segments": len(transcript.Content.Segments), "package_revision": bundle.Revision, "bundle_file_count": 5,
-		"catalog_rows": len(records) - 1, "worker_step_output_records": workerOutputRecordCount, "source_checksum_unchanged": true,
+		"transcript_segments": len(transcript.Content.Segments), "initial_package_revision": initial.Revision, "package_revision": bundle.Revision, "bundle_file_count": 5,
+		"catalog_rows": len(rows), "worker_step_output_records": workerOutputRecordCount, "source_checksum_unchanged": true,
 	})
 	t.Logf("acceptance_evidence=%s", evidence)
 }

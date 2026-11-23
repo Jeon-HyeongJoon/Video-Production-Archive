@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -214,6 +215,47 @@ func TestWhisperCPPAdapterExecutesArgumentArrayAndPublishesVerifiedTranscript(t 
 	if _, err := os.Stat(invalidPublishedPath); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("invalid transcript was published: %v", err)
 	}
+
+	t.Run("long Windows file arguments retain the resolved paths", func(t *testing.T) {
+		if runtime.GOOS != "windows" {
+			t.Skip("Windows native path handling")
+		}
+		directory := filepath.Join(t.TempDir(), strings.Repeat("a", 90), strings.Repeat("b", 90), strings.Repeat("c", 80))
+		model, audio := filepath.Join(directory, "model ;.bin"), filepath.Join(directory, "audio &.wav")
+		output := filepath.Join(directory, "transcript.json")
+		t.Setenv("WHISPER_FIXTURE_JSON", rawJSON)
+		_, err := transcriber.Transcribe(context.Background(), Request{
+			TranscriptID: "TRANSCRIPT-LONG", AudioArtifact: audioInput, ResolvedAudioPath: audio, ResolvedModelPath: model,
+			TemporaryOutputPath: output + ".partial", PublishedOutputPath: output, ArtifactPath: "transcript/event.json", Profile: profile,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		args, err := os.ReadFile(argumentsPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fields := strings.Split(strings.TrimSpace(string(args)), "\n")
+		want := map[string]string{"-m": model, "-f": audio, "-of": output + ".partial.whisper"}
+		for i := 0; i+1 < len(fields); i++ {
+			if name, ok := want[fields[i]]; ok {
+				extended := `\\?\` + name
+				if server, unc := strings.CutPrefix(name, `\\`); unc {
+					extended = `\\?\UNC\` + server
+				}
+				if fields[i+1] != extended {
+					t.Fatalf("%s does not identify the extended path to %s", fields[i], name)
+				}
+				delete(want, fields[i])
+			}
+		}
+		if len(want) != 0 {
+			t.Fatalf("missing long path arguments: %v", want)
+		}
+		if _, err := os.Stat(output); err != nil {
+			t.Fatal(err)
+		}
+	})
 
 	t.Run("long audio uses silence-aware bounded chunks and global timecodes", func(t *testing.T) {
 		rootDirectory := t.TempDir()
