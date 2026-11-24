@@ -39,7 +39,8 @@ func TestWindowsArchiveRunCompletesSourceSequenceAcrossWorkerRestart(t *testing.
 	directory := t.TempDir()
 	sourceRoot := filepath.Join(directory, "source")
 	workingRoot := filepath.Join(directory, "working")
-	sourceFolder := filepath.Join(sourceRoot, "source-sequence")
+	const folderID = "261124-office/VJ"
+	sourceFolder := filepath.Join(sourceRoot, filepath.FromSlash(folderID))
 	for _, path := range []string{sourceFolder, workingRoot} {
 		if err := os.MkdirAll(path, 0o700); err != nil {
 			t.Fatal(err)
@@ -64,7 +65,7 @@ func TestWindowsArchiveRunCompletesSourceSequenceAcrossWorkerRestart(t *testing.
 		t.Fatal(err)
 	}
 	for index := 1; index <= 3; index++ {
-		name := fmt.Sprintf("source-sequence/C%04d.mp4", index)
+		name := fmt.Sprintf("%s/C%04d.mp4", folderID, index)
 		_, checksum, err := sourceCapability.FileSHA256(name)
 		if err != nil {
 			t.Fatal(err)
@@ -177,7 +178,29 @@ worker:
 	})
 
 	cookie, csrfToken := runtimeSession(t, runtime.Handler())
-	startBody := `{"archive_run_id":"RUN-WINDOWS-DRIVE","idempotency_key":"windows-drive:start","session_id":"SESSION-WINDOWS-DRIVE","source_volume_id":"source-volume","expected_candidate_revision":1,"archive_storage_id":"archive-windows","input_revision":1,"folder_ids":["source-sequence"]}`
+	var candidateRevision, inputRevision uint64
+	waitForWindowsAcceptance(t, 15*time.Second, "published source folder inventory", func() bool {
+		response := runtimeRequest(runtime.Handler(), http.MethodGet, "/api/v1/archive-intake", "", nil, "", "")
+		var inventory struct {
+			Data []struct {
+				Volume            string `json:"source_volume_id"`
+				CandidateRevision uint64 `json:"candidate_revision"`
+				DiscoveryRevision uint64 `json:"folder_discovery_revision"`
+				State             string `json:"folder_discovery_state"`
+			} `json:"data"`
+		}
+		if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &inventory) != nil {
+			return false
+		}
+		for _, drive := range inventory.Data {
+			if drive.Volume == "source-volume" && drive.State == "READY" && drive.CandidateRevision != 0 && drive.DiscoveryRevision != 0 {
+				candidateRevision, inputRevision = drive.CandidateRevision, drive.DiscoveryRevision
+				return true
+			}
+		}
+		return false
+	})
+	startBody := fmt.Sprintf(`{"archive_run_id":"RUN-WINDOWS-DRIVE","idempotency_key":"windows-drive:start","session_id":"SESSION-WINDOWS-DRIVE","source_volume_id":"source-volume","expected_candidate_revision":%d,"archive_storage_id":"archive-windows","input_revision":%d,"folder_ids":[%q]}`, candidateRevision, inputRevision, folderID)
 	start := runtimeRequest(runtime.Handler(), http.MethodPost, "/api/v1/archive-intake/runs", startBody, cookie, csrfToken, "http://127.0.0.1:8080")
 	if start.Code != http.StatusCreated {
 		t.Fatalf("start Windows Archive Organization returned %d: %s", start.Code, start.Body.String())
