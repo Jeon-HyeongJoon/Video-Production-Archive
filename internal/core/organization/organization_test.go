@@ -230,26 +230,46 @@ func TestCompatibleConsecutiveShortClipsBecomeSourceSequenceBeforeReadyFiles(t *
 
 // Requirement: ORG-006
 func TestSourceTimelinePreservesOrderedWholeClipsAndCumulativeBoundaryMarkers(t *testing.T) {
-	decision, err := Classify(AutoRequest{
-		DecisionID: "DECISION-SOURCE", WorkspaceDriveID: "DRIVE-1", Folder: "source", InputRevision: 1,
-		Inputs: []Input{
-			organizationInput("ASSET-2", "source/C0002.MP4", 12_000, 30_000_000, 3840, 2160),
-			organizationInput("ASSET-1", "source/C0001.MP4", 10_000, 30_000_000, 3840, 2160),
-			organizationInput("ASSET-3", "source/C0003.MP4", 8_000, 30_000_000, 3840, 2160),
-		},
-		Policy: DefaultPolicy(), DecidedAt: time.Now().UTC(),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	timeline, err := BuildSourceTimeline("TIMELINE-1", 1, decision)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(timeline.Clips) != 3 || timeline.Clips[0].OriginalAssetID != "ASSET-1" || timeline.Clips[0].InMillis != 0 || timeline.Clips[0].OutMillis != 10_000 ||
-		len(timeline.Markers) != 2 || timeline.Markers[0] != (CutMarker{BeforeClipID: "ASSET-1", AfterClipID: "ASSET-2", AtMillis: 10_000}) ||
-		timeline.Markers[1] != (CutMarker{BeforeClipID: "ASSET-2", AfterClipID: "ASSET-3", AtMillis: 22_000}) || timeline.DurationMillis() != 30_000 {
-		t.Fatalf("timeline order or markers are invalid: %+v", timeline)
+	for _, tc := range []struct {
+		name       string
+		durations  [3]int64
+		boundaries [2]int64
+		total      int64
+	}{
+		{"unequal clips", [3]int64{10_000, 12_000, 8_000}, [2]int64{10_000, 22_000}, 30_000},
+		{"three two-second cuts", [3]int64{2_000, 2_000, 2_000}, [2]int64{2_000, 4_000}, 6_000},
+		{"subsecond boundaries", [3]int64{2_013, 1_994, 2_007}, [2]int64{2_013, 4_007}, 6_014},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			decision, err := Classify(AutoRequest{
+				DecisionID: "DECISION-SOURCE", WorkspaceDriveID: "DRIVE-1", Folder: "source", InputRevision: 1,
+				Inputs: []Input{
+					organizationInput("ASSET-2", "source/C0002.MP4", tc.durations[1], 30_000_000, 3840, 2160),
+					organizationInput("ASSET-1", "source/C0001.MP4", tc.durations[0], 30_000_000, 3840, 2160),
+					organizationInput("ASSET-3", "source/C0003.MP4", tc.durations[2], 30_000_000, 3840, 2160),
+				},
+				Policy: DefaultPolicy(), DecidedAt: time.Now().UTC(),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			timeline, err := BuildSourceTimeline("TIMELINE-1", 1, decision)
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantClips := []SourceClip{
+				{Sequence: 1, OriginalAssetID: "ASSET-1", OutMillis: tc.durations[0]},
+				{Sequence: 2, OriginalAssetID: "ASSET-2", OutMillis: tc.durations[1]},
+				{Sequence: 3, OriginalAssetID: "ASSET-3", OutMillis: tc.durations[2]},
+			}
+			wantMarkers := []CutMarker{
+				{BeforeClipID: "ASSET-1", AfterClipID: "ASSET-2", AtMillis: tc.boundaries[0]},
+				{BeforeClipID: "ASSET-2", AfterClipID: "ASSET-3", AtMillis: tc.boundaries[1]},
+			}
+			if !reflect.DeepEqual(timeline.Clips, wantClips) || !reflect.DeepEqual(timeline.Markers, wantMarkers) || timeline.DurationMillis() != tc.total {
+				t.Fatalf("got clips %v, markers %v, duration %d ms; want %v, %v, %d ms", timeline.Clips, timeline.Markers, timeline.DurationMillis(), wantClips, wantMarkers, tc.total)
+			}
+		})
 	}
 }
 

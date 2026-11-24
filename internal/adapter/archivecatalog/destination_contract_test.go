@@ -98,6 +98,41 @@ func TestDestinationVerificationAccountsForUnindexedVideos(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("unindexed video alongside a verified package", func(t *testing.T) {
+		f := newV2CatalogFixture(t)
+		defer f.close()
+		_, _, row := f.publish(t, "VP-20261124-INDEXED", "DECISION", "recording", catalogSource(f.checksum, "PRIMARY"))
+		publisher, err := NewPublisher(f.archiveRoot)
+		if err != nil {
+			t.Fatal(err)
+		}
+		catalog, err := publisher.PublishPackageRowsMerged([]PackageRow{row}, ".initial.partial", "archive-catalog.csv")
+		if err != nil {
+			t.Fatal(err)
+		}
+		reconciler, err := NewReconciler(f.archiveRoot)
+		if err != nil {
+			t.Fatal(err)
+		}
+		healthy, err := reconciler.Verify()
+		if err != nil || !healthy.Current() || healthy.Coverage.CandidateVideos != 1 || len(healthy.Coverage.UnresolvedVideos) != 0 || healthy.CatalogSHA256 != catalog.Checksum {
+			t.Fatalf("expected one verified video: report=%+v err=%v", healthy, err)
+		}
+
+		const loose = "unindexed.mp4"
+		placeDestinationFile(t, f.archiveRoot, loose, []byte{0})
+		report, err := reconciler.Verify()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if report.Current() || report.Coverage.State != "INCOMPLETE" || report.Coverage.CandidateVideos != 2 || !slices.Equal(report.Coverage.UnresolvedVideos, []string{loose}) {
+			t.Fatalf("expected only %s to be unresolved: %+v", loose, report)
+		}
+		if report.CatalogSHA256 != catalog.Checksum || len(report.Entries) != 1 || report.Entries[0].PackageID != row.PackageID || report.Entries[0].State != ConsistencyCurrent {
+			t.Fatalf("verified catalog row changed after adding an unrelated file: %+v", report)
+		}
+	})
 }
 
 // Requirement: ARC-023
