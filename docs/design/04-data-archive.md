@@ -177,6 +177,8 @@ layout v3에서는 검색과 상세 provenance의 범위를 분리한다. 루트
 
 Core 메타데이터 round-trip 계약은 `ARC-005`, manifest 계약은 `ARC-003`이다. SQLite와 디렉터리를 사용하는 sidecar package import prototype은 있으나 Control의 복원 명령에 연결되지 않았으므로 `ARC-007`은 planned다.
 
+운영 목적지의 리비전 불일치 실측, 버전별 카탈로그 범위와 쓰기 전 검사·복구 순서는 [목적지 메타데이터 설계](18-destination-metadata.md)에 기록했다.
+
 ## 7. 아카이브 확정
 
 보관됨과 확정됨은 같은 상태가 아니다. 보관됨은 ARCHIVE_PRIMARY 한 벌의 검증 게시이고, 확정됨은 아래 `ARC-004` 증적을 모두 만족한 `COMMITTED` 상태다. 화면 이름 “아카이브”와 05 검색은 두 상태의 같은 기록물을 보되 상태를 구분한다.

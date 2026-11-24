@@ -54,6 +54,7 @@
 18. [기계 판독 요구사항 카탈로그](requirements/catalog.json)
 19. [원본 드라이브 분류 사례와 노이즈 전수 목록](docs/design/16-source-classification-cases.md)
 20. [분류 정책과 Archivist 검토 설계](docs/design/17-source-classification-policy.md)
+21. [목적지 메타데이터의 기록과 대조](docs/design/18-destination-metadata.md)
 
 초기 설정 예시는 [config.example.yaml](config.example.yaml)에 있다. 실제 credential은 이 파일에 쓰지 않고 Windows Credential Manager·DPAPI 또는 macOS Keychain reference만 기록한다.
 

@@ -141,6 +141,8 @@ layout v1의 상태 후보는 분류됨·보류·처리 중·보관됨·STT 완�
 
 “보관됨”은 ARCHIVE_PRIMARY 한 벌의 검증 게시다. “확정됨”은 현재 패키지 리비전이 `ARC-004`의 QC·sidecar·manifest·서로 다른 물리 장치의 두 ArchiveCopy·사람 Approval 조건을 모두 만족한 상태다. 확정 뒤 같은 패키지 리비전을 고치지 않는다. `DSH-013`
 
+실행별 게시 건수와 목적지 전체 검증 건수의 구분, 미게시 실행의 표시, 과거 기록 복원 규칙은 [목적지 메타데이터의 기록과 대조](18-destination-metadata.md#2-기록의-소유권)에 있다.
+
 ## 7. Archivist 협업
 
 담당자는 화면에서 Worker·원본·아카이브 저장소·폴더 범위를 먼저 고른다. 이 참조는 ID와 revision으로 ArchivistTurn에 고정하며 메시지 본문에서 추론하지 않는다. 참조가 없거나 오래됐으면 Archivist는 ActionCard로 선택을 요청한다. `COL-003`

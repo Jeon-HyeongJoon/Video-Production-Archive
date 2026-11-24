@@ -5776,6 +5776,7 @@
         "package가 보관되거나 새 리비전이 게시될 때 기존 행과 병합한 현재 전체 투영을 임시 파일로 검증한 뒤 원자 교체한다.",
         "동일한 ARCHIVE_PRIMARY의 동시 게시자는 StorageRoot 배타 잠금 아래 현재 파일을 다시 읽고 병합해 행 유실을 막는다.",
         "작업 공간의 마지막 기록 시각은 성공 완료된 가장 최근 archive_catalog Step의 영속 완료 시각이다.",
+        "목적지 전체의 검증 건수, 실행별 게시 패키지 수, 원본 입력 수는 서로 다른 집계다. 행사 배치의 패키지 식별과 관측 계약은 docs/design/18-destination-metadata.md에 있다.",
         "layout v1의 OriginalAsset별 행과 layout v2 행은 읽기 호환을 유지하고 layout v3 행과 암묵적으로 섞지 않는다.",
         "검색 속도를 위한 projection이며 versioned package 복구 문서보다 우선하는 복구 원본이 아니다."
       ],
