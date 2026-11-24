@@ -106,6 +106,18 @@ type ClassificationAssetView struct {
 	AudioStreams    []mediaanalysis.AudioStream   `json:"audio_streams"`
 }
 
+func (asset ClassificationAssetView) measurement() *SourceMeasurement {
+	if asset.InspectionID == "" {
+		return nil
+	}
+	m := &SourceMeasurement{InspectionID: asset.InspectionID, DurationMillis: asset.DurationMillis}
+	if len(asset.VideoStreams) > 0 {
+		primary := asset.VideoStreams[0]
+		m.Width, m.Height, m.VideoBitRate = primary.Width, primary.Height, primary.BitRate
+	}
+	return m
+}
+
 type StorageView struct {
 	StorageID        string
 	Role             vocabulary.StorageRole

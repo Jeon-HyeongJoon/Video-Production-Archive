@@ -20,6 +20,7 @@ import (
 	"videoarchive/internal/core/organization"
 	"videoarchive/internal/core/transcription"
 	"videoarchive/internal/core/vocabulary"
+	"videoarchive/internal/core/worker"
 	"videoarchive/internal/core/workflow"
 )
 
@@ -724,7 +725,7 @@ func TestWorkspaceRetainsPerFileProfileEvidenceAndSumsTargetSizes(t *testing.T) 
 		duration            int64
 	}{{"cut.mov", organization.RoleSource, "archive-1080p-20mbps@v1", 10000}, {"rec.mp4", organization.RoleRecording, "archive-1080p-6mbps@v1", 1200000}} {
 		rel := folder + "/" + input.name
-		d.Inputs = append(d.Inputs, organization.Input{OriginalAssetID: input.name, RelativePath: rel, Inspection: mediaanalysis.MediaInspection{ID: "inspection-" + input.name, SizeBytes: 16000, DurationMillis: input.duration}, RenderSelection: &organization.RenderSelection{Role: input.role, ProfileReference: input.profile, Basis: "검사된 역할 증거"}})
+		d.Inputs = append(d.Inputs, organization.Input{OriginalAssetID: input.name, RelativePath: rel, Inspection: mediaanalysis.MediaInspection{ID: "inspection-" + input.name, SizeBytes: 16000, DurationMillis: input.duration, VideoStreams: []mediaanalysis.VideoStream{{Width: 1920, Height: 1080, BitRate: 25_000_000}}}, RenderSelection: &organization.RenderSelection{Role: input.role, ProfileReference: input.profile, Basis: "검사된 역할 증거"}})
 		receipt.Files = append(receipt.Files, organization.CoordinatedFile{OriginalAssetID: input.name, RelativePath: rel})
 	}
 	receipt.Folders = []organization.CoordinatedFolder{{Folder: folder, Decision: d}}
@@ -743,8 +744,20 @@ func TestWorkspaceRetainsPerFileProfileEvidenceAndSumsTargetSizes(t *testing.T) 
 	}
 	for i, v := range f.Videos {
 		a := f.ClassificationAssets[i]
-		if v.RenderSelection == nil || !reflect.DeepEqual(v.RenderSelection, d.Inputs[i].RenderSelection) || !reflect.DeepEqual(a.RenderSelection, v.RenderSelection) || a.InspectionID != d.Inputs[i].Inspection.ID {
+		if v.RenderSelection == nil || !reflect.DeepEqual(v.RenderSelection, d.Inputs[i].RenderSelection) || !reflect.DeepEqual(a.RenderSelection, v.RenderSelection) || a.InspectionID != d.Inputs[i].Inspection.ID || v.Measurement == nil || v.Measurement.InspectionID != a.InspectionID || v.Measurement.VideoBitRate != a.VideoStreams[0].BitRate {
 			t.Fatalf("missing stored evidence %+v %+v", v, a)
 		}
 	}
+	now := receipt.CompletedAt
+	rescan := worker.StorageObservation{StorageID: "S", Connected: true, DiscoveryState: vocabulary.FolderDiscoveryReady, DiscoveryRevision: 6, Folders: []worker.MediaFolderObservation{{Folder: folder, VideoCount: 3}}}
+	statuses := statusInventory{{WorkerID: "worker", State: "ONLINE", Metrics: worker.Metrics{ObservedAt: now, StorageObservations: []worker.StorageObservation{rescan}}}}
+	service, err = archiveintakeworkspace.New(store, workstationJobs{}, archiveintakeworkspace.WithInventory(candidateInventory{{VolumeID: "drive", Revision: 1, WorkerID: "worker", StorageID: "S", Connected: true}}, storageInventory{}, statuses, func() time.Time { return now }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	views, err = service.Projection(context.Background())
+	if err != nil || len(views) != 1 || views[0].DiscoveredFileCount != 3 || len(views[0].Folders) != 1 || !reflect.DeepEqual(views[0].Folders[0].Videos, f.Videos) {
+		t.Fatalf("new inventory must retain its own count and the run's original measurements: views=%+v, err=%v", views, err)
+	}
+
 }

@@ -236,7 +236,10 @@ func (service *Service) Projection(ctx context.Context) ([]DriveView, error) {
 			// A stored render choice remains inspectable after disconnect or rescan.
 			for _, asset := range view.ClassificationAssets {
 				if asset.RenderSelection != nil {
-					view.Videos = append(view.Videos, SourceVideoView{RenderSelection: asset.RenderSelection, RelativePath: asset.RelativePath, FileName: path.Base(asset.RelativePath), SizeBytes: uint64(asset.SizeBytes)})
+					view.Videos = append(view.Videos, SourceVideoView{
+						RenderSelection: asset.RenderSelection, Measurement: asset.measurement(), MetadataHint: asset.MetadataHint,
+						RelativePath: asset.RelativePath, FileName: path.Base(asset.RelativePath), SizeBytes: uint64(asset.SizeBytes),
+					})
 				}
 			}
 			view.NoiseReview = organization.SummarizeNoise(decision, view.VideoCount)
@@ -661,6 +664,7 @@ func (service *Service) mergeInventory(ctx context.Context, drives map[string]*p
 			if preview, previewErr := archive.PreviewFlatPackage(previewDate, folder.Folder, originalNames, folder.VideoCount); previewErr == nil {
 				view.ExpectedResult = preview
 			}
+			state.view.DiscoveredFileCount += folder.VideoCount
 			state.discoveredFolders[folder.Folder] = view
 			if scoped, exists := state.folders[folder.Folder]; exists && state.view.ArchiveRunID != "" {
 				if scoped.InputRevision != observation.DiscoveryRevision && len(scoped.Videos) > 0 && scoped.Videos[0].RenderSelection != nil {
@@ -688,13 +692,12 @@ func (service *Service) mergeInventory(ctx context.Context, drives map[string]*p
 						if !ok || len(asset.VideoStreams) == 0 {
 							continue
 						}
-						primary := asset.VideoStreams[0]
 						if scoped.SourceRole != nil && scoped.SourceRole.Role == organization.RoleProxy {
 							scoped.Videos[i].MatchedOriginal = asset.MatchedOriginal
 						}
 						scoped.Videos[i].RenderSelection = asset.RenderSelection
 						scoped.Videos[i].MetadataHint = asset.MetadataHint
-						scoped.Videos[i].Measurement = &SourceMeasurement{InspectionID: asset.InspectionID, Width: primary.Width, Height: primary.Height, DurationMillis: asset.DurationMillis, VideoBitRate: primary.BitRate}
+						scoped.Videos[i].Measurement = asset.measurement()
 					}
 				} else {
 					for i := range scoped.Videos {
@@ -704,7 +707,6 @@ func (service *Service) mergeInventory(ctx context.Context, drives map[string]*p
 				}
 				state.folders[folder.Folder] = scoped
 			}
-			state.view.DiscoveredFileCount += folder.VideoCount
 			if state.view.ArchiveRunID == "" {
 				state.folders[folder.Folder] = view
 			}
