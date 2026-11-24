@@ -2,6 +2,19 @@
 
 This repository treats requirements, ontology, tests, and Core contracts as one change set.
 
+## Development quality ownership
+
+The coordinating agent acts as development PM and owns overall quality. For each change or incident, the PM defines the observable acceptance criteria and assigns the affected areas to their lead agents.
+
+| Development lead | Quality responsibility |
+| --- | --- |
+| FFmpeg and rendering | Reproduce decoding and encoding failures, verify render profiles, markers, QC, and retry behavior. |
+| Classification and folder mapping | Verify source classification, grouping and holds across drive layouts. Compare the destination preview with the paths actually published. |
+| Metadata extraction and preservation | Trace ffprobe measurements and checksums from the original through package metadata to the destination catalog. Check missing records and reconciliation. |
+| STT and subtitles | Verify speech extraction, chunk boundaries, subtitle timing, transcription quality evidence, and recovery from interrupted work. |
+
+Each lead reports the affected requirement, what they reproduced or verified, the supporting test or artifact, and any open defect. The PM resolves ownership across areas, checks that one stage's output works as the next stage's input, and reports integration results and release readiness to the user.
+
 ## Before changing behavior
 
 - Read `requirements/catalog.json`, `requirements/README.md`, `ontology/terms.json`, and the owning file under `docs/design/`.

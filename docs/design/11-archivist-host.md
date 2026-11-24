@@ -305,16 +305,3 @@ Adapter 경계도 구현 상태다.
 macOS Keychain credential 왕복, ChatGPT OAuth Profile·token 회전, stateless streaming Responses 계약, loopback local Chat Completions Adapter, 제한 도구 루프와 실행 상한은 `CFG-015`, `AGT-016~021`로 구현됐다. Host process 계약에서 local model fixture가 Archive MCP 도구를 호출하고 receipt 뒤 최종 응답을 내는 수직 조립은 `LRH-016`으로 검증한다. 실제 macOS ChatGPT 계정의 읽기 도구 Turn은 `LRH-015`, 실제 자체 LLM의 읽기 도구 Turn은 `LRH-017` acceptance가 각각 소유한다. 현재 Mac 계정은 plan 사용 권한 동의 단계에서 차단되어 `LRH-015`를 planned로 유지하며, 실제 자체 LLM endpoint가 준비되기 전에는 `LRH-017`을 planned로 유지한다. 이 경계는 Codex·Claude의 native resume acceptance `LRH-009`, `LRH-014`를 대신하지 않으며 다계정 Router `AGT-001~015`도 구현됐다고 간주하지 않는다.
 
 원본 탐색 누락은 드라이브 후보에서, QC 측정 실패와 후보별 배정 차단은 원래 작업의 진단에서 확인한다. 작업 미선택 상태에서 Control 모니터 장애·회복 및 최근 명령 호출은 전체 현황으로 확인한다. 원인 미분류나 미완료 호출에는 자동 복구 권한을 부여하지 않는다. `DEV-017`, `QCT-005`, `DSP-005`, `OBS-012~013`
-
-### 기능별 담당 Agent 분리 제안
-
-현재 Archivist Host는 보조 Agent 호출과 도구 진행을 기록한다. 아래 역할 분담은 운영에 연결하기 전의 설계 제안이다.
-
-| 담당 | 읽을 근거 | 완료 판단과 인계 |
-|---|---|---|
-| FFmpeg | 원본 검사 ID, 출력 규격, 입력 순번과 영상 시간, 디코더 종료 원인 | 렌더 결과와 QC를 대조한다. 손상 원본은 ID·실패 위치와 함께 주 Archivist에 넘긴다. |
-| 폴더 배치 | 선택한 드라이브·탐색 revision, 원본 경로, 분류 결정, 목적지 후보 트리 | 예상 경로와 게시 경로를 대조한다. 충돌·역할 미확정 자료는 담당자 선택으로 넘긴다. |
-| 메타데이터 | 원본·결과 체크섬, ffprobe 검사, Package 메타데이터, 목적지 Catalog | 빠진 필드와 불일치를 해당 생성 단계에 연결하고, 재대조 결과를 남긴다. |
-| STT | 음성 추출 결과, 모델 규격, 입력·청크 범위, 전사 품질과 자막 파일 | 실패 구간과 생성 파일을 확인하고 원본·STT 중 어느 단계의 조치가 필요한지 보고한다. |
-
-주 Archivist가 실행·Job·Step·시도와 근거 ID를 붙여 조사 건을 배정하고 담당 Agent는 원인, 영향받은 입력, 제안한 조치, 확인 기준을 돌려준다. 상태 변경과 재시도는 Control의 기존 Command, 권한, 멱등성, 실행 토큰 검사를 거친다. 도입 첫 단계는 읽기 전용 진단이다. 이후에는 동일 파일·동일 위치 반복 실패, 독립 파일의 계속 처리, 검증된 출력 재사용을 시험한 뒤 자동 조치 범위를 정한다. 폴더 전체가 합본 한 편인 경우와 영상별로 게시하는 경우의 실패 격리는 별도로 검증한다.
