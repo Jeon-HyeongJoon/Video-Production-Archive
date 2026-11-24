@@ -3,7 +3,7 @@ import sys
 from playwright.sync_api import expect, sync_playwright
 
 
-def turn(number, work="JOB-1", cause="NO_INPUT", action="CHECK_INPUT", *, legacy=False, attempt=1):
+def turn(number, work="JOB-1", cause="NO_INPUT", action="CHECK_INPUT", *, legacy=False, attempt=1, step="render"):
     row = {
         "turn_id": f"TURN-{number}", "submitted_by": "SYSTEM", "tool_policy": "REMEDIATION", "state": "COMPLETED",
         "work_reference": {"kind": "JOB", "work_id": work, "revision": 4 if legacy else number},
@@ -11,7 +11,7 @@ def turn(number, work="JOB-1", cause="NO_INPUT", action="CHECK_INPUT", *, legacy
         "created_at": f"2026-11-24T12:{number:02d}:00Z", "updated_at": f"2026-11-24T12:{number:02d}:20Z",
     }
     if not legacy:
-        row["diagnostic_check"] = {"subjects": [f"{work}/render/{attempt}"], "failed_step": "render",
+        row["diagnostic_check"] = {"subjects": [f"{work}/{step}/{attempt}"], "failed_step": step,
                                    "states": ["FAILED"], "causes": [cause], "actions": [action]}
     return row
 
@@ -22,7 +22,7 @@ def sessions(route):
     human = dict(turn(2), submitted_by="HUMAN", tool_policy="DIAGNOSTIC", prompt="직접 요청한 점검")
     pending = dict(turn(9), state="QUEUED")
     session["turns"] = [turn(1), human, turn(3), turn(4, cause="DISK_FULL", action="FREE_SPACE"),
-                        turn(5, "JOB-2"), turn(6, "JOB-2"), turn(7, legacy=True), turn(8, legacy=True), pending,
+                        turn(5, "JOB-2", step="organize"), turn(6, "JOB-2", step="organize"), turn(7, legacy=True), turn(8, legacy=True), pending,
                         turn(10, attempt=2)]
     session["action_cards"] = [{"action_card_id": "CHECK-DECISION", "archivist_turn_id": "TURN-1",
                                 "command_type": "archive_run.start", "state": "PENDING", "approval_required": True}]
@@ -48,6 +48,7 @@ with sync_playwright() as playwright:
     expect(thread.get_by_text("직접 요청한 점검")).to_be_visible()
     expect(thread.locator('[data-turn-id="TURN-9"].turn-live')).to_be_visible()
     expect(thread.locator('.system-source[data-turn-id="TURN-10"]')).to_be_visible()
+    expect(groups.filter(has_text="영상 정리 실패").locator(".check-summary")).to_contain_text("상태 변화 없음")
     expect(groups.filter(has_text="상태 변화 없음").locator(".check-summary")).to_contain_text("2회 점검")
     expect(groups.filter(has_text="변화 비교 자료 없음").locator(".check-summary")).to_contain_text("2회 점검")
     changed.locator(".check-summary").press("Enter")

@@ -85,6 +85,7 @@ export const labels = {
     NONCONSECUTIVE_SEQUENCE: "영상 순서가 이어지지 않음", INCOMPATIBLE_SEQUENCE: "영상 형식이 서로 다름", INVALID_OVERRIDE: "선택한 처리 방법을 적용할 수 없음",
   },
   stage: {
+    organize: "영상 정리", archive_package_revision: "보관 결과 갱신",
     classification: "처리 방식 결정", markers: "영상 구간 정리", render: "영상 변환", qc: "결과 검사", archive: "결과 저장", gate: "자막·텍스트 시작", audio: "음성 준비",
     transcript: "음성을 텍스트로 변환", transcript_text: "텍스트 파일 생성", subtitle: "자막 생성", add: "결과에 추가", catalog: "영상 목록 갱신", job_pending: "작업 준비",
   },

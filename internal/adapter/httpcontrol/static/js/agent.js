@@ -11,7 +11,7 @@ import { html, useEffect, useRef, useState, useComputed, batch } from "./lib.js"
 import { label, finishedTurns, formatCount, clockTime, mutation, newID, startArchivistHost } from "./core.js";
 import {
   ui, store, stale, refresh, allDrives, currentSession, allSessions, hostFor, activeTurn, availability, driveView, driveSelection,
-  selectionRefs, jobOf, workDrive, workspaces, workTitle, openNewWork,
+  selectionRefs, jobOf, workOf, workDrive, workspaces, workTitle, openNewWork,
 } from "./store.js";
 import { route, go } from "./router.js";
 import { StatusIcon, Glyph, GLYPH, Presence } from "./ui.js";
@@ -231,7 +231,8 @@ function DiagnosticHistory({ turns, session }) {
   const currentChanges = checks[checks.length - 1].changes;
   const job = ref.kind === "JOB" ? jobOf(ref.work_id) : null;
   const step = latest.diagnostic_check?.failed_step || (job?.revision === ref.revision && job.step_state === "FAILED" ? job.current_step_id : "");
-  const title = step ? `${label("stage", step)} 실패` : "작업 점검";
+  const event = ref.kind === "ARCHIVE_RUN" && workOf(ref.work_id)?.title;
+  const title = step ? `${label("stage", step)} 실패` : event ? `${event} 점검` : "작업 점검";
   const status = !latest.diagnostic_check ? "변화 비교 자료 없음" : currentChanges.length ? changeNames(currentChanges) + " 변경" : "상태 변화 없음";
   const [open, setOpen] = useState(false);
   return html`<section class="diagnostic-history" aria-label=${title}>
