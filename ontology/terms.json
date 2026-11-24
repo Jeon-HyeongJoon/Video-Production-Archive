@@ -2256,7 +2256,7 @@
         "Control에 QUEUED 상태를 확정한 뒤 Archivist Host에 전달한다.",
         "terminal idle이나 화면 문자열로 완료를 추론하지 않는다.",
         "중간 화면 표시는 raw terminal이 아니라 정제된 ArchivistTurnEntry만 사용한다.",
-        "새 드라이브 자동 제안 Turn은 ArchivistTurnToolPolicy.ADVISORY, 작업 이상 자동 복구 Turn은 REMEDIATION을 고정하고 일반 사용자 Turn과 단계 완료 재호출 Turn은 STANDARD를 사용한다."
+        "새 드라이브 자동 제안 Turn은 ArchivistTurnToolPolicy.ADVISORY, 작업 이상 자동 복구 Turn은 REMEDIATION을 고정하고 사람의 실패 진단 Turn은 DIAGNOSTIC, 일반 사용자 Turn과 단계 완료 재호출 Turn은 STANDARD를 사용한다."
       ],
       "forbidden": {
         "words": [],
@@ -2293,6 +2293,10 @@
         {
           "id": "STANDARD",
           "description": "사용자 지시와 기존 단계 재호출 Turn이 인증된 MCP Capability를 통상 권한으로 사용한다."
+        },
+        {
+          "id": "DIAGNOSTIC",
+          "description": "사람이 요청한 실패 진단 Turn은 Job 참조를 고정하고 Archive MCP 조회만 실행한다."
         },
         {
           "id": "ADVISORY",

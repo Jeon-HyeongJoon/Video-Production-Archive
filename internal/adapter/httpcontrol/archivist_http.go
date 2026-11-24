@@ -73,7 +73,8 @@ func (handler *Handler) archivistSessions(writer http.ResponseWriter, request *h
 		for _, turn := range projection.Turns {
 			turnView := archivistTurnView{
 				TurnID: turn.ID, RequestID: turn.RequestID, State: turn.State,
-				Prompt: safeArchivistPrompt(turn.Prompt), SubmittedBy: string(turn.SubmittedBy),
+				ToolPolicy: string(turn.ToolPolicy.Effective()),
+				Prompt:     safeArchivistPrompt(turn.Prompt), SubmittedBy: string(turn.SubmittedBy),
 				CreatedAt: turn.CreatedAt, UpdatedAt: turn.UpdatedAt, FinalResponse: turn.FinalResponse,
 				Entries: turn.Entries, DriveSelection: turn.DriveSelection, WorkReference: turn.WorkReference, WorkContext: turn.WorkContext,
 			}
@@ -170,6 +171,7 @@ func (handler *Handler) createArchivistSession(writer http.ResponseWriter, reque
 }
 
 type createArchivistTurnRequest struct {
+	DiagnosisOnly  bool                             `json:"diagnosis_only,omitempty"`
 	TurnID         string                           `json:"turn_id"`
 	RequestID      string                           `json:"request_id"`
 	Prompt         string                           `json:"prompt"`
@@ -191,9 +193,17 @@ func (handler *Handler) createArchivistTurn(writer http.ResponseWriter, request 
 		copy.SelectedBy = principal.ID
 		payload.DriveSelection = &copy
 	}
-	record, err := handler.archivists.SubmitTurnWithReferences(
-		request.Context(), request.PathValue("sessionID"), payload.TurnID, payload.RequestID, payload.Prompt, payload.DriveSelection, payload.WorkReference,
-	)
+	var record archivistcontrol.TurnRecord
+	var err error
+	if payload.DiagnosisOnly {
+		if payload.DriveSelection != nil {
+			writeArchivistError(writer, archivistcontrol.ErrInvalidRequest)
+			return
+		}
+		record, err = handler.archivists.SubmitDiagnosticTurn(request.Context(), request.PathValue("sessionID"), payload.TurnID, payload.RequestID, payload.Prompt, payload.WorkReference)
+	} else {
+		record, err = handler.archivists.SubmitTurnWithReferences(request.Context(), request.PathValue("sessionID"), payload.TurnID, payload.RequestID, payload.Prompt, payload.DriveSelection, payload.WorkReference)
+	}
 	if err != nil {
 		writeArchivistError(writer, err)
 		return

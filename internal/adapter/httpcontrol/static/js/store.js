@@ -95,6 +95,7 @@ export const folderKey = (driveID, folder) => `${driveID}\u0001${folder}`;
 // A drive's folders are records of their own. The drive keeps the names of
 // its ArchiveRun's fixed scope and of its whole discovered inventory; a scope
 // folder's run state is laid over its inventory record.
+const inventoryCache = new Map();
 function applyDrives(list) {
   const ids = [];
   const kept = new Set();
@@ -102,16 +103,21 @@ function applyDrives(list) {
     const id = raw.workspace_drive_id;
     ids.push(id);
     const { folders, discovered_folders: discovered, ...rest } = raw;
-    const scopeFolders = folders || [];
+
+    const cached = inventoryCache.get(id);
+    const inventoryRows = raw.inventory_unchanged && cached?.token === raw.inventory_token ? cached.rows : discovered;
+    if (raw.inventory_token && Array.isArray(inventoryRows)) inventoryCache.set(id, { token: raw.inventory_token, rows: inventoryRows });
+    else inventoryCache.delete(id);
+    const scopeFolders = raw.scope_is_inventory ? inventoryRows || [] : folders || [];
     const byName = new Map(scopeFolders.map((folder) => [folder.folder, folder]));
-    const source = Array.isArray(discovered) ? discovered : scopeFolders;
+    const source = Array.isArray(inventoryRows) ? inventoryRows : scopeFolders;
     const inventory = [];
     for (const item of source) {
       const current = byName.get(item.folder);
-      const merged = current ? { ...item, ...current, videos: item.videos?.length ? item.videos : current.videos } : item;
+      const merged = current ? { ...item, ...current, files_deferred: item.files_deferred || current.files_deferred, videos: current.videos?.length ? current.videos : item.videos } : item;
       inventory.push(item.folder);
       kept.add(folderKey(id, item.folder));
-      put(store.folders, "f", folderKey(id, item.folder), merged);
+      put(store.folders, "f", folderKey(id, item.folder), { ...merged, inventory_role: Array.isArray(inventoryRows) ? item.source_role : null, inventory_videos: item.source_role?.role === "CAMERA_PROXY" ? item.videos : undefined, inventory_deferred: item.files_deferred });
     }
     for (const folder of scopeFolders) {
       if (kept.has(folderKey(id, folder.folder))) continue;
@@ -120,6 +126,7 @@ function applyDrives(list) {
     }
     put(store.drives, "d", id, { ...rest, scope: scopeFolders.map((folder) => folder.folder), inventory });
   }
+  for (const id of inventoryCache.keys()) if (!ids.includes(id)) inventoryCache.delete(id);
   prune(store.folders, "f", kept);
   prune(store.drives, "d", new Set(ids));
   setList(store.driveIds, ids);
@@ -171,7 +178,13 @@ let refreshSequence = 0;
 
 // read returns the endpoint's data, or undefined when its text is unchanged.
 async function read(path) {
-  const response = await fetch(path, { headers: { Accept: "application/json" } });
+  const headers = { Accept: "application/json" };
+  if (path === "/api/v1/archive-intake") {
+    const tokens = Object.fromEntries([...inventoryCache].map(([id, entry]) => [id, entry.token]));
+    // HTTP header values must remain ASCII even for a non-Latin drive ID.
+    headers["X-Archive-Inventory"] = JSON.stringify(tokens).replace(/[^\x20-\x7e]/g, (ch) => "\\u" + ch.charCodeAt(0).toString(16).padStart(4, "0"));
+  }
+  const response = await fetch(path, { headers });
   const text = await response.text();
   if (!response.ok) {
     let code = `HTTP_${response.status}`;
@@ -273,6 +286,14 @@ export function drivePhase(current) {
   return current?.archive_run_id ? RUN_PHASE[current.archive_run_state] || "stage1" : "intake";
 }
 
+export function driveOutcome(current) {
+  const work = workOf(current.archive_run_id);
+  if (work) return { text: workText(work), kind: workKind(work) };
+  if (current.folders?.some((folder) => folderState(folder).signal === "fault")) return { text: WORK_TEXT.FAILED, kind: "fault" };
+  const phase = drivePhase(current);
+  return { text: PHASE_LABEL[phase], kind: PHASE_ICON[phase] };
+}
+
 export function driveName(current) {
   if (!current) return "";
   const source = (current.storage_candidates || []).find((item) => item.storage_id === current.source_storage_id);
@@ -359,6 +380,8 @@ export function driveProblems(current) {
 export function folderState(folder) {
   if (folder.disposition === "EXCLUDE_FROM_RUN") return { word: "이번 작업에서 제외", signal: "done" };
   const stages = folder.stages || [];
+  if (folder.step_state === "FAILED" || stages.some((stage) => stage.state === "FAILED")) return { word: "실패", signal: "fault" };
+  if (folder.disposition === "HOLD" || stages.some((stage) => stage.state === "WAITING" && humanWait.has(stage.wait_reason))) return { word: "직접 확인 필요", signal: "decide" };
   if (!stages.length) return { word: "—", signal: "idle" };
   if (stages.some((stage) => activeStates.has(stage.state) || (stage.state === "WAITING" && !humanWait.has(stage.wait_reason)))) return { word: "진행 중", signal: "work" };
   if (stages.every((stage) => stage.state === "COMPLETED")) return { word: folder.archive_state ? "" : "완료", signal: "done" };
@@ -558,13 +581,13 @@ const LANE_KIND = { fault: "fault", decide: "decide", work: "work", resource: "w
 // workText is a work's state in words: an archive work names its phase.
 export function workText(work) {
   if (work.replacement_work_id) return "새 작업으로 넘김";
-  if (work.kind === "JOB" || work.state === "QUEUED" || work.state === "FAILED") return WORK_TEXT[work.state] || work.state;
+  if (work.kind === "JOB" || ["QUEUED", "FAILED", "ATTENTION"].includes(work.state)) return WORK_TEXT[work.state] || work.state;
   return PHASE_LABEL[workPhase(work)] || WORK_TEXT[work.state];
 }
 
 export function workKind(work) {
   if (work.replacement_work_id) return "done";
-  if (work.kind === "ARCHIVE_RUN" && !["QUEUED", "FAILED"].includes(work.state)) return PHASE_ICON[workPhase(work)] || "idle";
+  if (work.kind === "ARCHIVE_RUN" && !["QUEUED", "FAILED", "ATTENTION"].includes(work.state)) return PHASE_ICON[workPhase(work)] || "idle";
   return LANE_KIND[workLane(work)] || "idle";
 }
 

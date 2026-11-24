@@ -991,3 +991,46 @@ func mcpTestRequest(handler http.Handler, method, target, body, credential strin
 	handler.ServeHTTP(recorder, request)
 	return recorder
 }
+
+// Requirement: MCP-016
+func TestHumanDiagnosticTurnCanReadEvidenceButCannotApplyActions(t *testing.T) {
+	handler, fixture := driveMCPFixture(t)
+	ref := archivistruntime.WorkReference{Kind: archivistruntime.WorkJob, WorkID: "JOB-1", Revision: 8}
+	calls := []archivistcontrol.ToolCallProjection{}
+	handler.archivists = fixtureArchivistRuntime{policy: archivistruntime.ToolPolicyDiagnostic, work: &ref, recordedCalls: &calls}
+	for _, tool := range []string{ToolWorkReferenceGet, ToolJobsCreate, ToolWorkRecoveryApply, ToolIntakeSourceSelect, ToolIntakeSelectionPin, ToolOrganizationHoldClassify, ToolArchiveRunStart, ToolArchiveTranscriptionStart} {
+		response := mcpTestRequest(handler, http.MethodPost, "/mcp/v1/call", archiveToolCall("CALL-"+tool, tool, `{}`), "secret")
+		if tool == ToolWorkReferenceGet {
+			if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), ref.WorkID) {
+				t.Fatal(response.Body.String())
+			}
+		} else if response.Code != http.StatusForbidden || !strings.Contains(response.Body.String(), "MCP_DIAGNOSTIC_POLICY_DENIED") || calls[len(calls)-1].State != "FAILED" {
+			t.Fatalf("%s: %d %s", tool, response.Code, response.Body.String())
+		}
+	}
+	if fixture.runs.calls != 0 || fixture.transcriptions.calls != 0 {
+		t.Fatal("diagnosis started work")
+	}
+}
+
+type outcomeReader map[string]archivework.State
+
+func (r outcomeReader) Detail(_ context.Context, id string) (archivework.View, error) {
+	state, ok := r[id]
+	if !ok {
+		return archivework.View{}, archivework.ErrWorkNotFound
+	}
+	return archivework.View{Summary: archivework.Summary{WorkID: id, State: state}}, nil
+}
+
+// Requirement: MCP-017
+func TestArchiveRunStatusSeparatesWorkOutcomeFromTerminalPhase(t *testing.T) {
+	state := holdReviewDriveState(t)
+	state.view.State, state.view.ArchiveRunState = "COMPLETED", "COMPLETED"
+	handler := holdReviewMCPHandler(t, state)
+	handler.work = outcomeReader{state.view.ArchiveRunID: archivework.StateFailed}
+	response := mcpTestRequest(handler, http.MethodPost, "/mcp/v1/call", archiveToolCall("STATUS", ToolArchiveRunStatus, `{}`), "secret")
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"work_state":"FAILED"`) || !strings.Contains(response.Body.String(), `"archive_run_state":"COMPLETED"`) {
+		t.Fatal(response.Body.String())
+	}
+}

@@ -9,9 +9,10 @@ import {
   ui, store, workOf, workDetail, workDrive, workPhase, workTitle, workScopeText, workText, workKind, driveProblems, folderKey, folderState,
   folderProgress, jobLane, jobMedia,
 } from "../store.js";
+import { DiagnoseFailure } from "../agent.js";
 import { route } from "../router.js";
 import { StatusIcon, Glyph, GLYPH, Chevron, Swap, Meter, Fold, Presence, Crumbs, Fact, Empty, Skeleton, useLinger } from "../ui.js";
-import { DriveOverview, Problems, StatusLine, titleShared, useOpenProblem } from "./drive.js";
+import { DriveOverview, Problems, RedoFolder, StatusLine, titleShared, useOpenProblem } from "./drive.js";
 import { MediaTable } from "./job.js";
 
 const ROLE = { INSPECTION: "원본 확인", FOLDER: "폴더 처리", TRANSCRIPTION: "자막·텍스트" };
@@ -48,17 +49,19 @@ function WorkOverview({ summary, trace }) {
 // FailureHistory keeps the reason at the ArchiveRun level. The child Job link
 // remains available for deeper evidence, but the person does not need to open
 // it merely to learn why the parent work ended.
-function FailureHistory({ failures, summary }) {
+function FailureHistory({ failures, summary, current, currentFailures }) {
   if (!failures?.length) return null;
   return html`<section class="section" id="run-failures" aria-label="실패 기록">
     <div class="section-head"><h2 class="section-title">실패 기록${" "}<span class="num">${formatCount(failures.length)}</span></h2>
       ${summary.replacement_work_id ? html`<a class="text-btn" href=${`#/runs/${encodeURIComponent(summary.replacement_work_id)}`}>새 작업으로 넘김<${Glyph} d=${GLYPH.next} /></a>` : null}
     </div>
     <div class="card-list">
-      ${failures.map((failure) => html`<a class="problem-panel failure-record" key=${failure.job_id} data-signal="fault" href=${`#/jobs/${encodeURIComponent(failure.job_id)}`}>
+      ${failures.map((failure) => html`<div class="failure-item" key=${failure.job_id}><a class="problem-panel failure-record" data-signal="fault" href=${`#/jobs/${encodeURIComponent(failure.job_id)}`}>
         <span class="problem-head"><${StatusIcon} kind="fault" /><span class="problem-line"><b>${failure.folder || "원본 검사"}</b><span>${label("stage", failure.step_id)} · ${failure.error_class || "처리 실패"}</span></span><span class="token">실패</span><${Glyph} d=${GLYPH.next} /></span>
-        ${failure.log_reference ? html`<small class="muted failure-reference">${failure.log_reference}</small>` : null}
-      </a>`)}
+      </a><div class="failure-actions"><${DiagnoseFailure} jobID=${failure.job_id} stepID=${failure.step_id} />
+        ${currentFailures.has(failure) && html`<${RedoFolder} drive=${current} folder=${failure.folder} />`}
+        ${failure.log_reference && html`<details class="evidence-fold"><summary>로그 참조</summary><code class="failure-reference">${failure.log_reference}</code></details>`}
+      </div></div>`)}
     </div>
   </section>`;
 }
@@ -181,7 +184,16 @@ export function RunScreen({ id }) {
   const detail = answer.value;
   const summary = detail?.summary || work;
   const current = summary ? workDrive(summary) : null;
-  useOpenProblem(current);
+  const failures = detail?.failures || [];
+  const currentFailures = new Set();
+  const problems = driveProblems(current).filter(([folder, problem]) => {
+    if (problem.kind !== "fault") return true;
+    const failure = failures.find((item) => item.folder === folder.folder && item.step_id === problem.stage.stage_id
+      && (item.job_id === folder.job_id || item.job_id === folder.transcription_job_id));
+    if (failure) currentFailures.add(failure);
+    return !failure;
+  });
+  useOpenProblem(current, problems);
   if (!summary) {
     return answer.value === undefined && !answer.error
       ? html`<div class="boot-view"><span class="skel boot-title"></span><span class="skel-card boot-card"></span></div>`
@@ -208,8 +220,8 @@ export function RunScreen({ id }) {
       ? html`<${DriveOverview} key="overview" drive=${current} id="run-summary" title=${trace} facts=${html`<${RunFacts} summary=${summary} />`} />`
       : html`<${WorkOverview} key="overview" summary=${summary} trace=${trace} />`,
     html`<${StatusLine} key="status" />`,
-    html`<${FailureHistory} key="failures" failures=${detail?.failures || []} summary=${summary} />`,
-    current ? html`<${Problems} key="problems" drive=${current} items=${driveProblems(current)} id="run-attention" />` : null,
+    html`<${FailureHistory} key="failures" failures=${failures} summary=${summary} current=${current} currentFailures=${currentFailures} />`,
+    current ? html`<${Problems} key="problems" drive=${current} items=${problems} id="run-attention" />` : null,
     holdLink ? html`<section key="holds" class="section" id="run-attention" aria-label="직접 확인할 항목">
       <h2 class="section-title">직접 확인할 항목${" "}<span class="num">1</span></h2>
       <a class="problem-panel attention-link" data-kind="hold" data-signal="decide" href=${`#/drives/${encodeURIComponent(summary.source_volume_id)}`}>

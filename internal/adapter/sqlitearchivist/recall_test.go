@@ -245,3 +245,37 @@ type recallVerifier struct{}
 func (recallVerifier) Verify(archivistHostID, credentialRef, presentedCredential string) bool {
 	return archivistHostID == "HOST-1" && credentialRef == "secret://host" && presentedCredential == "host-secret"
 }
+
+// Requirement: LRH-025
+func TestHumanFailureDiagnosisPersistsPinnedReadOnlyPolicy(t *testing.T) {
+	ctx := context.Background()
+	store, err := Open(filepath.Join(t.TempDir(), "diagnosis.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	hosts := archivistruntime.NewHostRegistry([]archivistruntime.HostDefinition{{
+		ID: "HOST-1", Enabled: true, CredentialRef: "secret://host",
+		AllowedBackends: map[vocabulary.RuntimeBackend]bool{vocabulary.RuntimeEmbeddedCore: true},
+		AllowedCLIIDs:   map[string]bool{"codex": true}, AllowedWorkspaceRootIDs: map[string]bool{"archive": true},
+	}}, recallVerifier{}, time.Minute)
+	service, err := archivistcontrol.New(store, hosts, time.Now, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = service.CreateSession(ctx, archivistruntime.SessionSpec{ID: "SESSION", ArchivistHostID: "HOST-1", Backend: vocabulary.RuntimeEmbeddedCore, CLIID: "codex", WorkspaceRootID: "archive"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := archivistruntime.WorkReference{Kind: archivistruntime.WorkJob, WorkID: "failed-folder", Revision: 12}
+	if _, err := service.SubmitDiagnosticTurn(ctx, "SESSION", "DIAG", "REQ", "실패 근거 확인", &ref); err != nil {
+		t.Fatal(err)
+	}
+	record, err := store.Turn(ctx, "DIAG")
+	if err != nil || record.Turn.ToolPolicy != archivistruntime.ToolPolicyDiagnostic || record.Turn.WorkReference == nil || *record.Turn.WorkReference != ref || record.Turn.SubmittedBy != vocabulary.ActorHuman {
+		t.Fatalf("stored diagnosis: %+v, %v", record, err)
+	}
+	if _, err := service.SubmitDiagnosticTurn(ctx, "SESSION", "UNBOUND", "REQ2", "진단", nil); !errors.Is(err, archivistcontrol.ErrInvalidRequest) {
+		t.Fatalf("unbound diagnosis: %v", err)
+	}
+}

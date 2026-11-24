@@ -17,6 +17,7 @@ import (
 	"videoarchive/internal/application/archiveintakeworkspace"
 	"videoarchive/internal/application/archiveorganization"
 	"videoarchive/internal/application/archivetranscription"
+	"videoarchive/internal/application/archivework"
 	"videoarchive/internal/application/archiveworkspace"
 	"videoarchive/internal/application/archivistcontrol"
 	"videoarchive/internal/application/systemstatus"
@@ -53,6 +54,7 @@ const (
 
 type ArchivistRuntime interface {
 	Authenticate(string, string) error
+	TurnToolPolicy(context.Context, string, string) (archivistruntime.ArchivistTurnToolPolicy, error)
 	ValidateToolContext(context.Context, string, string, string, uint64) error
 	RecordToolCall(context.Context, string, string, string, string, string, string) error
 	RecordActionCard(context.Context, string, archivistcontrol.ActionCardProjection) error
@@ -82,10 +84,6 @@ type SystemStatusReader interface {
 	Snapshot(context.Context) (systemstatus.Snapshot, error)
 }
 
-type turnPolicyReader interface {
-	TurnToolPolicy(context.Context, string, string) (archivistruntime.ArchivistTurnToolPolicy, error)
-}
-
 type ArchiveWorkspaceReader interface {
 	Detail(context.Context, string) (archiveworkspace.JobView, error)
 }
@@ -111,7 +109,12 @@ type ArchiveTranscriptionStarter interface {
 	Start(context.Context, archivetranscription.StartRequest) (archivetranscription.Result, error)
 }
 
+type WorkReader interface {
+	Detail(context.Context, string) (archivework.View, error)
+}
+
 type Configuration struct {
+	Work                  WorkReader
 	Archivists            ArchivistRuntime
 	Catalog               CatalogReader
 	ArchiveWorkspace      ArchiveWorkspaceReader
@@ -127,6 +130,7 @@ type Configuration struct {
 }
 
 type Handler struct {
+	work                  WorkReader
 	archivists            ArchivistRuntime
 	catalog               CatalogReader
 	archiveWorkspace      ArchiveWorkspaceReader
@@ -156,6 +160,7 @@ func New(configuration Configuration) (*Handler, error) {
 		return nil, errors.New("MCP adapter configuration is incomplete")
 	}
 	handler := &Handler{
+		work:       configuration.Work,
 		archivists: configuration.Archivists, catalog: configuration.Catalog,
 		archiveWorkspace: configuration.ArchiveWorkspace, commands: configuration.Commands,
 		drives: configuration.Drives, intakeSelector: configuration.IntakeSelector,
@@ -242,14 +247,10 @@ func (handler *Handler) call(writer http.ResponseWriter, request *http.Request) 
 		writeError(writer, http.StatusConflict, "MCP_TURN_CONTEXT_INVALID")
 		return
 	}
-	policy := archivistruntime.ToolPolicyStandard
-	if reader, ok := handler.archivists.(turnPolicyReader); ok {
-		resolved, err := reader.TurnToolPolicy(request.Context(), payload.SessionID, payload.TurnID)
-		if err != nil {
-			writeError(writer, http.StatusConflict, "MCP_TURN_CONTEXT_INVALID")
-			return
-		}
-		policy = resolved
+	policy, err := handler.archivists.TurnToolPolicy(request.Context(), payload.SessionID, payload.TurnID)
+	if err != nil || !policy.Valid() {
+		writeError(writer, http.StatusConflict, "MCP_TURN_CONTEXT_INVALID")
+		return
 	}
 	if payload.Tool != ToolJobsGet && payload.Tool != ToolWorkReferenceGet && payload.Tool != ToolAssetsSearch && payload.Tool != ToolJobsCreate &&
 		payload.Tool != ToolWorkDiagnosticsGet &&
@@ -261,6 +262,11 @@ func (handler *Handler) call(writer http.ResponseWriter, request *http.Request) 
 		payload.Tool != ToolOrganizationHoldsList && payload.Tool != ToolOrganizationHoldGet &&
 		payload.Tool != ToolOrganizationHoldClassify && payload.Tool != ToolArchiveRunStart && payload.Tool != ToolArchiveTranscriptionStart {
 		writeError(writer, http.StatusNotFound, "MCP_CAPABILITY_NOT_FOUND")
+		return
+	}
+	if policy == archivistruntime.ToolPolicyDiagnostic && !diagnosticToolAllowed(payload.Tool) {
+		_ = handler.archivists.RecordToolCall(request.Context(), payload.SessionID, payload.TurnID, payload.ToolCallID, payload.Tool, "", "FAILED")
+		writeError(writer, http.StatusForbidden, "MCP_DIAGNOSTIC_POLICY_DENIED")
 		return
 	}
 	if policy == archivistruntime.ToolPolicyAdvisory && !advisoryToolAllowed(payload.Tool) {
@@ -318,8 +324,12 @@ func (handler *Handler) call(writer http.ResponseWriter, request *http.Request) 
 }
 
 func remediationToolAllowed(tool string) bool {
+	return diagnosticToolAllowed(tool) || tool == ToolWorkRecoveryApply
+}
+
+func diagnosticToolAllowed(tool string) bool {
 	switch tool {
-	case ToolJobsGet, ToolWorkReferenceGet, ToolWorkDiagnosticsGet, ToolWorkFailureEvidenceGet, ToolSystemStatusGet, ToolArchiveRunStatus, ToolWorkRecoveryApply:
+	case ToolJobsGet, ToolWorkReferenceGet, ToolWorkDiagnosticsGet, ToolWorkFailureEvidenceGet, ToolSystemStatusGet, ToolArchiveRunStatus:
 		return true
 	default:
 		return false
@@ -791,6 +801,15 @@ func (handler *Handler) getArchiveRunStatus(writer http.ResponseWriter, request 
 	}
 	for _, drive := range drives {
 		if drive.WorkspaceDriveID == selection.WorkspaceDriveID && (selection.ArchiveRunID == "" || drive.ArchiveRunID == selection.ArchiveRunID) {
+			var outcome archivework.State
+			if handler.work != nil && drive.ArchiveRunID != "" {
+				view, err := handler.work.Detail(request.Context(), drive.ArchiveRunID)
+				if err != nil {
+					writeError(writer, http.StatusInternalServerError, "MCP_WORK_STATUS_FAILED")
+					return
+				}
+				outcome = view.Summary.State
+			}
 			var outputs []archiveintakeworkspace.EventOutputEvidence
 			for _, o := range drive.EventOutputEvidence {
 				if o.ArchiveRunID == drive.ArchiveRunID && o.InputRevision == drive.InputRevision {
@@ -799,7 +818,7 @@ func (handler *Handler) getArchiveRunStatus(writer http.ResponseWriter, request 
 			}
 			_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, selection.ArchiveRunID, "COMPLETED")
 			writeJSON(writer, http.StatusOK, map[string]any{"data": map[string]any{
-				"workspace_drive_id": drive.WorkspaceDriveID, "worker_id": drive.WorkerID, "state": drive.State,
+				"workspace_drive_id": drive.WorkspaceDriveID, "worker_id": drive.WorkerID, "state": drive.State, "work_state": outcome, "archive_run_state": drive.ArchiveRunState,
 				"input_revision": drive.InputRevision, "file_count": drive.FileCount,
 				"archive_run_id": drive.ArchiveRunID, "event_output_evidence": outputs, "folder_count": drive.FolderCount, "folders": drive.Folders,
 			}})

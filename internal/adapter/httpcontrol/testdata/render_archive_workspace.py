@@ -12,21 +12,21 @@ DRIVE = "#/drives/VOLUME-1"
 SCENES: dict[str, dict[str, Any]] = {
     "pre-run": {"route": DRIVE, "problems": ("3", "fault"), "phase": "intake", "stages": ["todo", "todo", "todo"]},
     "stage-one": {
-        "route": DRIVE, "problems": ("6", "fault"), "phase": "stage1", "stages": ["now", "todo", "part"],
+        "route": DRIVE, "problems": ("6", "fault"), "phase": "stage1", "stages": ["fault", "todo", "part"],
         "stage_problems": [("fault", "영상 변환 1"), ("decide", "처리 방식 결정 1"), ("decide", "결과 저장 1")],
         "progress": ("2 / 8 폴더", "최근 작업 보관 191 / 795 영상", "최근 작업 폴더 2 / 8"), "stt": None,
         "words": {"INPUT": "처리 방법 선택 필요", "DEVICE": "저장 위치 연결 필요"}, "panels": ["broken", "hold", "source-b"], "stored": 1, "committed": 1,
         "detail": ("broken", ["처리 방식 결정", "영상 변환"]),
     },
     "stt-ready": {
-        "route": DRIVE, "problems": ("5", "fault"), "phase": "stt", "stages": ["done", "now", "part"],
+        "route": DRIVE, "problems": ("5", "fault"), "phase": "stt", "stages": ["fault", "now", "part"],
         "stage_problems": [("fault", "영상 변환 1"), ("decide", "처리 방식 결정 1")],
         "progress": ("6 / 8 폴더", "최근 작업 보관 790 / 795 영상", "최근 작업 폴더 6 / 8"), "stt": None,
         "words": {"INPUT": "처리 방법 선택 필요"}, "panels": ["broken", "hold"], "stored": 5, "committed": 1,
         "detail": ("broken", ["처리 방식 결정", "영상 변환"]),
     },
     "complete": {
-        "route": DRIVE, "problems": ("6", "fault"), "phase": "done", "stages": ["done", "done", "done"],
+        "route": DRIVE, "problems": ("6", "fault"), "phase": "done", "stages": ["fault", "done", "done"],
         "stage_problems": [("fault", "영상 변환 1"), ("decide", "처리 방식 결정 1")],
         "progress": ("6 / 8 폴더", "최근 작업 보관 790 / 795 영상", "최근 작업 폴더 6 / 8 · 자막·텍스트 4 폴더"), "stt": None, "catalog": "CSV 795행 · 10. 31. 00:00 기록",
         "words": {"INPUT": "처리 방법 선택 필요"}, "panels": ["broken", "hold", "ready"], "stored": 5, "committed": 1,

@@ -94,6 +94,7 @@ type Turn struct {
 type ArchivistTurnToolPolicy string
 
 const (
+	ToolPolicyDiagnostic  ArchivistTurnToolPolicy = "DIAGNOSTIC"
 	ToolPolicyStandard    ArchivistTurnToolPolicy = "STANDARD"
 	ToolPolicyAdvisory    ArchivistTurnToolPolicy = "ADVISORY"
 	ToolPolicyRemediation ArchivistTurnToolPolicy = "REMEDIATION"
@@ -107,7 +108,7 @@ func (policy ArchivistTurnToolPolicy) Effective() ArchivistTurnToolPolicy {
 }
 
 func (policy ArchivistTurnToolPolicy) Valid() bool {
-	return policy == ToolPolicyStandard || policy == ToolPolicyAdvisory || policy == ToolPolicyRemediation
+	return policy == ToolPolicyDiagnostic || policy == ToolPolicyStandard || policy == ToolPolicyAdvisory || policy == ToolPolicyRemediation
 }
 
 type WorkKind string

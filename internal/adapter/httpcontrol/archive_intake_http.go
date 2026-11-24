@@ -1,8 +1,13 @@
 package httpcontrol
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"net/http"
+	"reflect"
+	"strconv"
 	"time"
 
 	appdriveintake "videoarchive/internal/application/archiveintake"
@@ -20,6 +25,14 @@ func (handler *Handler) archiveIntakeProjection(writer http.ResponseWriter, requ
 	views, err := handler.drives.Projection(request.Context())
 	if err != nil {
 		writeError(writer, http.StatusInternalServerError, "QUERY_FAILED")
+		return
+	}
+	header := request.Header.Get("X-Archive-Inventory")
+	writer.Header().Add("Vary", "X-Archive-Inventory")
+	writer.Header().Set("Cache-Control", "no-store")
+	known := map[string]string{}
+	if header != "" && json.Unmarshal([]byte(header), &known) != nil {
+		writeError(writer, http.StatusBadRequest, "INVALID_INVENTORY_TOKEN")
 		return
 	}
 	result := make([]driveView, 0, len(views))
@@ -60,15 +73,99 @@ func (handler *Handler) archiveIntakeProjection(writer http.ResponseWriter, requ
 				CapacityBytes: candidate.CapacityBytes, FreeBytes: candidate.FreeBytes,
 			})
 		}
-		for _, folder := range value.Folders {
-			projected.Folders = append(projected.Folders, projectDriveFolder(folder))
+		projected.ScopeIsInventory = header != "" && value.ArchiveRunID == "" && len(value.DiscoveredFolders) > 0 && reflect.DeepEqual(value.Folders, value.DiscoveredFolders)
+		if !projected.ScopeIsInventory {
+			for _, folder := range value.Folders {
+				projected.Folders = append(projected.Folders, dashboardFolder(folder, header != ""))
+			}
 		}
 		for _, folder := range value.DiscoveredFolders {
-			projected.DiscoveredFolders = append(projected.DiscoveredFolders, projectDriveFolder(folder))
+			projected.DiscoveredFolders = append(projected.DiscoveredFolders, dashboardFolder(folder, header != ""))
+		}
+		if header != "" {
+			projected.DiscoveredDirectories = nil
+			if value.FolderDiscoveryState == vocabulary.FolderDiscoveryReady && value.ConnectionState == vocabulary.VolumeConnected && value.FolderDiscoveryRevision > 0 && len(projected.DiscoveredFolders) > 0 {
+				hash := sha256.New()
+				if err := json.NewEncoder(hash).Encode(projected.DiscoveredFolders); err != nil {
+					writeError(writer, http.StatusInternalServerError, "QUERY_FAILED")
+					return
+				}
+				projected.InventoryToken = strconv.FormatUint(value.FolderDiscoveryRevision, 10) + "-" + hex.EncodeToString(hash.Sum(nil))
+				if known[value.WorkspaceDriveID] == projected.InventoryToken {
+					projected.InventoryUnchanged = true
+					projected.DiscoveredFolders = nil
+				}
+			}
 		}
 		result = append(result, projected)
 	}
 	writeJSON(writer, http.StatusOK, map[string]any{"data": result})
+}
+
+func dashboardFolder(folder archiveintakeworkspace.FolderView, compact bool) driveFolderView {
+	if !compact {
+		return projectDriveFolder(folder)
+	}
+	deferred := len(folder.Videos) > 0
+	folder.Videos, folder.ClassificationEvidence = nil, nil
+	result := projectDriveFolder(folder)
+	result.FilesDeferred = deferred
+	return result
+}
+
+// Return only the requested read-model record. Folder names are opaque keys.
+func (handler *Handler) archiveFolderFiles(writer http.ResponseWriter, request *http.Request) {
+	q := request.URL.Query()
+	revision, err := strconv.ParseUint(q.Get("revision"), 10, 64)
+	if err != nil || q.Get("folder") == "" {
+		writeError(writer, http.StatusBadRequest, "INVALID_FOLDER_REFERENCE")
+		return
+	}
+	drives, err := handler.drives.Projection(request.Context())
+	if err != nil {
+		writeError(writer, http.StatusInternalServerError, "QUERY_FAILED")
+		return
+	}
+	writer.Header().Set("Cache-Control", "no-store")
+	for _, drive := range drives {
+		if drive.WorkspaceDriveID != request.PathValue("workspaceDriveID") {
+			continue
+		}
+		if drive.FolderDiscoveryRevision != revision || drive.ArchiveRunID != q.Get("run") {
+			writeError(writer, http.StatusConflict, "FOLDER_REFERENCE_STALE")
+			return
+		}
+		var files []archiveintakeworkspace.SourceVideoView
+		decision, found := "", false
+		for _, folder := range drive.DiscoveredFolders {
+			if folder.Folder == q.Get("folder") {
+				files, found = folder.Videos, true
+				break
+			}
+		}
+		if q.Get("scope") != "inventory" {
+			for _, folder := range drive.Folders {
+				if folder.Folder != q.Get("folder") {
+					continue
+				}
+				decision, found = folder.DecisionID, true
+				if len(folder.Videos) > 0 {
+					files = folder.Videos
+				}
+				break
+			}
+		}
+		if decision != q.Get("decision") {
+			writeError(writer, http.StatusConflict, "FOLDER_REFERENCE_STALE")
+			return
+		}
+		if found {
+			writeJSON(writer, http.StatusOK, map[string]any{"data": projectSourceVideos(files)})
+			return
+		}
+		break
+	}
+	writeError(writer, http.StatusNotFound, "FOLDER_NOT_FOUND")
 }
 
 func projectDriveFolder(folder archiveintakeworkspace.FolderView) driveFolderView {
@@ -102,19 +199,11 @@ func projectDriveFolder(folder archiveintakeworkspace.FolderView) driveFolderVie
 			Disposition: string(option.Disposition), TargetVideoBitRateKbps: option.TargetVideoBitRateKbps,
 		})
 	}
-	videos := make([]driveSourceVideoView, 0, len(folder.Videos))
-	for _, video := range folder.Videos {
-		videos = append(videos, driveSourceVideoView{
-			ContextEvidence: video.ContextEvidence, Measurement: video.Measurement, MatchedOriginal: video.MatchedOriginal, MetadataHint: video.MetadataHint,
-			RelativePath: video.RelativePath, FileName: video.FileName,
-			SizeBytes: video.SizeBytes, ModifiedAt: video.ModifiedAt,
-		})
-	}
 	projected := driveFolderView{
 		NoiseReview:            folder.NoiseReview,
 		ClassificationEvidence: folder.ClassificationEvidence, EventPreview: folder.EventPreview, CopyCandidates: folder.CopyCandidates, SourceRole: folder.SourceRole, Folder: folder.Folder, DecisionID: folder.DecisionID, InputRevision: folder.InputRevision,
 		DecisionSequence: folder.DecisionSequence, Disposition: string(folder.Disposition),
-		ProfileReference: folder.ProfileReference, HoldReasons: holdReasons, WorkOptions: workOptions, Videos: videos, VideoCount: folder.VideoCount,
+		ProfileReference: folder.ProfileReference, HoldReasons: holdReasons, WorkOptions: workOptions, Videos: projectSourceVideos(folder.Videos), VideoCount: folder.VideoCount,
 		EstimatedOutputBytes: folder.EstimatedOutputBytes, JobID: folder.JobID,
 		TranscriptionJobID: folder.TranscriptionJobID, CurrentStepID: folder.CurrentStepID,
 		StepState: string(folder.StepState), Stages: stages, ArchivePackageID: folder.ArchivePackageID,
@@ -132,6 +221,18 @@ func projectDriveFolder(folder archiveintakeworkspace.FolderView) driveFolderVie
 		}
 	}
 	return projected
+}
+
+func projectSourceVideos(files []archiveintakeworkspace.SourceVideoView) []driveSourceVideoView {
+	videos := make([]driveSourceVideoView, 0, len(files))
+	for _, video := range files {
+		videos = append(videos, driveSourceVideoView{
+			ContextEvidence: video.ContextEvidence, Measurement: video.Measurement, MatchedOriginal: video.MatchedOriginal, MetadataHint: video.MetadataHint,
+			RelativePath: video.RelativePath, FileName: video.FileName,
+			SizeBytes: video.SizeBytes, ModifiedAt: video.ModifiedAt,
+		})
+	}
+	return videos
 }
 
 type driveOverrideRequest struct {

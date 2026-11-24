@@ -381,6 +381,7 @@ func OpenWithDependencies(ctx context.Context, configuration bootconfig.Configur
 		mcpArchiveTranscriptions = archiveTranscriptions
 	}
 	mcpHandler, err := httpmcp.New(httpmcp.Configuration{
+		Work:       workQueries,
 		Archivists: archivists, Catalog: catalogStore, ArchiveWorkspace: queries, Commands: jobCommands,
 		Drives: mcpArchiveIntake, IntakeSelector: mcpArchiveIntakeSelector,
 		ArchiveRuns: mcpArchiveRuns, ArchiveTranscriptions: mcpArchiveTranscriptions,

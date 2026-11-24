@@ -713,3 +713,43 @@ details[open]>.tools-toggle::before{transform:rotate(45deg)}
   .step-item{grid-template-columns:14px minmax(0,1fr) 72px}
   .agent-handle{top:auto;bottom:96px;transform:none}
 }
+
+.idle-summary, .inventory-head, .failure-actions, .inventory-count {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.idle-summary { color: var(--muted); font-size: var(--text-sm); padding: 8px 0; }
+.inventory-review { border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.inventory-head { width: 100%; flex-wrap: wrap; text-align: left; padding: 12px 14px; background: none; border: 0; color: var(--ink); }
+.inventory-head > b { margin-right: auto; }
+.inventory-head > b span { margin-left: 5px; color: var(--muted); }
+.inventory-head[aria-expanded="true"] > .chev { transform: rotate(90deg); }
+.inventory-count { font-size: var(--text-sm); gap: 4px; }
+.inventory-body { padding: 12px; border-top: 1px solid var(--line); }
+.inventory-body select { min-width: 0; max-width: 100%; }
+.inventory-body .source-video-list { max-height: 22rem; overflow: auto; }
+.failure-actions { flex-wrap: wrap; padding: 6px 12px; }
+.evidence-fold summary, .report-fold summary { cursor: pointer; color: var(--muted); }
+.evidence-fold { min-width: 0; overflow-wrap: anywhere; }
+.report-fold .report-lead { color: var(--ink); overflow-wrap: anywhere; }
+.report-toggle { display: inline-block; margin-left: 6px; color: var(--muted); font-size: var(--text-xs); }
+.report-fold[open] .report-lead { display: none; }
+
+@media (min-width: 801px) {
+  .job-cols.idle-cols, .work-row.idle-row { grid-template-columns: minmax(0, 1fr) minmax(100px, .32fr) 64px 14px; }
+  .idle-cols > span:nth-child(3), .idle-row > .job-progress { display: none; }
+}
+
+.fault-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.problem-head .token[hidden] { display: none; }
+.problem-head .chev { grid-column: -2 / -1; }
+.inventory-body .seg { margin: 8px 0; }
+
+.system-source { color: var(--muted); font-size: var(--text-sm); }
+.system-source summary { cursor: pointer; }
+.system-source time { margin-left: 8px; font-variant-numeric: tabular-nums; }
+.system-source .message-body { margin-top: 6px; overflow-wrap: anywhere; }
+
+.file-proof summary { cursor: pointer; overflow-wrap: anywhere; font-weight: 600; }
+.file-proof[open] small { white-space: normal; overflow-wrap: anywhere; }

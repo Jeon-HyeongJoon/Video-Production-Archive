@@ -110,6 +110,9 @@ type archivistHostStatusView struct {
 }
 
 type driveView struct {
+	ScopeIsInventory           bool                          `json:"scope_is_inventory,omitempty"`
+	InventoryToken             string                        `json:"inventory_token,omitempty"`
+	InventoryUnchanged         bool                          `json:"inventory_unchanged,omitempty"`
 	WorkspaceDriveID           string                        `json:"workspace_drive_id"`
 	ConnectionState            string                        `json:"connection_state"`
 	ConnectionObservedAt       time.Time                     `json:"connection_observed_at,omitempty"`
@@ -178,6 +181,7 @@ type driveStorageView struct {
 }
 
 type driveFolderView struct {
+	FilesDeferred          bool                                 `json:"files_deferred,omitempty"`
 	NoiseReview            *organization.NoiseReview            `json:"noise_review,omitempty"`
 	ClassificationEvidence *organization.ClassificationEvidence `json:"classification_evidence,omitempty"`
 	EventPreview           *organization.EventPreview           `json:"event_preview,omitempty"`
@@ -268,6 +272,7 @@ type archivistSessionView struct {
 }
 
 type archivistTurnView struct {
+	ToolPolicy     string                                  `json:"tool_policy,omitempty"`
 	TurnID         string                                  `json:"turn_id"`
 	RequestID      string                                  `json:"request_id"`
 	State          string                                  `json:"state"`

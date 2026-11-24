@@ -72,6 +72,7 @@ type ArchivistWorkspace interface {
 	CreateArchivist(context.Context, string, string, string, string) (archivistcontrol.SessionRecord, error)
 	RemoveSession(context.Context, string) error
 	SubmitTurnWithDriveSelection(context.Context, string, string, string, string, *archivistruntime.DriveSelection) (archivistcontrol.TurnRecord, error)
+	SubmitDiagnosticTurn(context.Context, string, string, string, string, *archivistruntime.WorkReference) (archivistcontrol.TurnRecord, error)
 	SubmitTurnWithReferences(context.Context, string, string, string, string, *archivistruntime.DriveSelection, *archivistruntime.WorkReference) (archivistcontrol.TurnRecord, error)
 	Projection(context.Context) ([]archivistcontrol.SessionProjection, error)
 	HostStatuses() []archivistruntime.HostStatus
@@ -194,6 +195,7 @@ func New(configuration Configuration) (*Handler, error) {
 	}
 	if handler.drives != nil {
 		mux.HandleFunc("GET /api/v1/archive-intake", handler.archiveIntakeProjection)
+		mux.HandleFunc("GET /api/v1/archive-intake/{workspaceDriveID}/files", handler.archiveFolderFiles)
 		mux.HandleFunc("POST /api/v1/archive-intake/{workspaceDriveID}/override", handler.overrideArchiveIntakeDecision)
 	}
 	if handler.archiveIntake != nil {

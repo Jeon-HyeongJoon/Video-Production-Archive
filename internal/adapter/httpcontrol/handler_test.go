@@ -8,6 +8,7 @@ import (
 	"image/color"
 	"image/png"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -705,9 +706,22 @@ func testControlHTTPScene(t *testing.T, scene archiveWorkspaceScene, check func(
 
 func integerPointer(value int) *int { return &value }
 
+// Windows may assign a loopback listener in Chromium's blocked IRC port
+// range. Keep each rejected port reserved until a usable listener is ready.
+func newBrowserTestServer(handler http.Handler) *httptest.Server {
+	for {
+		server := httptest.NewServer(handler)
+		port := server.Listener.Addr().(*net.TCPAddr).Port
+		if port < 6665 || port > 6669 {
+			return server
+		}
+		defer server.Close()
+	}
+}
+
 func assertArchiveWorkspaceLayout(t *testing.T, handler http.Handler) {
 	t.Helper()
-	server := httptest.NewServer(handler)
+	server := newBrowserTestServer(handler)
 	defer server.Close()
 
 	python := os.Getenv("ARCHIVE_WORKSPACE_GOLDEN_PYTHON")
@@ -724,7 +738,7 @@ func assertArchiveWorkspaceLayout(t *testing.T, handler http.Handler) {
 
 func assertArchiveWorkspaceScript(t *testing.T, handler http.Handler, script string, arguments ...string) {
 	t.Helper()
-	server := httptest.NewServer(handler)
+	server := newBrowserTestServer(handler)
 	defer server.Close()
 	python := os.Getenv("ARCHIVE_WORKSPACE_GOLDEN_PYTHON")
 	if python == "" {
@@ -1374,6 +1388,10 @@ func (workspace fixedArchivistWorkspace) SubmitTurnWithDriveSelection(context.Co
 	return archivistcontrol.TurnRecord{}, errors.New("fixture is read-only")
 }
 
+func (workspace fixedArchivistWorkspace) SubmitDiagnosticTurn(context.Context, string, string, string, string, *archivistruntime.WorkReference) (archivistcontrol.TurnRecord, error) {
+	return archivistcontrol.TurnRecord{}, errors.New("fixture is read-only")
+}
+
 func (workspace fixedArchivistWorkspace) SubmitTurnWithReferences(context.Context, string, string, string, string, *archivistruntime.DriveSelection, *archivistruntime.WorkReference) (archivistcontrol.TurnRecord, error) {
 	return archivistcontrol.TurnRecord{}, errors.New("fixture is read-only")
 }
@@ -1416,7 +1434,7 @@ func (workspace fixedArchivistWorkspace) RejectActionCard(context.Context, strin
 
 func assertArchiveWorkspaceGolden(t *testing.T, handler http.Handler, scene archiveWorkspaceScene) {
 	t.Helper()
-	server := httptest.NewServer(handler)
+	server := newBrowserTestServer(handler)
 	defer server.Close()
 
 	testdata, err := filepath.Abs("testdata")
@@ -1575,4 +1593,32 @@ func preserveArchiveWorkspaceActual(t *testing.T, actualPath, goldenName string)
 		t.Fatalf("preserve rendered Archive Workspace: %v", err)
 	}
 	return artifactDir
+}
+
+// Requirement: DSH-048
+func TestTerminalFailureAgreesAcrossWorkAndDriveViews(t *testing.T) {
+	testControlHTTPScene(t, sceneStageOne, func(t *testing.T, handler http.Handler) {
+		assertArchiveWorkspaceScript(t, handler, "check_dashboard_review.py", "outcome")
+	})
+}
+
+// Requirement: DSH-049
+func TestFailureDiagnosisPinsChildWithoutReplacingDraft(t *testing.T) {
+	testControlHTTPScene(t, sceneComplete, func(t *testing.T, handler http.Handler) {
+		assertArchiveWorkspaceScript(t, handler, "check_dashboard_review.py", "diagnosis")
+	})
+}
+
+// Requirement: DSH-050
+func TestDriveProxyEvidenceOpensMixedFolderFirst(t *testing.T) {
+	testControlHTTPScene(t, sceneStageOne, func(t *testing.T, handler http.Handler) {
+		assertArchiveWorkspaceScript(t, handler, "check_dashboard_review.py", "proxies")
+	})
+}
+
+// Requirement: DSH-051
+func TestWorkspacePollsScopeAndLoadsOnlyOpenedFolderFiles(t *testing.T) {
+	testControlHTTPScene(t, scenePreRun, func(t *testing.T, handler http.Handler) {
+		assertArchiveWorkspaceScript(t, handler, "check_dashboard_review.py", "transfer")
+	})
 }

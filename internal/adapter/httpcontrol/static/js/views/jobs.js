@@ -31,12 +31,15 @@ const laneItems = (lane) => {
 };
 
 export function JobsScreen() {
+  const idle = store.ready.value && !allWork.value.some((item) => ["work", "queue"].includes(workLane(item)));
+  const lanes = idle ? LANES.slice(2) : LANES;
   return [
     html`<div key="head" class="page-head">
       <div class="page-title"><h1 id="jobs-title">작업 관리</h1></div>
     </div>`,
-    html`<div key="cols" class="job-cols with-chev" aria-hidden="true"><span>작업</span><span>상태</span><span>진행</span><span>추가</span><span></span></div>`,
-    ...LANES.map(([lane, id, title, empty]) => html`<${Lane} key=${lane} lane=${lane} id=${id} title=${title} empty=${empty} />`),
+    html`<div key="cols" class=${`job-cols with-chev${idle ? " idle-cols" : ""}`} aria-hidden="true"><span>작업</span><span>상태</span><span>진행</span><span>추가</span><span></span></div>`,
+    ...lanes.map(([lane, id, title, empty]) => html`<${Lane} key=${lane} lane=${lane} id=${id} title=${title} empty=${empty} compact=${idle} />`),
+    idle && html`<div key="idle" class="idle-summary" aria-label="작업 대기열"><${StatusIcon} kind="idle" />진행 중 0 · 시작 대기 0</div>`,
   ];
 }
 
@@ -51,7 +54,7 @@ export function NewWorkScreen() {
   ];
 }
 
-function Lane({ lane, id, title, empty }) {
+function Lane({ lane, id, title, empty, compact }) {
   const items = laneItems(lane);
   const foldable = lane === "attention" || lane === "done";
   const open = foldable ? ui.lanes.value[lane] : true;
@@ -64,13 +67,13 @@ function Lane({ lane, id, title, empty }) {
     </div>
     <${Fold} open=${open}>
       <div class="lane-rows">
-        ${items.length ? items.map((work) => html`<${WorkBlock} key=${work.work_id} work=${work} meter=${lane === "work"} />`) : html`<${Empty} text=${empty} />`}
+        ${items.length ? items.map((work) => html`<${WorkBlock} key=${work.work_id} work=${work} meter=${lane === "work"} compact=${compact} />`) : html`<${Empty} text=${empty} />`}
       </div>
     <//>
   </section>`;
 }
 
-function WorkBlock({ work, meter }) {
+function WorkBlock({ work, meter, compact }) {
   const open = useComputed(() => ui.expanded.value.has(work.work_id)).value;
   const shown = useLinger(open);
   const run = work.kind === "ARCHIVE_RUN";
@@ -82,15 +85,17 @@ function WorkBlock({ work, meter }) {
     if (!next.delete(work.work_id)) next.add(work.work_id);
     ui.expanded.value = next;
   };
+  const issues = run ? workIssues(work) : {};
+  const shortScope = run ? workScopeText(work).split("/").pop() : "";
   const pct = Math.round((work.progress || 0) * 100);
   return html`<div class="work-block vt" style=${`--vtn:work-${cssName(work.work_id)}`} data-work-id=${work.work_id}>
-    <button type="button" class="job-row work-row" aria-expanded=${open ? "true" : "false"} data-work-id=${work.work_id} data-kind=${work.kind} data-lane=${workLane(work)}
-      title=${[work.work_id, `Worker ${work.worker_id || "배정 없음"}`].join("\n")} onClick=${toggle}>
+    <button type="button" class=${`job-row work-row${compact ? " idle-row" : ""}`} aria-expanded=${open ? "true" : "false"} data-work-id=${work.work_id} data-kind=${work.kind} data-lane=${workLane(work)}
+      title=${[work.work_id, run ? workScopeText(work) : "", `Worker ${work.worker_id || "배정 없음"}`].join("\n")} onClick=${toggle}>
       <span class="job-name">
         <b class=${isShared ? "shared" : null}>${workTitle(work)}</b>
-        <small class="work-scope">${run ? workScopeText(work) : `템플릿 작업 · ${label("template", job?.template_name)}`} <i class="faint-id">${work.work_id}</i></small>
+        <small class="work-scope">${run ? (compact ? shortScope : workScopeText(work)) : `템플릿 작업 · ${label("template", job?.template_name)}`} ${(!compact || open) && html`<i class="faint-id">${work.work_id}</i>`}</small>
       </span>
-      <span class="state"><${StatusIcon} kind=${workKind(work)} /><${Swap} cls="job-state" text=${workText(work)} />${run ? html`<${IssueTags} ...${workIssues(work)} cls="row-issue" />` : null}</span>
+      <span class="state"><${StatusIcon} kind=${workKind(work)} /><${Swap} cls="job-state" text=${compact && work.state === "FAILED" && issues.fault > 1 ? `실패 · ${issues.fault} 폴더` : workText(work)} />${run ? html`<${IssueTags} fault=${compact && work.state === "FAILED" ? 0 : issues.fault} decide=${issues.decide} cls="row-issue" />` : null}</span>
       <span class="job-progress">${meter ? html`<${Meter} value=${work.progress || 0} label=${`진행 ${pct}%`} />` : null}</span>
       <span class="job-time" title=${shortTime(work.created_at)}>${dayTime(work.created_at)}</span>
       <${Chevron} />
@@ -111,15 +116,19 @@ function WorkFolders({ work, href }) {
   const total = work.folder_count || names?.length || 0;
   let running = 0;
   let queued = 0;
+  let failed = 0;
+  let attention = 0;
   let done = 0;
   for (const folder of current?.folders || []) {
     const state = folderState(folder);
-    if (state.signal === "work") running += 1;
+    if (state.signal === "fault") failed += 1;
+    else if (state.signal === "decide") attention += 1;
+    else if (state.signal === "work") running += 1;
     else if (state.word === "시작 대기") queued += 1;
     else if (state.signal === "done") done += 1;
   }
   const moved = newer && names ? names.filter((name) => newer.has(name)).length : 0;
-  const counts = current ? `폴더 ${formatCount(total)} · 진행 ${running} · 대기 ${formatCount(queued)} · 끝남 ${formatCount(done)}` : `폴더 ${formatCount(total)} · 영상 ${formatCount(work.video_count)}`;
+  const counts = current ? `폴더 ${formatCount(total)} · 진행 ${running} · 대기 ${formatCount(queued)} · 끝남 ${formatCount(done)}${failed ? ` · 실패 ${formatCount(failed)}` : ""}${attention ? ` · 직접 확인 ${formatCount(attention)}` : ""}` : `폴더 ${formatCount(total)} · 영상 ${formatCount(work.video_count)}`;
   return html`<div class="work-children">
     <div class="children-head">
       <span>${counts}${moved ? ` · 새 작업으로 넘김 ${moved}` : ""}</span>

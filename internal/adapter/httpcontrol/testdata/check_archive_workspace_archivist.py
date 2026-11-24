@@ -106,4 +106,32 @@ with sync_playwright() as playwright:
         expect(fold.locator(".message.system").first).to_be_visible()
         expect(fold.locator(".turn-entry").first).to_be_visible()
 
+    if scene == "complete":
+        report = "보관 완료 3개, 실패 1개.\n" + "확인된 근거와 다음 조치입니다. " * 20
+
+        def long_report(route):
+            payload = route.fetch().json()
+            for turn in payload["data"][0]["turns"]:
+                if turn.get("work_context", {}).get("trigger") == "ARCHIVE_RUN_COMPLETE":
+                    turn["final_response"]["summary"] = report
+            payload["data"][0]["turns"].append({
+                "turn_id": "SYSTEM-ADVISORY-TEST", "submitted_by": "SYSTEM", "state": "COMPLETED",
+                "tool_policy": "ADVISORY", "prompt": "Inspect the current selection using recorded evidence.",
+                "created_at": "2026-11-01T00:00:00Z", "updated_at": "2026-11-01T00:00:02Z",
+            })
+            route.fulfill(json=payload)
+
+        page.route("**/api/v1/archivist-sessions", long_report)
+        page.reload(wait_until="networkidle")
+        system = page.locator(".system-source")
+        expect(system.locator("summary")).to_contain_text("자동 제안")
+        expect(system.locator(".message-body")).to_be_hidden()
+        expect(thread.locator(".message.user")).to_have_count(1)
+        system.locator("summary").click()
+        expect(system.locator(".message-body")).to_have_text("Inspect the current selection using recorded evidence.")
+        report_fold = page.locator(".report-fold")
+        expect(report_fold.locator("summary")).to_contain_text("보관 완료 3개, 실패 1개.")
+        expect(report_fold.locator(".message-body")).to_be_hidden()
+        report_fold.locator("summary").press("Enter")
+        expect(report_fold.locator(".message-body")).to_have_text(report)
     browser.close()

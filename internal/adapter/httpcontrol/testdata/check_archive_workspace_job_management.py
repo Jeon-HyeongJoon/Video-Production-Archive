@@ -75,4 +75,18 @@ with sync_playwright() as playwright:
     expect(page.locator(".sidebar .side-tools #alert-button")).to_be_visible()
     expect(page.locator(".sidebar .side-foot #open-settings")).to_be_visible()
     expect(page.locator(".topbar, #theme-switch")).to_have_count(0)
+    def idle_work(route):
+        payload = route.fetch().json()
+        payload["data"] = [row for row in payload["data"] if row["state"] not in ("ACTIVE", "QUEUED")]
+        route.fulfill(json=payload)
+
+    page.route("**/api/v1/work", idle_work)
+    page.reload(wait_until="networkidle")
+    expect(page.locator(".lane").first).to_have_id("attention-jobs")
+    expect(page.locator(".idle-summary")).to_have_text("진행 중 0 · 시작 대기 0")
+    expect(page.locator("#active-jobs, #queued-jobs")).to_have_count(0)
+    attention_row = page.locator("#attention-jobs .work-row").first
+    expect(attention_row.locator(".faint-id")).to_have_count(0)
+    attention_row.click()
+    expect(attention_row.locator(".faint-id")).to_be_visible()
     browser.close()

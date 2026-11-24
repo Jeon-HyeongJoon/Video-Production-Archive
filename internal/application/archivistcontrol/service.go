@@ -263,6 +263,17 @@ func (service *Service) SubmitTurnWithDriveSelection(ctx context.Context, sessio
 }
 
 func (service *Service) SubmitTurnWithReferences(ctx context.Context, sessionID, turnID, requestID, prompt string, selection *archivistruntime.DriveSelection, work *archivistruntime.WorkReference) (TurnRecord, error) {
+	return service.submitTurn(ctx, sessionID, turnID, requestID, prompt, selection, work, archivistruntime.ToolPolicyStandard)
+}
+
+func (service *Service) SubmitDiagnosticTurn(ctx context.Context, sessionID, turnID, requestID, prompt string, work *archivistruntime.WorkReference) (TurnRecord, error) {
+	if work == nil || work.Kind != archivistruntime.WorkJob {
+		return TurnRecord{}, ErrInvalidRequest
+	}
+	return service.submitTurn(ctx, sessionID, turnID, requestID, prompt, nil, work, archivistruntime.ToolPolicyDiagnostic)
+}
+
+func (service *Service) submitTurn(ctx context.Context, sessionID, turnID, requestID, prompt string, selection *archivistruntime.DriveSelection, work *archivistruntime.WorkReference, policy archivistruntime.ArchivistTurnToolPolicy) (TurnRecord, error) {
 	prompt = strings.TrimSpace(prompt)
 	if prompt == "" {
 		return TurnRecord{}, ErrInvalidRequest
@@ -278,6 +289,7 @@ func (service *Service) SubmitTurnWithReferences(ctx context.Context, sessionID,
 	if err != nil {
 		return TurnRecord{}, err
 	}
+	turn.ToolPolicy = policy
 	now := service.now().UTC()
 	record := TurnRecord{Turn: turn, Prompt: prompt, CreatedAt: now, UpdatedAt: now}
 	if err := service.store.CreateTurn(ctx, record); err != nil {

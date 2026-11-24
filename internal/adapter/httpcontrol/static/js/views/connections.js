@@ -6,7 +6,7 @@
 import { html, useEffect, useRef } from "../lib.js";
 import { label, stateSignal, formatBytes, formatPercent, formatCount, clockTime } from "../core.js";
 import {
-  store, allDrives, allSessions, drivePhase, driveName, driveProgress, driveProblems, driveConnection, availability, PHASE_LABEL, PHASE_ICON,
+  store, allDrives, allSessions, drivePhase, driveName, driveProgress, driveProblems, driveConnection, availability, driveOutcome,
 } from "../store.js";
 import { route } from "../router.js";
 import { StatusIcon, Chevron, Swap, Meter, Fine, IssueTags, Empty } from "../ui.js";
@@ -72,6 +72,7 @@ function WorkerCard({ worker, focused }) {
 
 function DriveRow({ drive: current }) {
   const phase = drivePhase(current);
+  const outcome = driveOutcome(current);
   const connection = driveConnection(current);
   const progress = driveProgress(current);
   const problems = driveProblems(current);
@@ -80,7 +81,7 @@ function DriveRow({ drive: current }) {
     <b>${driveName(current)}</b>
     ${connection.state === "CONNECTED" ? html`<${Fine} text=${connection.text} />` : html`<span class="ok" data-signal=${connection.signal}><${StatusIcon} kind=${connection.signal === "fault" ? "fault" : "idle"} />${connection.text}</span>`}
     <span class="num">${current.connection_worker_id || current.worker_id || "배정 없음"}</span>
-    <span class="state"><${StatusIcon} kind=${PHASE_ICON[phase]} /><${Swap} text=${PHASE_LABEL[phase]} /></span>
+    <span class="state"><${StatusIcon} kind=${outcome.kind} /><${Swap} text=${outcome.text} /></span>
     ${phase === "intake" ? html`<span class="muted">—</span>`
       : phase === "done"
         ? html`<span class="num latest-scope">보관 ${formatCount(progress.storedFolders)} / ${formatCount(progress.folders)} 폴더 · 발견 ${formatCount(progress.discoveredFolders)} 폴더</span>`

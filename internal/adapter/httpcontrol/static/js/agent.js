@@ -25,6 +25,31 @@ export function openAgentCard(sessionID, cardID) {
   });
 }
 
+export function DiagnoseFailure({ jobID, stepID }) {
+  const session = currentSession.value;
+  const job = jobOf(jobID);
+  const [pending, setPending] = useState(false);
+  const [status, signal] = availability(session);
+  const unavailable = !job?.revision || stale.value || signal !== "online";
+  const reason = !job?.revision ? "작업 기록 미확인" : stale.value ? "연결 확인 필요" : status;
+  const diagnose = async () => {
+    if (pending || unavailable) return;
+    setPending(true);
+    ui.agentOpen.value = true;
+    try {
+      await mutation(`/api/v1/archivist-sessions/${encodeURIComponent(session.session_id)}/turns`, {
+        turn_id: newID("TURN"), request_id: newID("REQUEST"), diagnosis_only: true,
+        prompt: `${label("stage", stepID)} (${stepID}) 실패 원인을 확인해줘. 확인된 사실과 근거, 가능한 원인, 다음 조치를 구분해서 알려줘.`,
+        work_reference: { kind: "JOB", work_id: jobID, revision: job.revision },
+      });
+      await refresh();
+    } catch (error) { ui.status.value = error.message; }
+    finally { setPending(false); }
+  };
+  return html`<button type="button" class="btn btn-sm diagnose" data-action="diagnose" disabled=${pending || unavailable} onClick=${diagnose}
+    title=${unavailable ? reason : "에이전트가 실패 근거를 조회합니다"}>이 실패 원인 확인${unavailable ? ` · ${reason}` : ""}</button>`;
+}
+
 function minutesBetween(start, end) {
   const minutes = Math.max(0, Math.round((new Date(end) - new Date(start)) / 60000));
   return minutes < 1 ? "1분 미만" : `${minutes}분`;
@@ -69,7 +94,16 @@ function referenceLabels(selection, work) {
   return values;
 }
 
+function automaticTitle(turn) {
+  return { ADVISORY: "자동 제안", REMEDIATION: "자동 복구 점검" }[turn.tool_policy] || "자동 점검";
+}
+
 function UserBubble({ turn }) {
+  if (isSystem(turn)) return html`<details class="system-source" data-turn-id=${turn.turn_id}>
+    <summary><span>${automaticTitle(turn)}</span><time>${clockTime(turn.created_at)}</time></summary>
+    <div class="text message-body">${turn.prompt || turn.request_id}</div>
+    <${RefsFold} refs=${referenceLabels(turn.drive_selection, turn.work_reference)} cls="turn-refs" />
+  </details>`;
   return html`<div class="bubble message user" data-turn-id=${turn.turn_id} title=${`담당자 · ${label("turn", turn.state)} · ${clockTime(turn.created_at)}`}>
     <div class="text message-body">${turn.prompt || turn.request_id}</div>
     <${RefsFold} refs=${referenceLabels(turn.drive_selection, turn.work_reference)} cls="turn-refs" />
@@ -139,7 +173,7 @@ function LiveLine({ turn }) {
   const row = running ? html`<${ToolRow} call=${running} />`
     : entries.length ? html`<${EntryRow} entry=${entries[entries.length - 1]} />`
       : calls.length ? html`<${ToolRow} call=${calls[calls.length - 1]} />`
-        : html`<li class="tool turn-entry" data-kind="STATE" data-signal="work"><${StatusIcon} kind="work" /><b class="turn-entry-kind">${isSystem(turn) ? "자동 진행" : "진행"}</b><span>${isSystem(turn) ? turn.prompt || turn.request_id : ""}</span></li>`;
+        : html`<li class="tool turn-entry" data-kind="STATE" data-signal="work"><${StatusIcon} kind="work" /><b class="turn-entry-kind">${isSystem(turn) ? "자동 진행" : "진행"}</b><span>${isSystem(turn) ? (turn.work_context ? turn.prompt || turn.request_id : automaticTitle(turn)) : ""}</span></li>`;
   return html`<div class="turn-live" data-turn-id=${turn.turn_id}><ul class="tools">${row}</ul><span class="token">${label("turn", turn.state)}</span></div>`;
 }
 
@@ -210,11 +244,20 @@ function unitItems(unit, session) {
 const head = (item) => (item.active ? label("turn", item.active.state)
   : item.shown ? `${label("turn", item.shown.state)} · ${clockTime(item.shown.updated_at)}` : `${label("turn", item.origin.state)} · ${clockTime(item.origin.updated_at)}`);
 
+function ReportText({ text }) {
+  const lines = text.trim().split(/\r?\n/);
+  if (lines.length <= 3 && text.length <= 180) return html`<div class="text message-body">${text}</div>`;
+  const firstLine = lines[0].replace(/\*\*|`/g, "");
+  const lead = firstLine.length > 90 ? firstLine.slice(0, 90) + "…" : firstLine;
+  return html`<details class="report-fold"><summary><span class="report-lead">${lead}</span><span class="report-toggle">보고 전문</span></summary>
+    <div class="text message-body">${text}</div></details>`;
+}
+
 function Answer({ item }) {
   const { unit, origin, active, shown, failed, failure, settled, foldText, session } = item;
   return html`<div class=${`turn message archivist${unit.workID && settled ? " work-result" : ""}`} data-turn-id=${unit.workID ? null : origin.turn_id} data-work-id=${unit.workID || null} data-settled=${String(settled)}>
     <div class="turn-head message-head">에이전트 · ${head(item)}</div>
-    ${shown ? html`<div class="text message-body">${shown.final_response.summary}</div>` : failure ? html`<ul class="tools"><${EntryRow} entry=${failure} /></ul>` : null}
+    ${shown ? html`<${ReportText} text=${shown.final_response.summary} />` : failure ? html`<ul class="tools"><${EntryRow} entry=${failure} /></ul>` : null}
     ${active ? html`<${LiveLine} turn=${active} />` : null}
     ${foldText ? html`<details class=${`turn-work${unit.workID ? " work-fold" : ""}`} data-work-id=${unit.workID || null} data-turn-id=${unit.workID ? null : origin.turn_id}>
       <summary class="tools-toggle">${foldText}</summary>
