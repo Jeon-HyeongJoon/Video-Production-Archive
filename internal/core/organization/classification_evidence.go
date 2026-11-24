@@ -7,7 +7,8 @@ import (
 	"videoarchive/internal/core/vocabulary"
 )
 
-const DrivePolicyVersion uint32 = 3
+const ContextPolicyVersion uint32 = 3
+const DrivePolicyVersion uint32 = 4
 
 type ClassificationEvidence struct {
 	State         string         `json:"state"`

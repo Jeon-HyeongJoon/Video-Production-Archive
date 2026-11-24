@@ -2261,7 +2261,7 @@
       "id": "ORG-005",
       "design": "source-sequence-classification",
       "statement": "여러 짧은 영상은 연속 번호 파일명과 동일한 video·audio 기술 규격을 모두 만족할 때만 자동 소스 시퀀스로 분류해야 한다.",
-      "given": "2개 이상의 3분 이하 영상에 연속·비연속 번호와 동일·상이한 codec·해상도·frame rate·audio 조합이 있다.",
+      "given": "기존 정책 v2에 고정된 2개 이상의 3분 이하 영상에 연속·비연속 번호와 동일·상이한 codec·해상도·frame rate·audio 조합이 있다.",
       "when": "소스 시퀀스 자동 분류를 이미 렌더된 개별 파일 판정보다 먼저 실행한다.",
       "then": "같은 prefix의 마지막 숫자가 1씩 증가하고 기술 규격이 모두 같은 조합만 순서가 고정된 COMPILE_SOURCE_SEQUENCE가 되며 부분 일치는 HOLD가 된다.",
       "test_file": "internal/core/organization/organization_test.go",
@@ -4121,7 +4121,7 @@
       "id": "ORG-016",
       "design": "folder-role-routing",
       "statement": "자동 정리는 폴더 역할과 입력 기술 조건을 대조해 실행할 처리 방식과 근거를 남겨야 한다.",
-      "given": "같은 행사의 VJ 원본, 단일 PGM, 분할 또는 고정캠, 편집·선별본, 행사·순서 미확인 형식별 폴더가 있다.",
+      "given": "기존 역할 정책 v2에 고정된 같은 행사의 VJ 원본, 단일 PGM, 분할 또는 고정캠, 편집·선별본, 행사·순서 미확인 형식별 폴더가 있다.",
       "when": "같은 입력 리비전의 폴더들을 정책 v2로 판정한다.",
       "then": "연속·호환되는 짧은 VJ 컷은 경계 마커가 있는 20Mbps 시퀀스, 명시된 단일 녹화는 6Mbps 렌더가 된다. 역할 충돌·불완전한 순서·편집 자료·행사 미확인 형식별 원본는 사유를 남기고 보류한다.",
       "test_file": "internal/core/organization/source_role_test.go",
@@ -4488,6 +4488,42 @@
       "then": "같은 대상의 완료된 자동 진단만 합쳐 횟수와 변화 여부를 표시하고 바뀐 값과 원문을 열 수 있다. 비교 자료 없는 과거 점검은 동일 작업·revision에서만 묶어 비교 불가를 표시하며 사람 요청·진행 중 점검과 결정 대기 카드는 별도로 보인다.",
       "test_file": "internal/adapter/httpcontrol/handler_test.go",
       "test_name": "TestRepeatedAutomaticDiagnosticsKeepChangesReportsAndPendingActions"
+    },
+    {
+      "id": "ORG-029",
+      "design": "source-role-render-profiles",
+      "level": "unit",
+      "status": "implemented",
+      "statement": "새 드라이브 실행은 촬영물과 녹화 기록의 원본별 역할에 따라 VJ 컷에 20 Mbps, 녹화에 6 Mbps를 자동 지정하고 검사 근거를 보존한다.",
+      "given": "촬영물 행사 폴더에 짧은 고화질 컷과 장시간 유음 기록이 섞여 있으며 다른 선택에는 단일 VJ 컷, 연속 컷, 녹화 채널, 노이즈 및 이전 정책 실행이 있다.",
+      "when": "고정한 정책 버전과 폴더 맥락으로 검사된 대상 전체를 분류한다.",
+      "then": "v4는 컷마다 20 Mbps, 녹화마다 6 Mbps를 지정한다. 직접 폴더 전체가 순서와 호환성이 확인된 짧은 VJ 컷이면 마커를 넣어 합본하고 그 밖의 확인된 역할은 개별 보존한다. 파일별 근거가 부족하거나 노이즈이면 보류하고 이전 버전은 원래 판정을 재현한다.",
+      "test_file": "internal/core/organization/role_profiles_test.go",
+      "test_name": "TestSelectedCaptureInputsPinProfilesByRoleAcrossDrives"
+    },
+    {
+      "id": "RND-007",
+      "design": "per-original-render-publication",
+      "level": "integration",
+      "status": "implemented",
+      "statement": "서로 다른 목표 Profile을 가진 녹화와 촬영 컷은 같은 Folder Job에서도 각 원본의 선택으로 렌더·검증·게시되어야 한다.",
+      "given": "같은 선택 범위에 역할을 구분할 수 있는 녹화와 촬영 원본이 있다.",
+      "when": "자동 판정에서 생성한 Worker 명세로 FFmpeg 렌더, QC, 패키지와 카탈로그 게시를 수행한다.",
+      "then": "각 원본 ID에 연결된 6 또는 20 Mbps Profile이 렌더·QC와 해당 결과 패키지 및 루트 카탈로그에 일치하고 원본 checksum은 보존된다.",
+      "test_file": "internal/application/archiveorganization/render_profiles_test.go",
+      "test_name": "TestWorkerPublishesMixedRoleProfilesFromOneFolder"
+    },
+    {
+      "id": "DSH-054",
+      "design": "pinned-render-profile-evidence",
+      "level": "unit",
+      "status": "implemented",
+      "statement": "작업 범위는 검사된 원본별 역할·선택 Profile·근거와 선택 Profile별 예상 영상 용량 합계를 제공해야 한다.",
+      "given": "한 실행에 20 Mbps 촬영 컷과 6 Mbps 녹화의 검사·결정 기록이 있고 드라이브 탐색 자료가 없다.",
+      "when": "작업 범위와 Archivist의 분류 근거를 조회한다.",
+      "then": "각 파일에는 결정 당시의 역할·Profile·근거 및 해당 검사 참조가 연결되며 예상 영상 용량은 원본별 길이와 목표 비트레이트의 합계다.",
+      "test_file": "internal/application/archiveintakeworkspace/service_test.go",
+      "test_name": "TestWorkspaceRetainsPerFileProfileEvidenceAndSumsTargetSizes"
     }
   ]
 }

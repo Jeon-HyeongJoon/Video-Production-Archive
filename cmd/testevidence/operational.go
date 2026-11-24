@@ -16,10 +16,10 @@ import (
 
 // Use requirement IDs so renaming or moving a test follows the reviewed catalog.
 var operationalIDs = []string{
-	"INT-001", "ORG-019", "ORG-021", "ORG-023", "ORG-024", "ORG-025", "ORG-026", "ORG-027", "ORG-028",
-	"APP-006", "RND-005", "RND-006", "QCT-005",
+	"INT-001", "ORG-019", "ORG-021", "ORG-023", "ORG-024", "ORG-025", "ORG-026", "ORG-027", "ORG-028", "ORG-029",
+	"APP-006", "RND-005", "RND-006", "RND-007", "QCT-005",
 	"APP-008", "AUD-002", "TRN-006", "TRN-008", "TRN-009", "SUB-001", "SUB-002",
-	"ARC-021", "ARC-022", "ARC-023", "ARC-024", "ARC-025", "DSH-046",
+	"ARC-021", "ARC-022", "ARC-023", "ARC-024", "ARC-025", "DSH-046", "DSH-054",
 	"MCP-011", "MCP-014", "MCP-015", "WRK-018",
 }
 

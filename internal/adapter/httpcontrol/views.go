@@ -225,6 +225,7 @@ type driveExpectedResultView struct {
 }
 
 type driveSourceVideoView struct {
+	RenderSelection *organization.RenderSelection             `json:"render_selection,omitempty"`
 	ContextEvidence *archiveintakeworkspace.ContextEvidence   `json:"context_evidence,omitempty"`
 	Measurement     *archiveintakeworkspace.SourceMeasurement `json:"measurement,omitempty"`
 	MatchedOriginal string                                    `json:"matched_original,omitempty"`

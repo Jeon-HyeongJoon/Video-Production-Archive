@@ -5397,7 +5397,7 @@
         },
         {
           "id": "RENDER_RECORDINGS",
-          "description": "독립된 녹화영상을 선택 Profile로 각각 렌더한다."
+          "description": "독립 보존하는 원본을 각각 렌더한다. 정책 v4는 촬영 컷과 녹화 기록의 역할별 목표 Profile을 원본 단위로 고정한다."
         },
         {
           "id": "COMPILE_SOURCE_SEQUENCE",

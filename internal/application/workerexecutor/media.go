@@ -312,14 +312,18 @@ func (operations *mediaOperations) renderRecording(ctx context.Context, spec exe
 	if len(spec.Inputs) != len(spec.Outputs) || len(spec.Inputs) == 0 {
 		return nil, nil, ErrProductionExecution
 	}
-	profile, err := organizationProfile(spec.ProfileReference)
-	if err != nil {
-		return nil, nil, err
-	}
 	reused := make(map[string]bool)
 	outputs := make([]execution.StepOutput, 0, len(spec.Outputs))
 	for index, target := range spec.Outputs {
 		input := spec.Inputs[index]
+		reference := spec.ProfileReference
+		if reference == "" {
+			reference = input.ProfileReference
+		}
+		profile, err := organizationProfile(reference)
+		if err != nil {
+			return nil, nil, err
+		}
 		if target.Kind != execution.OutputRendition || target.OriginalAssetID != input.OriginalAssetID {
 			return nil, nil, ErrProductionExecution
 		}
@@ -943,7 +947,7 @@ func (operations *mediaOperations) organizeMedia(_ context.Context, spec executi
 			videoRoot = archivebundle.RootSource
 		}
 		profileReference := spec.Parameters.SelectedProfileReference
-		if spec.Parameters.Disposition == vocabulary.OrganizationAsIs && len(sourceInputs) == 1 && sourceInputs[0].ProfileReference != "" {
+		if (profileReference == "" || spec.Parameters.Disposition == vocabulary.OrganizationAsIs) && len(sourceInputs) == 1 && sourceInputs[0].ProfileReference != "" {
 			profileReference = sourceInputs[0].ProfileReference
 		}
 		request := archivebundle.InitialRequest{
@@ -1035,7 +1039,7 @@ func (operations *mediaOperations) writeArchiveCatalog(ctx context.Context, spec
 			return nil, nil, ErrProductionExecution
 		}
 		profileReference := source.ProfileReference
-		if spec.Parameters.Disposition != vocabulary.OrganizationAsIs || profileReference == "" {
+		if (spec.Parameters.Disposition != vocabulary.OrganizationAsIs && spec.Parameters.SelectedProfileReference != "") || profileReference == "" {
 			profileReference = spec.Parameters.SelectedProfileReference
 		}
 		rows = append(rows, organization.ArchiveCatalogRow{
@@ -1206,13 +1210,11 @@ func publishPayload(ctx context.Context, root *archive.StorageRoot, publishedPat
 }
 
 func organizationProfile(reference string) (rendering.Profile, error) {
-	for _, target := range []int{6_000, 20_000} {
-		profile, err := rendering.OrganizationProfile(target)
-		if err == nil && profile.Reference() == reference {
-			return profile, nil
-		}
+	profile, err := rendering.OrganizationProfileByReference(reference)
+	if err != nil {
+		return rendering.Profile{}, ErrProductionExecution
 	}
-	return rendering.Profile{}, ErrProductionExecution
+	return profile, nil
 }
 
 func sequenceTargets(targets []execution.OutputTarget) (execution.OutputTarget, execution.OutputTarget, bool) {

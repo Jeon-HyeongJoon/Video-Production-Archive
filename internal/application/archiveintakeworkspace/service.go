@@ -233,6 +233,12 @@ func (service *Service) Projection(ctx context.Context) ([]DriveView, error) {
 				EstimatedOutputBytes: estimatedOutputBytes(decision),
 				JobID:                folderJobID,
 			}
+			// A stored render choice remains inspectable after disconnect or rescan.
+			for _, asset := range view.ClassificationAssets {
+				if asset.RenderSelection != nil {
+					view.Videos = append(view.Videos, SourceVideoView{RenderSelection: asset.RenderSelection, RelativePath: asset.RelativePath, FileName: path.Base(asset.RelativePath), SizeBytes: uint64(asset.SizeBytes)})
+				}
+			}
 			view.NoiseReview = organization.SummarizeNoise(decision, view.VideoCount)
 			classificationState := workflow.Completed
 			classificationWaitReason := vocabulary.WaitReason("")
@@ -414,7 +420,7 @@ func (service *Service) completedWork(
 					if output.Kind != execution.OutputOrganizedMedia || output.ID == "" || seenPackages[output.ID] {
 						continue
 					}
-					originalNames, sourceCount := completedWorkSources(decision, targets[output.ID].OriginalAssetID)
+					originalNames, sourceCount, outputProfile := completedWorkSources(decision, targets[output.ID].OriginalAssetID)
 					presentation, presentationErr := archive.PresentPackage(output.ID, decision.Folder, originalNames)
 					if presentationErr != nil {
 						continue
@@ -432,7 +438,7 @@ func (service *Service) completedWork(
 					seenPackages[output.ID] = true
 					result[receipt.WorkspaceDriveID] = append(result[receipt.WorkspaceDriveID], CompletedWorkView{
 						ArchiveRunID: receipt.ID, Folder: decision.Folder, JobID: jobState.ID,
-						Disposition: decision.Disposition, ProfileReference: decision.ProfileReference,
+						Disposition: decision.Disposition, ProfileReference: outputProfile,
 						SourceVideoCount: sourceCount, ArchiveStorageID: output.StorageID,
 						ArchivePackageID: output.ID, ArchiveDate: presentation.ArchiveDate,
 						ArchiveDisplayName: presentation.DisplayName, ArchiveVideoFileName: presentation.VideoFileName,
@@ -474,11 +480,15 @@ func completedWorkRelativePath(output execution.StepOutput, target execution.Out
 	return directory
 }
 
-func completedWorkSources(decision organization.OrganizationDecision, originalAssetID string) ([]string, int) {
+func completedWorkSources(decision organization.OrganizationDecision, originalAssetID string) ([]string, int, string) {
 	if originalAssetID != "" {
 		for _, input := range decision.Inputs {
 			if input.OriginalAssetID == originalAssetID {
-				return []string{path.Base(input.RelativePath)}, 1
+				profile := decision.ProfileReference
+				if input.RenderSelection != nil {
+					profile = input.RenderSelection.ProfileReference
+				}
+				return []string{path.Base(input.RelativePath)}, 1, profile
 			}
 		}
 	}
@@ -486,7 +496,7 @@ func completedWorkSources(decision organization.OrganizationDecision, originalAs
 	for _, input := range decision.Inputs {
 		names = append(names, path.Base(input.RelativePath))
 	}
-	return names, len(names)
+	return names, len(names), decision.ProfileReference
 }
 
 func workOptions(decision organization.OrganizationDecision) []WorkOptionView {
@@ -653,8 +663,13 @@ func (service *Service) mergeInventory(ctx context.Context, drives map[string]*p
 			}
 			state.discoveredFolders[folder.Folder] = view
 			if scoped, exists := state.folders[folder.Folder]; exists && state.view.ArchiveRunID != "" {
+				if scoped.InputRevision != observation.DiscoveryRevision && len(scoped.Videos) > 0 && scoped.Videos[0].RenderSelection != nil {
+					continue
+				}
 				scoped.VideoCount = folder.VideoCount
-				scoped.EstimatedOutputBytes = folder.InputBytes
+				if scoped.DecisionID == "" || scoped.EstimatedOutputBytes == 0 {
+					scoped.EstimatedOutputBytes = folder.InputBytes
+				}
 				scoped.Videos = append([]SourceVideoView(nil), videos...)
 				if scoped.InputRevision == observation.DiscoveryRevision {
 					scoped.CopyCandidates = view.CopyCandidates
@@ -677,6 +692,7 @@ func (service *Service) mergeInventory(ctx context.Context, drives map[string]*p
 						if scoped.SourceRole != nil && scoped.SourceRole.Role == organization.RoleProxy {
 							scoped.Videos[i].MatchedOriginal = asset.MatchedOriginal
 						}
+						scoped.Videos[i].RenderSelection = asset.RenderSelection
 						scoped.Videos[i].MetadataHint = asset.MetadataHint
 						scoped.Videos[i].Measurement = &SourceMeasurement{InspectionID: asset.InspectionID, Width: primary.Width, Height: primary.Height, DurationMillis: asset.DurationMillis, VideoBitRate: primary.BitRate}
 					}
@@ -825,11 +841,15 @@ func estimatedOutputBytes(decision organization.OrganizationDecision) uint64 {
 	if decision.Disposition != vocabulary.OrganizationRenderRecordings && decision.Disposition != vocabulary.OrganizationCompileSourceSequence {
 		return 0
 	}
-	bitRate := int64(6_000_000)
-	if decision.Disposition == vocabulary.OrganizationCompileSourceSequence || strings.Contains(strings.ToLower(decision.ProfileReference), "20mbps") {
-		bitRate = 20_000_000
-	}
 	for _, input := range decision.Inputs {
+		profile := decision.ProfileReference
+		if input.RenderSelection != nil {
+			profile = input.RenderSelection.ProfileReference
+		}
+		bitRate := int64(6_000_000)
+		if decision.Disposition == vocabulary.OrganizationCompileSourceSequence || strings.Contains(strings.ToLower(profile), "20mbps") {
+			bitRate = 20_000_000
+		}
 		if input.Inspection.DurationMillis > 0 {
 			total += uint64(input.Inspection.DurationMillis * bitRate / 8 / 1000)
 		}
@@ -842,7 +862,7 @@ func classificationAssets(decision organization.OrganizationDecision) []Classifi
 	for _, input := range decision.Inputs {
 		inspection := input.Inspection
 		assets = append(assets, ClassificationAssetView{
-			MatchedOriginal: input.MatchedOriginal, InspectionID: inspection.ID, MetadataHint: organization.SourceMetadataHint(decision.Folder, inspection),
+			RenderSelection: input.RenderSelection, MatchedOriginal: input.MatchedOriginal, InspectionID: inspection.ID, MetadataHint: organization.SourceMetadataHint(decision.Folder, inspection),
 			OriginalAssetID: input.OriginalAssetID, RelativePath: input.RelativePath,
 			Checksum: inspection.OriginalChecksum, DurationMillis: inspection.DurationMillis,
 			SizeBytes: inspection.SizeBytes, BitRate: inspection.BitRate,

@@ -52,7 +52,7 @@ DATA 18의 영상·비영상 조사 범위와 분류 근거는 [현장 사례 �
 | 판정 | 조건 | 1단계 결과 |
 |---|---|---|
 | `ORGANIZE_AS_IS` | 1080p와 승인 bitrate·codec 범위에 이미 맞음 | 검증 뒤 그대로 보관 |
-| `RENDER_RECORDINGS` | 일반 녹화영상이며 새 렌더 필요 | 기본 1080p 6Mbps, 명시 선택 시 20Mbps |
+| `RENDER_RECORDINGS` | 독립 결과로 렌더할 입력 | v4에서 VJ 컷 20Mbps·녹화 기록 6Mbps를 원본별 선택, 기존 명시 결정은 고정 규격 |
 | `COMPILE_SOURCE_SEQUENCE` | 짧은 여러 Clip의 소스 폴더 | 입력 순서·CutMarker를 고정해 1080p 20Mbps 통합 |
 | `HOLD` | 하나의 결정으로 수렴하지 않음 | `WAITING/INPUT`, 외부 실행 없음 |
 
@@ -70,7 +70,7 @@ Archivist의 정리 검토 단위는 현재 HOLD인 MediaFolder 하나다. 목�
 
 - 그대로 사용은 분류 뒤 QC·보관으로 간다.
 - 한 폴더의 그대로 사용할 영상이 여러 개이면 QC는 폴더 공통 Profile을 추정하지 않고 검사 때 각 원본에 고정한 6Mbps 또는 20Mbps Profile로 각각 검증하며, 보관 패키지 metadata에도 같은 파일별 Profile을 기록한다. `QCT-004`, `ARC-020`
-- 개별 렌더는 6Mbps 또는 20Mbps 렌더 뒤 QC·보관으로 간다.
+- 개별 렌더는 원본별 6Mbps 또는 20Mbps로 실행한다. QC, 패키지, 카탈로그는 같은 원본 ID의 목표 Profile을 사용한다. [원본별 선택과 근거](17-source-classification-policy.md#11-새-실행의-원본별-렌더-규격)
 - 소스 시퀀스는 정렬된 Clip과 CutMarker를 고정하고 20Mbps 통합 렌더 뒤 QC·보관으로 간다.
 - 원본에 오디오가 없는 렌더 결과는 오디오 스트림을 만들지 않으며, QC는 AAC 대신 오디오 부재를 검증한다.
 - 자동 소스 시퀀스는 동일한 frame rate까지 요구한다. 보류에서 사람이 `소스 시퀀스` 작업을 명시적으로 고를 때는 모든 입력을 다시 인코딩하므로 화면 크기와 audio 형태가 같으면 frame rate 차이를 허용한다. 화면과 MCP에는 서버가 현재 기술 근거로 검증한 작업만 제시한다.

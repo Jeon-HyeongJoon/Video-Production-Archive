@@ -713,3 +713,38 @@ func (starter *resolvedFolderStarterFixture) StartResolvedFolder(
 	}
 	return "JOB-RESOLVED-HOLD", nil
 }
+
+// Requirement: DSH-054
+func TestWorkspaceRetainsPerFileProfileEvidenceAndSumsTargetSizes(t *testing.T) {
+	const folder = "370105-행사_촬영"
+	d := organization.OrganizationDecision{ID: "decision", Sequence: 1, WorkspaceDriveID: "drive", Folder: folder, InputRevision: 5, PolicyVersion: 4, Disposition: vocabulary.OrganizationRenderRecordings}
+	receipt := organization.ArchiveOrganizationReceipt{ID: "run", WorkspaceDriveID: "drive", InputRevision: 5, WorkerID: "worker", CompletedAt: time.Now().UTC()}
+	for _, input := range []struct {
+		name, role, profile string
+		duration            int64
+	}{{"cut.mov", organization.RoleSource, "archive-1080p-20mbps@v1", 10000}, {"rec.mp4", organization.RoleRecording, "archive-1080p-6mbps@v1", 1200000}} {
+		rel := folder + "/" + input.name
+		d.Inputs = append(d.Inputs, organization.Input{OriginalAssetID: input.name, RelativePath: rel, Inspection: mediaanalysis.MediaInspection{ID: "inspection-" + input.name, SizeBytes: 16000, DurationMillis: input.duration}, RenderSelection: &organization.RenderSelection{Role: input.role, ProfileReference: input.profile, Basis: "검사된 역할 증거"}})
+		receipt.Files = append(receipt.Files, organization.CoordinatedFile{OriginalAssetID: input.name, RelativePath: rel})
+	}
+	receipt.Folders = []organization.CoordinatedFolder{{Folder: folder, Decision: d}}
+	store := workstationStore{receipts: []organization.ArchiveOrganizationReceipt{receipt}, decisions: map[string]organization.OrganizationDecision{folder: d}}
+	service, err := archiveintakeworkspace.New(store, workstationJobs{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	views, err := service.Projection(context.Background())
+	if err != nil || len(views) != 1 || len(views[0].Folders) != 1 {
+		t.Fatal(views, err)
+	}
+	f := views[0].Folders[0]
+	if f.EstimatedOutputBytes != 925000000 || len(f.Videos) != 2 || len(f.ClassificationAssets) != 2 || f.ProfileReference != "" {
+		t.Fatal(f)
+	}
+	for i, v := range f.Videos {
+		a := f.ClassificationAssets[i]
+		if v.RenderSelection == nil || !reflect.DeepEqual(v.RenderSelection, d.Inputs[i].RenderSelection) || !reflect.DeepEqual(a.RenderSelection, v.RenderSelection) || a.InspectionID != d.Inputs[i].Inspection.ID {
+			t.Fatalf("missing stored evidence %+v %+v", v, a)
+		}
+	}
+}

@@ -65,6 +65,18 @@ func NewProfile(source Profile) (Profile, error) {
 	return profile, nil
 }
 
+// OrganizationProfileByReference resolves a persisted bitrate choice without
+// substituting a default when the reference is absent or unsupported.
+func OrganizationProfileByReference(reference string) (Profile, error) {
+	for _, target := range []int{6_000, 20_000} {
+		profile, err := OrganizationProfile(target)
+		if err == nil && profile.Reference() == reference {
+			return profile, nil
+		}
+	}
+	return Profile{}, ErrUnsupportedProfile
+}
+
 func OrganizationProfile(targetVideoBitRateKbps int) (Profile, error) {
 	if targetVideoBitRateKbps == 0 {
 		targetVideoBitRateKbps = 6_000

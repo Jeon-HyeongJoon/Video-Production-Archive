@@ -1,6 +1,6 @@
 # 17. 원본 분류 정책과 Archivist 검토 설계
 
-[현장 사례 전체](16-source-classification-cases.md)에서 얻은 관례를 [Archive Intake](13-archive-intake.md)의 선택·검사·결정·게시 경로에 적용한다. 새 ArchiveRun은 정책 v3와 선택 시점의 행사·채널 근거를 고정한다. 기존 결정은 당시 기록을 조회한다. ML은 별도의 오프라인 비교 실험 제안이다.
+[현장 사례 전체](16-source-classification-cases.md)에서 얻은 관례를 [Archive Intake](13-archive-intake.md)의 선택·검사·결정·게시 경로에 적용한다. 새 ArchiveRun은 정책 v4와 선택 시점의 행사·채널 근거를 고정한다. 기존 결정은 당시 기록을 조회한다. ML은 별도의 오프라인 비교 실험 제안이다.
 
 ## 1. 어떤 판단을 자동화하는가
 
@@ -11,7 +11,15 @@
 | 지금 무엇을 할 수 있는가? | 선택된 MediaFolder의 직접 입력 전체 | 20 Mbps 합본, 6 Mbps 개별 렌더, 명시 분류 후 그대로 보관, 또는 HOLD. 보조 파일은 원본 위치에서 보존 |
 | 왜 보류이며 무엇을 확인해야 하는가? | 파일·결정 revision | 확인한 사실, 반대·누락 근거, 다음 확인 방법을 Archivist와 담당자가 함께 조회 |
 
-하나의 행사에서 VJ, PGM, 고정캠이 함께 발견돼도 형제 폴더를 하나의 입력으로 합치지 않는다. 같은 직접 폴더에 상충하는 영상이 섞였을 때도 임의로 일부 컷만 합본하지 않는다. 파일별로 사유를 보여주되 그 폴더의 자동 작업 전체를 보류한다. 독립적인 다른 폴더는 계속 처리한다.
+하나의 행사에서 VJ, PGM, 고정캠이 함께 발견돼도 형제 폴더를 하나의 입력으로 합치지 않는다. v3에서는 같은 직접 폴더에 상충하는 영상이 섞였을 때도 임의로 일부 컷만 합본하지 않는다. 파일별로 사유를 보여주되 그 폴더의 자동 작업 전체를 보류한다. 독립적인 다른 폴더는 계속 처리한다.
+
+### 1.1 새 실행의 원본별 렌더 규격
+
+선택된 폴더의 검사 결과를 사용해 VJ 촬영 컷은 20 Mbps, 녹화 기록은 6 Mbps로 고정한다. 같은 폴더 안에 두 역할이 있어도 각 원본에 역할, 선택한 Profile, 판단 이유와 검사 ID가 남는다. 촬영물 경로에서 이름이 남은 짧은 컷, VJ 표기, 카메라 원본명을 근거로 삼는다. 이름이 손실됐으면 촬영 맥락과 180초 이하·1920×1080 이상·영상 스트림 25 Mbps 이상을 함께 확인한다. 녹화·PGM·CLN 표기 또는 촬영물 경로의 20분 이상 유음 영상은 녹화로 처리한다. 장시간 녹화에는 SD 원본도 포함한다. 독립적인 위치 채널은 행사·형제 근거를 계속 확인한다.
+
+직접 폴더 전체가 확인된 짧은 VJ 컷이고 순번과 기술 규격이 맞으면 기존 20 Mbps 합본과 N−1개 마커를 사용한다. 단일 컷, 순서를 알 수 없는 컷, 역할이 혼합된 폴더는 원본별 결과를 보존한다. 출력 수는 파일명 유사성이나 재생 길이로 줄이지 않는다. 노이즈 선택은 담당자가 맡으며, 확인할 수 없는 역할·편집·행사 충돌·목록 변경은 보류한다. v1~v3 실행과 명시적으로 선택한 기존 결정은 당시 선택을 재현한다.
+
+남양주 주일정오예배 테스트 폴더의 5개 검사 기록은 이름이 손실된 9~13초 MOV 3개와 길이가 약 29분인 서로 다른 MP4 2개였다. v4 결과는 개별 20 Mbps 3개와 6 Mbps 2개다. 파일 번호로 촬영 순서를 확인할 수 없다. 화면과 Archivist는 파일을 펼쳐 근거를 읽고, 예상 영상 용량은 원본별 재생 길이와 목표 비트레이트로 계산한다. `ORG-029`, `RND-007`, `DSH-054`
 
 ## 2. 관측에서 결정까지
 
@@ -94,6 +102,9 @@ powershell -NoProfile -ExecutionPolicy RemoteSigned -File C:/Archive/scratch/sou
 
 | 구현 요구사항 | 하나의 관찰 결과 | 테스트 함수 |
 |---|---|---|
+| ORG-029 | 촬영·녹화 원본별 역할과 목표 규격 고정 | TestSelectedCaptureInputsPinProfilesByRoleAcrossDrives |
+| RND-007 | 혼합 규격 렌더·QC·게시 일치 | TestWorkerPublishesMixedRoleProfilesFromOneFolder |
+| DSH-054 | 원본별 규격 근거와 예상 용량 합계 | TestWorkspaceRetainsPerFileProfileEvidenceAndSumsTargetSizes |
 | ORG-019 | 빈 형제·비지원 자료까지 포함한 revision별 Worker 구조 목록 | TestDiscoveryVersionsDirectoryEvidence |
 | ORG-020 | READY 목록의 직접 파일별 업무·프록시 맥락과 근거 경로 | TestInventoryExplainsFileContextWithinItsParent |
 | ORG-021 | v3에서 역할 근거가 있는 직접 폴더만 렌더 대상으로 결정 | TestV3RoutesOnlyRoleSupportedInputs |

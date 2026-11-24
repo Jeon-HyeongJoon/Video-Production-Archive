@@ -52,7 +52,7 @@ func eventOutput(run string, d organization.OrganizationDecision, first job.Stat
 				if out.Kind != execution.OutputOrganizedMedia || out.RelativePath == "" {
 					continue
 				}
-				names, _ := completedWorkSources(d, "")
+				names, _, _ := completedWorkSources(d, "")
 				present, err := archive.PresentPackage(out.ID, d.Folder, names)
 				if err != nil {
 					continue

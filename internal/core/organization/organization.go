@@ -39,7 +39,8 @@ func (policy Policy) validate() error {
 }
 
 type Input struct {
-	MatchedOriginal string `json:",omitempty"`
+	RenderSelection *RenderSelection `json:",omitempty"`
+	MatchedOriginal string           `json:",omitempty"`
 	OriginalAssetID string
 	RelativePath    string
 	Inspection      mediaanalysis.MediaInspection
@@ -107,7 +108,7 @@ func Classify(request AutoRequest) (decision OrganizationDecision, err error) {
 		DecisionReason: "versioned automatic organization policy", DecisionBasis: []string{"policy:" + strconv.FormatUint(uint64(request.Policy.Version), 10)},
 		DecidedAt: request.DecidedAt.UTC(),
 	}
-	if request.Policy.Version == DrivePolicyVersion {
+	if request.Policy.Version >= ContextPolicyVersion {
 		request.EventContext.ListingChanged = !request.EventContext.matchesInputs(folder, request.Inputs)
 		ctx := request.EventContext
 		if ctx.InputRevision != 0 && ctx.InputRevision != request.InputRevision {
@@ -156,13 +157,17 @@ func Classify(request AutoRequest) (decision OrganizationDecision, err error) {
 		decision.SourceRole = &role
 		decision.DecisionBasis = append(decision.DecisionBasis, role.Basis)
 		positionVerified := false
-		if request.Policy.Version == DrivePolicyVersion {
+		if request.Policy.Version >= ContextPolicyVersion {
 			ctx := request.EventContext
 			if NoiseCandidateKind(folder, &role) != "" {
 				decision.HoldReasons = []vocabulary.OrganizationHoldReason{vocabulary.OrganizationHoldSourceRole}
 				return decision, nil
 			}
-			if (ctx.InputRevision != 0 && ctx.EventFolder == "") || ctx.ListingChanged || len(ctx.ConflictingEventFolders) > 0 || len(ctx.OverlappingPositionFolders) > 0 || ctx.EditorialWitness != "" || editorialPath(folder) {
+			missingEvent := ctx.InputRevision != 0 && ctx.EventFolder == ""
+			if request.Policy.Version == DrivePolicyVersion && (sourceLabel.MatchString(folderKey(folder)) || recordingName.MatchString(folderKey(folder)) || captureLabel.MatchString(folderKey(folder))) {
+				missingEvent = false
+			}
+			if missingEvent || ctx.ListingChanged || len(ctx.ConflictingEventFolders) > 0 || len(ctx.OverlappingPositionFolders) > 0 || ctx.EditorialWitness != "" || editorialPath(folder) {
 				decision.HoldReasons = []vocabulary.OrganizationHoldReason{vocabulary.OrganizationHoldSourceRole}
 				return decision, nil
 			}
@@ -175,6 +180,10 @@ func Classify(request AutoRequest) (decision OrganizationDecision, err error) {
 				decision.DecisionBasis = append(decision.DecisionBasis, ctx.EventFolder)
 				decision.DecisionBasis = append(decision.DecisionBasis, ctx.ChannelFolders...)
 			}
+		}
+		if request.Policy.Version == DrivePolicyVersion {
+			applyRoleProfiles(&decision, request.Policy, positionVerified)
+			return decision, nil
 		}
 		// Multiple recorder files may be consecutive parts or separate channels.
 		if (role.Role == RoleRecording && role.Strength == roleExplicit && len(inputs) == 1) || positionVerified {
@@ -196,7 +205,7 @@ func Classify(request AutoRequest) (decision OrganizationDecision, err error) {
 				decision.DecisionBasis = append(decision.DecisionBasis, ShortCameraHint)
 			}
 		}
-		if (role.Strength != roleUnknown || request.Policy.Version == DrivePolicyVersion) && !sourceEvidence {
+		if (role.Strength != roleUnknown || request.Policy.Version >= ContextPolicyVersion) && !sourceEvidence {
 			decision.HoldReasons = []vocabulary.OrganizationHoldReason{vocabulary.OrganizationHoldSourceRole}
 			return decision, nil
 		}
@@ -297,6 +306,7 @@ func normalizeInputs(source []Input) ([]Input, bool) {
 	for index := range inputs {
 		input := &inputs[index]
 		input.MatchedOriginal = ""
+		input.RenderSelection = nil
 		input.OriginalAssetID = strings.TrimSpace(input.OriginalAssetID)
 		input.RelativePath = path.Clean(strings.ReplaceAll(strings.TrimSpace(input.RelativePath), "\\", "/"))
 		normalized, err := mediaanalysis.NewMediaInspection(input.Inspection)
@@ -450,6 +460,10 @@ func safeRelative(value string) bool {
 func cloneInputs(source []Input) []Input {
 	values := append([]Input(nil), source...)
 	for index := range values {
+		if source[index].RenderSelection != nil {
+			selection := *source[index].RenderSelection
+			values[index].RenderSelection = &selection
+		}
 		values[index].Inspection.Containers = append([]string(nil), values[index].Inspection.Containers...)
 		values[index].Inspection.VideoStreams = append([]mediaanalysis.VideoStream(nil), values[index].Inspection.VideoStreams...)
 		values[index].Inspection.AudioStreams = append([]mediaanalysis.AudioStream(nil), values[index].Inspection.AudioStreams...)

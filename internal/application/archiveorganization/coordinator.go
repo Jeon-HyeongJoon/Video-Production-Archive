@@ -427,7 +427,7 @@ func firstWorkerSpec(archiveRunID, jobID, templateName, sourceStorageID, working
 			VideoBitRateBPS: video.BitRate, HasAudio: len(input.Inspection.AudioStreams) > 0,
 			AudioCodec: audio.Codec, AudioProfile: audio.Profile, AudioBitRateBPS: audio.BitRate,
 			AudioSampleRateHz: audio.SampleRateHz, AudioChannels: audio.Channels, AudioChannelLayout: audio.ChannelLayout,
-			ProfileReference: inputProfileReference(decision, video.BitRate),
+			ProfileReference: inputProfileReference(decision, input, video.BitRate),
 		})
 	}
 	parameters := execution.StepExecutionParameters{
@@ -492,7 +492,10 @@ func firstWorkerSpec(archiveRunID, jobID, templateName, sourceStorageID, working
 	})
 }
 
-func inputProfileReference(decision organization.OrganizationDecision, bitRate int64) string {
+func inputProfileReference(decision organization.OrganizationDecision, input organization.Input, bitRate int64) string {
+	if input.RenderSelection != nil {
+		return input.RenderSelection.ProfileReference
+	}
 	if decision.ProfileReference != "" {
 		return decision.ProfileReference
 	}

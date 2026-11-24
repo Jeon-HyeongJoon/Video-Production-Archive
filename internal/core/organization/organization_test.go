@@ -222,7 +222,7 @@ func TestCompatibleConsecutiveShortClipsBecomeSourceSequenceBeforeReadyFiles(t *
 		},
 		Policy: DefaultPolicy(), DecidedAt: time.Now().UTC(),
 	})
-	if err != nil || decision.Disposition != vocabulary.OrganizationCompileSourceSequence ||
+	if err != nil || decision.PolicyVersion != 2 || decision.Disposition != vocabulary.OrganizationCompileSourceSequence ||
 		!reflect.DeepEqual(decision.OrderedOriginalAssetIDs, []string{"ASSET-1", "ASSET-2", "ASSET-3"}) {
 		t.Fatalf("ready camera clips were not classified as one source sequence: %+v err=%v", decision, err)
 	}

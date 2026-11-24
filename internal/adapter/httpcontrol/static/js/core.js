@@ -73,7 +73,7 @@ export const finishedTurns = new Set(["COMPLETED", "FAILED", "CANCELLED"]);
 export const finishedSteps = new Set(["COMPLETED", "FAILED", "CANCELLED"]);
 
 export const labels = {
-  sourceRole: { VJ_SOURCE: "VJ 소스컷 후보", RECORDING: "풀녹화 후보", CAMERA_PROXY: "카메라 프록시 확인", EDITORIAL_OR_REFERENCE: "편집·참고자료", UNRESOLVED: "역할 미확인" },
+  sourceRole: { MIXED_SOURCE_AND_RECORDING: "촬영 컷·녹화 혼합", VJ_SOURCE: "VJ 소스컷 후보", RECORDING: "풀녹화 후보", CAMERA_PROXY: "카메라 프록시 확인", EDITORIAL_OR_REFERENCE: "편집·참고자료", UNRESOLVED: "역할 미확인" },
   metadataHint: { LONG_HD_WITH_AUDIO: "장시간 HD·오디오 녹화 후보", SHORT_HIGH_BITRATE_CAMERA_CANDIDATE: "단시간 고비트레이트 촬영컷 후보" },
   drive: { UNCLASSIFIED: "아직 처리 안 함", IN_PROGRESS: "처리 중", HAS_HOLD: "처리 방법 선택 필요", COMPLETED: "최근 작업 완료", CONTENT_CHANGED: "드라이브 내용 변경" },
   run: { STAGE_ONE_RUNNING: "영상 정리·저장 중", TRANSCRIPTION_READY: "자막·텍스트 자동 시작 중", STAGE_TWO_RUNNING: "자막·텍스트 만드는 중", COMPLETED: "작업 완료" },

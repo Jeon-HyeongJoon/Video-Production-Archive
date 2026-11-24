@@ -64,6 +64,7 @@ type ContextEvidence struct {
 }
 
 type SourceVideoView struct {
+	RenderSelection *organization.RenderSelection `json:"render_selection,omitempty"`
 	ContextEvidence *ContextEvidence
 	Measurement     *SourceMeasurement
 	MatchedOriginal string
@@ -90,18 +91,19 @@ type TranscriptQualityView struct {
 }
 
 type ClassificationAssetView struct {
-	MatchedOriginal string                      `json:"matched_original,omitempty"`
-	InspectionID    string                      `json:"inspection_id,omitempty"`
-	MetadataHint    string                      `json:"metadata_hint,omitempty"`
-	OriginalAssetID string                      `json:"original_asset_id"`
-	RelativePath    string                      `json:"relative_path"`
-	Checksum        string                      `json:"checksum"`
-	DurationMillis  int64                       `json:"duration_millis"`
-	SizeBytes       int64                       `json:"size_bytes"`
-	BitRate         int64                       `json:"bitrate_bps"`
-	Containers      []string                    `json:"containers"`
-	VideoStreams    []mediaanalysis.VideoStream `json:"video_streams"`
-	AudioStreams    []mediaanalysis.AudioStream `json:"audio_streams"`
+	RenderSelection *organization.RenderSelection `json:"render_selection,omitempty"`
+	MatchedOriginal string                        `json:"matched_original,omitempty"`
+	InspectionID    string                        `json:"inspection_id,omitempty"`
+	MetadataHint    string                        `json:"metadata_hint,omitempty"`
+	OriginalAssetID string                        `json:"original_asset_id"`
+	RelativePath    string                        `json:"relative_path"`
+	Checksum        string                        `json:"checksum"`
+	DurationMillis  int64                         `json:"duration_millis"`
+	SizeBytes       int64                         `json:"size_bytes"`
+	BitRate         int64                         `json:"bitrate_bps"`
+	Containers      []string                      `json:"containers"`
+	VideoStreams    []mediaanalysis.VideoStream   `json:"video_streams"`
+	AudioStreams    []mediaanalysis.AudioStream   `json:"audio_streams"`
 }
 
 type StorageView struct {

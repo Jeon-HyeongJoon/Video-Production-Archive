@@ -33,7 +33,7 @@ const pad = (value) => String(value).padStart(2, "0");
 const INFO = {
   classification: ["영상 기술정보와 정책으로 처리 방식 결정 · 원본 그대로 저장 / 영상별 변환 / 여러 영상 합치기 / 직접 선택", "모든 폴더"],
   markers: ["짧은 영상의 순서와 구간 표시 고정 · 합칠 영상 입력", "여러 영상 합치기"],
-  render: ["1080p 변환 · 영상별 6Mbps(선택 시 20Mbps) · 여러 영상은 20Mbps로 합침", "영상별 변환 · 여러 영상 합치기"],
+  render: ["1080p 변환 · VJ 컷 20Mbps · 녹화 기록 6Mbps", "영상별 변환 · 여러 영상 합치기"],
   qc: ["결과 영상을 원본 기술정보·변환 설정과 대조하는 검사", "영상 게시가 결정된 폴더"],
   archive: ["결과 저장 위치에 복사 · checksum 검증 뒤 저장 완료", "영상 게시가 결정된 폴더"],
   gate: ["영상 정리·저장에 남은 작업이 없으면 Control이 자막·텍스트 작업을 자동으로 이어서 시작", "저장 완료된 원본 그대로 저장 · 영상별 변환"],
@@ -439,7 +439,7 @@ function FolderVideos({ folder, driveID, open, inventoryOnly = false }) {
       ${filtered.map((video) => html`<div class="source-video-row" role="row" key=${video.relative_path} data-relative-path=${video.relative_path} title=${video.relative_path}>
         ${inventoryOnly ? html`<details class="source-video-name file-proof"><summary>${video.file_name || video.relative_path}</summary><small>${video.relative_path}</small>
           ${video.matched_original ? html`<small>대응 원본 · ${video.matched_original}</small>` : html`<small>대응 원본 미확인</small>`}
-        </details>` : html`<span class="source-video-name"><b>${video.file_name || video.relative_path}</b><small>${video.relative_path}</small>${video.context_evidence?.case === "EDITORIAL_INPUT" ? html`<small>편집 입력 · 같은 프로젝트의 ${video.context_evidence.witness}</small>` : null}${video.context_evidence?.case === "UNPAIRED_PROXY" ? html`<small>대응 원본 미확인 · ${video.context_evidence.witness}</small>` : null}${video.matched_original ? html`<small>대응 원본 · ${video.matched_original}</small>` : null}${video.measurement ? html`<small title=${video.measurement.inspection_id}>${video.measurement.width}×${video.measurement.height} · ${Math.round(video.measurement.duration_millis / 1000)}초 · ${video.measurement.video_bitrate_bps ? (video.measurement.video_bitrate_bps / 1000000).toFixed(1) + " Mbps" : "영상 비트레이트 미확인"}</small>` : null}${video.metadata_hint ? html`<small>${label("metadataHint", video.metadata_hint)}</small>` : null}</span>`}
+        </details>` : html`<span class="source-video-name"><b>${video.file_name || video.relative_path}</b><small>${video.relative_path}</small>${video.context_evidence?.case === "EDITORIAL_INPUT" ? html`<small>편집 입력 · 같은 프로젝트의 ${video.context_evidence.witness}</small>` : null}${video.context_evidence?.case === "UNPAIRED_PROXY" ? html`<small>대응 원본 미확인 · ${video.context_evidence.witness}</small>` : null}${video.matched_original ? html`<small>대응 원본 · ${video.matched_original}</small>` : null}${video.measurement ? html`<small title=${video.measurement.inspection_id}>${video.measurement.width}×${video.measurement.height} · ${Math.round(video.measurement.duration_millis / 1000)}초 · ${video.measurement.video_bitrate_bps ? (video.measurement.video_bitrate_bps / 1000000).toFixed(1) + " Mbps" : "영상 비트레이트 미확인"}</small>` : null}${video.render_selection ? html`<small title=${video.render_selection.basis}>${video.render_selection.role === "VJ_SOURCE" ? "VJ 컷 · 20 Mbps" : "녹화 기록 · 6 Mbps"}</small>` : video.metadata_hint ? html`<small>${label("metadataHint", video.metadata_hint)}</small>` : null}</span>`}
         <span class="num muted">${video.modified_at ? shortTime(video.modified_at) : "—"}</span>
         <span class="num muted">${video.size_bytes < 1024 ** 3 ? formatSize(video.size_bytes || 0) : formatBytes(video.size_bytes || 0)}</span>
       </div>`)}

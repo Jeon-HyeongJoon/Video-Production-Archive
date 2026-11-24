@@ -81,6 +81,17 @@ func MaterializeDependentStepExecutionSpec(request MaterializeRequest) (StepExec
 	case "qc":
 		operation = OperationQCRendition
 		inputs = inputsFromOutputs(allOutputs, outputOriginals, OutputRendition)
+		// Sequence QC uses the common profile. Independent mixed renders keep
+		// their pinned profile by original ID even after outputs are reordered.
+		if profileReference == "" {
+			profiles := make(map[string]string, len(originalInputs))
+			for _, original := range originalInputs {
+				profiles[original.OriginalAssetID] = original.ProfileReference
+			}
+			for i := range inputs {
+				inputs[i].ProfileReference = profiles[inputs[i].OriginalAssetID]
+			}
+		}
 		for _, input := range inputs {
 			id := stableExecutionID("QC", parameters.OrganizationDecisionID, input.ArtifactID)
 			outputs = append(outputs, OutputTarget{ID: id, Kind: OutputQCAssessment, StorageID: input.StorageID, RelativePath: path.Join("staging", request.JobID, "qc", id+".json")})

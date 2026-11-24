@@ -45,7 +45,7 @@ func TestSourceRoleRoutesOriginalsAndPreservesReviewFolders(t *testing.T) {
 		{"37년도/영상_CANON", []string{"C0001.MP4", "C0002.MP4"}, RoleUnresolved, vocabulary.OrganizationHold, ""},
 	} {
 		d := classifyRoleFolder(t, tc.folder, tc.names, 20_000_000)
-		if d.SourceRole == nil || d.SourceRole.Role != tc.role || d.Disposition != tc.disposition || d.ProfileReference != tc.profile || len(d.DecisionBasis) < 2 {
+		if d.PolicyVersion != 2 || d.SourceRole == nil || d.SourceRole.Role != tc.role || d.Disposition != tc.disposition || d.ProfileReference != tc.profile || len(d.DecisionBasis) < 2 {
 			t.Fatalf("%s: %+v", tc.folder, d)
 		}
 		if strings.Contains(tc.folder, "영상_") && strings.Contains(d.SourceRole.Basis, "복구") {

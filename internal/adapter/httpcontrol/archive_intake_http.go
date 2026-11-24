@@ -227,7 +227,7 @@ func projectSourceVideos(files []archiveintakeworkspace.SourceVideoView) []drive
 	videos := make([]driveSourceVideoView, 0, len(files))
 	for _, video := range files {
 		videos = append(videos, driveSourceVideoView{
-			ContextEvidence: video.ContextEvidence, Measurement: video.Measurement, MatchedOriginal: video.MatchedOriginal, MetadataHint: video.MetadataHint,
+			RenderSelection: video.RenderSelection, ContextEvidence: video.ContextEvidence, Measurement: video.Measurement, MatchedOriginal: video.MatchedOriginal, MetadataHint: video.MetadataHint,
 			RelativePath: video.RelativePath, FileName: video.FileName,
 			SizeBytes: video.SizeBytes, ModifiedAt: video.ModifiedAt,
 		})

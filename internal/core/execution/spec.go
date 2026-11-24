@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"videoarchive/internal/core/organization"
+	"videoarchive/internal/core/rendering"
 	"videoarchive/internal/core/vocabulary"
 )
 
@@ -311,7 +312,10 @@ func (spec StepExecutionSpec) validWithoutDigest() bool {
 			spec.Outputs[0].Kind == OutputArchiveCatalog && spec.Outputs[0].StorageID == spec.Parameters.ArchiveStorageID &&
 			spec.Parameters.SourceTimeline == nil
 	case OperationRenderRecording:
-		if len(spec.Inputs) != len(spec.Outputs) || spec.ProfileReference == "" || spec.Parameters.SourceTimeline != nil {
+		if len(spec.Inputs) != len(spec.Outputs) || len(spec.Inputs) == 0 || spec.Parameters.SourceTimeline != nil {
+			return false
+		}
+		if spec.ProfileReference == "" && !spec.hasPinnedRenderProfiles() {
 			return false
 		}
 		for index, output := range spec.Outputs {
@@ -356,6 +360,26 @@ func (spec StepExecutionSpec) validWithoutDigest() bool {
 	default:
 		return true
 	}
+}
+
+func (spec StepExecutionSpec) hasPinnedRenderProfiles() bool {
+	if spec.Parameters.SelectedProfileReference != "" || len(spec.Parameters.SourceInputs) != len(spec.Inputs) {
+		return false
+	}
+	profiles := make(map[string]string, len(spec.Inputs))
+	for _, source := range spec.Parameters.SourceInputs {
+		if _, err := rendering.OrganizationProfileByReference(source.ProfileReference); err != nil {
+			return false
+		}
+		profiles[source.OriginalAssetID] = source.ProfileReference
+	}
+	for _, input := range spec.Inputs {
+		if input.ProfileReference == "" || profiles[input.OriginalAssetID] != input.ProfileReference {
+			return false
+		}
+		delete(profiles, input.OriginalAssetID)
+	}
+	return len(profiles) == 0
 }
 
 func specDigest(spec StepExecutionSpec) (string, error) {

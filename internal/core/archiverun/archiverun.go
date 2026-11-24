@@ -119,7 +119,7 @@ func (handler *Handler) Handle(envelope command.Envelope, snapshot command.Snaps
 		return command.Change{}, command.DeterministicFailure("INVALID_ARCHIVE_RUN", ErrInvalidArchiveRun)
 	}
 
-	if parameters.ClassificationPolicy != 0 && (parameters.ClassificationPolicy != organization.DrivePolicyVersion || len(parameters.ClassificationContexts) != len(folderScope.FolderIDs())) {
+	if parameters.ClassificationPolicy != 0 && (parameters.ClassificationPolicy < organization.ContextPolicyVersion || parameters.ClassificationPolicy > organization.DrivePolicyVersion || len(parameters.ClassificationContexts) != len(folderScope.FolderIDs())) {
 		return command.Change{}, command.DeterministicFailure("INVALID_ARCHIVE_RUN", ErrInvalidArchiveRun)
 	}
 	for folder, c := range parameters.ClassificationContexts {
