@@ -7,6 +7,17 @@ from playwright.sync_api import expect, sync_playwright
 with sync_playwright() as playwright:
     browser = playwright.chromium.launch()
     page = browser.new_page(viewport={"width": 1440, "height": 900}, color_scheme="light", locale="ko-KR")
+    def counts(route):
+        response = route.fetch()
+        payload = response.json()
+        run = next(w for w in payload["data"] if w["work_id"] == "ARCHIVE-RUN-1")
+        run.update(completed_jobs=1, effective_jobs=2, items={
+            "operation": "RENDER_RECORDING", "total": 5, "completed": 0, "current": 1, "name": "긴 녹화.mp4",
+            "position_millis": 62000, "duration_millis": 1755000, "attempt": 2,
+        })
+        route.fulfill(response=response, json=payload)
+
+    page.route("**/api/v1/work", counts)
     page.goto(sys.argv[1], wait_until="networkidle")
 
     links = page.locator("#menu .menu-link")
@@ -22,6 +33,7 @@ with sync_playwright() as playwright:
     expect(page.locator("#active-jobs .section-title")).to_have_text("진행 중 2")
     archive_run = page.locator('#active-jobs .work-row[data-work-id="ARCHIVE-RUN-1"]')
     expect(archive_run).to_be_visible()
+    expect(archive_run.locator(".item-progress")).to_contain_text("하위 작업 1/2개 완료 · 영상 0/5개 완료 · 1번째 긴 녹화.mp4 · 1:02 / 29:15 · 2번째 시도")
     # The row names the drive, its first folder and the rest as a count; the
     # work ID stays faint beside them.
     expect(archive_run.locator(".job-name b")).to_have_text("VOLUME-1")

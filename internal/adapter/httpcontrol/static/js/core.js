@@ -185,3 +185,22 @@ export function dayTime(value) {
   if (!date) return "—";
   return DAY.format(date) === DAY.format(new Date()) ? CLOCK.format(date) : MONTH_DAY.format(date);
 }
+
+export function mediaDuration(millis) {
+  if (!millis) return "—";
+  const total = Math.max(0, Math.round(millis / 1000));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const seconds = total % 60;
+  return hours ? `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}` : `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
+export function itemProgressText(item) {
+  if (!item?.total) return "";
+  const unit = { RENDER_SOURCE_SEQUENCE: "합본", EXTRACT_SPEECH_AUDIO: "음성", TRANSCRIBE_AUDIO: "전사" }[item.operation] || "영상";
+  const parts = [`${unit} ${formatCount(item.completed)}/${formatCount(item.total)}개 완료`];
+  if (item.current) parts.push(`${formatCount(item.current)}번째${item.name ? " " + item.name : ""}`);
+  if (item.position_millis) parts.push(mediaDuration(item.position_millis) + (item.duration_millis ? " / " + mediaDuration(item.duration_millis) : ""));
+  if (item.attempt > 1) parts.push(`${item.attempt}번째 시도`);
+  return parts.join(" · ");
+}

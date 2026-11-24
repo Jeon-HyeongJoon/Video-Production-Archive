@@ -30,25 +30,26 @@ type summaryView struct {
 }
 
 type jobSummaryView struct {
-	JobID                  string      `json:"job_id"`
-	Revision               uint64      `json:"revision"`
-	TemplateName           string      `json:"template_name"`
-	TargetTitle            string      `json:"target_title"`
-	CurrentStepID          string      `json:"current_step_id"`
-	StepState              string      `json:"step_state"`
-	Progress               float64     `json:"progress"`
-	ExecutorKind           string      `json:"executor_kind"`
-	ActorID                string      `json:"actor_id,omitempty"`
-	WorkerID               string      `json:"worker_id,omitempty"`
-	ArchivistAction        string      `json:"archivist_action,omitempty"`
-	ToolCallStatus         string      `json:"tool_call_status,omitempty"`
-	WaitReason             string      `json:"wait_reason,omitempty"`
-	ErrorClass             string      `json:"error_class,omitempty"`
-	LastEventAt            time.Time   `json:"last_event_at"`
-	LogReference           string      `json:"log_reference,omitempty"`
-	NeedsHumanIntervention bool        `json:"needs_human_intervention"`
-	InterventionReason     string      `json:"intervention_reason,omitempty"`
-	Worker                 *workerView `json:"worker,omitempty"`
+	Items                  *archiveworkspace.ItemProgress `json:"items,omitempty"`
+	JobID                  string                         `json:"job_id"`
+	Revision               uint64                         `json:"revision"`
+	TemplateName           string                         `json:"template_name"`
+	TargetTitle            string                         `json:"target_title"`
+	CurrentStepID          string                         `json:"current_step_id"`
+	StepState              string                         `json:"step_state"`
+	Progress               float64                        `json:"progress"`
+	ExecutorKind           string                         `json:"executor_kind"`
+	ActorID                string                         `json:"actor_id,omitempty"`
+	WorkerID               string                         `json:"worker_id,omitempty"`
+	ArchivistAction        string                         `json:"archivist_action,omitempty"`
+	ToolCallStatus         string                         `json:"tool_call_status,omitempty"`
+	WaitReason             string                         `json:"wait_reason,omitempty"`
+	ErrorClass             string                         `json:"error_class,omitempty"`
+	LastEventAt            time.Time                      `json:"last_event_at"`
+	LogReference           string                         `json:"log_reference,omitempty"`
+	NeedsHumanIntervention bool                           `json:"needs_human_intervention"`
+	InterventionReason     string                         `json:"intervention_reason,omitempty"`
+	Worker                 *workerView                    `json:"worker,omitempty"`
 }
 
 type workerView struct {
@@ -252,12 +253,13 @@ type transcriptQualityView struct {
 }
 
 type driveStageView struct {
-	ID                  string `json:"stage_id"`
-	State               string `json:"state"`
-	WaitReason          string `json:"wait_reason,omitempty"`
-	WaitTargetStorageID string `json:"wait_target_storage_id,omitempty"`
-	CompletedCount      int    `json:"completed_count"`
-	TotalCount          int    `json:"total_count"`
+	Items               *archiveworkspace.ItemProgress `json:"items,omitempty"`
+	ID                  string                         `json:"stage_id"`
+	State               string                         `json:"state"`
+	WaitReason          string                         `json:"wait_reason,omitempty"`
+	WaitTargetStorageID string                         `json:"wait_target_storage_id,omitempty"`
+	CompletedCount      int                            `json:"completed_count"`
+	TotalCount          int                            `json:"total_count"`
 }
 
 type archivistSessionView struct {
@@ -332,6 +334,7 @@ type stepView struct {
 	LastEventAt            time.Time                      `json:"last_event_at"`
 	DependencyIDs          []string                       `json:"dependency_ids"`
 	ProgressHistoryOmitted uint64                         `json:"progress_history_omitted,omitempty"`
+	Items                  *archiveworkspace.ItemProgress `json:"items,omitempty"`
 	ProgressEvidence       []corejob.StepProgressEvidence `json:"progress_evidence,omitempty"`
 	FailureEvidence        []corejob.StepFailureEvidence  `json:"failure_evidence,omitempty"`
 }
@@ -359,23 +362,26 @@ type jobDetailView struct {
 }
 
 type workSummaryView struct {
-	WorkID            string    `json:"work_id"`
-	Kind              string    `json:"kind"`
-	State             string    `json:"state"`
-	CreatedAt         time.Time `json:"created_at"`
-	LastEventAt       time.Time `json:"last_event_at"`
-	WorkerID          string    `json:"worker_id,omitempty"`
-	SourceVolumeID    string    `json:"source_volume_id,omitempty"`
-	SourceStorageID   string    `json:"source_storage_id,omitempty"`
-	ArchiveStorageID  string    `json:"archive_storage_id,omitempty"`
-	FolderCount       int       `json:"folder_count"`
-	VideoCount        int       `json:"video_count"`
-	HoldCount         int       `json:"hold_count"`
-	ResultCount       int       `json:"result_count"`
-	ChildJobCount     int       `json:"child_job_count"`
-	Progress          float64   `json:"progress"`
-	Title             string    `json:"title,omitempty"`
-	ReplacementWorkID string    `json:"replacement_work_id,omitempty"`
+	CompletedJobs     int                            `json:"completed_jobs"`
+	EffectiveJobs     int                            `json:"effective_jobs"`
+	Items             *archiveworkspace.ItemProgress `json:"items,omitempty"`
+	WorkID            string                         `json:"work_id"`
+	Kind              string                         `json:"kind"`
+	State             string                         `json:"state"`
+	CreatedAt         time.Time                      `json:"created_at"`
+	LastEventAt       time.Time                      `json:"last_event_at"`
+	WorkerID          string                         `json:"worker_id,omitempty"`
+	SourceVolumeID    string                         `json:"source_volume_id,omitempty"`
+	SourceStorageID   string                         `json:"source_storage_id,omitempty"`
+	ArchiveStorageID  string                         `json:"archive_storage_id,omitempty"`
+	FolderCount       int                            `json:"folder_count"`
+	VideoCount        int                            `json:"video_count"`
+	HoldCount         int                            `json:"hold_count"`
+	ResultCount       int                            `json:"result_count"`
+	ChildJobCount     int                            `json:"child_job_count"`
+	Progress          float64                        `json:"progress"`
+	Title             string                         `json:"title,omitempty"`
+	ReplacementWorkID string                         `json:"replacement_work_id,omitempty"`
 }
 
 type workChildJobView struct {
@@ -443,7 +449,7 @@ func projectJobVideoInfo(value archivework.VideoInfo) jobVideoInfoView {
 
 func projectWorkSummary(value archivework.Summary) workSummaryView {
 	return workSummaryView{
-		WorkID: value.WorkID, Kind: string(value.Kind), State: string(value.State), CreatedAt: value.CreatedAt,
+		Items: value.Items, CompletedJobs: value.CompletedJobs, EffectiveJobs: value.EffectiveJobs, WorkID: value.WorkID, Kind: string(value.Kind), State: string(value.State), CreatedAt: value.CreatedAt,
 		LastEventAt: value.LastEventAt, WorkerID: value.WorkerID, SourceVolumeID: value.SourceVolumeID,
 		SourceStorageID: value.SourceStorageID, ArchiveStorageID: value.ArchiveStorageID,
 		FolderCount: value.FolderCount, VideoCount: value.VideoCount, HoldCount: value.HoldCount,
@@ -467,7 +473,7 @@ func projectStandaloneWork(value archiveworkspace.JobSummary) workSummaryView {
 		}
 	}
 	return projectWorkSummary(archivework.Summary{
-		WorkID: value.JobID, Kind: archivework.StandaloneJob, State: state, CreatedAt: value.LastEventAt,
+		Items: value.Items, WorkID: value.JobID, Kind: archivework.StandaloneJob, State: state, CreatedAt: value.LastEventAt,
 		LastEventAt: value.LastEventAt, WorkerID: value.WorkerID, ChildJobCount: 1, Progress: value.Progress, Title: value.TargetTitle,
 	})
 }
@@ -499,7 +505,7 @@ func projectWorkDetail(value archivework.View) workDetailView {
 
 func projectJobSummary(value archiveworkspace.JobSummary) jobSummaryView {
 	result := jobSummaryView{
-		JobID: value.JobID, Revision: value.Revision, TemplateName: value.TemplateName, TargetTitle: value.TargetTitle,
+		Items: value.Items, JobID: value.JobID, Revision: value.Revision, TemplateName: value.TemplateName, TargetTitle: value.TargetTitle,
 		CurrentStepID: value.CurrentStepID, StepState: string(value.StepState),
 		Progress: value.Progress, ExecutorKind: string(value.ExecutorKind), ActorID: value.ActorID, WorkerID: value.WorkerID,
 		ArchivistAction: value.ArchivistAction, ToolCallStatus: string(value.ToolCallStatus), WaitReason: string(value.WaitReason),
@@ -524,8 +530,8 @@ func projectJobDetail(value archiveworkspace.JobView) jobDetailView {
 			ID: step.ID, State: string(step.State), Progress: step.Progress, ExecutorKind: string(step.ExecutorKind),
 			ActorID: step.ActorID, WorkerID: step.WorkerID, WaitReason: string(step.WaitReason), ErrorClass: step.ErrorClass,
 			LogReference: step.LogReference, LastEventAt: step.LastEventAt,
-			DependencyIDs:          append([]string(nil), step.DependencyIDs...),
-			ProgressHistoryOmitted: step.ProgressHistoryOmitted, ProgressEvidence: append([]corejob.StepProgressEvidence(nil), step.ProgressEvidence...),
+			DependencyIDs: append([]string(nil), step.DependencyIDs...),
+			Items:         step.Items, ProgressHistoryOmitted: step.ProgressHistoryOmitted, ProgressEvidence: append([]corejob.StepProgressEvidence(nil), step.ProgressEvidence...),
 			FailureEvidence: failureEvidence,
 		})
 	}

@@ -121,7 +121,7 @@ func Project(state job.State) (archiveworkspace.JobView, error) {
 				}
 			}
 		}
-		steps = append(steps, archiveworkspace.StepStatus{ReusedOutputIDs: reused,
+		steps = append(steps, archiveworkspace.StepStatus{ReusedOutputIDs: reused, Items: archiveworkspace.ObservedItems(step),
 			ID: step.Workflow.ID, State: step.Workflow.State, Progress: step.Progress,
 			ExecutorKind: step.ExecutorKind, ActorID: step.ActorID, WorkerID: step.WorkerID,
 			WaitReason: step.Workflow.WaitReason, ErrorClass: step.ErrorClass, LogReference: step.LogReference,

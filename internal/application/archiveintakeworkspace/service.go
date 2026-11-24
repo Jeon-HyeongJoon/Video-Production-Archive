@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"videoarchive/internal/application/archiveworkspace"
 	"videoarchive/internal/core/archive"
 	"videoarchive/internal/core/archiveintake"
 	"videoarchive/internal/core/archiverun"
@@ -1122,7 +1123,13 @@ func projectStageTwoJobs(states []job.State) []StageView {
 	result := make([]StageView, 0, len(byID))
 	for id, values := range byID {
 		aggregate := StageView{ID: id, State: workflow.Completed, TotalCount: len(states)}
+		if len(values) == 1 {
+			aggregate.Items = values[0].Items
+		}
 		for _, value := range values {
+			if value.TotalCount > 1 {
+				aggregate.TotalCount += value.TotalCount - 1
+			}
 			aggregate.CompletedCount += value.CompletedCount
 		}
 		aggregate.State, aggregate.WaitReason, aggregate.WaitTargetStorageID = aggregateStageViews(values)
@@ -1208,10 +1215,15 @@ func stageView(id string, step job.Step, total int) StageView {
 	if step.Workflow.State == workflow.Waiting && step.Workflow.WaitReason == vocabulary.WaitDevice {
 		waitTargetStorageID = step.WaitTargetStorageID
 	}
+	completed := completedItemCount(step.Workflow.State, step.Progress, total)
+	items := archiveworkspace.ObservedItems(step)
+	if items != nil {
+		completed, total = items.Completed, items.Total
+	}
 	return StageView{
-		ID: id, State: step.Workflow.State, WaitReason: step.Workflow.WaitReason,
+		ID: id, Items: items, State: step.Workflow.State, WaitReason: step.Workflow.WaitReason,
 		WaitTargetStorageID: waitTargetStorageID,
-		CompletedCount:      completedItemCount(step.Workflow.State, step.Progress, total), TotalCount: total,
+		CompletedCount:      completed, TotalCount: total,
 	}
 }
 

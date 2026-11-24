@@ -2,6 +2,7 @@ package ffmpeg
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"strings"
 	"time"
@@ -57,8 +58,14 @@ func (r *progressRunner) Run(ctx context.Context, executable string, args []stri
 		}
 	}}
 	args = append([]string{"-nostats", "-progress", "pipe:1"}, args...)
-	err := r.stream.RunStreams(ctx, executable, args, &lines, nil)
+	var diagnostics decoderDiagnostics
+	stderr := processprogress.Lines{OnLine: diagnostics.observe, MaxLineBytes: 1024}
+	err := r.stream.RunStreams(ctx, executable, args, &lines, &stderr)
+	stderr.Flush()
 	lines.Flush()
 	report()
+	if err != nil && ctx.Err() == nil && diagnostics.rejectedInput() {
+		return errors.Join(err, &DecodeFailure{r.index, r.count, latest})
+	}
 	return err
 }

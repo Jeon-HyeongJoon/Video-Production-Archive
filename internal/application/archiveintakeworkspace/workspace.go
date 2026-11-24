@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"videoarchive/internal/application/archiveworkspace"
 	"videoarchive/internal/core/archive"
 	"videoarchive/internal/core/archiverun"
 	"videoarchive/internal/core/command"
@@ -132,6 +133,7 @@ type StorageView struct {
 }
 
 type StageView struct {
+	Items               *archiveworkspace.ItemProgress `json:"items,omitempty"`
 	ID                  string
 	State               workflow.StepState
 	WaitReason          vocabulary.WaitReason

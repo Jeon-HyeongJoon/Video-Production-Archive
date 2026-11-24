@@ -4,7 +4,7 @@
 // when their panel opens.
 
 import { html, useState } from "../lib.js";
-import { label, stageSignal, stateSignal, finishedSteps, formatCount, formatPercent, shortTime, clockTime, dateOnly, mutation, newID } from "../core.js";
+import { label, stageSignal, stateSignal, finishedSteps, formatCount, formatPercent, shortTime, clockTime, dateOnly, mediaDuration, itemProgressText, mutation, newID } from "../core.js";
 import {
   ui, stale, refresh, jobOf, jobDetail, jobMedia, jobLane, linkedFolder, completion, folderProblem, isRunning, openNewWork, driveName,
 } from "../store.js";
@@ -27,14 +27,7 @@ function mediaDate(value) {
   return dateOnly(date);
 }
 
-function mediaDuration(millis) {
-  if (!millis) return "—";
-  const total = Math.max(0, Math.round(millis / 1000));
-  const hours = Math.floor(total / 3600);
-  const minutes = Math.floor((total % 3600) / 60);
-  const seconds = total % 60;
-  return hours ? `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}` : `${minutes}:${String(seconds).padStart(2, "0")}`;
-}
+
 
 function mediaBytes(value) {
   if (!value) return "—";
@@ -240,7 +233,7 @@ export function JobScreen({ id }) {
           const signal = stageSignal({ state: step.state, wait_reason: step.wait_reason });
           const kind = step.state === "COMPLETED" ? "done" : signal;
           return html`<li class="step-item" key=${step.id} data-step=${step.id} data-signal=${signal} data-state=${kind}>
-            <${StatusIcon} kind=${kind} /><span><b>${label("stage", step.id)}</b><small class="stage-state">${stepLine(step)}</small></span>
+            <${StatusIcon} kind=${kind} /><span><b>${label("stage", step.id)}</b><small class="stage-state">${stepLine(step)}</small>${step.items && html`<small class="item-progress">${itemProgressText(step.items)}</small>`}</span>
             ${step.state === "RUNNING" ? html`<${Meter} value=${step.progress || 0} label="진행" />` : html`<span></span>`}
             <${ProgressEvidence} items=${step.progress_evidence || []} omitted=${step.progress_history_omitted} />
             <${FailureEvidence} items=${step.failure_evidence || []} />

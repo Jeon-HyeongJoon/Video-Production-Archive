@@ -425,6 +425,8 @@ func (service *Service) diagnoseJob(ctx context.Context, view archiveworkspace.J
 			actions = append(actions, SuggestedAction{Code: "FAILURE_DETAIL_UNAVAILABLE", Summary: "Use the structured failure fields because process detail was not recorded"})
 		}
 		switch latest.CauseCode {
+		case "SOURCE_DECODE_FAILED":
+			actions = append(actions, SuggestedAction{Code: "CHECK_SOURCE_COPY", Summary: "Inspect the affected original at the reported output position and compare an alternate source copy before retrying"})
 		case "QC_CHECK_FAILED":
 			actions = append(actions, SuggestedAction{Code: "REVIEW_QC_MEASUREMENTS", Summary: "Compare the failed checks with their expected values before changing the source or rendering profile"})
 		case "INPUT_FILE_MISSING", "INPUT_FILE_ACCESS_DENIED":

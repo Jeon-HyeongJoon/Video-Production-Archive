@@ -56,6 +56,9 @@ const (
 )
 
 type Summary struct {
+	Items            *archiveworkspace.ItemProgress
+	CompletedJobs    int
+	EffectiveJobs    int
 	WorkID           string
 	Revision         uint64
 	Kind             Kind
@@ -637,16 +640,7 @@ func summarizeRun(run archiverun.State, children []ChildJob, drive archiveintake
 		ArchiveStorageID: run.ArchiveStorageID, FolderCount: len(run.FolderIDs), ChildJobCount: len(children),
 		ResultCount: len(completed),
 	}
-	var totalProgress float64
-	for _, child := range effectiveChildren {
-		totalProgress += child.Job.Progress
-		if child.Job.LastEventAt.After(summary.LastEventAt) {
-			summary.LastEventAt = child.Job.LastEventAt
-		}
-	}
-	if len(effectiveChildren) > 0 {
-		summary.Progress = totalProgress / float64(len(effectiveChildren))
-	}
+	measureChildren(&summary, effectiveChildren)
 	if current {
 		summary.HoldCount = drive.HoldCount
 		for _, folder := range drive.Folders {
@@ -681,16 +675,7 @@ func summarizeProjectedRun(runID string, drive archiveintakeworkspace.DriveView,
 	if len(folders) == summary.FolderCount {
 		summary.Title = organization.SelectedEventTitle(folders)
 	}
-	var totalProgress float64
-	for _, child := range effectiveChildren {
-		totalProgress += child.Job.Progress
-		if child.Job.LastEventAt.After(summary.LastEventAt) {
-			summary.LastEventAt = child.Job.LastEventAt
-		}
-	}
-	if len(effectiveChildren) > 0 {
-		summary.Progress = totalProgress / float64(len(effectiveChildren))
-	}
+	measureChildren(&summary, effectiveChildren)
 	for _, folder := range drive.Folders {
 		summary.VideoCount += folder.VideoCount
 	}
@@ -698,9 +683,34 @@ func summarizeProjectedRun(runID string, drive archiveintakeworkspace.DriveView,
 	return summary
 }
 
+func measureChildren(summary *Summary, children []ChildJob) {
+	summary.EffectiveJobs = len(children)
+	active := 0
+	for _, child := range children {
+		j := child.Job
+		summary.Progress += j.Progress
+		if j.LastEventAt.After(summary.LastEventAt) {
+			summary.LastEventAt = j.LastEventAt
+		}
+		switch j.StepState {
+		case workflow.Completed:
+			summary.CompletedJobs++
+		case workflow.Running, workflow.Verifying:
+			active++
+			summary.Items = j.Items
+		}
+	}
+	if active != 1 {
+		summary.Items = nil
+	}
+	if len(children) > 0 {
+		summary.Progress /= float64(len(children))
+	}
+}
+
 func summarizeStandalone(job archiveworkspace.JobSummary) Summary {
 	return Summary{
-		WorkID: job.JobID, Revision: job.Revision, Kind: StandaloneJob, State: stateFromJob(job), CreatedAt: job.LastEventAt,
+		Items: job.Items, WorkID: job.JobID, Revision: job.Revision, Kind: StandaloneJob, State: stateFromJob(job), CreatedAt: job.LastEventAt,
 		LastEventAt: job.LastEventAt, WorkerID: job.WorkerID, ChildJobCount: 1, Progress: job.Progress, Title: job.TargetTitle,
 	}
 }

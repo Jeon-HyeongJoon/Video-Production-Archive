@@ -192,20 +192,7 @@ func (registry *Registry) ExecuteOperation(ctx context.Context, spec execution.S
 		if errors.As(err, &failedQC) {
 			return workerclient.ExecutionResult{FailureClass: workflow.FailureInput, ErrorClass: "QC_CHECK_FAILED", CauseCode: "QC_CHECK_FAILED", ErrorSummary: failedQC.Error(), QCFailure: failedQC, LogReference: "worker://qc-check-failed"}
 		}
-		causeCode, summary, exitCode := operationFailureDetails(spec.Operation, err)
-		var processFailure *execution.ProcessFailure
-		var processLog *execution.ProcessLogArtifact
-		logReference := "worker://operation-failed"
-		if errors.As(err, &processFailure) && processFailure.Artifact.Validate() == nil {
-			artifact := processFailure.Artifact
-			processLog = &artifact
-			logReference = artifact.Reference
-		}
-		return workerclient.ExecutionResult{
-			FailureClass: workflow.FailureTransient, ErrorClass: "STEP_EXECUTION_FAILED",
-			CauseCode: causeCode, ErrorSummary: summary, ProcessExitCode: exitCode,
-			LogReference: logReference, ProcessLog: processLog,
-		}
+		return operationFailureResult(spec.Operation, err)
 	}
 	reportPhase(execution.ProgressCheckingOutputs)
 	validationWorkerID := "registry-validation"
@@ -345,6 +332,29 @@ func inputFailure(errorClass string) workerclient.ExecutionResult {
 	return workerclient.ExecutionResult{
 		FailureClass: workflow.FailureInput, ErrorClass: errorClass, CauseCode: errorClass,
 		ErrorSummary: "The Worker rejected the typed execution input", LogReference: "worker://input-rejected",
+	}
+}
+
+func operationFailureResult(operation execution.Operation, err error) workerclient.ExecutionResult {
+	causeCode, summary, exitCode := operationFailureDetails(operation, err)
+	var processFailure *execution.ProcessFailure
+	var processLog *execution.ProcessLogArtifact
+	logReference := "worker://operation-failed"
+	if errors.As(err, &processFailure) && processFailure.Artifact.Validate() == nil {
+		artifact := processFailure.Artifact
+		processLog = &artifact
+		logReference = artifact.Reference
+	}
+	class, errorClass := workflow.FailureTransient, "STEP_EXECUTION_FAILED"
+	var decode *ffmpeg.DecodeFailure
+	if errors.As(err, &decode) {
+		class, errorClass = workflow.FailureInput, "SOURCE_DECODE_FAILED"
+		causeCode, summary = errorClass, decode.Error()
+	}
+	return workerclient.ExecutionResult{
+		FailureClass: class, ErrorClass: errorClass,
+		CauseCode: causeCode, ErrorSummary: summary, ProcessExitCode: exitCode,
+		LogReference: logReference, ProcessLog: processLog,
 	}
 }
 

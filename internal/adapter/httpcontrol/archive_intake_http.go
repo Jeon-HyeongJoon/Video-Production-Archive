@@ -14,6 +14,7 @@ import (
 	"videoarchive/internal/application/archiveintakeworkspace"
 	"videoarchive/internal/application/archiveorganization"
 	"videoarchive/internal/application/archivetranscription"
+	"videoarchive/internal/core/archive"
 	coreintake "videoarchive/internal/core/archiveintake"
 	"videoarchive/internal/core/command"
 	"videoarchive/internal/core/organization"
@@ -137,9 +138,11 @@ func (handler *Handler) archiveFolderFiles(writer http.ResponseWriter, request *
 		}
 		var files []archiveintakeworkspace.SourceVideoView
 		decision, found := "", false
+		var previewDate string
 		for _, folder := range drive.DiscoveredFolders {
 			if folder.Folder == q.Get("folder") {
 				files, found = folder.Videos, true
+				previewDate = folder.ExpectedResult.ArchiveDate
 				break
 			}
 		}
@@ -159,6 +162,23 @@ func (handler *Handler) archiveFolderFiles(writer http.ResponseWriter, request *
 			writeError(writer, http.StatusConflict, "FOLDER_REFERENCE_STALE")
 			return
 		}
+		if found && q.Get("scope") == "inventory" && q.Get("layout") == "individual" {
+			type entry struct {
+				Directory string `json:"directory"`
+				Video     string `json:"video"`
+			}
+			entries := make([]entry, 0, len(files))
+			for _, file := range files {
+				preview, err := archive.PreviewFlatPackage(previewDate, q.Get("folder"), []string{file.FileName}, 1)
+				if err != nil {
+					writeError(writer, http.StatusConflict, "PREVIEW_UNAVAILABLE")
+					return
+				}
+				entries = append(entries, entry{preview.FirstIndividualDirectoryPattern, preview.FirstIndividualVideoFileName})
+			}
+			writeJSON(writer, http.StatusOK, map[string]any{"data": entries})
+			return
+		}
 		if found {
 			writeJSON(writer, http.StatusOK, map[string]any{"data": projectSourceVideos(files)})
 			return
@@ -176,7 +196,7 @@ func projectDriveFolder(folder archiveintakeworkspace.FolderView) driveFolderVie
 	stages := make([]driveStageView, 0, len(folder.Stages))
 	for _, stage := range folder.Stages {
 		stages = append(stages, driveStageView{
-			ID: stage.ID, State: string(stage.State), WaitReason: string(stage.WaitReason),
+			ID: stage.ID, Items: stage.Items, State: string(stage.State), WaitReason: string(stage.WaitReason),
 			WaitTargetStorageID: stage.WaitTargetStorageID,
 			CompletedCount:      stage.CompletedCount, TotalCount: stage.TotalCount,
 		})

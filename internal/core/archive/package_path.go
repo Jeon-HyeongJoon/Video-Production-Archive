@@ -73,24 +73,12 @@ func PreviewFlatPackage(archiveDate, mediaFolder string, originalNames []string,
 	if len(names) > 0 {
 		firstName = names[0]
 	}
-	individualStem := SafeWindowsFileStem(strings.TrimSuffix(firstName, path.Ext(firstName)))
-	if individualStem == "" {
-		individualStem = "video"
-	}
-	combinedStem := individualStem
-	if sourceCount > 1 {
-		combinedStem = SafeWindowsFileStem(path.Base(folder))
-		if combinedStem == "" {
-			combinedStem = "video"
-		}
-	}
-	directoryPattern := func(stem string) string {
-		return SafeWindowsFileStem(archiveDate+"_"+stem) + "__XXXXXXXXXXXX"
-	}
+	individual := packageVideoStem(folder, firstName, 1)
+	combined := packageVideoStem(folder, firstName, sourceCount)
 	return FlatPackagePreview{
 		ArchiveDate: archiveDate, MinimumResultCount: 1, MaximumResultCount: sourceCount,
-		CombinedDirectoryPattern: directoryPattern(combinedStem), CombinedVideoFileName: combinedStem + ".mp4",
-		FirstIndividualDirectoryPattern: directoryPattern(individualStem), FirstIndividualVideoFileName: individualStem + ".mp4",
+		CombinedDirectoryPattern: flatDirectory(archiveDate, combined, "XXXXXXXXXXXX"), CombinedVideoFileName: combined + ".mp4",
+		FirstIndividualDirectoryPattern: flatDirectory(archiveDate, individual, "XXXXXXXXXXXX"), FirstIndividualVideoFileName: individual + ".mp4",
 	}, nil
 }
 
@@ -112,14 +100,9 @@ func PresentPackage(packageID, mediaFolder string, originalNames []string) (Pack
 		names = append(names, name)
 	}
 	label := names[0]
-	stem := strings.TrimSuffix(label, path.Ext(label))
+	stem := packageVideoStem(folder, label, len(names))
 	if len(names) > 1 {
 		label = path.Base(folder)
-		stem = label
-	}
-	stem = SafeWindowsFileStem(stem)
-	if stem == "" {
-		stem = "video"
 	}
 	return PackagePresentation{
 		ArchiveDate: archiveDate, MediaFolder: folder,
@@ -143,16 +126,26 @@ func PresentFlatPackage(packageID, mediaFolder string, originalNames []string) (
 		suffix = string(runes[len(runes)-12:])
 	}
 	resultStem := strings.TrimSuffix(presentation.VideoFileName, path.Ext(presentation.VideoFileName))
-	if utf8.RuneCountInString(resultStem) > 48 {
-		runes := []rune(resultStem)
-		resultStem = string(runes[:48])
-	}
-	directoryName := SafeWindowsFileStem(presentation.ArchiveDate + "_" + resultStem + "__" + suffix)
-	if directoryName == "" {
-		return PackagePresentation{}, ErrInvalidPackagePresentation
-	}
-	presentation.PackageDirectory = directoryName
+	presentation.PackageDirectory = flatDirectory(presentation.ArchiveDate, resultStem, suffix)
 	return presentation, nil
+}
+
+func packageVideoStem(folder, firstName string, count int) string {
+	stem := strings.TrimSuffix(firstName, path.Ext(firstName))
+	if count > 1 {
+		stem = path.Base(folder)
+	}
+	if safe := SafeWindowsFileStem(stem); safe != "" {
+		return safe
+	}
+	return "video"
+}
+
+func flatDirectory(date, stem, suffix string) string {
+	if utf8.RuneCountInString(stem) > 48 {
+		stem = string([]rune(stem)[:48])
+	}
+	return SafeWindowsFileStem(date + "_" + stem + "__" + suffix)
 }
 
 func PackageDirectory(packageID string) (string, error) {

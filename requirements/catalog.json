@@ -3760,10 +3760,10 @@
     {
       "id": "DSH-043",
       "design": "archive-output-preview-surface",
-      "statement": "새 아카이브 작업은 담당자가 저장할 위치와 폴더 범위를 고르면 실행 전에 서버가 투영한 root-relative 예상 결과 폴더 패턴·결과 수 범위·파일 구성과 용량을 보여주고 절대 저장경로를 노출하지 않아야 한다.",
+      "statement": "새 아카이브 작업은 선택한 원본 폴더의 가능한 합본·개별 저장 구조를 목적지 기준 상대 경로 트리로 보여주어야 한다.",
       "given": "READY 원본 드라이브의 영상별 root-relative 이름·예상 출력 용량과 접근 가능한 아카이브 Storage 표시명·여유 용량이 있다.",
-      "when": "담당자가 최상위 작업 생성에서 아카이브 Storage와 하나 이상의 폴더를 고른다.",
-      "then": "화면은 분류 전에는 확정될 수 없는 package identity를 12자리 placeholder로 표시한 날짜·원본 이름 기반 1-level 결과 폴더 패턴, 통합 1개부터 영상별 최대 개수까지의 결과 수, 폴더별 결과 영상·video-info.csv·선택적 전사 파일과 Storage 최상단 archive-catalog.csv, 예상 출력·안전 여유·필요·현재 여유를 표시하고 절대 root·endpoint·credential이나 확정 경로로 표현하지 않는다.",
+      "when": "원본을 고르고 목적지를 선택하거나 바꾸며 합본·개별 영상을 전환한다.",
+      "then": "목적지 바로 아래에 결과 폴더·영상·메타데이터·조건부 자막과 루트 카탈로그를 표시한다. 보관 이름 규칙·검사 전 결과 수 범위·용량을 유지하고, 개별 파일은 현재 탐색 revision의 원본 이름으로 조회하며 선택 해제 즉시 반영한다.",
       "test_file": "internal/adapter/httpcontrol/handler_test.go",
       "test_name": "TestNewArchiveWorkShowsExpectedRelativeOutputLayoutBeforeStart",
       "status": "implemented",
@@ -3775,7 +3775,7 @@
       "statement": "작업 상세는 장시간 Step의 구조화된 실행 진행 증적 수를 표시하고 사람이 펼쳤을 때만 청크별 원본 시간 범위와 상태를 보여줘야 한다.",
       "given": "계획과 완료 상태의 StepProgressEvidence가 저장된 RUNNING Job이 있다.",
       "when": "담당자가 작업 상세의 실행 근거를 펼친다.",
-      "then": "접힌 상태에는 증적 수만 보이고 펼치면 Control 관측 시각·청크 순번과 전체 수·원본 시간 범위·진행 상태가 시간순으로 보이며 stdout·stderr·credential·절대경로는 표시되지 않는다. 단계 진입·입력별 출력 위치·엔진 백분율과 조회 창 이전 건수를 각 관측의 종류에 맞게 표시한다.",
+      "then": "접힌 상태에는 증적 수만 보이고 펼치면 Control 관측 시각·청크 순번과 전체 수·원본 시간 범위·진행 상태가 시간순으로 보이며 stdout·stderr·credential·절대경로는 표시되지 않는다. 단계 진입·입력별 출력 위치·엔진 백분율과 조회 창 이전 건수를 각 관측의 종류에 맞게 표시한다. 현재 단계의 파일 순번·처리 시간과 재시도는 실행 근거를 펼치기 전에도 표시한다.",
       "test_file": "internal/adapter/httpcontrol/handler_test.go",
       "test_name": "TestWorkspaceShowsStructuredStepProgressEvidenceOnlyOnDisclosure",
       "status": "implemented",
@@ -4524,6 +4524,30 @@
       "then": "각 파일에는 결정 당시의 역할·Profile·근거 및 해당 검사 참조가 연결되며 예상 영상 용량은 원본별 길이와 목표 비트레이트의 합계다.",
       "test_file": "internal/application/archiveintakeworkspace/service_test.go",
       "test_name": "TestWorkspaceRetainsPerFileProfileEvidenceAndSumsTargetSizes"
+    },
+    {
+      "id": "DSH-055",
+      "design": "observed-item-progress",
+      "level": "unit",
+      "status": "implemented",
+      "statement": "작업 요약은 하위 작업 완료 수와 해당 실행 시도의 영상 처리 순번을 서로 다른 단위로 집계한다.",
+      "given": "이전 시도의 출력 위치가 남아 있는 두 번째 실행에서 여러 원본을 순차 처리한다.",
+      "when": "작업 목록·실행·단계에서 진행을 확인한다.",
+      "then": "유효한 하위 작업 완료 수와 전체 수, 현재 시도의 파일 순번과 전체, 처리한 파일 수, 확인된 이름·출력 시간·시도를 보여준다. 합본은 출력 한 개이며 과거 시도·출력 시간 100%로 완료 수를 올리지 않는다.",
+      "test_file": "internal/application/archivework/item_progress_test.go",
+      "test_name": "TestWorkCountsCurrentAttemptMediaAndCompletedChildren"
+    },
+    {
+      "id": "WRK-022",
+      "design": "terminal-input-decode-failure",
+      "level": "unit",
+      "status": "implemented",
+      "statement": "렌더 작업에서 확인된 치명적인 원본 디코딩 실패는 입력 실패로 기록한다.",
+      "given": "FFmpeg가 잘못된 원본 패킷을 보고한 후 디코더가 입력 오류로 종료하거나 AAC 설정 불일치와 오디오 필터의 Invalid argument 종료가 함께 관찰된다.",
+      "when": "Worker가 해당 프로세스의 종료와 입력 순번·마지막 출력 위치를 처리한다.",
+      "then": "실패 종료이면 원본 순번·마지막 출력 위치와 SOURCE_DECODE_FAILED를 남기고 동일 입력의 자동 재시도를 끝낸다. 경고 후 성공, 별개의 출력 실패와 필터 설정 오류는 이 실패로 분류하지 않는다.",
+      "test_file": "internal/application/workerexecutor/decode_failure_test.go",
+      "test_name": "TestWorkerDistinguishesTerminalSourceDecodeFailureFromWarnings"
     }
   ]
 }

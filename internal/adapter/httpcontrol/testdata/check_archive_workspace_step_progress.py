@@ -30,10 +30,14 @@ with sync_playwright() as playwright:
         ]
         step["progress_evidence"] = [dict(base, evidence_id=f"EVD-{i}", update=u) for i, u in enumerate(updates)]
         step["progress_history_omitted"] = 2
+        step["items"] = {"operation": "RENDER_RECORDING", "current": 2, "total": 3, "completed": 1, "position_millis": 7500,
+                         "duration_millis": 12000, "name": "현장.mp4", "attempt": 2}
         route.fulfill(response=response, json=payload)
 
     page.route("**/api/v1/jobs/JOB-RUNNING", live_evidence)
     page.reload(wait_until="networkidle")
+    expect(page.locator('#job-steps [data-step="render"] .item-progress')).to_have_text("영상 1/3개 완료 · 2번째 현장.mp4 · 0:08 / 0:12 · 2번째 시도")
+    expect(disclosure.locator("li").first).not_to_be_visible()
     disclosure.locator("summary").click()
     expect(disclosure).to_contain_text("이전 2건은 이벤트 원장에 보관")
     expect(disclosure.locator("li").nth(0)).to_contain_text("입력 검증 진입")

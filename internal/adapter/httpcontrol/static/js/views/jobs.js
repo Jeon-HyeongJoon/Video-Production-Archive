@@ -4,8 +4,8 @@
 // Template Job's steps. Running work stays on top, queued work in its own
 // list, work that needs a person below, and finished work folded at the end.
 
-import { html, useEffect, useComputed, batch } from "../lib.js";
-import { label, formatCount, formatBytes, shortTime, dayTime, mutation, newID } from "../core.js";
+import { html, useEffect, useState, useComputed, batch } from "../lib.js";
+import { label, formatCount, formatBytes, itemProgressText, shortTime, dayTime, mutation, newID } from "../core.js";
 import {
   ui, store, stale, refresh, allWork, allDrives, workLane, workTitle, workScopeText, workText, workKind, workIssues, workDrive, workDetail,
   jobDetail, jobOf, driveView, folderKey, folderState, folderProblem, folderProgress, driveName, isRunning, archiveCandidates,
@@ -95,6 +95,7 @@ function WorkBlock({ work, meter, compact }) {
       <span class="job-name">
         <b class=${isShared ? "shared" : null}>${workTitle(work)}</b>
         <small class="work-scope">${run ? (compact ? shortScope : scope) : `템플릿 작업 · ${label("template", job?.template_name)}`} ${(!compact || open) && html`<i class="faint-id">${work.work_id}</i>`}</small>
+        ${meter && (work.items || work.effective_jobs) ? html`<small class="item-progress">${[work.effective_jobs && `하위 작업 ${work.completed_jobs || 0}/${work.effective_jobs}개 완료`, itemProgressText(work.items)].filter(Boolean).join(" · ")}</small>` : null}
       </span>
       <span class="state"><${StatusIcon} kind=${workKind(work)} /><${Swap} cls="job-state" text=${compact && work.state === "FAILED" && issues.fault > 1 ? `실패 · ${issues.fault} 폴더` : workText(work)} />${run ? html`<${IssueTags} fault=${compact && work.state === "FAILED" ? 0 : issues.fault} decide=${issues.decide} cls="row-issue" />` : null}</span>
       <span class="job-progress">${meter ? html`<${Meter} value=${work.progress || 0} label=${`진행 ${pct}%`} />` : null}</span>
@@ -307,7 +308,7 @@ function ArchiveScope({ draft }) {
         </div>
       </div>
     </div>
-    <${ExpectedResults} selected=${selected} archive=${archive} />
+    <${ExpectedResults} selected=${selected} archive=${archive} drive=${current} />
     <div class="new-work-foot start-bar">
       <span class="summary num" id="selection-summary">${selected.length} 폴더 · ${formatCount(videos)} 영상 · ${formatBytes(bytes)}</span>
       <span class="start-reason" id="start-reason">${draft.error || blocker}</span>
@@ -316,42 +317,77 @@ function ArchiveScope({ draft }) {
     </div>`;
 }
 
-function ExpectedResults({ selected, archive }) {
-  if (!archive || !selected.length) return null;
-  const plans = selected.filter((folder) => folder.expected_result);
-  if (!plans.length) return null;
+function ResultDirectory({ directory, video }) {
+  return html`<li class="result-directory"><b>${directory}/</b>
+    <ul class="path-tree"><li><code>${video}</code></li>
+      <li class="sidecars">video-info.csv · .archive-package.json</li>
+      <li class="sidecars">subtitle.srt · transcript.txt <small>자막 생성 후</small></li>
+    </ul></li>`;
+}
+
+function FolderPreview({ folder, drive, separate }) {
+  const preview = folder.expected_result;
+  const [result, setResult] = useState(null);
+  const [limit, setLimit] = useState(3);
+  const [retry, setRetry] = useState(0);
+  const individual = separate && preview?.maximum_result_count > 1;
+  const query = new URLSearchParams({ folder: folder.folder, scope: "inventory", layout: "individual",
+    revision: drive.folder_discovery_revision, run: drive.archive_run_id || "" });
+  const url = individual ? `/api/v1/archive-intake/${encodeURIComponent(drive.workspace_drive_id)}/files?${query}` : "";
+  useEffect(() => {
+    if (!url) return;
+    const controller = new AbortController();
+    (async () => {
+      try {
+        const response = await fetch(url, { signal: controller.signal });
+        if (!response.ok) throw new Error();
+        const { data } = await response.json();
+        if (!controller.signal.aborted) setResult({ url, files: data });
+      } catch {
+        if (!controller.signal.aborted) setResult({ url, error: true });
+      }
+    })();
+    return () => controller.abort();
+  }, [url, retry]);
+  if (!preview) return html`<div class="expected-result-row"><small>${folder.folder} · 저장 경로 미정</small></div>`;
+  const loaded = result?.url === url ? result : null;
+  const first = individual
+    ? { directory: preview.first_individual_directory_pattern, video: preview.first_individual_video_file_name }
+    : { directory: preview.combined_directory_pattern, video: preview.combined_video_file_name };
+  const entries = loaded?.files?.length ? loaded.files : [first];
+  return html`<div class="expected-result-row" data-folder-id=${folder.folder}>
+    <small class="expected-source">원본 · ${folder.folder}</small>
+    <ul class="path-tree">${entries.slice(0, limit).map((entry, i) => html`<${ResultDirectory} key=${i} ...${entry} />`)}</ul>
+    ${entries.length > limit && html`<button type="button" class="text-btn" onClick=${() => setLimit(limit + 20)}>결과 폴더 더 보기 · ${formatCount(entries.length - limit)}개</button>`}
+    ${individual && !loaded && html`<small>개별 폴더 조회 중</small>`}
+    ${individual && loaded?.error && html`<button type="button" class="text-btn" onClick=${() => setRetry(retry + 1)}>개별 경로 다시 조회</button>`}
+    ${individual && loaded?.files && loaded.files.length < preview.maximum_result_count && html`<small>이름 미확인 ${formatCount(preview.maximum_result_count - loaded.files.length)}개</small>`}
+  </div>`;
+}
+
+function ExpectedResults({ selected, archive, drive }) {
+  const [mode, setMode] = useState(null);
+  const [limit, setLimit] = useState(4);
+  if (!selected.length) return null;
+  const plans = selected.flatMap(f => f.expected_result ? [f.expected_result] : []);
+  const minimum = plans.reduce((sum, p) => sum + p.minimum_result_count, 0);
+  const maximum = plans.reduce((sum, p) => sum + p.maximum_result_count, 0);
+  const separate = mode ? mode === "individual" : selected.every(f => f.source_role?.role === "RECORDING");
   const { estimated, reserve, required } = archiveCapacityEstimate(selected);
-  const minimum = plans.reduce((sum, folder) => sum + folder.expected_result.minimum_result_count, 0);
-  const maximum = plans.reduce((sum, folder) => sum + folder.expected_result.maximum_result_count, 0);
-  const resultCount = minimum === maximum ? `${formatCount(minimum)}개` : `${formatCount(minimum)}~${formatCount(maximum)}개`;
-  const storageName = archive.label || archive.storage_id;
-  const rows = plans.slice(0, 4);
-  return html`<section class="expected-results" id="expected-results" aria-label="예상 결과 위치">
-    <div class="expected-results-head">
-      <span>예상 결과 위치</span>
-      <b>${storageName}</b>
-      <small>${resultCount} 결과 폴더</small>
+  return html`<section class="expected-results" id="expected-results" aria-label="목적지 폴더 구조">
+    <div class="expected-results-head"><b>목적지 폴더 구조</b><small>검사 후 확정 · 보류 시 생성 안 함</small></div>
+    ${maximum > minimum && html`<div class="preview-options" role="group" aria-label="예상 저장 방식">
+      ${[["combined", "합본일 때"], ["individual", "개별 영상일 때"]].map(([value, text]) => html`<button type="button" class="btn" key=${value} aria-pressed=${separate === (value === "individual")} onClick=${() => setMode(value)}>${text}</button>`)}
+    </div>`}
+    <div class="preview-root"><b>${archive?.label || archive?.storage_id || "저장 위치 선택 전"}/</b>
+      ${plans.length > 0 && html`<small>${minimum === maximum ? formatCount(minimum) : `${formatCount(minimum)}~${formatCount(maximum)}`}개 결과 폴더</small>`}</div>
+    <div class="expected-result-list">${selected.slice(0, limit).map(folder => html`<${FolderPreview} key=${folder.folder} folder=${folder} drive=${drive} separate=${separate} />`)}
+      ${selected.length > limit && html`<button type="button" class="text-btn" onClick=${() => setLimit(limit + 12)}>선택한 원본 더 보기 · ${formatCount(selected.length - limit)}개</button>`}
+      <div class="catalog-node"><code>archive-catalog.csv</code> <small>목적지 전체 목록</small></div>
     </div>
-    <div class="expected-result-list">
-      ${rows.map((folder) => {
-        const preview = folder.expected_result;
-        const multiple = preview.maximum_result_count > 1;
-        return html`<div class="expected-result-row" key=${folder.folder} data-folder-id=${folder.folder}>
-          <span class="expected-source">${folder.folder}${folder.source_role ? html`<small>${label("sourceRole", folder.source_role.role)}</small>` : null}</span>
-          ${folder.event_preview ? html`<small>행사 배치 미리보기 · ${folder.event_preview.directory}/${folder.event_preview.video} · ${folder.event_preview.subtitle} · ${folder.event_preview.metadata}</small>` : null}
-          <code>${preview.combined_directory_pattern}/</code>
-          <small>${multiple ? `통합 1개 또는 영상별 최대 ${formatCount(preview.maximum_result_count)}개 · ${preview.first_individual_directory_pattern}/` : preview.combined_video_file_name}</small>
-        </div>`;
-      })}
-      ${plans.length > rows.length ? html`<span class="expected-more">외 ${formatCount(plans.length - rows.length)}개 폴더</span>` : null}
-    </div>
-    <div class="expected-result-files">
-      <span><b>각 결과 폴더</b> 결과 영상 · video-info.csv · .archive-package.json</span>
-      <span><b>자막·텍스트 후</b> transcript.txt · subtitle.srt</span>
-      <span><b>저장 위치 최상단</b> archive-catalog.csv</span>
-    </div>
-    <div class="expected-capacity num">
+    <small class="preview-note">XXXXXXXXXXXX · 보관 시 확정되는 식별자</small>
+    ${archive && html`<div class="expected-capacity num">
       <span>예상 ${formatBytes(estimated)}</span><span>안전 여유 ${formatBytes(reserve)}</span><span>필요 ${formatBytes(required)}</span><span>현재 여유 ${formatBytes(archive.free_bytes)}</span>
-    </div>
+    </div>`}
   </section>`;
 }

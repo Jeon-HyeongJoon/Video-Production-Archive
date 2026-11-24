@@ -5,6 +5,7 @@ import (
 	"slices"
 	"time"
 
+	"videoarchive/internal/application/archiveworkspace"
 	"videoarchive/internal/core/archive"
 	"videoarchive/internal/core/execution"
 	"videoarchive/internal/core/job"
@@ -15,21 +16,22 @@ import (
 )
 
 type EventOutputEvidence struct {
-	ObservedAt       time.Time                     `json:"observed_at,omitzero"`
-	ManifestChecksum string                        `json:"manifest_checksum,omitempty"`
-	ReviewReasons    []transcription.QualityReason `json:"review_reasons,omitempty"`
-	ArchiveRunID     string                        `json:"archive_run_id"`
-	InputRevision    uint64                        `json:"input_revision"`
-	Folder           string                        `json:"folder,omitempty"`
-	RelativeVideo    string                        `json:"relative_video"`
-	PathState        string                        `json:"path_state,omitempty"`
-	Stage            string                        `json:"stage"`
-	Completed        int64                         `json:"completed,omitempty"`
-	Total            int64                         `json:"total,omitempty"`
-	Unit             string                        `json:"unit,omitempty"`
-	CauseCode        string                        `json:"cause_code,omitempty"`
-	IssueCount       int                           `json:"issue_count,omitempty"`
-	Basis            []string                      `json:"basis"`
+	Items            *archiveworkspace.ItemProgress `json:"items,omitempty"`
+	ObservedAt       time.Time                      `json:"observed_at,omitzero"`
+	ManifestChecksum string                         `json:"manifest_checksum,omitempty"`
+	ReviewReasons    []transcription.QualityReason  `json:"review_reasons,omitempty"`
+	ArchiveRunID     string                         `json:"archive_run_id"`
+	InputRevision    uint64                         `json:"input_revision"`
+	Folder           string                         `json:"folder,omitempty"`
+	RelativeVideo    string                         `json:"relative_video"`
+	PathState        string                         `json:"path_state,omitempty"`
+	Stage            string                         `json:"stage"`
+	Completed        int64                          `json:"completed,omitempty"`
+	Total            int64                          `json:"total,omitempty"`
+	Unit             string                         `json:"unit,omitempty"`
+	CauseCode        string                         `json:"cause_code,omitempty"`
+	IssueCount       int                            `json:"issue_count,omitempty"`
+	Basis            []string                       `json:"basis"`
 }
 
 func eventOutput(run string, d organization.OrganizationDecision, first job.State, second []job.State) []EventOutputEvidence {
@@ -119,6 +121,7 @@ func (row *EventOutputEvidence) observeStep(jobID string, step job.Step, duratio
 	}
 	row.Stage = string(step.Workflow.State)
 	row.Basis = []string{jobID, step.Workflow.ID}
+	row.Items = archiveworkspace.ObservedItems(step)
 	if len(step.FailureEvidence) > 0 && (step.Workflow.State == workflow.Failed || step.Workflow.State == workflow.Waiting) {
 		failure := step.FailureEvidence[len(step.FailureEvidence)-1]
 		row.ObservedAt = failure.ObservedAt
@@ -143,6 +146,9 @@ func (row *EventOutputEvidence) observeStep(jobID string, step job.Step, duratio
 	row.Basis = append(row.Basis, progress.EvidenceID)
 	switch {
 	case progress.Update.OutputMillis > 0:
+		if row.Items != nil {
+			duration = row.Items.DurationMillis
+		}
 		row.Completed, row.Total, row.Unit = progress.Update.OutputMillis, duration, "milliseconds"
 	case progress.Update.ProcessPercent > 0:
 		row.Completed, row.Total, row.Unit = int64(progress.Update.ProcessPercent), 100, "percent"

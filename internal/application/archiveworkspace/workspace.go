@@ -35,7 +35,8 @@ type Job struct {
 }
 
 type StepStatus struct {
-	ReusedOutputIDs           []string `json:"reused_output_ids,omitempty"`
+	Items                     *ItemProgress `json:"items,omitempty"`
+	ReusedOutputIDs           []string      `json:"reused_output_ids,omitempty"`
 	ID                        string
 	State                     workflow.StepState
 	Progress                  float64
@@ -91,6 +92,7 @@ type ProjectionInput struct {
 }
 
 type JobSummary struct {
+	Items                  *ItemProgress `json:"items,omitempty"`
 	JobID                  string
 	Revision               uint64
 	TemplateName           string
@@ -150,8 +152,8 @@ func Project(input ProjectionInput) (JobView, error) {
 	summary := JobSummary{
 		JobID: input.Job.ID, Revision: input.Job.Revision,
 		TemplateName: input.Job.TemplateName, TargetTitle: input.Job.TargetTitle,
-		CurrentStepID: current.ID,
-		StepState:     current.State, Progress: current.Progress,
+		CurrentStepID: current.ID, Items: current.Items,
+		StepState: current.State, Progress: current.Progress,
 		ExecutorKind: current.ExecutorKind, ActorID: current.ActorID, WorkerID: current.WorkerID,
 		WaitReason: current.WaitReason, ErrorClass: current.ErrorClass,
 		LastEventAt: current.LastEventAt, LogReference: current.LogReference,

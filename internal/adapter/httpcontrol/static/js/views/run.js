@@ -4,10 +4,10 @@
 // and, folded, the fixed folder scope.
 
 import { html, useComputed } from "../lib.js";
-import { label, formatCount, shortTime, dayTime } from "../core.js";
+import { label, formatCount, itemProgressText, shortTime, dayTime } from "../core.js";
 import {
   ui, store, workOf, workDetail, workDrive, workPhase, workTitle, workScopeText, workText, workKind, driveProblems, folderKey, folderState,
-  folderProgress, jobLane, jobMedia,
+  folderProgress, jobLane, jobMedia, jobOf,
 } from "../store.js";
 import { DiagnoseFailure } from "../agent.js";
 import { route } from "../router.js";
@@ -27,6 +27,8 @@ function RunFacts({ summary }) {
     <${Fact} label="가져올 드라이브 → 저장 위치" value=${`${source} → ${summary.archive_storage_id || "—"}`} />
     <${Fact} label="폴더" value=${formatCount(summary.folder_count)} />
     <${Fact} label="영상" value=${formatCount(summary.video_count)} />
+    ${summary.effective_jobs > 0 && html`<${Fact} label="하위 작업 완료" value=${`${summary.completed_jobs || 0}/${summary.effective_jobs}개`} />`}
+    ${summary.items && html`<${Fact} label="현재 단계" value=${itemProgressText(summary.items)} />`}
   </div>`;
 }
 
@@ -96,8 +98,9 @@ function FolderJobRow({ driveID, name }) {
   const now = (folder.stages || []).find((item) => !["COMPLETED", "FAILED", "CANCELLED"].includes(item.state));
   const word = now ? `${label("stage", now.stage_id)} ${now.state === "WAITING" ? "대기" : "중"}` : "진행 중";
   const href = folder.job_id ? `#/jobs/${encodeURIComponent(folder.job_id)}` : `#/drives/${encodeURIComponent(driveID)}?folder=${encodeURIComponent(name)}`;
+  const items = jobOf(folder.transcription_job_id || folder.job_id)?.items;
   return html`<a class="job-row" href=${href} data-shared="row" data-folder-id=${name} data-job-id=${folder.job_id || null}>
-    <span class="job-name"><b>${name}</b><small>${stage} · 영상 ${formatCount(folder.video_count)} · ${label("disposition", folder.disposition)}</small></span>
+    <span class="job-name"><b>${name}</b>${items && html`<small class="item-progress">${itemProgressText(items)}</small>`}<small>${stage} · 영상 ${formatCount(folder.video_count)} · ${label("disposition", folder.disposition)}</small></span>
     <span class="state"><${StatusIcon} kind="work" /><${Swap} text=${word} /></span>
     <span class="job-progress"><${Meter} value=${folderProgress(folder)} label="진행" /></span>
     <span class="job-time">${folder.last_event_at ? dayTime(folder.last_event_at) : ""}</span>
@@ -120,7 +123,7 @@ function ChildWork({ child }) {
   return html`<div class="child-work" data-job-id=${job.job_id} data-lane=${lane} data-open=${open ? "true" : "false"}>
     <div class="child-line">
       <button type="button" class="child-row" aria-expanded=${open ? "true" : "false"} title=${`${job.job_id}\n작업 PC ${job.worker_id || "배정 없음"}`} onClick=${toggle}>
-        <b>${child.folder || ROLE[child.role] || child.role}</b>
+        <b>${child.folder || ROLE[child.role] || child.role}${job.items && html`<small class="item-progress">${itemProgressText(job.items)}</small>`}</b>
         <span class="muted">${ROLE[child.role] || child.role} · 영상 정보</span>
         <span class="state"><${StatusIcon} kind=${LANE_KIND[lane]} />${LANE_TEXT[lane] || label("step", job.step_state)}</span>
         <span class="cell-meter"><${Meter} value=${job.progress || 0} done=${lane === "done"} label="진행" /><span class="num">${pct}%</span></span>
