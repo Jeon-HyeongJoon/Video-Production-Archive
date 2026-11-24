@@ -38,6 +38,10 @@ func TestWorkCountsCurrentAttemptMediaAndCompletedChildren(t *testing.T) {
 	if multi.EffectiveJobs != 3 || multi.CompletedJobs != 1 || multi.Items != nil {
 		t.Fatal(multi)
 	}
+	s.Workflow.State = workflow.Cancelled
+	if p := archiveworkspace.ObservedItems(s); p.Attempt != 2 || p.Current != 2 || p.Completed != 1 {
+		t.Fatal(p)
+	}
 	s.Workflow.State = workflow.Completed
 	if p := archiveworkspace.ObservedItems(s); p.Completed != 2 || p.Current != 0 {
 		t.Fatal(p)

@@ -59,6 +59,10 @@ func ObservedItems(s job.Step) *ItemProgress {
 		if u.InputIndex < 1 || int(u.InputCount) != p.Total || u.InputIndex > u.InputCount {
 			continue
 		}
+		// A cancelled attempt can retain its last observed file even though it did not record another failure.
+		if s.Workflow.State == workflow.Cancelled {
+			p.Attempt = s.Workflow.Attempt + 1
+		}
 		p.Current, p.Completed, p.PositionMillis = int(u.InputIndex), int(u.InputIndex)-1, u.OutputMillis
 		if spec.Operation == execution.OperationRenderSourceSequence {
 			if timeline := spec.Parameters.SourceTimeline; timeline != nil {
