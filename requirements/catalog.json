@@ -1214,6 +1214,18 @@
       "level": "integration"
     },
     {
+      "id": "TST-002",
+      "design": "test-evidence",
+      "statement": "경량 운영 회귀 검증은 선정한 모든 구현 요구사항의 등록 패키지와 테스트에서 실제 통과 결과를 확인해야 성공한다.",
+      "given": "분류·처리·목적지 기록·Archivist 조회와 복구를 대표하는 요구사항 목록과 Go 테스트 실행 기록이 있다.",
+      "when": "선택 실행 또는 CI 전체 실행의 기록으로 경량 운영 회귀 결과를 판정한다.",
+      "then": "모든 대상의 등록 패키지에 상위 테스트 통과 기록이 있고 그 테스트의 실행 사례가 모두 통과해야 성공하며 누락·건너뜀·실패는 오류로 보고한다.",
+      "test_file": "cmd/testevidence/main_test.go",
+      "test_name": "TestOperationalChecksRequireEverySelectedCatalogTestToPass",
+      "status": "implemented",
+      "level": "integration"
+    },
+    {
       "id": "MED-001",
       "design": "media-inspection-domain",
       "statement": "MediaInspection은 OriginalAsset ID와 checksum에 묶여 컨테이너·길이·크기와 video/audio stream 기술정보를 정규화한 추가 전용 Record여야 한다.",

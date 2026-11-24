@@ -6,9 +6,9 @@
 
 ## 1. 검증 기준선
 
-- 요구사항 353개 중 implemented 303개, planned 50개
-- implemented 요구사항과 주석 테스트 303개가 1:1 연결
-- 설계 분기에 추가한 분류 계약 8개는 planned이며 각각 실행 가능한 선행 테스트 한 개를 갖는다. [분류 사례](16-source-classification-cases.md) · [설계 및 인수 기준](17-source-classification-policy.md)
+- 요구사항 361개 중 implemented 319개, planned 42개
+- implemented 요구사항과 주석 테스트 319개가 1:1 연결
+- 분류 계약 `ORG-019~026`은 각각 기본 검증의 주석 테스트 한 개에 연결된다. [분류 사례](16-source-classification-cases.md) · [설계 및 인수 기준](17-source-classification-policy.md)
 - `make verify`, `go vet ./...` 통과를 변경 인계 조건으로 사용
 - Core는 Application·Adapter와 HTTP·SQLite·FFmpeg·Windows API를 import하지 않음
 - 실제 제품 수직 경로는 Archive Intake와 별도 STT, layout v3 compact 게시·카탈로그 대조까지 연결

@@ -88,3 +88,38 @@ func writeFixture(t *testing.T, path, payload string) {
 		t.Fatal(err)
 	}
 }
+
+// Requirement: TST-002
+func TestOperationalChecksRequireEverySelectedCatalogTestToPass(t *testing.T) {
+	dir := t.TempDir()
+	catalogPath := filepath.Join(dir, "catalog.json")
+	writeFixture(t, catalogPath, `{"requirements":[
+		{"id":"A-001","status":"implemented","level":"integration","test_file":"internal/a/a_test.go","test_name":"TestA"},
+		{"id":"B-001","status":"implemented","level":"integration","test_file":"internal/b/b_test.go","test_name":"TestB"}]}`)
+	const first = `{"Action":"pass","Package":"videoarchive/internal/a","Test":"TestA"}` + "\n"
+	for _, tc := range []struct {
+		name     string
+		second   string
+		wantPass bool
+	}{
+		{"all passed", `{"Action":"pass","Package":"videoarchive/internal/b","Test":"TestB"}`, true},
+		{"missing", "", false},
+		{"skipped", `{"Action":"skip","Package":"videoarchive/internal/b","Test":"TestB"}`, false},
+		{"failed", `{"Action":"fail","Package":"videoarchive/internal/b","Test":"TestB"}`, false},
+		{"same name in another package", `{"Action":"pass","Package":"videoarchive/internal/a","Test":"TestB"}`, false},
+		{"skip followed by pass", `{"Action":"skip","Package":"videoarchive/internal/b","Test":"TestB"}
+{"Action":"pass","Package":"videoarchive/internal/b","Test":"TestB"}`, false},
+		{"only child passed", `{"Action":"pass","Package":"videoarchive/internal/b","Test":"TestB/child"}`, false},
+		{"skipped case in passing test", `{"Action":"skip","Package":"videoarchive/internal/b","Test":"TestB/child"}
+{"Action":"pass","Package":"videoarchive/internal/b","Test":"TestB"}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			input := filepath.Join(t.TempDir(), "test.jsonl")
+			writeFixture(t, input, first+tc.second)
+			err := checkOperational(catalogPath, input, []string{"A-001", "B-001"})
+			if (err == nil) != tc.wantPass {
+				t.Fatalf("pass=%t, error=%v", tc.wantPass, err)
+			}
+		})
+	}
+}

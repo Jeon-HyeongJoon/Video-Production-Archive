@@ -54,7 +54,7 @@ jobs:
         run: |
           mkdir -p "$EVIDENCE_DIR"
           set +e
-          go test -json ./... > "$EVIDENCE_DIR/go-test.jsonl"
+          go test -json -count=1 ./... > "$EVIDENCE_DIR/go-test.jsonl"
           test_status=$?
           set -e
           go run ./cmd/testevidence \
@@ -64,6 +64,10 @@ jobs:
             -revision "${{ github.sha }}" \
             -repository "${{ github.repository }}"
           exit "$test_status"
+
+      - name: Check operational requirements against the same test run
+        if: always()
+        run: go run ./cmd/testevidence -operational -input "$EVIDENCE_DIR/go-test.jsonl"
 
       - name: Check requirement traceability
         if: always()

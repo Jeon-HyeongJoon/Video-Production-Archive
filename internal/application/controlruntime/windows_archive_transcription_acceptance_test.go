@@ -50,7 +50,9 @@ func TestWindowsRecordingCompletesRenderingTranscriptionAndOrganization(t *testi
 	for len(workingRoot) < 152 {
 		workingRoot = filepath.Join(workingRoot, "recording-archive")
 	}
-	sourceFolder := filepath.Join(sourceRoot, "recordings")
+	const folderID = "261124-office/PGM"
+	const sourceRelative = folderID + "/event-master.mov"
+	sourceFolder := filepath.Join(sourceRoot, filepath.FromSlash(folderID))
 	for _, value := range []string{sourceFolder, workingRoot} {
 		if err := os.MkdirAll(value, 0o700); err != nil {
 			t.Fatal(err)
@@ -59,17 +61,17 @@ func TestWindowsRecordingCompletesRenderingTranscriptionAndOrganization(t *testi
 	sourcePath := filepath.Join(sourceFolder, "event-master.mov")
 	fixture := exec.Command(
 		ffmpegExecutable, "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
-		"-f", "lavfi", "-i", "testsrc=size=1280x720:rate=30", "-i", koreanAudio,
+		"-f", "lavfi", "-i", "testsrc=size=640x360:rate=30", "-i", koreanAudio, "-t", "8",
 		"-c:v", "mpeg4", "-q:v", "3", "-c:a", "pcm_s16le", "-shortest", sourcePath,
 	)
 	if output, err := fixture.CombinedOutput(); err != nil {
 		t.Fatalf("create Windows recording fixture: %v: %s", err, output)
 	}
-	sourceCapability, err := archive.OpenStorageRoot(sourceRoot)
+	sourceCapability, err := archive.OpenReadOnlyStorageRoot(sourceRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, originalChecksum, err := sourceCapability.FileSHA256("recordings/event-master.mov")
+	_, originalChecksum, err := sourceCapability.FileSHA256(sourceRelative)
 	sourceCapability.Close()
 	if err != nil {
 		t.Fatal(err)
@@ -227,7 +229,8 @@ worker:
 	})
 
 	cookie, csrfToken := runtimeSession(t, runtime.Handler())
-	startBody := `{"archive_run_id":"RUN-WINDOWS-RECORDING","idempotency_key":"windows-recording:start","session_id":"SESSION-WINDOWS-RECORDING","source_volume_id":"source-volume","expected_candidate_revision":1,"archive_storage_id":"archive-windows","input_revision":1,"folder_ids":["recordings"]}`
+	candidateRevision, inputRevision := windowsInventoryRevisions(t, runtime.Handler(), "source-volume")
+	startBody := fmt.Sprintf(`{"archive_run_id":"RUN-WINDOWS-RECORDING","idempotency_key":"windows-recording:start","session_id":"SESSION-WINDOWS-RECORDING","source_volume_id":"source-volume","expected_candidate_revision":%d,"archive_storage_id":"archive-windows","input_revision":%d,"folder_ids":[%q]}`, candidateRevision, inputRevision, folderID)
 	start := runtimeRequest(runtime.Handler(), http.MethodPost, "/api/v1/archive-intake/runs", startBody, cookie, csrfToken, "http://127.0.0.1:8080")
 	if start.Code != http.StatusCreated {
 		t.Fatalf("start Windows recording organization returned %d: %s", start.Code, start.Body.String())
@@ -389,12 +392,13 @@ worker:
 		finalRow["transcript_path"] != bundle.TranscriptPath || finalRow["transcript_text_path"] != bundle.TranscriptTextPath || finalRow["subtitle_path"] != bundle.SubtitlePath {
 		t.Fatalf("revised catalog: %+v", finalRow)
 	}
-	sourceCapability, err = archive.OpenStorageRoot(sourceRoot)
+	assertWindowsCatalogCurrent(t, workingCapability, bundle)
+	sourceCapability, err = archive.OpenReadOnlyStorageRoot(sourceRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer sourceCapability.Close()
-	_, finalChecksum, err := sourceCapability.FileSHA256("recordings/event-master.mov")
+	_, finalChecksum, err := sourceCapability.FileSHA256(sourceRelative)
 	if err != nil || finalChecksum != originalChecksum {
 		t.Fatalf("Windows recording source changed: before=%s after=%s err=%v", originalChecksum, finalChecksum, err)
 	}

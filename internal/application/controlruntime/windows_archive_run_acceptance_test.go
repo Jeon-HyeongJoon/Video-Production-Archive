@@ -18,12 +18,15 @@ import (
 	"time"
 
 	"videoarchive/internal/adapter/archivebundle"
+	"videoarchive/internal/adapter/archivecatalog"
 	"videoarchive/internal/adapter/bootconfig"
 	"videoarchive/internal/adapter/controlruntime"
 	"videoarchive/internal/adapter/ossecret"
 	"videoarchive/internal/adapter/sqlitecommand"
 	"videoarchive/internal/core/archive"
+	"videoarchive/internal/core/execution"
 	"videoarchive/internal/core/job"
+	"videoarchive/internal/core/organization"
 	"videoarchive/internal/core/vocabulary"
 	"videoarchive/internal/core/workflow"
 )
@@ -60,7 +63,7 @@ func TestWindowsArchiveRunCompletesSourceSequenceAcrossWorkerRestart(t *testing.
 			t.Fatalf("create Windows source fixture %s: %v: %s", name, err, output)
 		}
 	}
-	sourceCapability, err := archive.OpenStorageRoot(sourceRoot)
+	sourceCapability, err := archive.OpenReadOnlyStorageRoot(sourceRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,28 +181,7 @@ worker:
 	})
 
 	cookie, csrfToken := runtimeSession(t, runtime.Handler())
-	var candidateRevision, inputRevision uint64
-	waitForWindowsAcceptance(t, 15*time.Second, "published source folder inventory", func() bool {
-		response := runtimeRequest(runtime.Handler(), http.MethodGet, "/api/v1/archive-intake", "", nil, "", "")
-		var inventory struct {
-			Data []struct {
-				Volume            string `json:"source_volume_id"`
-				CandidateRevision uint64 `json:"candidate_revision"`
-				DiscoveryRevision uint64 `json:"folder_discovery_revision"`
-				State             string `json:"folder_discovery_state"`
-			} `json:"data"`
-		}
-		if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &inventory) != nil {
-			return false
-		}
-		for _, drive := range inventory.Data {
-			if drive.Volume == "source-volume" && drive.State == "READY" && drive.CandidateRevision != 0 && drive.DiscoveryRevision != 0 {
-				candidateRevision, inputRevision = drive.CandidateRevision, drive.DiscoveryRevision
-				return true
-			}
-		}
-		return false
-	})
+	candidateRevision, inputRevision := windowsInventoryRevisions(t, runtime.Handler(), "source-volume")
 	startBody := fmt.Sprintf(`{"archive_run_id":"RUN-WINDOWS-DRIVE","idempotency_key":"windows-drive:start","session_id":"SESSION-WINDOWS-DRIVE","source_volume_id":"source-volume","expected_candidate_revision":%d,"archive_storage_id":"archive-windows","input_revision":%d,"folder_ids":[%q]}`, candidateRevision, inputRevision, folderID)
 	start := runtimeRequest(runtime.Handler(), http.MethodPost, "/api/v1/archive-intake/runs", startBody, cookie, csrfToken, "http://127.0.0.1:8080")
 	if start.Code != http.StatusCreated {
@@ -233,6 +215,7 @@ worker:
 		t.Fatal(err)
 	}
 	outputPaths := make(map[string][]string)
+	var marker execution.StepOutput
 	for _, step := range state.Steps {
 		if step.ExecutorKind != vocabulary.ExecutorWorker {
 			continue
@@ -242,6 +225,9 @@ worker:
 		}
 		for _, output := range step.OutputRecord.Outputs {
 			outputPaths[step.Workflow.ID] = append(outputPaths[step.Workflow.ID], output.RelativePath)
+			if output.Kind == execution.OutputCutMarkers {
+				marker = output
+			}
 		}
 	}
 	if len(outputPaths["sequence_render"]) != 2 || len(outputPaths["qc"]) != 1 || len(outputPaths["organize"]) != 1 || len(outputPaths["archive_catalog"]) != 1 {
@@ -258,15 +244,34 @@ worker:
 	}
 	metadataPayload, err := workingCapability.ReadFile(outputPaths["organize"][0])
 	var metadata archivebundle.Metadata
-	if err != nil || json.Unmarshal(metadataPayload, &metadata) != nil || metadata.Disposition != vocabulary.OrganizationCompileSourceSequence {
+	if err != nil || json.Unmarshal(metadataPayload, &metadata) != nil || metadata.Disposition != vocabulary.OrganizationCompileSourceSequence || metadata.ProfileReference != "archive-1080p-20mbps@v1" {
 		t.Fatalf("Windows organized bundle is incomplete: %s err=%v", metadataPayload, err)
 	}
+	markerBytes, err := workingCapability.ReadFile(marker.RelativePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sidecar struct {
+		Timeline organization.SourceTimeline `json:"timeline"`
+	}
+	if err := json.Unmarshal(markerBytes, &sidecar); err != nil {
+		t.Fatal(err)
+	}
+	timeline := sidecar.Timeline
+	if timeline.Validate() != nil || len(timeline.Markers) != 2 || timeline.Markers[0].AtMillis != 2000 || timeline.Markers[1].AtMillis != 4000 {
+		t.Fatalf("unexpected cut boundaries: %+v", timeline)
+	}
+	_, markerHash, err := workingCapability.FileSHA256(marker.RelativePath)
+	if err != nil || markerHash != marker.Checksum {
+		t.Fatalf("marker differs from its Worker receipt: %v", err)
+	}
+	assertWindowsCatalogCurrent(t, workingCapability, metadata)
 	catalogPayload, err := workingCapability.ReadFile(outputPaths["archive_catalog"][0])
 	if err != nil {
 		t.Fatal(err)
 	}
 	packages := windowsCSVRows(t, catalogPayload, 1)
-	if packages[0]["archive_package_id"] != metadata.PackageID || packages[0]["result_video_path"] != metadata.VideoPath || packages[0]["source_count"] != "3" {
+	if metadata.Revision != 1 || packages[0]["package_revision"] != "1" || packages[0]["archive_package_id"] != metadata.PackageID || packages[0]["result_video_path"] != metadata.VideoPath || packages[0]["source_count"] != "3" {
 		t.Fatalf("catalog does not identify the sequence package: %+v", packages[0])
 	}
 	info, err := workingCapability.ReadFile(metadata.VideoInfoPath)
@@ -283,7 +288,7 @@ worker:
 		}
 		seen[name] = true
 	}
-	sourceCapability, err = archive.OpenStorageRoot(sourceRoot)
+	sourceCapability, err = archive.OpenReadOnlyStorageRoot(sourceRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -298,9 +303,53 @@ worker:
 	evidence, _ := json.Marshal(map[string]any{
 		"requirement_id": "APP-005", "host": hostname, "job_id": jobID,
 		"worker_restarted": true, "sequence_output_count": len(outputPaths["sequence_render"]),
-		"qc": "PASSED", "catalog_rows": len(packages), "source_detail_rows": len(details), "source_checksum_unchanged": true,
+		"cut_marker_millis": []int64{timeline.Markers[0].AtMillis, timeline.Markers[1].AtMillis},
+		"qc":                "PASSED", "catalog_rows": len(packages), "source_detail_rows": len(details), "source_checksum_unchanged": true,
 	})
 	t.Logf("acceptance_evidence=%s", evidence)
+}
+
+func windowsInventoryRevisions(t *testing.T, handler http.Handler, volumeID string) (uint64, uint64) {
+	t.Helper()
+	var candidateRevision, inputRevision uint64
+	waitForWindowsAcceptance(t, 15*time.Second, "published source folder inventory", func() bool {
+		response := runtimeRequest(handler, http.MethodGet, "/api/v1/archive-intake", "", nil, "", "")
+		var inventory struct {
+			Data []struct {
+				Volume            string `json:"source_volume_id"`
+				CandidateRevision uint64 `json:"candidate_revision"`
+				DiscoveryRevision uint64 `json:"folder_discovery_revision"`
+				State             string `json:"folder_discovery_state"`
+			} `json:"data"`
+		}
+		if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &inventory) != nil {
+			return false
+		}
+		for _, drive := range inventory.Data {
+			if drive.Volume == volumeID && drive.State == "READY" && drive.CandidateRevision != 0 && drive.DiscoveryRevision != 0 {
+				candidateRevision, inputRevision = drive.CandidateRevision, drive.DiscoveryRevision
+				return true
+			}
+		}
+		return false
+	})
+	return candidateRevision, inputRevision
+}
+
+func assertWindowsCatalogCurrent(t *testing.T, root *archive.StorageRoot, metadata archivebundle.Metadata) {
+	t.Helper()
+	check, err := archivecatalog.NewReconciler(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := check.Verify()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !report.Current() || report.Coverage.CandidateVideos != 1 || len(report.Entries) != 1 ||
+		report.Entries[0].PackageID != metadata.PackageID {
+		t.Fatalf("destination verification disagrees with published package %s revision %d: %+v", metadata.PackageID, metadata.Revision, report)
+	}
 }
 
 type driveJobView struct {

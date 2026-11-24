@@ -1,4 +1,4 @@
-.PHONY: build build-windows test requirements requirements-lock ontology visual-deps archive-workspace-golden-update archive-workspace-golden-evidence verify
+.PHONY: build build-windows test test-operational requirements requirements-lock ontology visual-deps archive-workspace-golden-update archive-workspace-golden-evidence verify
 
 build:
 	mkdir -p bin
@@ -22,6 +22,9 @@ build-windows:
 
 test:
 	go test ./...
+
+test-operational:
+	go run ./cmd/testevidence -operational
 
 requirements:
 	go run ./cmd/reqcheck

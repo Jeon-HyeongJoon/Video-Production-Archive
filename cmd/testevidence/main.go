@@ -22,6 +22,8 @@ type catalog struct {
 type requirement struct {
 	ID       string `json:"id"`
 	TestName string `json:"test_name"`
+	TestFile string `json:"test_file"`
+	Status   string `json:"status"`
 	Level    string `json:"level"`
 }
 
@@ -73,7 +75,14 @@ func main() {
 	runID := flag.String("run-id", "", "CI run identifier")
 	revision := flag.String("revision", "", "tested git revision")
 	repository := flag.String("repository", "", "repository identifier")
+	operational := flag.Bool("operational", false, "run the lightweight operational checks, or check their results in -input")
 	flag.Parse()
+	if *operational {
+		if err := checkOperational(*catalogPath, *inputPath, operationalIDs); err != nil {
+			fatal(err)
+		}
+		return
+	}
 
 	if *inputPath == "" || *outputDirectory == "" || *runID == "" || *revision == "" {
 		fatal(errors.New("input, output, run-id and revision are required"))

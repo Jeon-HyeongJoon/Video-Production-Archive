@@ -4,12 +4,19 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
+
+	"videoarchive/internal/adapter/archivebundle"
+	"videoarchive/internal/adapter/archivecatalog"
 	"videoarchive/internal/adapter/sqlitecommand"
 	"videoarchive/internal/adapter/sqlitestorage"
+	"videoarchive/internal/adapter/workerconfig"
+	"videoarchive/internal/application/systemstatus"
+	"videoarchive/internal/application/workerexecutor"
+	"videoarchive/internal/core/archive"
 	"videoarchive/internal/core/command"
 	"videoarchive/internal/core/execution"
 	"videoarchive/internal/core/job"
@@ -17,14 +24,12 @@ import (
 	"videoarchive/internal/core/vocabulary"
 	"videoarchive/internal/core/worker"
 	"videoarchive/internal/core/workflow"
-
-	"videoarchive/internal/application/systemstatus"
 )
 
 // Requirement: MCP-014
 func TestDestinationStatusReturnsScopedVerificationEvidenceWithoutRun(t *testing.T) {
 	ctx := context.Background()
-	now := time.Date(2026, 11, 24, 0, 0, 0, 0, time.UTC)
+	now := time.Now().UTC()
 	db := filepath.Join(t.TempDir(), "control.db")
 	records, err := sqlitecommand.Open(db)
 	if err != nil {
@@ -36,8 +41,9 @@ func TestDestinationStatusReturnsScopedVerificationEvidenceWithoutRun(t *testing
 		t.Fatal(err)
 	}
 	defer storages.Close()
-	for _, id := range []string{"PRIMARY", "SECOND"} {
-		if err := storages.Register(ctx, storage.Topology{StorageID: id, VolumeID: "volume-" + id, PhysicalDeviceID: "disk-" + id, PartitionID: "partition-" + id, Role: vocabulary.StorageArchivePrimary, Root: t.TempDir()}); err != nil {
+	rootPaths := map[string]string{"PRIMARY": t.TempDir(), "SECOND": t.TempDir()}
+	for id, rootPath := range rootPaths {
+		if err := storages.Register(ctx, storage.Topology{StorageID: id, VolumeID: "volume-" + id, PhysicalDeviceID: "disk-" + id, PartitionID: "partition-" + id, Role: vocabulary.StorageArchivePrimary, Root: rootPath}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -45,14 +51,88 @@ func TestDestinationStatusReturnsScopedVerificationEvidenceWithoutRun(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	sum := strings.Repeat("b", 64)
-	output := execution.StepOutput{ID: "VERIFY-7", Kind: execution.OutputArchiveCatalogVerification, StorageID: "REPORTS", RelativePath: "J.json", Checksum: sum, CatalogVerification: &execution.CatalogVerification{
-		ArchiveStorageID: "PRIMARY", State: "MISMATCH", ReportID: "VERIFY-7", ReportSHA256: sum, ObservedAt: now, CatalogSHA256: strings.Repeat("a", 64), CurrentPackages: 15, MismatchedPackages: 1, NextCheck: "REVIEW_CATALOG_DIFFERENCES"}}
-	record, err := execution.NewStepOutputRecord(spec, 1, "worker", now, []execution.StepOutput{output}, []string{"verification"})
+	// Publish one indexed and one still-unindexed package. The Worker must report
+	// both from disk before the Archivist can explain this destination.
+	tool := workerconfig.LocalTool{Executable: os.Args[0], Version: "unused-by-catalog"}
+	cfg := workerconfig.Configuration{ID: "worker", AccessibleStorageIDs: []string{"PRIMARY", "REPORTS"}, Tools: workerconfig.MediaTools{FFmpeg: tool, FFprobe: tool},
+		StorageRoots: []workerconfig.StorageRootConfiguration{{StorageID: "PRIMARY", Root: rootPaths["PRIMARY"]}, {StorageID: "REPORTS", Root: t.TempDir()}}}
+	roots, err := workerconfig.OpenStorageRoots(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	payload, err := json.Marshal(job.State{ID: "J", Revision: 1, Steps: []job.Step{{Workflow: workflow.Step{ID: "verify", State: workflow.Completed}, ExecutionSpec: &spec, OutputRecord: &record, LastEventAt: now}}})
+	defer roots.Close()
+	primary := roots.MustRoot("PRIMARY")
+	source, err := archive.OpenStorageRoot(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer source.Close()
+	publisher, err := archivebundle.NewPublisher(source, primary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"indexed", "pending"} {
+		name := id + ".mp4"
+		if err := source.WriteFile(name, []byte(id), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		_, hash, err := source.FileSHA256(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = publisher.PublishInitialCompact(archivebundle.InitialRequest{
+			LayoutVersion: archive.PackageLayoutCompactResultFolder, PackageID: "VP-20261124-" + id, DecisionID: id, WorkspaceDriveID: "source-volume",
+			MediaFolder: id, Disposition: vocabulary.OrganizationAsIs, ProfileReference: "archive-1080p-6mbps@v1", CreatedAt: now,
+			Sources: []archivebundle.SourceReference{{OriginalAssetID: id, OriginalName: name, RelativePath: name, Checksum: hash}},
+			Video:   archivebundle.FileSource{Root: archivebundle.RootSource, Path: name, Checksum: hash},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if id == "indexed" {
+			reconciler, err := archivecatalog.NewReconciler(primary)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := reconciler.Rebuild(); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	registry, err := workerexecutor.NewProduction(cfg, roots)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := registry.ExecuteOperation(ctx, spec, 1)
+	if !result.Success {
+		t.Fatalf("destination verification failed: %s %s", result.CauseCode, result.ErrorSummary)
+	}
+	reports := roots.MustRoot("REPORTS")
+	raw, err := reports.ReadFile("J.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var report archivecatalog.Verification
+	if err := json.Unmarshal(raw, &report); err != nil {
+		t.Fatal(err)
+	}
+	if report.Current() || report.Coverage.CandidateVideos != 2 || len(report.Entries) != 2 || report.ObservedAt.IsZero() {
+		t.Fatalf("unexpected verification report: %+v", report)
+	}
+	_, sum, err := reports.FileSHA256("J.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, catalogHash, err := primary.FileSHA256("archive-catalog.csv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	completedAt := time.Now().UTC()
+	record, err := execution.NewStepOutputRecord(spec, 1, "worker", completedAt, result.Outputs, result.VerificationReferences)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, err := json.Marshal(job.State{ID: "J", Revision: 1, Steps: []job.Step{{Workflow: workflow.Step{ID: "verify", State: workflow.Completed}, ExecutionSpec: &spec, OutputRecord: &record, LastEventAt: completedAt}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +140,7 @@ func TestDestinationStatusReturnsScopedVerificationEvidenceWithoutRun(t *testing
 		t.Fatal(err)
 	}
 	workers := systemStatusWorkers{{WorkerID: "worker", State: "ONLINE", Metrics: worker.Metrics{AccessibleStorageIDs: map[string]bool{"PRIMARY": true}}}}
-	status, err := systemstatus.New(systemStatusWorks{}, workers, systemStatusHosts{}, systemStatusDiagnostics{}, records, func() time.Time { return now })
+	status, err := systemstatus.New(systemStatusWorks{}, workers, systemStatusHosts{}, systemStatusDiagnostics{}, records, func() time.Time { return completedAt })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,8 +168,8 @@ func TestDestinationStatusReturnsScopedVerificationEvidenceWithoutRun(t *testing
 	}
 	a, b := got["PRIMARY"], got["SECOND"]
 	if a["state"] != "MISMATCH" || a["report_id"] != "VERIFY-7" ||
-		a["current_packages"] != 15.0 || a["mismatched_packages"] != 1.0 ||
-		a["catalog_sha256"] != strings.Repeat("a", 64) || a["observed_at"] != "2026-11-24T00:00:00Z" ||
+		a["report_sha256"] != sum || a["current_packages"] != 1.0 || a["mismatched_packages"] != 1.0 ||
+		a["catalog_sha256"] != catalogHash || a["observed_at"] != report.ObservedAt.Format(time.RFC3339Nano) ||
 		a["next_check"] != "REVIEW_CATALOG_DIFFERENCES" {
 		t.Fatalf("missing primary verification evidence: %+v", a)
 	}
@@ -101,5 +181,4 @@ func TestDestinationStatusReturnsScopedVerificationEvidenceWithoutRun(t *testing
 	if err != nil || len(stale.DestinationCatalogs) != 2 || stale.DestinationCatalogs[0].State != "STALE" || stale.DestinationCatalogs[0].ReportSHA256 != sum {
 		t.Fatalf("offline report: %+v %v", stale.DestinationCatalogs, err)
 	}
-
 }
