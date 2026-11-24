@@ -373,6 +373,9 @@ func normalizeRow(row *organization.ArchiveCatalogRow) bool {
 			row.TranscriptPath == "" && row.TranscriptTextPath == "" && row.SubtitlePath == "" && row.Status == "HOLD" &&
 			vocabulary.OrganizationHoldReason(row.HoldReason).Valid()
 	}
+	if !row.Disposition.ProducesMedia() {
+		return false
+	}
 	outputPath, outputOK := normalizePath(row.OutputVideoPath)
 	row.OutputVideoPath = outputPath
 	if !validArchiveDate(row.ArchiveDate) || row.OutputVideoName == "" || row.ArchivePackageID == "" || row.OutputMediaID == "" ||

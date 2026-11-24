@@ -2212,10 +2212,10 @@
     {
       "id": "ORG-003",
       "design": "immutable-organization-override",
-      "statement": "사람 또는 Archivist의 명시적 정리 판정은 최신 MediaFolder 입력 revision을 검사한 새 OrganizationDecision으로 행위자·사유·근거와 함께 추가되고 기존 결정을 수정하지 않아야 한다.",
-      "given": "HOLD OrganizationDecision, 이후 파일이 추가되어 달라진 입력 revision, 구조화된 영상 근거가 없는 HOLD 및 사람과 Archivist의 6Mbps·20Mbps·소스 시퀀스 판정이 있다.",
+      "statement": "사람의 명시적 분류와 노이즈 후보 이외에서 허용되는 Archivist의 명시적 정리 판정은 최신 MediaFolder 입력 revision을 검사한 새 OrganizationDecision으로 행위자·사유·근거와 함께 추가되고 기존 결정을 수정하지 않아야 한다.",
+      "given": "HOLD OrganizationDecision, 이후 파일이 추가되어 달라진 입력 revision, 구조화된 영상 근거가 없는 HOLD 및 사람과 Archivist의 6Mbps·20Mbps·소스 시퀀스 판정이 있다. 카메라 프록시 후보도 있다.",
       "when": "각 행위자가 이전 revision과 최신 revision으로 명시적 분류 Command를 제출한다.",
-      "then": "이전 revision과 영상 근거가 부족한 요청은 상태 변경 없이 거부되고 최신 근거가 있는 요청만 행위자·사유·근거를 가진 새 결정 sequence로 추가되며 기존 HOLD 기록은 그대로 남는다.",
+      "then": "이전 revision과 영상 근거가 부족한 요청은 상태 변경 없이 거부되고 최신 근거가 있는 요청만 행위자·사유·근거를 가진 새 결정 sequence로 추가되며 기존 HOLD 기록은 그대로 남는다. 노이즈 후보에 대한 Archivist 요청은 현재 revision에도 결정을 추가하지 않는다.",
       "test_file": "internal/core/organization/organization_test.go",
       "test_name": "TestExplicitOrganizationClassificationAppendsActorEvidenceAndRejectsStaleRevision",
       "status": "implemented",
@@ -2860,10 +2860,10 @@
     {
       "id": "ORG-014",
       "design": "resolved-hold-folder-job-continuation",
-      "statement": "HOLD의 명시적 분류가 비HOLD 결정으로 추가되면 시스템은 같은 ArchiveRun의 고정 Worker·Storage·PhysicalDevice·입력 revision으로 후속 1단계 Folder Job을 멱등하게 연결해야 한다.",
+      "statement": "HOLD의 명시적 분류가 영상을 게시하는 결정으로 추가되면 시스템은 같은 ArchiveRun의 고정 Worker·Storage·PhysicalDevice·입력 revision으로 후속 1단계 Folder Job을 멱등하게 연결해야 한다.",
       "given": "Folder Job이 없는 HOLD와 같은 분류 Command의 timeout 재전송 및 해당 ArchiveRun의 고정 실행 문맥이 있다.",
-      "when": "사람 또는 Archivist의 유효한 비HOLD 분류를 기록하고 같은 멱등 key로 다시 제출한다.",
-      "then": "새 결정은 한 번 추가되고 같은 ArchiveRun·폴더·Storage·PhysicalDevice 문맥의 Folder Job 효과도 한 번만 생성되며 projection은 더 이상 HOLD나 job_pending으로 남지 않는다.",
+      "when": "일반 보류 폴더에 노이즈 전용 제외를 요청한 뒤 유효한 보관 분류를 기록하고 같은 멱등 key로 다시 제출한다.",
+      "then": "일반 보류의 제외 요청에는 효과가 없고, 보관 결정은 한 번 추가되고 같은 ArchiveRun·폴더·Storage·PhysicalDevice 문맥의 Folder Job 효과도 한 번만 생성되며 projection은 더 이상 HOLD나 job_pending으로 남지 않는다.",
       "test_file": "internal/application/archiveintakeworkspace/service_test.go",
       "test_name": "TestResolvedHoldContinuesSameArchiveRunWithOneIdempotentFolderJob",
       "status": "implemented",
@@ -2956,10 +2956,10 @@
     {
       "id": "MCP-005",
       "design": "archivist-single-hold-classification-capability",
-      "statement": "인증된 MCP 분류 Capability는 고정 선택 안의 최신 HOLD 하나에만 명시적 판정·사유·근거를 추가해야 한다.",
-      "given": "고정 선택 안의 현재 HOLD, 선택 밖 HOLD 및 오래된 입력 revision이 있다.",
+      "statement": "인증된 MCP 분류 Capability는 고정 선택 안의 노이즈 후보 이외의 최신 HOLD 하나에만 명시적 판정·사유·근거를 추가해야 한다.",
+      "given": "고정 선택 안의 현재 HOLD, 선택 안의 노이즈 후보, 선택 밖 HOLD 및 오래된 입력 revision이 있다.",
       "when": "Archivist가 각각을 단일 HOLD 분류 MCP Capability로 제출한다.",
-      "then": "선택 안의 최신 HOLD만 ActorType.ARCHIVIST와 Session 행위자·사유·근거를 가진 새 OrganizationDecision으로 추가되고 선택 밖·오래된 요청은 기존 HOLD를 바꾸지 않는다.",
+      "then": "선택 안의 일반 HOLD만 ActorType.ARCHIVIST와 Session 행위자·사유·근거를 가진 새 OrganizationDecision으로 추가되고 노이즈 후보·선택 밖·오래된 요청은 기존 HOLD를 바꾸지 않는다.",
       "test_file": "internal/adapter/httpmcp/handler_test.go",
       "test_name": "TestMCPClassifiesOneSelectedCurrentHoldWithArchivistProvenance",
       "status": "implemented",
@@ -4332,6 +4332,54 @@
       "then": "각 Storage ID별로 첫 목적지는 MISMATCH·집계·검증 시각·CSV digest·보고서 참조·차이 검토를, 둘째는 NOT_OBSERVED와 검증 요청을 반환한다.",
       "test_file": "internal/adapter/httpmcp/destination_contract_test.go",
       "test_name": "TestDestinationStatusReturnsScopedVerificationEvidenceWithoutRun"
+    },
+    {
+      "id": "ORG-027",
+      "design": "noise-review-evidence",
+      "level": "unit",
+      "status": "implemented",
+      "statement": "노이즈 후보의 직접 폴더는 자동 보류하고 원장에 기록된 파일 근거로 원본 대응 건수와 미확인 건수 및 각각의 대표 경로를 요약해야 한다.",
+      "given": "같은 카드에서 유일한 원본과 대응한 프록시 4개와 미대응 파일 1개, 파일 근거를 수집하지 않은 과거 결정이 있다.",
+      "when": "각 결정의 노이즈 검토 요약을 조회한다.",
+      "then": "현재 폴더는 보류 상태에서 대응 4건·미확인 1건과 각 그룹 최대 3개의 예시를 제공하고 과거 결정은 대응 0건으로 표시한다.",
+      "test_file": "internal/core/organization/noise_review_test.go",
+      "test_name": "TestNoiseReviewSummarizesRecordedMatchesAndExceptions"
+    },
+    {
+      "id": "ORG-028",
+      "design": "human-noise-disposition",
+      "level": "integration",
+      "status": "implemented",
+      "statement": "노이즈 후보의 처리 방법은 사람이 현재 ArchiveRun·폴더·입력 revision·결정을 지정해 선택해야 하며 이번 작업에서 제외한 폴더는 작업을 생성하지 않아야 한다.",
+      "given": "근거가 기록된 보류 폴더에 Archivist 요청, 이전 결정에 대한 요청, 담당자의 보류 유지와 실행 제외 요청이 있다.",
+      "when": "분류를 제출하고 같은 제외 요청을 다시 제출한 뒤 저장된 결정과 실행 상태를 조회한다.",
+      "then": "담당자의 현재 선택만 근거와 행위자를 가진 새 sequence로 남으며 보류 유지 후 제외된 폴더는 Job·패키지·남은 작업 없이 한 번 종결된다.",
+      "test_file": "internal/application/archiveintakeworkspace/noise_review_test.go",
+      "test_name": "TestOnlyCurrentHumanNoiseChoiceCanExcludeFolderWithoutWork"
+    },
+    {
+      "id": "MCP-015",
+      "design": "archivist-noise-review-choices",
+      "level": "integration",
+      "status": "implemented",
+      "statement": "Archivist는 고정 선택 안의 보류 노이즈 후보에서 사람이 고를 처리 방법과 대응·미확인 근거를 읽을 수 있어야 한다.",
+      "given": "선택된 보류 폴더에 대응 원본이 기록된 프록시와 원본을 확인할 수 없는 파일이 함께 있다.",
+      "when": "Archivist가 보류 목록과 해당 폴더 상세를 조회한다.",
+      "then": "양쪽에 같은 확인·미확인 건수와 대표 경로, 사람의 선택 권한 및 가능한 선택지가 표시되고 조회는 분류 결정을 만들지 않는다.",
+      "test_file": "internal/adapter/httpmcp/classification_contract_test.go",
+      "test_name": "TestArchivistListsHumanNoiseChoicesWithRecordedEvidence"
+    },
+    {
+      "id": "DSH-047",
+      "design": "drive-human-noise-choice",
+      "level": "integration",
+      "status": "implemented",
+      "statement": "작업 화면은 노이즈 후보의 근거와 적용 범위를 먼저 표시하고 현재 결정을 보고 담당자가 명시적으로 고른 선택만 제출해야 한다.",
+      "given": "노이즈 후보의 보류 상세에 원본 대응 예시와 미확인 예시가 있고 검토 중 최신 결정 ID가 바뀐다.",
+      "when": "담당자가 상세를 열고 선택한 뒤 결정 갱신을 거쳐 다시 선택·제출한다.",
+      "then": "처음과 갱신 직후에는 선택과 제출이 비어 있고 명시적으로 선택해 적용한 시점에만 해당 최신 결정 ID와 방식이 전송된다.",
+      "test_file": "internal/adapter/httpcontrol/handler_test.go",
+      "test_name": "TestNoiseChoicesRequireAnExplicitSelectionOnTheDisplayedDecision"
     }
   ]
 }

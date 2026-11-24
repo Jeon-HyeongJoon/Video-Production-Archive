@@ -236,6 +236,15 @@ func TestMCPClassifiesOneSelectedCurrentHoldWithArchivistProvenance(t *testing.T
 	if stale.Code != http.StatusConflict || outside.Code != http.StatusConflict || len(state.overrides) != 1 {
 		t.Fatalf("stale or unselected classification changed a HOLD: stale=%d outside=%d overrides=%+v", stale.Code, outside.Code, state.overrides)
 	}
+	t.Run("noise requires operator selection even with proof", func(t *testing.T) {
+		s := holdReviewDriveState(t)
+		s.view.Folders[0].SourceRole = &organization.SourceRoleEvidence{Role: organization.RoleProxy}
+		r := mcpTestRequest(holdReviewMCPHandler(t, s), http.MethodPost, "/mcp/v1/call", archiveToolCall("NOISE-CLASSIFY", ToolOrganizationHoldClassify, input), "secret")
+		if r.Code != http.StatusForbidden || !strings.Contains(r.Body.String(), "MCP_NOISE_REQUIRES_HUMAN_CHOICE") || len(s.overrides) != 0 {
+			t.Fatalf("noise classification: %d %s", r.Code, r.Body.String())
+		}
+	})
+
 }
 
 // Requirement: COL-003

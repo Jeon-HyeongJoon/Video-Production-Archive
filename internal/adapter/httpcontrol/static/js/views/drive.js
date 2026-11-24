@@ -17,6 +17,8 @@ import { route, go, onRepeat, shared } from "../router.js";
 import { StatusIcon, Glyph, GLYPH, Chevron, Swap, Meter, Fold, Presence, Crumbs, Fine, Empty, useLinger } from "../ui.js";
 
 const WORK_CHOICE_LABELS = {
+  "HOLD:0": ["hold", "보류 유지"],
+  "EXCLUDE_FROM_RUN:0": ["exclude", "이번 작업에서 제외 · 원본 유지"],
   "RENDER_RECORDINGS:6000": ["render-6000", "영상별 변환 · 6Mbps"],
   "RENDER_RECORDINGS:20000": ["render-20000", "영상별 변환 · 20Mbps"],
   "COMPILE_SOURCE_SEQUENCE:0": ["source", "여러 영상 합치기"],
@@ -31,8 +33,8 @@ const INFO = {
   classification: ["영상 기술정보와 정책으로 처리 방식 결정 · 원본 그대로 저장 / 영상별 변환 / 여러 영상 합치기 / 직접 선택", "모든 폴더"],
   markers: ["짧은 영상의 순서와 구간 표시 고정 · 합칠 영상 입력", "여러 영상 합치기"],
   render: ["1080p 변환 · 영상별 6Mbps(선택 시 20Mbps) · 여러 영상은 20Mbps로 합침", "영상별 변환 · 여러 영상 합치기"],
-  qc: ["결과 영상을 원본 기술정보·변환 설정과 대조하는 검사", "처리 방법 선택이 필요한 폴더를 뺀 모든 폴더"],
-  archive: ["결과 저장 위치에 복사 · checksum 검증 뒤 저장 완료", "처리 방법 선택이 필요한 폴더를 뺀 모든 폴더"],
+  qc: ["결과 영상을 원본 기술정보·변환 설정과 대조하는 검사", "영상 게시가 결정된 폴더"],
+  archive: ["결과 저장 위치에 복사 · checksum 검증 뒤 저장 완료", "영상 게시가 결정된 폴더"],
   gate: ["영상 정리·저장에 남은 작업이 없으면 Control이 자막·텍스트 작업을 자동으로 이어서 시작", "저장 완료된 원본 그대로 저장 · 영상별 변환"],
   audio: ["음성 인식용 16kHz mono 오디오 준비", "자막·텍스트 대상"],
   transcript: ["음성을 시간 구간 텍스트로 인식", "자막·텍스트 대상"],
@@ -240,7 +242,9 @@ function HoldDecision({ drive: current, folder, open }) {
     const choice = WORK_CHOICE_LABELS[`${option.disposition}:${target}`];
     return choice ? [choice[0], choice[1], option.disposition, target] : null;
   }).filter(Boolean);
-  const chosen = ui.hold.value?.key === folder.folder ? ui.hold.value.choice : "";
+  const review = folder.noise_review;
+  const choiceKey = JSON.stringify([current.archive_run_id, folder.folder, folder.input_revision, folder.decision_id]);
+  const chosen = ui.hold.value?.key === choiceKey ? ui.hold.value.choice : "";
   const [pending, setPending] = useState(false);
   const submit = async () => {
     const option = available.find(([value]) => value === chosen);
@@ -250,7 +254,7 @@ function HoldDecision({ drive: current, folder, open }) {
       await mutation(`/api/v1/archive-intake/${encodeURIComponent(current.workspace_drive_id)}/override`, {
         command_id: newID("COMMAND"), decision_id: newID("DECISION"), idempotency_key: newID("OVERRIDE"),
         archive_run_id: current.archive_run_id, folder: folder.folder,
-        expected_revision: folder.input_revision, disposition: option[2], target_video_bitrate_kbps: option[3],
+        expected_revision: folder.input_revision, expected_decision_id: folder.decision_id, disposition: option[2], target_video_bitrate_kbps: option[3],
       });
       batch(() => { ui.hold.value = null; ui.status.value = `${folder.folder} · ${option[1]}`; });
       await refresh();
@@ -262,9 +266,18 @@ function HoldDecision({ drive: current, folder, open }) {
   };
   return html`<div class="problem-body">
     <span class="muted hold-reasons">선택이 필요한 이유 · ${(folder.hold_reasons || []).map((reason) => label("hold", reason)).join(" · ") || "—"} · 영상 ${formatCount(folder.video_count)}</span>
+    ${review && html`<div class="noise-review" aria-label="노이즈 후보 근거">
+      <strong>${review.kind === "PROJECT_RENDER_CACHE" ? "편집 라이브러리의 렌더 캐시 후보" : "카메라 프록시 후보"}</strong>
+      <p>대응 원본 확인 ${formatCount(review.matched_count)}개 · 미확인 ${formatCount(review.unconfirmed_count)}개</p>
+      ${review.matched_count > 0 && html`<p>같은 카드에서 파일 번호가 대응하고 원본 후보보다 크기가 작습니다.</p>`}
+      ${(review.matched_examples || []).map((item) => html`<div key=${item.relative_path}>${item.relative_path} → ${item.matched_original}</div>`)}
+      ${Object.entries(review.unconfirmed_reasons || {}).map(([reason, count]) => html`<div key=${reason}>${label("noiseReason", reason)} · ${formatCount(count)}개</div>`)}
+      ${(review.unconfirmed_examples || []).map((item) => html`<div key=${item.relative_path}>추가 확인 · ${item.relative_path} · ${label("noiseReason", item.reason_code)}</div>`)}
+      <p>선택은 이 폴더의 영상 전체에 적용됩니다. 이번 작업에서 제외해도 원본은 보존됩니다.</p>
+    </div>`}
     ${available.length ? html`<div class="seg plain-seg hold-choices" role="group" aria-label="처리 방법 선택">
-      ${available.map(([value, text]) => html`<button type="button" key=${value} data-choice=${value} aria-pressed=${chosen === value ? "true" : "false"} disabled=${stale.value}
-        onClick=${() => { ui.hold.value = { key: folder.folder, choice: value }; }}>${text}</button>`)}
+      ${available.map(([value, text]) => html`<button type="button" key=${value} data-choice=${value} aria-pressed=${chosen === value ? "true" : "false"} disabled=${pending || stale.value}
+        onClick=${() => { ui.hold.value = { key: choiceKey, choice: value }; }}>${text}</button>`)}
     </div>` : html`<span class="muted">선택 가능한 작업 없음</span>`}
     <button type="button" class="btn primary" id=${open ? "hold-submit" : null} data-action="hold" disabled=${!chosen || pending || stale.value} onClick=${submit}>${pending ? "적용 중…" : "선택한 방식으로 처리"}</button>
   </div>`;

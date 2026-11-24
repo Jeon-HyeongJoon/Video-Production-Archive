@@ -139,7 +139,7 @@ artifacts/      manifest, checksum, 보고서 같은 작은 검증 산출물
 
 개발 도구 자체의 테스트처럼 요구사항 ID가 없는 테스트도 결과를 기록하되 `requirement_id`를 비우고 `test_category=tooling`으로 구분한다. 실행된 테스트 하나가 `results.jsonl` 레코드 하나에 대응해야 한다. CI는 같은 revision에 대해 요구사항·온톨로지 검사, `go vet`, Linux test와 Windows amd64 cross-build도 수행한다. 요구사항: `TST-001`
 
-`make test-operational`은 임시 저장소와 SQLite를 사용해 원본 검사·역할 분류·HOLD·렌더 명세·마커·QC·음성 추출·전사 게시와 실패 근거·자막·목적지 대조·Archivist 조회와 복구의 대표 요구사항을 캐시 없이 실행한다. 목록은 [검증 도구](../../cmd/testevidence/operational.go)의 요구사항 ID로 관리하고 테스트 패키지와 함수는 카탈로그에서 읽는다. CI는 전체 실행의 같은 JSONL에서 누락·건너뜀·실패를 확인한다. 실환경 미디어 처리의 인수 근거는 Windows에서 `APP-005`와 `APP-007`로 별도 수집한다. `TST-002`
+`make test-operational`은 임시 저장소와 SQLite를 사용해 원본 검사·역할 분류·HOLD·노이즈 후보의 근거와 담당자 선택·렌더 명세·마커·QC·음성 추출·전사 게시와 실패 근거·자막·목적지 대조·Archivist 조회와 복구의 대표 요구사항을 캐시 없이 실행한다. 목록은 [검증 도구](../../cmd/testevidence/operational.go)의 요구사항 ID로 관리하고 테스트 패키지와 함수는 카탈로그에서 읽는다. CI는 전체 실행의 같은 JSONL에서 누락·건너뜀·실패를 확인한다. 실환경 미디어 처리의 인수 근거는 Windows에서 `APP-005`와 `APP-007`로 별도 수집한다. `TST-002`
 
 운영 Windows 장치·GPU·FFmpeg acceptance는 현재 CI 성공과 분리한다. 운영기기가 SSH로 제공되면 별도 승인된 acceptance job이 장비 식별자와 결과를 같은 증적 형식으로 남긴다.
 

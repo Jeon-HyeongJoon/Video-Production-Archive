@@ -395,6 +395,13 @@ func TestWorkspaceAlertsListProblemsAndAnnounceOnlyNewOnes(t *testing.T) {
 	})
 }
 
+// Requirement: DSH-047
+func TestNoiseChoicesRequireAnExplicitSelectionOnTheDisplayedDecision(t *testing.T) {
+	testControlHTTPWorkspace(t, func(t *testing.T, handler http.Handler) {
+		assertArchiveWorkspaceScript(t, handler, "check_noise_review.py")
+	})
+}
+
 // Requirement: DSH-021
 func TestWorkspaceLocksDecisionsWhileRefreshIsStale(t *testing.T) {
 	testControlHTTPWorkspace(t, func(t *testing.T, handler http.Handler) {

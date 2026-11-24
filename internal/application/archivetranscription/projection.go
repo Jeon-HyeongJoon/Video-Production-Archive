@@ -76,6 +76,10 @@ func (projection *JobStageOneProjection) StageOne(ctx context.Context, archiveRu
 		}
 		folder.Decision = decision
 		folder.JobID = archiveorganization.FolderJobID(receipt.ID, receipt.SessionID, receipt.InputRevision, folder.Folder)
+		if decision.Disposition == vocabulary.OrganizationExcludeFromRun {
+			progress = append(progress, archiverun.FolderProgress{FolderID: folder.Folder, Disposition: decision.Disposition, StageOne: workflow.Completed})
+			continue
+		}
 		if decision.Disposition == vocabulary.OrganizationHold {
 			progress = append(progress, archiverun.FolderProgress{
 				FolderID: folder.Folder, Disposition: decision.Disposition, StageOne: workflow.Waiting,

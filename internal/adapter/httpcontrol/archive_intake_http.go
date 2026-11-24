@@ -111,6 +111,7 @@ func projectDriveFolder(folder archiveintakeworkspace.FolderView) driveFolderVie
 		})
 	}
 	projected := driveFolderView{
+		NoiseReview:            folder.NoiseReview,
 		ClassificationEvidence: folder.ClassificationEvidence, EventPreview: folder.EventPreview, CopyCandidates: folder.CopyCandidates, SourceRole: folder.SourceRole, Folder: folder.Folder, DecisionID: folder.DecisionID, InputRevision: folder.InputRevision,
 		DecisionSequence: folder.DecisionSequence, Disposition: string(folder.Disposition),
 		ProfileReference: folder.ProfileReference, HoldReasons: holdReasons, WorkOptions: workOptions, Videos: videos, VideoCount: folder.VideoCount,
@@ -134,6 +135,7 @@ func projectDriveFolder(folder archiveintakeworkspace.FolderView) driveFolderVie
 }
 
 type driveOverrideRequest struct {
+	ExpectedDecisionID     string `json:"expected_decision_id,omitempty"`
 	CommandID              string `json:"command_id"`
 	DecisionID             string `json:"decision_id"`
 	IdempotencyKey         string `json:"idempotency_key"`
@@ -156,7 +158,7 @@ func (handler *Handler) overrideArchiveIntakeDecision(writer http.ResponseWriter
 	decision, err := handler.drives.Override(request.Context(), archiveintakeworkspace.OverrideCommand{
 		CommandID: payload.CommandID, DecisionID: payload.DecisionID, IdempotencyKey: payload.IdempotencyKey,
 		ArchiveRunID: payload.ArchiveRunID, WorkspaceDriveID: request.PathValue("workspaceDriveID"), Folder: payload.Folder,
-		ExpectedInputRevision: payload.ExpectedRevision, Disposition: vocabulary.OrganizationDisposition(payload.Disposition),
+		ExpectedDecisionID: payload.ExpectedDecisionID, ExpectedInputRevision: payload.ExpectedRevision, Disposition: vocabulary.OrganizationDisposition(payload.Disposition),
 		TargetVideoBitRateKbps: payload.TargetVideoBitRateKbps,
 		Actor:                  command.Actor{Type: principal.ActorType, ID: principal.ID}, OccurredAt: time.Now().UTC(),
 	})

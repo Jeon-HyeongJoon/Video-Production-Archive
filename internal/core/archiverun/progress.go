@@ -44,6 +44,9 @@ func EvaluateTranscriptionGate(folders []FolderProgress) (TranscriptionGate, err
 			result.HoldCount++
 			continue
 		}
+		if folder.Disposition == vocabulary.OrganizationExcludeFromRun {
+			continue
+		}
 		switch folder.StageOne {
 		case workflow.Completed, workflow.Failed, workflow.Cancelled:
 		default:

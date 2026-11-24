@@ -37,7 +37,7 @@ func (service *ResolvedFolderService) StartResolvedFolder(
 	if service == nil || service.jobs == nil || intakeSessionID == "" || idempotencyKey == "" || occurredAt.IsZero() ||
 		archiveRun.ID == "" || archiveRun.SourceStorageID == "" || archiveRun.SourcePhysicalDeviceID == "" ||
 		archiveRun.ArchiveStorageID == "" || archiveRun.FolderDiscoveryRevision == 0 ||
-		decision.Disposition == vocabulary.OrganizationHold || decision.InputRevision != archiveRun.FolderDiscoveryRevision ||
+		decision.Disposition == vocabulary.OrganizationHold || decision.Disposition == vocabulary.OrganizationExcludeFromRun || decision.InputRevision != archiveRun.FolderDiscoveryRevision ||
 		decision.WorkspaceDriveID != archiveRun.SourceVolumeID || !archiveRunContainsFolder(archiveRun, decision.Folder) {
 		return "", ErrInvalidRequest
 	}

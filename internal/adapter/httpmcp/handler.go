@@ -863,11 +863,15 @@ func (handler *Handler) listOrganizationHolds(writer http.ResponseWriter, reques
 		if !ok {
 			continue
 		}
-		holds = append(holds, map[string]any{
+		item := map[string]any{
 			"folder": folder.Folder, "decision_id": folder.DecisionID,
 			"decision_sequence": folder.DecisionSequence, "input_revision": folder.InputRevision,
 			"hold_reasons": folder.HoldReasons, "video_count": folder.VideoCount,
-		})
+		}
+		if folder.NoiseReview != nil {
+			item["noise_review"], item["work_options"] = folder.NoiseReview, folder.WorkOptions
+		}
+		holds = append(holds, item)
 	}
 	_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, selection.ArchiveRunID, "COMPLETED")
 	writeJSON(writer, http.StatusOK, map[string]any{"data": map[string]any{
@@ -902,6 +906,7 @@ func (handler *Handler) getOrganizationHold(writer http.ResponseWriter, request 
 		"archive_run_id": selection.ArchiveRunID, "workspace_drive_id": selection.WorkspaceDriveID,
 		"folder": folder.Folder, "decision_id": folder.DecisionID, "decision_sequence": folder.DecisionSequence,
 		"input_revision": folder.InputRevision, "hold_reasons": folder.HoldReasons,
+		"noise_review": folder.NoiseReview, "work_options": folder.WorkOptions,
 		"classification_evidence": evidence, "assets": folder.ClassificationAssets, "source_role": folder.SourceRole,
 	}})
 }
@@ -936,6 +941,10 @@ func (handler *Handler) classifyOrganizationHold(writer http.ResponseWriter, req
 	folder, ok := selectedHold(selection, drive, input.Folder)
 	if !ok || folder.InputRevision != input.ExpectedInputRevision {
 		handler.failHoldTool(writer, request, call, http.StatusConflict, "MCP_HOLD_REFERENCE_STALE", input.Folder)
+		return
+	}
+	if folder.NoiseReview != nil || organization.NoiseCandidateKind(folder.Folder, folder.SourceRole) != "" {
+		handler.failHoldTool(writer, request, call, http.StatusForbidden, "MCP_NOISE_REQUIRES_HUMAN_CHOICE", input.Folder)
 		return
 	}
 	route, err := archivistruntime.RouteArchivistCommand(vocabulary.ActionProcess)

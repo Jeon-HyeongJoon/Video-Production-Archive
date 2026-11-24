@@ -20,9 +20,8 @@ type OverrideRequest struct {
 	DecidedAt              time.Time
 }
 
-// OrganizationWorkOption is one executable first-stage path the current structured media
-// evidence can safely support. It is projected to people and Archivists so an
-// unavailable disposition is not offered and rejected only after submission.
+// OrganizationWorkOption describes a disposition available for the current
+// inputs. Noise review includes retaining the hold and skipping the folder.
 type OrganizationWorkOption struct {
 	Disposition            vocabulary.OrganizationDisposition
 	TargetVideoBitRateKbps int
@@ -30,6 +29,9 @@ type OrganizationWorkOption struct {
 
 func AvailableWorkOptions(decision OrganizationDecision) []OrganizationWorkOption {
 	options := make([]OrganizationWorkOption, 0, 4)
+	if decision.Disposition == vocabulary.OrganizationHold && NoiseCandidateKind(decision.Folder, decision.SourceRole) != "" {
+		options = append(options, OrganizationWorkOption{Disposition: vocabulary.OrganizationHold}, OrganizationWorkOption{Disposition: vocabulary.OrganizationExcludeFromRun})
+	}
 	if allReadyForOrganization(decision.Inputs) {
 		options = append(options, OrganizationWorkOption{Disposition: vocabulary.OrganizationAsIs})
 	}
@@ -64,6 +66,10 @@ func (history *DecisionHistory) RecordOverride(request OverrideRequest) (Organiz
 	if request.ExpectedInputRevision != latest.InputRevision {
 		return OrganizationDecision{}, ErrStaleInputRevision
 	}
+	noise := NoiseCandidateKind(latest.Folder, latest.SourceRole) != ""
+	if noise && (request.DecidedByType != vocabulary.ActorHuman || latest.Disposition != vocabulary.OrganizationHold) {
+		return OrganizationDecision{}, ErrInvalidDecision
+	}
 	basis := normalizeDecisionBasis(request.Basis)
 	if strings.TrimSpace(request.DecisionID) == "" ||
 		(request.DecidedByType != vocabulary.ActorHuman && request.DecidedByType != vocabulary.ActorArchivist) ||
@@ -75,7 +81,9 @@ func (history *DecisionHistory) RecordOverride(request OverrideRequest) (Organiz
 	decision.ID = strings.TrimSpace(request.DecisionID)
 	decision.Sequence++
 	decision.Disposition = request.Disposition
-	decision.ClassificationEvidence = nil
+	if !noise {
+		decision.ClassificationEvidence = nil
+	}
 	decision.EventPreview = nil
 	decision.ProfileReference = ""
 	decision.Actions = nil
@@ -108,7 +116,18 @@ func (history *DecisionHistory) RecordOverride(request OverrideRequest) (Organiz
 			return OrganizationDecision{}, ErrInvalidDecision
 		}
 		decision.Actions = []Action{ActionOrganize}
+	case vocabulary.OrganizationExcludeFromRun:
+		if !noise || request.TargetVideoBitRateKbps != 0 {
+			return OrganizationDecision{}, ErrInvalidDecision
+		}
 	case vocabulary.OrganizationHold:
+		if noise {
+			if request.TargetVideoBitRateKbps != 0 {
+				return OrganizationDecision{}, ErrInvalidDecision
+			}
+			decision.HoldReasons = latest.HoldReasons
+			break
+		}
 		decision.HoldReasons = []vocabulary.OrganizationHoldReason{vocabulary.OrganizationHoldInvalidOverride}
 	}
 	history.decisions = append(history.decisions, cloneDecision(decision))

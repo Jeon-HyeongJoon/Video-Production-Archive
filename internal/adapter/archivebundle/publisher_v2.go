@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"videoarchive/internal/core/archive"
-	"videoarchive/internal/core/vocabulary"
 )
 
 const FlatLayoutVersion = archive.PackageLayoutFlatResultFolder
@@ -33,8 +32,7 @@ func (publisher *Publisher) PublishInitialV2(request InitialRequest) (Package, e
 	request.DecisionID = strings.TrimSpace(request.DecisionID)
 	if request.LayoutVersion != FlatLayoutVersion || !packageIDPattern.MatchString(request.PackageID) ||
 		request.WorkspaceDriveID == "" || request.DecisionID == "" ||
-		len(request.Sources) == 0 || request.CreatedAt.IsZero() || !request.Disposition.Valid() ||
-		request.Disposition == vocabulary.OrganizationHold || strings.TrimSpace(request.ProfileReference) == "" {
+		len(request.Sources) == 0 || request.CreatedAt.IsZero() || !request.Disposition.ProducesMedia() || strings.TrimSpace(request.ProfileReference) == "" {
 		return Package{}, ErrInvalidRequest
 	}
 	lock, err := publisher.acquirePackageLock(request.PackageID)

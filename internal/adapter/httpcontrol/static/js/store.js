@@ -357,6 +357,7 @@ export function driveProblems(current) {
 
 // folderState is the one word a folder row shows when nothing needs a person.
 export function folderState(folder) {
+  if (folder.disposition === "EXCLUDE_FROM_RUN") return { word: "이번 작업에서 제외", signal: "done" };
   const stages = folder.stages || [];
   if (!stages.length) return { word: "—", signal: "idle" };
   if (stages.some((stage) => activeStates.has(stage.state) || (stage.state === "WAITING" && !humanWait.has(stage.wait_reason)))) return { word: "진행 중", signal: "work" };

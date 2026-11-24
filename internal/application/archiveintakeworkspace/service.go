@@ -233,6 +233,7 @@ func (service *Service) Projection(ctx context.Context) ([]DriveView, error) {
 				EstimatedOutputBytes: estimatedOutputBytes(decision),
 				JobID:                folderJobID,
 			}
+			view.NoiseReview = organization.SummarizeNoise(decision, view.VideoCount)
 			classificationState := workflow.Completed
 			classificationWaitReason := vocabulary.WaitReason("")
 			if decision.Disposition == vocabulary.OrganizationHold {
@@ -270,6 +271,8 @@ func (service *Service) Projection(ctx context.Context) ([]DriveView, error) {
 					}
 				}
 				view.CanAddTranscription = view.ArchiveState == archive.PackageStored && organization.TranscriptionEligible(decision, true)
+			} else if decision.Disposition == vocabulary.OrganizationExcludeFromRun {
+				view.CurrentStepID, view.StepState = "excluded_from_run", workflow.Completed
 			} else if decision.Disposition == vocabulary.OrganizationHold {
 				view.CurrentStepID = "resolve_classification"
 				view.StepState = workflow.Waiting
@@ -1251,6 +1254,9 @@ func storedPackage(state job.State) (string, archive.PackageState) {
 
 func summarizeFolders(folders []FolderView) (stageOneRemaining, stageTwoRemaining, holds, eligible int) {
 	for _, folder := range folders {
+		if folder.Disposition == vocabulary.OrganizationExcludeFromRun {
+			continue
+		}
 		if folder.Disposition == vocabulary.OrganizationHold {
 			holds++
 			continue
@@ -1324,6 +1330,10 @@ func (service *Service) Override(ctx context.Context, request OverrideCommand) (
 	if err != nil {
 		return organization.OrganizationDecision{}, err
 	}
+	noise := organization.NoiseCandidateKind(latest.Folder, latest.SourceRole) != ""
+	if request.WorkspaceDriveID != latest.WorkspaceDriveID || ((noise || request.ExpectedDecisionID != "") && request.ExpectedDecisionID != latest.ID) {
+		return organization.OrganizationDecision{}, organization.ErrStaleInputRevision
+	}
 	history, err := organization.NewDecisionHistory(latest)
 	if err != nil {
 		return organization.OrganizationDecision{}, err
@@ -1334,8 +1344,8 @@ func (service *Service) Override(ctx context.Context, request OverrideCommand) (
 		if reason == "" {
 			reason = "explicit operator classification"
 		}
-		if len(basis) == 0 {
-			basis = []string{"previous-decision:" + latest.ID}
+		if noise || len(basis) == 0 {
+			basis = append(basis, "previous-decision:"+latest.ID)
 		}
 	}
 	decision, err := history.RecordOverride(organization.OverrideRequest{
@@ -1357,7 +1367,7 @@ func (service *Service) Override(ctx context.Context, request OverrideCommand) (
 }
 
 func (service *Service) continueResolvedFolder(ctx context.Context, archiveRunID, idempotencyKey string, decision organization.OrganizationDecision, occurredAt time.Time) error {
-	if decision.Disposition == vocabulary.OrganizationHold {
+	if decision.Disposition == vocabulary.OrganizationHold || decision.Disposition == vocabulary.OrganizationExcludeFromRun {
 		return nil
 	}
 	if service.resolvedFolders == nil {
@@ -1397,6 +1407,7 @@ func (service *Service) continueResolvedFolder(ctx context.Context, archiveRunID
 
 func overrideDigest(request OverrideCommand) (string, error) {
 	payload, err := json.Marshal(struct {
+		ExpectedDecisionID     string                             `json:"expected_decision_id,omitempty"`
 		DecisionID             string                             `json:"decision_id"`
 		ArchiveRunID           string                             `json:"archive_run_id"`
 		WorkspaceDriveID       string                             `json:"workspace_drive_id"`
@@ -1408,7 +1419,7 @@ func overrideDigest(request OverrideCommand) (string, error) {
 		Reason                 string                             `json:"reason"`
 		Basis                  []string                           `json:"basis"`
 	}{
-		DecisionID: request.DecisionID, ArchiveRunID: request.ArchiveRunID, WorkspaceDriveID: request.WorkspaceDriveID, Folder: request.Folder,
+		ExpectedDecisionID: request.ExpectedDecisionID, DecisionID: request.DecisionID, ArchiveRunID: request.ArchiveRunID, WorkspaceDriveID: request.WorkspaceDriveID, Folder: request.Folder,
 		ExpectedInputRevision: request.ExpectedInputRevision, Disposition: request.Disposition,
 		TargetVideoBitRateKbps: request.TargetVideoBitRateKbps, Actor: request.Actor,
 		Reason: strings.TrimSpace(request.Reason), Basis: append([]string(nil), request.Basis...),

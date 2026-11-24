@@ -3,6 +3,7 @@ package archiveintakeworkspace_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -526,6 +527,11 @@ func TestResolvedHoldContinuesSameArchiveRunWithOneIdempotentFolderJob(t *testin
 		ArchiveRunID: "ARCHIVE-RUN-1", WorkspaceDriveID: "VOLUME-1", Folder: "hold", ExpectedInputRevision: 7,
 		Disposition: vocabulary.OrganizationAsIs, Actor: command.Actor{Type: vocabulary.ActorArchivist, ID: "archivist:session-1"},
 		Reason: "verified optimized rendition", Basis: []string{"ASSET-1", "INSPECTION-1"}, OccurredAt: now,
+	}
+	invalid := request
+	invalid.Disposition = vocabulary.OrganizationExcludeFromRun
+	if _, err := service.Override(context.Background(), invalid); !errors.Is(err, organization.ErrInvalidDecision) || starter.attempts != 0 || store.latest.Sequence != 1 {
+		t.Fatalf("ordinary HOLD accepted a noise-only choice: %v", err)
 	}
 	first, err := service.Override(context.Background(), request)
 	if err != nil {

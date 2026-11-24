@@ -84,16 +84,21 @@ const (
 	OrganizationAsIs                  OrganizationDisposition = "ORGANIZE_AS_IS"
 	OrganizationRenderRecordings      OrganizationDisposition = "RENDER_RECORDINGS"
 	OrganizationCompileSourceSequence OrganizationDisposition = "COMPILE_SOURCE_SEQUENCE"
+	OrganizationExcludeFromRun        OrganizationDisposition = "EXCLUDE_FROM_RUN"
 	OrganizationHold                  OrganizationDisposition = "HOLD"
 )
 
-func (value OrganizationDisposition) Valid() bool {
+func (value OrganizationDisposition) ProducesMedia() bool {
 	switch value {
-	case OrganizationAsIs, OrganizationRenderRecordings, OrganizationCompileSourceSequence, OrganizationHold:
+	case OrganizationAsIs, OrganizationRenderRecordings, OrganizationCompileSourceSequence:
 		return true
 	default:
 		return false
 	}
+}
+
+func (value OrganizationDisposition) Valid() bool {
+	return value.ProducesMedia() || value == OrganizationHold || value == OrganizationExcludeFromRun
 }
 
 type OrganizationHoldReason string

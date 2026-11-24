@@ -165,8 +165,7 @@ func (publisher *Publisher) PublishInitial(request InitialRequest) (Package, err
 	request.WorkspaceDriveID = strings.TrimSpace(request.WorkspaceDriveID)
 	request.DecisionID = strings.TrimSpace(request.DecisionID)
 	if !packageIDPattern.MatchString(request.PackageID) || request.WorkspaceDriveID == "" || request.DecisionID == "" ||
-		len(request.Sources) == 0 || request.CreatedAt.IsZero() || !request.Disposition.Valid() ||
-		request.Disposition == vocabulary.OrganizationHold || strings.TrimSpace(request.ProfileReference) == "" {
+		len(request.Sources) == 0 || request.CreatedAt.IsZero() || !request.Disposition.ProducesMedia() || strings.TrimSpace(request.ProfileReference) == "" {
 		return Package{}, ErrInvalidRequest
 	}
 	lock, err := publisher.acquirePackageLock(request.PackageID)

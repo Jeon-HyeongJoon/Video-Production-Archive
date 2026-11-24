@@ -18,6 +18,7 @@ import (
 const ClassifyHoldCommand = "organization.hold.classify"
 
 type FolderView struct {
+	NoiseReview            *organization.NoiseReview
 	ClassificationEvidence *organization.ClassificationEvidence
 	EventPreview           *organization.EventPreview
 	CopyCandidates         []string
@@ -74,8 +75,8 @@ type SourceVideoView struct {
 }
 
 type WorkOptionView struct {
-	Disposition            vocabulary.OrganizationDisposition
-	TargetVideoBitRateKbps int
+	Disposition            vocabulary.OrganizationDisposition `json:"disposition"`
+	TargetVideoBitRateKbps int                                `json:"target_video_bitrate_kbps,omitempty"`
 }
 
 type TranscriptQualityView struct {
@@ -185,6 +186,7 @@ type DriveView struct {
 }
 
 type OverrideCommand struct {
+	ExpectedDecisionID     string
 	CommandID              string
 	DecisionID             string
 	IdempotencyKey         string

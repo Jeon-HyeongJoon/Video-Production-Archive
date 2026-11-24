@@ -65,7 +65,7 @@ func (publisher *Publisher) Publish(request Request) (organization.OrganizedMedi
 	mediaID := strings.TrimSpace(request.MediaID)
 	decisionID := strings.TrimSpace(request.DecisionID)
 	if !identifierPattern.MatchString(workspaceDriveID) || !identifierPattern.MatchString(mediaID) || decisionID == "" ||
-		!request.Disposition.Valid() || request.Disposition == vocabulary.OrganizationHold || len(request.Sources) == 0 ||
+		!request.Disposition.ProducesMedia() || len(request.Sources) == 0 ||
 		(request.TranscriptEligible && (request.Transcript == nil || request.Subtitle == nil)) ||
 		(!request.TranscriptEligible && (request.Transcript != nil || request.Subtitle != nil)) {
 		return organization.OrganizedMediaBundle{}, ErrInvalidRequest

@@ -5402,12 +5402,17 @@
         {
           "id": "HOLD",
           "description": "규칙으로 하나의 흐름을 확정하지 못해 사람 또는 허용된 Archivist의 명시적 분류를 기다린다."
+        },
+        {
+          "id": "EXCLUDE_FROM_RUN",
+          "description": "담당자가 노이즈 후보 폴더를 이번 ArchiveRun에서 제외한다. 원본을 보존하고 결과를 생성하지 않는다."
         }
       ],
       "rules": [
         "자동 판정은 고정된 상대 폴더·파일명·검사에서 역할 단서를 추출한다. 기술 단서만으로 행사 경계나 촬영 순서를 확정하지 않는다.",
         "Archivist 추론은 자동 판정과 섞지 않고 현재 HOLD에 대한 별도 추가 전용 OrganizationDecision으로만 기록한다.",
-        "구조화된 근거로도 하나의 흐름을 정하지 못하면 HOLD를 유지한다."
+        "구조화된 근거로도 하나의 흐름을 정하지 못하면 HOLD를 유지한다.",
+        "카메라 프록시와 편집 라이브러리 렌더 캐시 후보는 보류한다. 처리 방법은 담당자가 직접 선택한다."
       ],
       "forbidden": {
         "words": [],
@@ -5434,12 +5439,13 @@
         "en": "Organization Work Choice"
       },
       "code_name": "OrganizationWorkOption",
-      "definition": "현재 MediaFolder의 구조화된 기술 근거로 안전하게 실행할 수 있어 사람 또는 Archivist에게 제시하는 정리 작업과 선택 Profile의 조합.",
+      "definition": "현재 MediaFolder의 근거에 따라 제시하는 정리 판정과 선택 Profile의 조합.",
       "rules": [
         "화면과 MCP에는 서버가 현재 OrganizationDecision 입력으로 검증한 선택지만 제시한다.",
         "그대로 보관은 ORGANIZE_AS_IS 조건을 모두 만족할 때만 제시한다.",
         "명시적 소스 시퀀스는 각 입력을 다시 인코딩하므로 frame rate 차이를 허용하되 concat 전에 필요한 화면 크기와 audio 형태는 같아야 한다.",
-        "작업 선택은 기존 OrganizationDecision을 수정하지 않고 새 결정을 추가한다."
+        "작업 선택은 기존 OrganizationDecision을 수정하지 않고 새 결정을 추가한다.",
+        "노이즈 후보에는 대응 원본 수와 미확인 수, 대표 경로를 함께 제시한다. 담당자가 보류 유지·이번 작업에서 제외 또는 실행 가능한 영상 작업을 고른다. 초기 선택은 비어 있다."
       ],
       "forbidden": {
         "words": [],
@@ -5457,7 +5463,8 @@
       ],
       "sources": [
         "docs/design/09-archive-workspace.md",
-        "docs/design/13-archive-intake.md §4"
+        "docs/design/13-archive-intake.md §4",
+        "docs/design/17-source-classification-policy.md §2.1"
       ],
       "decided": "2026-11-05"
     },
@@ -5538,7 +5545,7 @@
         "같은 입력과 policy version은 같은 자동 판정을 만든다.",
         "v3 자동 결정은 선택 시점의 행사·채널·사본 후보 근거를 고정하고 보류한 직접 파일마다 관찰 사유와 다음 확인 방법을 기록한다. 형식별 폴더명은 파일의 손상·복구 이력을 증명하지 않는다.",
         "사람 또는 Archivist의 명시적 분류는 기존 기록을 수정하지 않고 ActorType·행위자 ID·사유·근거를 가진 새 기록을 추가한다.",
-        "HOLD가 비HOLD 결정으로 해소되면 같은 ArchiveRun의 고정 실행 문맥에 후속 Folder Job을 멱등하게 연결한다.",
+        "HOLD에서 영상 게시 방식이 결정되면 같은 ArchiveRun의 고정 실행 문맥에 후속 Folder Job을 멱등하게 연결한다.",
         "HOLD에는 하나 이상의 정리 보류 사유가 있어야 한다."
       ],
       "forbidden": {

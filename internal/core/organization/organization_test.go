@@ -80,6 +80,18 @@ func TestExplicitOrganizationClassificationAppendsActorEvidenceAndRejectsStaleRe
 	if !errors.Is(err, ErrStaleInputRevision) || len(history.Decisions()) != 1 {
 		t.Fatalf("stale override changed history: decisions=%+v err=%v", history.Decisions(), err)
 	}
+	noise := initial
+	noise.Folder = "card/M4ROOT/SUB"
+	noiseHistory, err := NewDecisionHistory(noise)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = noiseHistory.RecordOverride(OverrideRequest{DecisionID: "agent-choice", ExpectedInputRevision: 7,
+		Disposition: vocabulary.OrganizationRenderRecordings, TargetVideoBitRateKbps: 20_000, DecidedByType: vocabulary.ActorArchivist,
+		DecidedBy: "archivist:session-1", Reason: "review", Basis: []string{initial.ID}, DecidedAt: time.Now().UTC()})
+	if !errors.Is(err, ErrInvalidDecision) || len(noiseHistory.Decisions()) != 1 {
+		t.Fatal("Archivist must leave the noise disposition to the operator", err)
+	}
 	actors := []struct {
 		id        string
 		actorType vocabulary.ActorType

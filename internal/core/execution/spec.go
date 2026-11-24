@@ -291,7 +291,7 @@ func (spec StepExecutionSpec) validWithoutDigest() bool {
 	if spec.Parameters.MediaFolder != "" && !safeRelative(spec.Parameters.MediaFolder) {
 		return false
 	}
-	if spec.Parameters.Disposition != "" && !spec.Parameters.Disposition.Valid() {
+	if spec.Parameters.Disposition == vocabulary.OrganizationExcludeFromRun || (spec.Parameters.Disposition != "" && !spec.Parameters.Disposition.Valid()) {
 		return false
 	}
 	seenOutputs := make(map[string]bool, len(spec.Outputs))

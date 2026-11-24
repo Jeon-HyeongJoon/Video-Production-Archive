@@ -3,8 +3,12 @@ package httpmcp
 import (
 	"encoding/json"
 	"net/http"
+	"reflect"
 	"slices"
 	"testing"
+	"videoarchive/internal/application/archiveintakeworkspace"
+	"videoarchive/internal/core/organization"
+	"videoarchive/internal/core/vocabulary"
 )
 
 // Requirement: ORG-023
@@ -123,5 +127,47 @@ func TestArchiveRunStatusReportsEventOutputWorkEvidence(t *testing.T) {
 	}
 	if !states["RENDERING"] || !states["FAILED"] || !states["STORED"] || !states["SUBTITLE_REVIEW"] {
 		t.Errorf("missing evidence: %v", states)
+	}
+}
+
+// Requirement: MCP-015
+func TestArchivistListsHumanNoiseChoicesWithRecordedEvidence(t *testing.T) {
+	state := holdReviewDriveState(t)
+	f := &state.view.Folders[0]
+	f.NoiseReview = &organization.NoiseReview{Kind: "CAMERA_PROXY", DecisionAuthority: "HUMAN", Matched: 8, Unconfirmed: 1,
+		MatchedExamples:     []organization.NoiseReviewExample{{RelativePath: "SUB/C0001S01.mp4", MatchedOriginal: "CLIP/C0001.mp4", ReasonCode: "MATCHED_PROXY"}},
+		UnconfirmedExamples: []organization.NoiseReviewExample{{RelativePath: "SUB/C0002S01.mp4", ReasonCode: "UNPAIRED_PROXY"}}}
+	f.WorkOptions = []archiveintakeworkspace.WorkOptionView{{Disposition: vocabulary.OrganizationHold}, {Disposition: vocabulary.OrganizationExcludeFromRun}}
+	handler := holdReviewMCPHandler(t, state)
+	for _, tool := range []string{ToolOrganizationHoldsList, ToolOrganizationHoldGet} {
+		input := "{}"
+		if tool == ToolOrganizationHoldGet {
+			input = `{"folder":"recordings"}`
+		}
+		resp := mcpTestRequest(handler, http.MethodPost, "/mcp/v1/call", archiveToolCall("READ", tool, input), "secret")
+		var body struct {
+			Data json.RawMessage `json:"data"`
+		}
+		if resp.Code != http.StatusOK || json.Unmarshal(resp.Body.Bytes(), &body) != nil {
+			t.Fatal(resp.Body.String())
+		}
+		data := body.Data
+		if tool == ToolOrganizationHoldsList {
+			var list struct {
+				Holds []json.RawMessage `json:"holds"`
+			}
+			if json.Unmarshal(data, &list) != nil || len(list.Holds) != 1 {
+				t.Fatal(string(data))
+			}
+			data = list.Holds[0]
+		}
+		var item struct {
+			Review   *organization.NoiseReview               `json:"noise_review"`
+			Options  []archiveintakeworkspace.WorkOptionView `json:"work_options"`
+			Decision string                                  `json:"decision_id"`
+		}
+		if json.Unmarshal(data, &item) != nil || !reflect.DeepEqual(item.Review, f.NoiseReview) || !slices.Equal(item.Options, f.WorkOptions) || item.Decision != f.DecisionID || len(state.overrides) != 0 {
+			t.Fatalf("noise evidence or options lost: %s", data)
+		}
 	}
 }

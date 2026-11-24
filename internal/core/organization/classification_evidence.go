@@ -31,6 +31,7 @@ func (d *OrganizationDecision) recordHold(context EventContext, inputs []Input) 
 	if len(d.Inputs) > 0 {
 		inputs = d.Inputs
 	}
+	noiseKind := NoiseCandidateKind(d.Folder, d.SourceRole)
 	for _, v := range inputs {
 		if !safeRelative(v.RelativePath) {
 			continue
@@ -65,7 +66,9 @@ func (d *OrganizationDecision) recordHold(context EventContext, inputs []Input) 
 			f.ReasonCode = "MATCHED_PROXY"
 			f.NextCheck = "REVIEW_MATCHED_ORIGINAL"
 			f.Basis = append(f.Basis, v.MatchedOriginal)
-		case CameraProxyDirectory(d.Folder):
+		case noiseKind == "PROJECT_RENDER_CACHE":
+			f.ReasonCode, f.NextCheck = "PROJECT_RENDER_CACHE", "CHECK_PROJECT_ORIGINAL"
+		case noiseKind == "CAMERA_PROXY":
 			f.ReasonCode = "UNPAIRED_PROXY"
 			f.NextCheck = "FIND_CARD_ORIGINAL"
 		case context.InputRevision != 0 && context.EventFolder == "":

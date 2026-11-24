@@ -6,8 +6,8 @@
 
 ## 1. 검증 기준선
 
-- 요구사항 361개 중 implemented 319개, planned 42개
-- implemented 요구사항과 주석 테스트 319개가 1:1 연결
+- 요구사항 365개 중 implemented 323개, planned 42개
+- implemented 요구사항과 주석 테스트 323개가 1:1 연결
 - 분류 계약 `ORG-019~026`은 각각 기본 검증의 주석 테스트 한 개에 연결된다. [분류 사례](16-source-classification-cases.md) · [설계 및 인수 기준](17-source-classification-policy.md)
 - `make verify`, `go vet ./...` 통과를 변경 인계 조건으로 사용
 - Core는 Application·Adapter와 HTTP·SQLite·FFmpeg·Windows API를 import하지 않음
@@ -128,7 +128,7 @@ flowchart TD
 - 자동 분류는 기술 관찰값과 versioned policy만 사용한다.
 - HOLD는 외부 Step을 만들지 않고 `WAITING/INPUT`으로 투영한다.
 - HOLD는 Control 원장과 작업 공간에 남고 layout v3 루트 Catalog 행은 만들지 않는다.
-- 사람 또는 Archivist가 실행 ID·최신 revision·근거를 붙여 명시적으로 분류하면 같은 ArchiveRun에 Folder Job을 한 번 연결한다.
+- 영상 게시를 선택하면 사람 또는 Archivist의 실행 ID·최신 revision·근거를 확인해 같은 ArchiveRun에 Folder Job을 한 번 연결한다. 노이즈 후보는 Archivist가 근거와 선택지를 보여주며 담당자만 처리 방식을 결정한다.
 
 ### 보관과 기록
 

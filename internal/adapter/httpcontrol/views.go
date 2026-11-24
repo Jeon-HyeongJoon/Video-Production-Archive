@@ -178,6 +178,7 @@ type driveStorageView struct {
 }
 
 type driveFolderView struct {
+	NoiseReview            *organization.NoiseReview            `json:"noise_review,omitempty"`
 	ClassificationEvidence *organization.ClassificationEvidence `json:"classification_evidence,omitempty"`
 	EventPreview           *organization.EventPreview           `json:"event_preview,omitempty"`
 	CopyCandidates         []string                             `json:"copy_candidates,omitempty"`

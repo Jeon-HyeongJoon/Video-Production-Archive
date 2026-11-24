@@ -243,7 +243,7 @@ func (coordinator *Coordinator) settleFolders(ctx context.Context, request Reque
 			return Result{}, err
 		}
 		folderResult := organization.CoordinatedFolder{Folder: folderID, Decision: decision}
-		if decision.Disposition != vocabulary.OrganizationHold {
+		if decision.Disposition.ProducesMedia() {
 			jobID, err := coordinator.createFolderJob(request, decision)
 			if err != nil {
 				return Result{}, err

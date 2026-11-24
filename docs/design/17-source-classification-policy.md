@@ -20,7 +20,15 @@
 3. **검사 비용과 관측.** 분류를 위해 프레임·오디오를 디코딩하지 않는다. 구조와 파일명으로 먼저 검토 대상을 좁히고 선택된 영상은 기존 MediaInspection에 연결한다. 해상도, 길이, 영상 스트림 비트레이트, 오디오 유무, 순번, 호환성 및 읽기 오류를 구별한다. 완전한 캐시 키는 원본 identity·checksum과 검사기 버전을 포함한다. 재실행의 검사 기록과 원래 관측 참조는 각각 유지한다. 누락된 헤더값은 미상으로 남긴다. `ORG-012`, `ORG-018`
 4. **자동 결정.** v3에서는 확인된 역할과 실행 조건이 함께 있어야 한다. 행사·순서 미확인 원본, 편집 입력·결과, 행사·채널 대응이 없는 고정캠 단독, 충돌, 순서·기술정보 미확인, 유일 원본 가능성은 자동 렌더를 막는다. 역할 미상의 단일 영상이 6 Mbps 규격에 맞거나 장시간이라는 이유만으로 그대로 보관하거나 렌더하지 않는다. 이는 이름 관례가 없는 경우 기술 판정으로 내려가던 v2에서 달라지는 부분이다. 과거 v1·v2 결정과 기존 명시적 작업 옵션은 해당 버전에 고정한다. `ORG-002`, `ORG-016`, `ORG-021`
 5. **사본 후보.** 완전한 목록에서 두 직접 폴더의 지원 영상 파일명·크기 다중집합이 같을 때만 폴더 전체를 사본 후보로 연결한다. 부분 일치는 완전 사본으로 표시하지 않는다. 비교는 목록 인덱스로 처리하고, 같은 후보 버킷만 실제 목록을 재대조한다. byte 일치 확인이 업무상 필요할 때만 개별 checksum을 대조한다. checksum이 일치해도 두 경로의 provenance를 보존하며 사본 표시는 작업 입력 생략·삭제 권한을 부여하지 않는다. 단, 다른 날짜의 서로 다른 행사에 동일 목록이 있으면 행사 귀속 자체가 충돌하므로 해당 결과의 자동 게시를 보류한다. 같은 행사·같은 위치의 부모·자식에 각각 장시간 파일이 있으면 별도 촬영인지 가공본인지 확인할 때까지 두 결과를 보류한다. `ORG-022`
-6. **결정·게시.** 실행 결정은 ArchiveRun, 선택한 Worker·Storage·물리 장치, 입력 revision, 정책 버전, 실제 검사 ID와 근거를 고정한다. 미확인 역할은 HOLD이며 Job과 결과 패키지를 만들지 않는다. Archivist는 실제 추가 근거를 얻으면 선정된 HOLD 하나에 대해 기존 명시 분류 명령으로 새 결정을 남길 수 있다. 원래 사유를 덮어쓰지 않고 최신 decision sequence와 입력 revision을 확인한다. 동일 명령 재전송은 한 번만 반영한다. `ORG-003`, `ORG-014`, `MCP-004~005`
+6. **결정·게시.** 실행 결정은 ArchiveRun, 선택한 Worker·Storage·물리 장치, 입력 revision, 정책 버전, 실제 검사 ID와 근거를 고정한다. 미확인 역할은 HOLD이며 Job과 결과 패키지를 만들지 않는다. Archivist는 실제 추가 근거를 얻으면 노이즈 후보 이외의 선정된 HOLD 하나에 대해 기존 명시 분류 명령으로 새 결정을 남길 수 있다. 원래 사유를 덮어쓰지 않고 최신 decision sequence와 입력 revision을 확인한다. 동일 명령 재전송은 한 번만 반영한다. `ORG-003`, `ORG-014`, `MCP-004~005`
+
+### 2.1 노이즈 후보 검토와 담당자의 선택
+
+카드의 `M4ROOT/SUB`·`XDROOT/Sub` 계열, 검사에 프록시 역할이 기록된 폴더, Final Cut 라이브러리의 `Render Files` 아래 지원 영상은 직접 폴더별로 보류한다. 일반 편집 결과나 이름이 비슷한 폴더까지 일괄 제외하지 않는다. 카메라 프록시의 대응 건수는 결정에 같은 카드의 유일한 원본 경로·파일 번호 대응·크기 관계가 기록된 파일만 센다. 렌더 캐시 경로나 예전 기록의 빈 근거는 미확인으로 집계한다. `ORG-027`
+
+Archivist는 선택된 실행의 보류 목록에서 폴더별로 대응·미확인 건수, 각 그룹의 대표 경로 최대 3개와 예외 사유별 건수, 가능한 처리 방법을 제시한다. 대응 예시는 원본 경로도 함께 보여준다. 담당자는 예외가 섞였는지 먼저 보고 필요할 때 해당 폴더의 파일별 근거를 확인한다. 화면의 초기 선택은 비어 있다. `MCP-015`, `DSH-047`
+
+담당자는 **보류 유지**, **이번 작업에서 제외** 또는 검사값이 허용하는 보관·렌더 방식을 직접 선택한다. 선택 범위는 표시된 실행의 직접 폴더 전체다. 대응·미확인 파일이 섞인 폴더도 같은 범위를 사용한다. 분류 요청은 본 ArchiveRun·폴더·입력 revision·최신 결정 ID에 묶인다. 결정이 바뀌면 다시 선택한다. 제외 결정에는 담당자, 기존 결정 참조와 근거가 남는다. 원본은 그대로 보존하고 해당 실행의 렌더·STT·패키지·카탈로그 게시 대상에서 빠진다. Archivist의 분류 도구로는 어떤 선택도 대신 확정할 수 없다. `ORG-028`, `MCP-005`
 
 ## 3. 실행과 목적지
 
@@ -94,6 +102,10 @@ powershell -NoProfile -ExecutionPolicy RemoteSigned -File C:/Archive/scratch/sou
 | ORG-024 | 원래 행사명에서 만든 단층 목적지의 채널별 파일과 sidecar 미리보기 | TestInventoryPreviewsOneDirectoryPerSourceEvent |
 | ORG-025 | 행사 내부의 검증된 단일 위치 촬영분과 불명확한 분할 구별 | TestV3PreservesEachCorroboratedPositionRecording |
 | ORG-026 | Archivist가 행사별 채널 진행·실패·게시 근거를 조회 | TestArchiveRunStatusReportsEventOutputWorkEvidence |
+| ORG-027 | 원본 대응과 미확인 파일의 건수·대표 근거 | TestNoiseReviewSummarizesRecordedMatchesAndExceptions |
+| ORG-028 | 최신 결정을 본 담당자의 이번 실행 제외와 원장 | TestOnlyCurrentHumanNoiseChoiceCanExcludeFolderWithoutWork |
+| MCP-015 | 대리 선택 없이 노이즈 근거·선택지 조회 | TestArchivistListsHumanNoiseChoicesWithRecordedEvidence |
+| DSH-047 | 근거 표시와 결정 갱신 후 명시적 재선택 | TestNoiseChoicesRequireAnExplicitSelectionOnTheDisplayedDecision |
 
 각 주석 테스트는 기본 `go test ./...`에 포함된다. Worker의 직접 확장자 집계에는 빈 폴더도 포함한다. 완료 목록의 전체 파일명·크기를 비교한 뒤 선택 범위의 근거를 ArchiveRun에 고정한다. 선택과 검사 사이에 직속 목록이 달라지면 재탐색을 요청한다. 처음 연결하기 전부터 없던 첫 컷·끝 컷은 카드 인수 기록과 대조해야 확인할 수 있다.
 

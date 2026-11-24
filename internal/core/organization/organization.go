@@ -158,6 +158,10 @@ func Classify(request AutoRequest) (decision OrganizationDecision, err error) {
 		positionVerified := false
 		if request.Policy.Version == DrivePolicyVersion {
 			ctx := request.EventContext
+			if NoiseCandidateKind(folder, &role) != "" {
+				decision.HoldReasons = []vocabulary.OrganizationHoldReason{vocabulary.OrganizationHoldSourceRole}
+				return decision, nil
+			}
 			if (ctx.InputRevision != 0 && ctx.EventFolder == "") || ctx.ListingChanged || len(ctx.ConflictingEventFolders) > 0 || len(ctx.OverlappingPositionFolders) > 0 || ctx.EditorialWitness != "" || editorialPath(folder) {
 				decision.HoldReasons = []vocabulary.OrganizationHoldReason{vocabulary.OrganizationHoldSourceRole}
 				return decision, nil

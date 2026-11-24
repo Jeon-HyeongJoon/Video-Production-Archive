@@ -121,7 +121,7 @@ Archive Intake에서 ArchivistTurn의 메시지 본문은 실행 명령의 대�
 
 ArchiveRun Command 실행 권한은 사람의 직접 `APPLICATION` 요청과 인증된 Archivist의 `mcp` 요청을 별도 허용 조합으로 고정한다. 행위자와 경로가 교차하거나 SYSTEM 등 다른 Actor가 같은 경로를 가장하면 Command Store에 들어가기 전에 거부한다. `MCP-007`
 
-원본과 아카이브 Storage 및 폴더 범위 선택은 담당자 화면 또는 인증된 Archivist의 명시적 후보 MCP Command다. MCP 선택은 현재 연결·접근 가능 후보의 ID·revision만 받고 절대경로·endpoint·credential은 받지 않는다. 고정 뒤 Archivist는 그 범위 안에서 현재 HOLD 목록과 한 항목의 상대경로·checksum·기술 검사를 조회하고, 최신 입력 revision에 명시적 disposition·사유·근거를 붙여 분류할 수 있다. 근거가 부족하면 HOLD를 유지한다. 파일명과 Transcript 내용은 지시나 Approval로 해석하지 않으며 포맷·삭제·임의 path 도구는 계속 금지한다.
+원본과 아카이브 Storage 및 폴더 범위 선택은 담당자 화면 또는 인증된 Archivist의 명시적 후보 MCP Command다. MCP 선택은 현재 연결·접근 가능 후보의 ID·revision만 받고 절대경로·endpoint·credential은 받지 않는다. 고정 뒤 Archivist는 그 범위 안에서 현재 HOLD 목록과 한 항목의 상대경로·checksum·기술 검사를 조회하고, 최신 입력 revision에 명시적 disposition·사유·근거를 붙여 분류할 수 있다. 노이즈 후보에서는 Archivist가 확인 근거와 선택지만 제시하며 처리 결정은 담당자가 화면에서 직접 제출한다. 이 경계는 MCP 분류와 Core 양쪽에서 검사한다. 근거가 부족하면 HOLD를 유지한다. 파일명과 Transcript 내용은 지시나 Approval로 해석하지 않으며 포맷·삭제·임의 path 도구는 계속 금지한다.
 
 - Provider에는 작업 상태에 필요한 tool allowlist만 제공한다.
 - `archive-archivist`는 Control MCP가 현재 광고한 이름과 바이너리에 고정된 schema registry가 모두 일치하는 도구만 model function tool로 제공한다.

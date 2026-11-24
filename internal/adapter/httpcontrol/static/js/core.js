@@ -77,7 +77,8 @@ export const labels = {
   metadataHint: { LONG_HD_WITH_AUDIO: "장시간 HD·오디오 녹화 후보", SHORT_HIGH_BITRATE_CAMERA_CANDIDATE: "단시간 고비트레이트 촬영컷 후보" },
   drive: { UNCLASSIFIED: "아직 처리 안 함", IN_PROGRESS: "처리 중", HAS_HOLD: "처리 방법 선택 필요", COMPLETED: "최근 작업 완료", CONTENT_CHANGED: "드라이브 내용 변경" },
   run: { STAGE_ONE_RUNNING: "영상 정리·저장 중", TRANSCRIPTION_READY: "자막·텍스트 자동 시작 중", STAGE_TWO_RUNNING: "자막·텍스트 만드는 중", COMPLETED: "작업 완료" },
-  disposition: { ORGANIZE_AS_IS: "원본 그대로 저장", RENDER_RECORDINGS: "영상별 변환", COMPILE_SOURCE_SEQUENCE: "여러 영상 합치기", HOLD: "처리 방법 선택 필요" },
+  noiseReason: { NOT_RECORDED: "파일별 대응 근거 미수집", UNPAIRED_PROXY: "대응 원본 미확인", PROJECT_RENDER_CACHE: "프로젝트 원본 대조 필요", LISTING_CHANGED: "선택 후 목록 변경", EVENT_CONFLICT: "행사 경계 충돌", EDITORIAL_INPUT: "편집 입력 관계 확인 필요", MISSING_INSPECTION: "기술 검사 누락", POSITION_OVERLAP: "촬영 범위 중복" },
+  disposition: { EXCLUDE_FROM_RUN: "이번 작업에서 제외", ORGANIZE_AS_IS: "원본 그대로 저장", RENDER_RECORDINGS: "영상별 변환", COMPILE_SOURCE_SEQUENCE: "여러 영상 합치기", HOLD: "처리 방법 선택 필요" },
   wait: { INPUT: "직접 입력", APPROVAL: "승인", DEVICE: "장비 연결", MEMORY: "메모리 여유", SCRATCH: "작업 공간", SLOT: "처리 순서", DISK: "디스크 여유", IDLE: "시작 시점", PRIORITY: "우선순위" },
   hold: {
     SOURCE_ROLE_REVIEW: "원본 역할·순서 확인 필요", NO_MEDIA: "영상 없음", MISSING_INSPECTION: "검사 없음", AMBIGUOUS_MULTIPLE_VIDEOS: "영상 여러 개", MIXED_READY_STATE: "상태 혼재",

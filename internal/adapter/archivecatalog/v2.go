@@ -548,8 +548,7 @@ func normalizePackageRow(row *PackageRow) bool {
 	}
 	if (row.LayoutVersion != archive.PackageLayoutFlatResultFolder && row.LayoutVersion != archive.PackageLayoutCompactResultFolder && row.LayoutVersion != archive.PackageLayoutEventFolder) ||
 		row.PackageID == "" || row.Revision == 0 ||
-		!checksumPattern.MatchString(row.ManifestDigest) || !row.ArchiveState.Valid() || !row.Disposition.Valid() ||
-		row.Disposition == vocabulary.OrganizationHold || row.SourceCount <= 0 || row.ResultTitle == "" ||
+		!checksumPattern.MatchString(row.ManifestDigest) || !row.ArchiveState.Valid() || !row.Disposition.ProducesMedia() || row.SourceCount <= 0 || row.ResultTitle == "" ||
 		row.ResultFolder == "" || row.ResultFolder != path.Base(row.ResultFolder) || strings.HasPrefix(row.ResultFolder, ".") ||
 		row.ResultVideoPath != path.Join(row.ResultFolder, row.ResultTitle) || row.ProfileReference == "" ||
 		row.CompletedAt.IsZero() || row.WorkspaceDriveID == "" || row.DecisionID == "" {

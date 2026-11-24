@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"videoarchive/internal/core/archive"
-	"videoarchive/internal/core/vocabulary"
 )
 
 const CompactLayoutVersion = archive.PackageLayoutCompactResultFolder
@@ -48,7 +47,7 @@ func (publisher *Publisher) PublishInitialCompact(request InitialRequest) (Packa
 	request.DecisionID = strings.TrimSpace(request.DecisionID)
 	if request.LayoutVersion != CompactLayoutVersion || !packageIDPattern.MatchString(request.PackageID) ||
 		request.WorkspaceDriveID == "" || request.DecisionID == "" || len(request.Sources) == 0 ||
-		request.CreatedAt.IsZero() || !request.Disposition.Valid() || request.Disposition == vocabulary.OrganizationHold ||
+		request.CreatedAt.IsZero() || !request.Disposition.ProducesMedia() ||
 		strings.TrimSpace(request.ProfileReference) == "" {
 		return Package{}, ErrInvalidRequest
 	}
