@@ -3,7 +3,9 @@ package archivistadvisory
 import (
 	"context"
 	"errors"
+	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -12,6 +14,7 @@ import (
 	"videoarchive/internal/application/workdiagnostics"
 	"videoarchive/internal/core/archivistruntime"
 	"videoarchive/internal/core/vocabulary"
+	"videoarchive/internal/core/workflow"
 )
 
 var ErrInvalidConfiguration = errors.New("archivist advisory configuration is invalid")
@@ -76,7 +79,7 @@ func (service *Service) Evaluate(ctx context.Context) error {
 		}
 		_, _, queueErr := service.turns.HandleAdvisoryEvent(ctx, archivistcontrol.AdvisoryEvent{
 			SessionID: session.Session.ID, Kind: archivistcontrol.AdvisoryWorkDiagnostic,
-			TriggerID: diagnostic.Fingerprint, Work: reference,
+			TriggerID: diagnostic.Fingerprint, Work: reference, Check: comparison(diagnostic),
 			Prompt: "Inspect the current bound work with archive.work.diagnostics.get.v1. Base confirmed statements on persisted evidence IDs and keep hypotheses separate. When recovery_actions contains an action, call archive.work.recovery.apply.v1 with that exact action, current revision, diagnostic fingerprint, optional reservation, fencing token, and basis; then read diagnostics again and report the recovery evidence ID or recovery Job ID and resulting state. RETRY_TERMINAL_ARCHIVE_PUBLICATION and RETRY_TRANSCRIPTION_SHORT_PATH each create a new evidence-linked recovery Job and must not reopen the failed Job. Never invent or broaden recovery, and do not cancel, classify, retry failures absent from recovery_actions, or start another stage.",
 		})
 		if queueErr != nil {
@@ -106,6 +109,63 @@ func (service *Service) Evaluate(ctx context.Context) error {
 		}
 	}
 	return combined
+}
+
+func comparison(snapshot workdiagnostics.Snapshot) *archivistcontrol.DiagnosticCheck {
+	if len(snapshot.Jobs) == 0 {
+		return nil
+	}
+	check := &archivistcontrol.DiagnosticCheck{}
+	for _, job := range snapshot.Jobs {
+		subject := job.JobID + "/" + job.StepID
+		sequence := uint64(0)
+		cause := job.ErrorClass
+		for _, failure := range job.FailureEvidence {
+			if failure.StepID == job.StepID && failure.FailureSequence >= sequence {
+				sequence = failure.FailureSequence
+				cause = job.ErrorClass
+				if failure.CauseCode != "" {
+					cause = failure.CauseCode
+				}
+			}
+		}
+		check.Subjects = append(check.Subjects, subject+"/"+strconv.FormatUint(sequence, 10))
+		if len(snapshot.Jobs) == 1 && job.StepState == workflow.Failed {
+			check.FailedStep = job.StepID
+		}
+		state := subject + "/" + string(job.StepState) + "/" + string(job.WaitReason) + "/" + strconv.FormatFloat(job.Progress, 'g', -1, 64)
+		check.States = append(check.States, state)
+		if job.Worker != nil {
+			check.States = append(check.States, subject+"/worker/"+job.Worker.WorkerID+"/"+job.Worker.State)
+		}
+		if job.Execution != nil {
+			check.States = append(check.States, subject+"/lease/"+strconv.FormatBool(job.Execution.HasLease))
+		}
+		if job.RecoveryJob != nil {
+			recovery := job.RecoveryJob
+			check.States = append(check.States, subject+"/recovery/"+recovery.JobID+"/"+recovery.StepID+"/"+string(recovery.State))
+		}
+		if cause != "" {
+			check.Causes = append(check.Causes, subject+"/"+cause)
+		}
+	}
+	for _, fact := range snapshot.Facts {
+		check.States = append(check.States, fact.Code)
+	}
+	for _, hypothesis := range snapshot.Hypotheses {
+		check.Causes = append(check.Causes, "hypothesis/"+hypothesis.Code)
+	}
+	for _, action := range snapshot.SuggestedActions {
+		check.Actions = append(check.Actions, action.Code)
+	}
+	for _, action := range snapshot.RecoveryActions {
+		check.Actions = append(check.Actions, action.JobID+"/"+action.StepID+"/"+action.ActionCode)
+	}
+	for _, values := range []*[]string{&check.Subjects, &check.States, &check.Causes, &check.Actions} {
+		slices.Sort(*values)
+		*values = slices.Compact(*values)
+	}
+	return check
 }
 
 func latestActivity(session archivistcontrol.SessionProjection) time.Time {

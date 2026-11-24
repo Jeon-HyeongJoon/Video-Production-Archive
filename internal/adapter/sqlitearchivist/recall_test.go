@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
@@ -185,13 +186,18 @@ func TestWorkDiagnosticAdvisoryPersistsRemediationPolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 	reference := archivistruntime.WorkReference{Kind: archivistruntime.WorkJob, WorkID: "JOB-RECOVERY", Revision: 4}
+	check := &archivistcontrol.DiagnosticCheck{Subjects: []string{"JOB-RECOVERY/render/1"}, FailedStep: "render", Causes: []string{"JOB-RECOVERY/render/NO_INPUT"}}
 	record, replayed, err := service.HandleAdvisoryEvent(ctx, archivistcontrol.AdvisoryEvent{
 		SessionID: "SESSION-RECOVERY", Kind: archivistcontrol.AdvisoryWorkDiagnostic,
-		TriggerID: "diagnostic-fingerprint", Prompt: "diagnose, recover current evidence, and verify", Work: &reference,
+		TriggerID: "diagnostic-fingerprint", Prompt: "diagnose, recover current evidence, and verify", Work: &reference, Check: check,
 	})
 	if err != nil || replayed || record.Turn.ToolPolicy != archivistruntime.ToolPolicyRemediation ||
 		record.Turn.SubmittedBy != vocabulary.ActorSystem || record.Turn.WorkReference == nil || record.Turn.WorkReference.WorkID != reference.WorkID {
 		t.Fatalf("work diagnostic advisory did not persist remediation authority: record=%+v replayed=%v err=%v", record, replayed, err)
+	}
+	sessions, err := service.Projection(ctx)
+	if err != nil || len(sessions) != 1 || len(sessions[0].Turns) != 1 || !reflect.DeepEqual(sessions[0].Turns[0].Check, check) {
+		t.Fatalf("stored diagnostic comparison unavailable in projection: %+v, %v", sessions, err)
 	}
 }
 

@@ -572,7 +572,7 @@ export function workPhase(work) {
 export function workTitle(work) {
   if (!work) return "—";
   if (work.kind === "JOB") return work.title || work.work_id;
-  return driveNameOf(work.source_volume_id) || work.source_storage_id || "원본";
+  return work.title || driveNameOf(work.source_volume_id) || work.source_storage_id || "원본";
 }
 
 const LANE_RANK = { fault: 5, decide: 4, work: 3, resource: 2, queue: 1, done: 0 };
@@ -619,6 +619,10 @@ export function workFirstFolder(work) {
 }
 
 export function workScopeText(work) {
+  if (work.kind === "ARCHIVE_RUN" && work.title) {
+    const drive = driveNameOf(work.source_volume_id) || work.source_storage_id || "원본";
+    return `${drive} · 영상 ${formatCount(work.video_count)}`;
+  }
   const count = work.folder_count || 0;
   const first = workFirstFolder(work);
   const folders = first ? `${first}${count > 1 ? ` 외 ${formatCount(count - 1)}개` : ""}` : `${formatCount(count)}개 폴더`;

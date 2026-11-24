@@ -18,6 +18,7 @@ import (
 	"videoarchive/internal/core/command"
 	"videoarchive/internal/core/execution"
 	"videoarchive/internal/core/job"
+	"videoarchive/internal/core/organization"
 	"videoarchive/internal/core/pipeline"
 	"videoarchive/internal/core/vocabulary"
 	"videoarchive/internal/core/workflow"
@@ -441,7 +442,7 @@ func (service *Service) project(ctx context.Context) ([]View, error) {
 		sort.Slice(completed, func(i, j int) bool { return completed[i].CompletedAt.After(completed[j].CompletedAt) })
 		folders := driveFolderIDs(drive)
 		result = append(result, View{
-			Summary: summarizeProjectedRun(runID, drive, children, completed), FolderIDs: folders,
+			Summary: summarizeProjectedRun(runID, drive, folders, children, completed), FolderIDs: folders,
 			Children: children, CompletedWork: completed, Failures: failuresFromChildren(children),
 		})
 	}
@@ -631,7 +632,7 @@ func sortChildren(children []ChildJob) {
 func summarizeRun(run archiverun.State, children []ChildJob, drive archiveintakeworkspace.DriveView, current bool, completed []archiveintakeworkspace.CompletedWorkView) Summary {
 	effectiveChildren := unresolvedChildren(children)
 	summary := Summary{
-		WorkID: run.ID, Revision: run.Revision, Kind: ArchiveRunWork, CreatedAt: run.CreatedAt, LastEventAt: run.CreatedAt,
+		Title: organization.SelectedEventTitle(run.FolderIDs), WorkID: run.ID, Revision: run.Revision, Kind: ArchiveRunWork, CreatedAt: run.CreatedAt, LastEventAt: run.CreatedAt,
 		WorkerID: run.WorkerID, SourceVolumeID: run.SourceVolumeID, SourceStorageID: run.SourceStorageID,
 		ArchiveStorageID: run.ArchiveStorageID, FolderCount: len(run.FolderIDs), ChildJobCount: len(children),
 		ResultCount: len(completed),
@@ -660,7 +661,7 @@ func summarizeRun(run archiverun.State, children []ChildJob, drive archiveintake
 	return summary
 }
 
-func summarizeProjectedRun(runID string, drive archiveintakeworkspace.DriveView, children []ChildJob, completed []archiveintakeworkspace.CompletedWorkView) Summary {
+func summarizeProjectedRun(runID string, drive archiveintakeworkspace.DriveView, folders []string, children []ChildJob, completed []archiveintakeworkspace.CompletedWorkView) Summary {
 	effectiveChildren := unresolvedChildren(children)
 	createdAt := drive.CatalogUpdatedAt
 	for _, child := range effectiveChildren {
@@ -676,6 +677,9 @@ func summarizeProjectedRun(runID string, drive archiveintakeworkspace.DriveView,
 	}
 	if summary.FolderCount == 0 {
 		summary.FolderCount = len(drive.Folders)
+	}
+	if len(folders) == summary.FolderCount {
+		summary.Title = organization.SelectedEventTitle(folders)
 	}
 	var totalProgress float64
 	for _, child := range effectiveChildren {

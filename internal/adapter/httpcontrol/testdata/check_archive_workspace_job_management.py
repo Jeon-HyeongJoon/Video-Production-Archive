@@ -89,4 +89,14 @@ with sync_playwright() as playwright:
     expect(attention_row.locator(".faint-id")).to_have_count(0)
     attention_row.click()
     expect(attention_row.locator(".faint-id")).to_be_visible()
+    def named_work(route):
+        payload = route.fetch().json()
+        next(row for row in payload["data"] if row["work_id"] == "ARCHIVE-RUN-1")["title"] = "남양주 주일정오예배"
+        route.fulfill(json=payload)
+
+    page.unroute("**/api/v1/work", idle_work)
+    page.route("**/api/v1/work", named_work)
+    page.reload(wait_until="networkidle")
+    expect(archive_run.locator(".job-name b")).to_have_text("남양주 주일정오예배")
+    expect(archive_run.locator(".work-scope")).to_contain_text("VOLUME-1 · 영상 795")
     browser.close()

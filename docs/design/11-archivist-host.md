@@ -209,7 +209,7 @@ Control은 완료 계기 재호출과 별도로 자동 제안 조정기를 실�
 - ArchivistSession의 최신 `WorkReference`가 가리키는 진행 중 작업에서 일정 시간 새 progress 증적이 없거나 Worker·ExecutionLease·ResourceReservation 결합 진단이 이상을 보고한 경우
 - `CONNECTED`·`READY` 원본 드라이브에 영상 폴더와 접근 가능한 ARCHIVE_PRIMARY 후보가 생긴 경우
 
-자동 제안은 같은 work revision·진단 code 또는 workspace drive·candidate revision·folder discovery revision fingerprint마다 SYSTEM Turn 하나만 만든다. 작업 계기는 그 작업을 이미 참조한 Session에, 새 드라이브 계기는 제거되지 않은 Session 가운데 마지막 Turn 갱신 시각이 가장 최근인 하나에 보낸다. 활성 Session이 없으면 영속 작업이나 드라이브 상태를 바꾸지 않고 다음 평가를 기다린다. Host가 offline이어도 Turn은 QUEUED로 남는다. `LRH-023~024`
+자동 제안은 같은 work revision·진단 code 또는 workspace drive·candidate revision·folder discovery revision fingerprint마다 SYSTEM Turn 하나만 만든다. 작업 계기는 그 작업을 이미 참조한 Session에, 새 드라이브 계기는 제거되지 않은 Session 가운데 마지막 Turn 갱신 시각이 가장 최근인 하나에 보낸다. 활성 Session이 없으면 영속 작업이나 드라이브 상태를 바꾸지 않고 다음 평가를 기다린다. 작업 진단으로 Turn을 만들 때 당시의 Job·단계·실패 차수와 상태, 사실·원인·가설 및 가능한 조치의 코드를 함께 저장한다. 대화는 이 기록을 비교하며 보고 문구나 관측 시각만으로 변화 여부를 추측하지 않는다. Host가 offline이어도 Turn은 QUEUED로 남는다. `LRH-023~024`
 
 SYSTEM Turn은 계기별 도구 정책을 고정한다. 새 드라이브 제안은 `ADVISORY`로 작업 진단·작업 상태·현재 후보 조회와 read-only intake session·현재 ID/revision 선택 준비만 허용하고, `archive.run.start.v1`은 PENDING ActionCard로 바꾼다. 작업 이상은 `REMEDIATION`으로 고정 작업 조회와 현재 진단의 `archive.work.recovery.apply.v1`만 허용한다. 복구 도구는 fingerprint·Job revision·선택적 reservation·fencing token·basis가 모두 같은 현재 action만 적용한다. 만료 실행은 같은 Step을 조정하고, 일시적 패키지·카탈로그 종결 실패는 원래 Job을 보존한 제한 복구 Job으로만 이어간다. 취소·HOLD 분류·STT 시작·입력 실패 retry·일반 Job 생성을 거부한다. 사람이 실패 기록에서 요청한 진단은 Job ID·revision을 고정하고 DIAGNOSTIC으로 저장한다. 작업 참조·상태·실패 근거는 조회할 수 있고 복구와 분류 등 변경 호출은 거부 기록을 남긴다. `LRH-025`, `MCP-016` 일반 사용자 Turn과 기존 단계 완료 SYSTEM 재호출 Turn은 `STANDARD` 정책을 유지하고 정책이 없는 기존 영속 Turn도 호환상 `STANDARD`로 읽는다. `MCP-009~011`, `WFL-015`
 

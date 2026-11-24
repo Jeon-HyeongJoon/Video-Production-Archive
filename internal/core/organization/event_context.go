@@ -69,6 +69,28 @@ func eventAnchor(folder string) (string, []string) {
 	return anchor, nil
 }
 
+// SelectedEventTitle uses only the event ancestor shared by every pinned source
+// folder. A drive can contain many events, even ones with the same display name.
+func SelectedEventTitle(folders []string) string {
+	var shared string
+	for _, folder := range folders {
+		anchor, conflict := eventAnchor(strings.ReplaceAll(folder, "\\", "/"))
+		if anchor == "" || len(conflict) > 0 || (shared != "" && shared != anchor) {
+			return ""
+		}
+		shared = anchor
+	}
+	if shared == "" {
+		return ""
+	}
+	match := eventDate.FindStringSubmatch(path.Base(shared))
+	name := recordingSuffix.ReplaceAllString(match[6], "")
+	return strings.Join(strings.Fields(strings.NewReplacer("-", " ", "_", " ").Replace(strings.Trim(name, " ._-"))), " ")
+}
+
+// An explicit capture label can carry a location or camera after the event name.
+var recordingSuffix = regexp.MustCompile(`(?i)[_-](촬영|녹화|PGM|CLN)(?:[-_ ].*)?$`)
+
 func positionBranch(folder, anchor string) (name, parent string) {
 	if anchor == "" || !strings.HasPrefix(folder, anchor+"/") {
 		return "", ""

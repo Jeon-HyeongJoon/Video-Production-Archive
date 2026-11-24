@@ -268,3 +268,51 @@ type fixedDrives struct {
 func (reader fixedDrives) Projection(context.Context) ([]archiveintakeworkspace.DriveView, error) {
 	return append([]archiveintakeworkspace.DriveView(nil), reader.views...), nil
 }
+
+// Requirement: DSH-052
+func TestArchiveRunTitlesUseOnlyCommonEventInPinnedFolders(t *testing.T) {
+	const event = "37년도/# 1. 교회 촬영물/370105-남양주-주일정오예배_촬영-본당"
+	for _, tc := range []struct {
+		name    string
+		folders []string
+		want    string
+	}{
+		{"one event", []string{event + "/CAM1", event + "/CAM2"}, "남양주 주일정오예배"},
+		{"another event", []string{"37년도/370106-신년-행사/PGM"}, "신년 행사"},
+		{"mixed events", []string{event, "37년도/370106-신년-행사"}, ""},
+		{"missing event", []string{event, "37년도/CAM1"}, ""},
+		{"ambiguous date", []string{event + "/370106-신년-행사"}, ""},
+		{"different roots", []string{event, "복사/" + event}, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			run := archiverun.State{ID: "RUN", Revision: 1, WorkerID: "WORKER", SourceStorageID: "SOURCE", SourceVolumeID: "VOLUME", SourcePhysicalDeviceID: "DISK", ArchiveStorageID: "DEST",
+				StartIdempotencyKey: "start", FolderDiscoveryRevision: 2, FolderIDs: tc.folders, CreatedAt: time.Now().UTC(),
+				SelectedBy: command.Actor{Type: vocabulary.ActorHuman, ID: "operator"}, StageOwnerships: []archiverun.StageOwnership{{Kind: archiverun.OrganizationStage}, {Kind: archiverun.TranscriptionStage}}}
+			legacy := archiveintakeworkspace.DriveView{ArchiveRunID: "LEGACY", SourceVolumeID: "VOLUME"}
+			for _, folder := range tc.folders {
+				legacy.Folders = append(legacy.Folders, archiveintakeworkspace.FolderView{Folder: folder})
+			}
+			partial := legacy
+			partial.ArchiveRunID = "PARTIAL"
+			partial.FolderCount = len(tc.folders) + 1
+			service, err := New(fixedSnapshots{[]command.Snapshot{snapshotOf(t, run.ID, 1, run)}}, fixedJobs{}, fixedDrives{[]archiveintakeworkspace.DriveView{legacy, partial}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			summaries, err := service.Inbox(context.Background())
+			if err != nil || len(summaries) != 3 {
+				t.Fatalf("list: %+v %v", summaries, err)
+			}
+			for _, summary := range summaries {
+				want := tc.want
+				if summary.WorkID == "PARTIAL" {
+					want = ""
+				}
+				detail, err := service.Detail(context.Background(), summary.WorkID)
+				if err != nil || summary.Title != want || detail.Summary.Title != want || !reflect.DeepEqual(detail.FolderIDs, tc.folders) {
+					t.Fatalf("%s: title %q detail %+v, want %q (%v)", summary.WorkID, summary.Title, detail, want, err)
+				}
+			}
+		})
+	}
+}

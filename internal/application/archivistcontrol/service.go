@@ -34,7 +34,18 @@ type SessionRecord struct {
 	RemovedAt time.Time
 }
 
+// DiagnosticCheck preserves the comparable observations from the moment the
+// automatic Turn was requested. Older Turns and diagnostics without observed Jobs have no comparison.
+type DiagnosticCheck struct {
+	Subjects   []string `json:"subjects"`
+	FailedStep string   `json:"failed_step,omitempty"`
+	States     []string `json:"states"`
+	Causes     []string `json:"causes"`
+	Actions    []string `json:"actions"`
+}
+
 type TurnRecord struct {
+	Check     *DiagnosticCheck `json:",omitempty"`
 	Turn      archivistruntime.Turn
 	Prompt    string
 	CreatedAt time.Time
@@ -50,6 +61,7 @@ type SessionProjection struct {
 }
 
 type TurnProjection struct {
+	Check          *DiagnosticCheck
 	ID             string
 	RequestID      string
 	State          string
@@ -189,6 +201,7 @@ const (
 )
 
 type AdvisoryEvent struct {
+	Check     *DiagnosticCheck
 	SessionID string
 	Kind      AdvisoryKind
 	TriggerID string
@@ -433,7 +446,7 @@ func (service *Service) HandleAdvisoryEvent(ctx context.Context, event AdvisoryE
 		return TurnRecord{}, false, err
 	}
 	now := service.now().UTC()
-	record := TurnRecord{Turn: turn, Prompt: event.Prompt, CreatedAt: now, UpdatedAt: now}
+	record := TurnRecord{Check: event.Check, Turn: turn, Prompt: event.Prompt, CreatedAt: now, UpdatedAt: now}
 	if err := service.store.CreateTurn(ctx, record); err != nil {
 		stored, loadErr := service.store.Turn(ctx, turnID)
 		if loadErr == nil && (event.Kind == AdvisoryNewDrive || stored.Turn.SessionID == event.SessionID) &&
@@ -568,7 +581,7 @@ func (service *Service) Projection(ctx context.Context) ([]SessionProjection, er
 				CreatedAt: turn.CreatedAt, UpdatedAt: turn.UpdatedAt,
 				FinalResponse: turn.Turn.FinalResponse, Entries: entries, ToolCalls: toolCalls,
 				DriveSelection: turn.Turn.DriveSelection, WorkReference: turn.Turn.WorkReference, WorkContext: turn.Turn.WorkContext,
-				ToolPolicy: turn.Turn.ToolPolicy.Effective(),
+				ToolPolicy: turn.Turn.ToolPolicy.Effective(), Check: turn.Check,
 			})
 		}
 		projection.ActionCards, err = service.store.ListActionCards(ctx, session.Session.ID)

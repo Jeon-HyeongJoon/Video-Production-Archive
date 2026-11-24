@@ -2,6 +2,7 @@ package httpcontrol
 
 import (
 	"time"
+	"videoarchive/internal/application/archivistcontrol"
 
 	"videoarchive/internal/application/archiveintakeworkspace"
 	"videoarchive/internal/application/archivework"
@@ -272,6 +273,7 @@ type archivistSessionView struct {
 }
 
 type archivistTurnView struct {
+	Check          *archivistcontrol.DiagnosticCheck       `json:"diagnostic_check,omitempty"`
 	ToolPolicy     string                                  `json:"tool_policy,omitempty"`
 	TurnID         string                                  `json:"turn_id"`
 	RequestID      string                                  `json:"request_id"`

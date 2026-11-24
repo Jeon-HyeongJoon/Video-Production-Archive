@@ -753,3 +753,16 @@ details[open]>.tools-toggle::before{transform:rotate(45deg)}
 
 .file-proof summary { cursor: pointer; overflow-wrap: anywhere; font-weight: 600; }
 .file-proof[open] small { white-space: normal; overflow-wrap: anywhere; }
+
+.diagnostic-history { border-block-start: 1px solid var(--line); padding-block: 8px; }
+.check-summary { display: flex; align-items: baseline; gap: 4px 8px; flex-wrap: wrap; width: 100%; text-align: left; background: transparent; color: var(--muted); border: 0; cursor: pointer; }
+.check-summary::before { content: "▸"; }
+.check-summary[aria-expanded="true"]::before { content: "▾"; }
+.check-summary > span::before { content: "·"; margin-inline-end: 6px; }
+.check-summary b, .check-change b { color: var(--ink); }
+.check-change, .check-entries { padding: 6px 10px; overflow-wrap: anywhere; }
+.check-entries summary { cursor: pointer; padding-block: 4px; }
+
+.check-diff { font-size: .85em; }
+.check-diff summary { cursor: pointer; }
+.check-diff ul { padding-inline-start: 1.25em; overflow-wrap: anywhere; }

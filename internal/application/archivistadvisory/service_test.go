@@ -2,6 +2,7 @@ package archivistadvisory
 
 import (
 	"context"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"videoarchive/internal/application/workdiagnostics"
 	"videoarchive/internal/core/archivistruntime"
 	"videoarchive/internal/core/vocabulary"
+	"videoarchive/internal/core/workflow"
 )
 
 type fixedSessions struct {
@@ -68,7 +70,12 @@ func TestAdvisoryLoopQueuesOneRecoveryLimitedTurnForStaleReferencedWork(t *testi
 		}},
 		fixedDrives{}, fixedDiagnostics{values: map[string]workdiagnostics.Snapshot{
 			"JOB-NORMAL": {WorkID: "JOB-NORMAL", ShouldReport: false, Fingerprint: "normal"},
-			"JOB-STALE":  {WorkID: "JOB-STALE", ShouldReport: true, Fingerprint: "stale-render-v1"},
+			"JOB-STALE": {WorkID: "JOB-STALE", ShouldReport: true, Fingerprint: "stale-render-v1",
+				Jobs:             []workdiagnostics.JobDiagnostic{{JobID: "JOB-STALE", StepID: "render", StepState: workflow.Running}},
+				Facts:            []workdiagnostics.Fact{{Code: "WORKER_OFFLINE", EvidenceID: "observation-1"}, {Code: "WORKER_OFFLINE", EvidenceID: "observation-2"}},
+				SuggestedActions: []workdiagnostics.SuggestedAction{{Code: "RESTORE_WORKER"}},
+				Hypotheses:       []workdiagnostics.Hypothesis{{Code: "CONNECTION_LOST"}},
+			},
 		}}, turns,
 	)
 	if err != nil {
@@ -86,6 +93,13 @@ func TestAdvisoryLoopQueuesOneRecoveryLimitedTurnForStaleReferencedWork(t *testi
 		!strings.Contains(turns.events[0].Prompt, "archive.work.recovery.apply.v1") ||
 		!strings.Contains(turns.events[0].Prompt, "read diagnostics again") {
 		t.Fatalf("stale work advisory was not deduplicated and bound: %+v", turns.events)
+	}
+	check := turns.events[0].Check
+	if check == nil || !reflect.DeepEqual(check.Subjects, []string{"JOB-STALE/render/0"}) ||
+		!reflect.DeepEqual(check.States, []string{"JOB-STALE/render/RUNNING//0", "WORKER_OFFLINE"}) ||
+		!reflect.DeepEqual(check.Causes, []string{"hypothesis/CONNECTION_LOST"}) ||
+		!reflect.DeepEqual(check.Actions, []string{"RESTORE_WORKER"}) {
+		t.Fatalf("automatic check lost the observed diagnostic basis: %+v", check)
 	}
 }
 

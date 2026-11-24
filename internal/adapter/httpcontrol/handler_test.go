@@ -1622,3 +1622,10 @@ func TestWorkspacePollsScopeAndLoadsOnlyOpenedFolderFiles(t *testing.T) {
 		assertArchiveWorkspaceScript(t, handler, "check_dashboard_review.py", "transfer")
 	})
 }
+
+// Requirement: DSH-053
+func TestRepeatedAutomaticDiagnosticsKeepChangesReportsAndPendingActions(t *testing.T) {
+	testControlHTTPScene(t, sceneComplete, func(t *testing.T, handler http.Handler) {
+		assertArchiveWorkspaceScript(t, handler, "check_dashboard_diagnostics.py")
+	})
+}

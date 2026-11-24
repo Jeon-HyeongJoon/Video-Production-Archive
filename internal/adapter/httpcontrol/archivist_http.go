@@ -73,8 +73,8 @@ func (handler *Handler) archivistSessions(writer http.ResponseWriter, request *h
 		for _, turn := range projection.Turns {
 			turnView := archivistTurnView{
 				TurnID: turn.ID, RequestID: turn.RequestID, State: turn.State,
-				ToolPolicy: string(turn.ToolPolicy.Effective()),
-				Prompt:     safeArchivistPrompt(turn.Prompt), SubmittedBy: string(turn.SubmittedBy),
+				ToolPolicy: string(turn.ToolPolicy.Effective()), Check: turn.Check,
+				Prompt: safeArchivistPrompt(turn.Prompt), SubmittedBy: string(turn.SubmittedBy),
 				CreatedAt: turn.CreatedAt, UpdatedAt: turn.UpdatedAt, FinalResponse: turn.FinalResponse,
 				Entries: turn.Entries, DriveSelection: turn.DriveSelection, WorkReference: turn.WorkReference, WorkContext: turn.WorkContext,
 			}

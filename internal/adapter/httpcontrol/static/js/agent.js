@@ -196,10 +196,83 @@ function TraceTurn({ turn, session, source, summary, excludeFailure }) {
   ];
 }
 
+function diagnosticKey(turn) {
+  const ref = turn.work_reference;
+  if (!isSystem(turn) || !ref || turn.work_context || turn.state !== "COMPLETED" ||
+      !["ADVISORY", "REMEDIATION"].includes(turn.tool_policy)) return "";
+  // Older checks have no comparable observation. Only their pinned revision
+  // can identify a common work context.
+  return JSON.stringify([ref.kind, ref.work_id, turn.diagnostic_check?.subjects || ref.revision]);
+}
+
+function checkChanges(previous, current) {
+  const before = previous?.diagnostic_check, after = current.diagnostic_check;
+  if (!before || !after) return [];
+  const changes = [];
+  for (const [field, name] of [["states", "상태"], ["causes", "원인"], ["actions", "가능한 조치"]]) {
+    const old = before[field] || [], next = after[field] || [];
+    const removed = old.filter((value) => !next.includes(value));
+    const added = next.filter((value) => !old.includes(value));
+    if (removed.length || added.length) changes.push({ name, removed, added });
+  }
+  if (current.tool_calls?.some((call) => call.tool_name === "archive.work.recovery.apply.v1")) {
+    changes.push({ name: "복구 실행 기록", removed: [], added: [] });
+  }
+  return changes;
+}
+
+const changeNames = (changes) => changes.map((change) => change.name).join(" · ");
+
+function DiagnosticHistory({ turns, session }) {
+  const latest = turns[turns.length - 1];
+  const ref = latest.work_reference;
+  const checks = turns.map((turn, index) => ({ turn, changes: checkChanges(turns[index - 1], turn) }));
+  const lastChange = checks.filter((check) => check.changes.length).at(-1);
+  const currentChanges = checks[checks.length - 1].changes;
+  const job = ref.kind === "JOB" ? jobOf(ref.work_id) : null;
+  const step = latest.diagnostic_check?.failed_step || (job?.revision === ref.revision && job.step_state === "FAILED" ? job.current_step_id : "");
+  const title = step ? `${label("stage", step)} 실패` : "작업 점검";
+  const status = !latest.diagnostic_check ? "변화 비교 자료 없음" : currentChanges.length ? changeNames(currentChanges) + " 변경" : "상태 변화 없음";
+  const [open, setOpen] = useState(false);
+  return html`<section class="diagnostic-history" aria-label=${title}>
+    <button type="button" class="check-summary" aria-expanded=${open} title=${ref.work_id} onClick=${() => setOpen(!open)}>
+      <b>${title}</b><span>${formatCount(turns.length)}회 점검</span><span>${status}</span>
+    </button>
+    ${lastChange && html`<div class="check-change"><b>최근 변화 · ${changeNames(lastChange.changes)}</b>
+      ${lastChange.changes.some(({ added, removed }) => added.length || removed.length) && html`<details class="check-diff"><summary>변경 근거</summary>
+        <ul>${lastChange.changes.flatMap(({ name, removed, added }) => [
+          ...removed.map((value) => html`<li key=${name + "-" + value}>${name} 제외 · <code>${value}</code></li>`),
+          ...added.map((value) => html`<li key=${name + "+" + value}>${name} 추가 · <code>${value}</code></li>`),
+        ])}</ul></details>`}
+      ${lastChange.turn.final_response?.summary && html`<${ReportText} text=${lastChange.turn.final_response.summary} />`}
+    </div>`}
+    ${open && html`<div class="check-entries"><small>${ref.work_id}</small>
+      ${[...checks].reverse().map(({ turn, changes }, index) => html`<details key=${turn.turn_id}>
+        <summary>${formatCount(turns.length - index)}회 · ${clockTime(turn.created_at)}${changes.length ? " · " + changeNames(changes) + " 변경" : ""}</summary>
+        <${UserBubble} turn=${turn} /><${TraceTurn} turn=${turn} session=${session} summary=${true} />
+      </details>`)}
+    </div>`}
+  </section>`;
+}
+
 function workUnits(turns) {
   const units = [];
   const byID = new Map();
+  const checks = new Map();
   for (const turn of turns) {
+    const key = diagnosticKey(turn);
+    if (key) {
+      if (!checks.has(key)) checks.set(key, []);
+      checks.get(key).push(turn);
+    }
+  }
+  for (const turn of turns) {
+    const key = diagnosticKey(turn);
+    const history = key && checks.get(key);
+    if (history && history.length > 1) {
+      if (history[history.length - 1] === turn) units.push({ key: "checks:" + key, diagnostic: true, turns: history });
+      continue;
+    }
     const workID = turn.work_context?.work_id;
     if (!workID) { units.push({ key: turn.turn_id, turns: [turn] }); continue; }
     let unit = byID.get(workID);
@@ -214,6 +287,11 @@ function workUnits(turns) {
 // last line and pending cards stay outside the fold.
 function unitItems(unit, session) {
   const turns = unit.turns;
+  if (unit.diagnostic) {
+    const ids = new Set(turns.map((turn) => turn.turn_id));
+    const pending = (session.action_cards || []).filter((card) => card.state === "PENDING" && ids.has(card.archivist_turn_id));
+    return [{ key: unit.key, kind: "checks", turns, session }, ...pending.map((card) => ({ key: "c:" + card.action_card_id, kind: "card", card }))];
+  }
   const origin = (unit.workID && turns.find((turn) => turn.turn_id === turn.work_context?.origin_turn_id)) || turns[0];
   const active = [...turns].reverse().find((turn) => !finishedTurns.has(turn.state));
   const final = unit.workID
@@ -270,6 +348,7 @@ function Answer({ item }) {
 }
 
 function ThreadItem({ item }) {
+  if (item.kind === "checks") return html`<${DiagnosticHistory} turns=${item.turns} session=${item.session} />`;
   if (item.kind === "user") return html`<${UserBubble} turn=${item.turn} />`;
   if (item.kind === "card") return html`<${AskCard} card=${item.card} />`;
   if (item.kind === "orphan") return item.card.state === "PENDING" ? html`<${AskCard} card=${item.card} />` : html`<${Receipt} card=${item.card} />`;

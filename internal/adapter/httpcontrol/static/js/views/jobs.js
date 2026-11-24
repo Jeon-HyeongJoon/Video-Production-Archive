@@ -1,5 +1,5 @@
 // 작업: one row per work a person requested. An archive work names its
-// drive, its first folder and when it was asked for; the work ID stays faint
+// event or source drive and when it was asked for; the work ID stays faint
 // because nobody tells works apart by it. A row opens into its folders, or a
 // Template Job's steps. Running work stays on top, queued work in its own
 // list, work that needs a person below, and finished work folded at the end.
@@ -86,14 +86,15 @@ function WorkBlock({ work, meter, compact }) {
     ui.expanded.value = next;
   };
   const issues = run ? workIssues(work) : {};
-  const shortScope = run ? workScopeText(work).split("/").pop() : "";
+  const scope = run ? workScopeText(work) : "";
+  const shortScope = work.title ? scope : scope.split("/").pop();
   const pct = Math.round((work.progress || 0) * 100);
   return html`<div class="work-block vt" style=${`--vtn:work-${cssName(work.work_id)}`} data-work-id=${work.work_id}>
     <button type="button" class=${`job-row work-row${compact ? " idle-row" : ""}`} aria-expanded=${open ? "true" : "false"} data-work-id=${work.work_id} data-kind=${work.kind} data-lane=${workLane(work)}
       title=${[work.work_id, run ? workScopeText(work) : "", `Worker ${work.worker_id || "배정 없음"}`].join("\n")} onClick=${toggle}>
       <span class="job-name">
         <b class=${isShared ? "shared" : null}>${workTitle(work)}</b>
-        <small class="work-scope">${run ? (compact ? shortScope : workScopeText(work)) : `템플릿 작업 · ${label("template", job?.template_name)}`} ${(!compact || open) && html`<i class="faint-id">${work.work_id}</i>`}</small>
+        <small class="work-scope">${run ? (compact ? shortScope : scope) : `템플릿 작업 · ${label("template", job?.template_name)}`} ${(!compact || open) && html`<i class="faint-id">${work.work_id}</i>`}</small>
       </span>
       <span class="state"><${StatusIcon} kind=${workKind(work)} /><${Swap} cls="job-state" text=${compact && work.state === "FAILED" && issues.fault > 1 ? `실패 · ${issues.fault} 폴더` : workText(work)} />${run ? html`<${IssueTags} fault=${compact && work.state === "FAILED" ? 0 : issues.fault} decide=${issues.decide} cls="row-issue" />` : null}</span>
       <span class="job-progress">${meter ? html`<${Meter} value=${work.progress || 0} label=${`진행 ${pct}%`} />` : null}</span>
