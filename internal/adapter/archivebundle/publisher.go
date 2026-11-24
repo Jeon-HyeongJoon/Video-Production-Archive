@@ -101,13 +101,16 @@ type InitialRequest struct {
 	CreatedAt        time.Time
 }
 
+var ErrLayoutPathMismatch = errors.New("archive package metadata output does not match its layout")
+
 type RevisionRequest struct {
-	PackageID      string
-	BaseRevision   uint64
-	Transcript     FileSource
-	TranscriptText FileSource
-	Subtitle       FileSource
-	CreatedAt      time.Time
+	ExpectedMetadataPath string
+	PackageID            string
+	BaseRevision         uint64
+	Transcript           FileSource
+	TranscriptText       FileSource
+	Subtitle             FileSource
+	CreatedAt            time.Time
 }
 
 type currentDocument struct {
@@ -315,6 +318,19 @@ func (publisher *Publisher) ReviseStored(request RevisionRequest) (Package, erro
 func (publisher *Publisher) replayedStoredRevision(current currentDocument, request RevisionRequest) (Package, bool, error) {
 	if request.BaseRevision == 0 {
 		return Package{}, false, ErrInvalidRequest
+	}
+	if request.ExpectedMetadataPath != "" {
+		target := path.Join(current.packageDirectory, "metadata.json")
+		switch current.LayoutVersion {
+		case archive.PackageLayoutCompactResultFolder:
+			target = path.Join(current.packageDirectory, CompactPackageDocumentName)
+		case archive.PackageLayoutFlatResultFolder:
+		default:
+			target = path.Join(current.packageDirectory, "revisions", fmt.Sprintf("%06d", request.BaseRevision+1), "metadata.json")
+		}
+		if request.ExpectedMetadataPath != target {
+			return Package{}, false, ErrLayoutPathMismatch
+		}
 	}
 	if current.Revision == request.BaseRevision {
 		return Package{}, false, nil

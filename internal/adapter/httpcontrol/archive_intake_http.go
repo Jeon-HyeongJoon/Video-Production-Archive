@@ -37,7 +37,7 @@ func (handler *Handler) archiveIntakeProjection(writer http.ResponseWriter, requ
 			InputRevision: value.InputRevision, FileCount: value.FileCount, FolderCount: value.FolderCount,
 			StageOneRemaining: value.StageOneRemaining, StageTwoRemaining: value.StageTwoRemaining,
 			HoldCount: value.HoldCount, EligibleTranscriptionCount: value.EligibleTranscriptionCount,
-			CatalogRowCount: value.CatalogRowCount, CatalogUpdatedAt: value.CatalogUpdatedAt,
+			CatalogCountUnknown: value.CatalogCountUnknown, CatalogRowCount: value.CatalogRowCount, CatalogUpdatedAt: value.CatalogUpdatedAt,
 			DiscoveredDirectories: value.DiscoveredDirectories,
 			DiscoveredFileCount:   value.DiscoveredFileCount, DiscoveredFolderCount: value.DiscoveredFolderCount,
 		}

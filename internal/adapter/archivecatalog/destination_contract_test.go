@@ -1,5 +1,3 @@
-//go:build destination_catalog_contract
-
 package archivecatalog
 
 import (
@@ -167,6 +165,11 @@ func TestDestinationRebuildRetainsCatalogWhenCoverageIsIncomplete(t *testing.T) 
 		if err != nil || !report.Current() || len(report.Entries) != 2 {
 			t.Fatalf("post-repair verification: %+v %v", report, err)
 		}
+		replay, err := rec.RebuildWithEvidence()
+		if err != nil || replay.Before.CatalogSHA256 != report.CatalogSHA256 || replay.After.CatalogSHA256 != report.CatalogSHA256 || !replay.After.Current() {
+			t.Fatalf("retry after replacement: %+v %v", replay, err)
+		}
+
 	}
 }
 

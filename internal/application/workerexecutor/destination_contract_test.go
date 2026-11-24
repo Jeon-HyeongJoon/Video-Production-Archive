@@ -1,5 +1,3 @@
-//go:build destination_catalog_contract
-
 package workerexecutor
 
 import (

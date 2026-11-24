@@ -13,6 +13,7 @@ import (
 	"videoarchive/internal/application/capability"
 	"videoarchive/internal/application/workdiagnostics"
 	"videoarchive/internal/core/archivistruntime"
+	"videoarchive/internal/core/execution"
 	"videoarchive/internal/core/vocabulary"
 	"videoarchive/internal/core/worker"
 )
@@ -112,18 +113,21 @@ type CapabilityReader interface {
 	RecentCapabilityRuns(context.Context) ([]capability.Evidence, error)
 }
 type Snapshot struct {
-	CapabilityRuns     []capability.Evidence   `json:"capability_runs"`
-	MonitorTransitions []MonitorTransition     `json:"monitor_transitions"`
-	CompletionDelivery *CompletionDelivery     `json:"completion_delivery"`
-	ObservedAt         time.Time               `json:"observed_at"`
-	Workers            []WorkerSnapshot        `json:"workers"`
-	ArchivistHosts     []ArchivistHostSnapshot `json:"archivist_hosts"`
-	WorkCounts         WorkCounts              `json:"work_counts"`
-	OpenIssues         []OpenIssue             `json:"open_issues"`
-	OmittedIssueCount  int                     `json:"omitted_issue_count"`
+	DestinationCatalogs []execution.CatalogVerification `json:"destination_catalogs"`
+	CapabilityRuns      []capability.Evidence           `json:"capability_runs"`
+	MonitorTransitions  []MonitorTransition             `json:"monitor_transitions"`
+	CompletionDelivery  *CompletionDelivery             `json:"completion_delivery"`
+	ObservedAt          time.Time                       `json:"observed_at"`
+	Workers             []WorkerSnapshot                `json:"workers"`
+	ArchivistHosts      []ArchivistHostSnapshot         `json:"archivist_hosts"`
+	WorkCounts          WorkCounts                      `json:"work_counts"`
+	OpenIssues          []OpenIssue                     `json:"open_issues"`
+	OmittedIssueCount   int                             `json:"omitted_issue_count"`
 }
 
 type Service struct {
+	storages     DestinationStorages
+	destinations DestinationRecords
 	capabilities CapabilityReader
 	delivery     CompletionReader
 	works        WorkReader
@@ -152,7 +156,11 @@ func (service *Service) Snapshot(ctx context.Context) (Snapshot, error) {
 	if err != nil {
 		return Snapshot{}, err
 	}
-	result := Snapshot{ObservedAt: now}
+	catalogs, err := service.destinationCatalogs(ctx, workerStatuses)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	result := Snapshot{ObservedAt: now, DestinationCatalogs: catalogs}
 	if service.capabilities != nil {
 		result.CapabilityRuns, _ = service.capabilities.RecentCapabilityRuns(ctx)
 	}

@@ -172,6 +172,7 @@ type DriveView struct {
 	StageTwoRemaining          int
 	HoldCount                  int
 	EligibleTranscriptionCount int
+	CatalogCountUnknown        bool
 	CatalogRowCount            int
 	CatalogUpdatedAt           time.Time
 	Folders                    []FolderView

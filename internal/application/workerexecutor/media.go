@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"path"
 	"sort"
 	"strconv"
@@ -812,12 +813,13 @@ func (operations *mediaOperations) reviseArchivePackage(_ context.Context, spec 
 		return nil, nil, err
 	}
 	revised, err := publisher.ReviseStored(archivebundle.RevisionRequest{
-		PackageID:      spec.Parameters.ArchivePackageID,
-		BaseRevision:   spec.Parameters.ArchivePackageRevision,
-		Transcript:     archivebundle.FileSource{Root: archivebundle.RootArchive, Path: transcriptInput.RelativePath, Checksum: transcriptInput.Checksum},
-		TranscriptText: archivebundle.FileSource{Root: archivebundle.RootArchive, Path: textInput.RelativePath, Checksum: textInput.Checksum},
-		Subtitle:       archivebundle.FileSource{Root: archivebundle.RootArchive, Path: subtitleInput.RelativePath, Checksum: subtitleInput.Checksum},
-		CreatedAt:      operations.now(),
+		ExpectedMetadataPath: spec.Outputs[0].RelativePath,
+		PackageID:            spec.Parameters.ArchivePackageID,
+		BaseRevision:         spec.Parameters.ArchivePackageRevision,
+		Transcript:           archivebundle.FileSource{Root: archivebundle.RootArchive, Path: transcriptInput.RelativePath, Checksum: transcriptInput.Checksum},
+		TranscriptText:       archivebundle.FileSource{Root: archivebundle.RootArchive, Path: textInput.RelativePath, Checksum: textInput.Checksum},
+		Subtitle:             archivebundle.FileSource{Root: archivebundle.RootArchive, Path: subtitleInput.RelativePath, Checksum: subtitleInput.Checksum},
+		CreatedAt:            operations.now(),
 	})
 	if err != nil || revised.Revision != spec.Parameters.ArchivePackageRevision+1 || revised.MetadataPath != spec.Outputs[0].RelativePath {
 		return nil, nil, errors.Join(ErrProductionExecution, err)
@@ -994,7 +996,8 @@ func (operations *mediaOperations) writeArchiveCatalog(ctx context.Context, spec
 			return nil, nil, err
 		}
 		var metadata archivebundle.Metadata
-		if json.Unmarshal(payload, &metadata) != nil || metadata.WorkspaceDriveID != spec.Parameters.WorkspaceDriveID || metadata.PackageID != input.ArtifactID {
+		actual := sha256.Sum256(payload)
+		if input.StorageID != spec.Outputs[0].StorageID || hex.EncodeToString(actual[:]) != input.Checksum || json.Unmarshal(payload, &metadata) != nil || metadata.WorkspaceDriveID != spec.Parameters.WorkspaceDriveID || metadata.PackageID != input.ArtifactID {
 			return nil, nil, ErrProductionExecution
 		}
 		packages = append(packages, archiveStoredPackage{metadata: metadata, path: input.RelativePath})
@@ -1015,6 +1018,9 @@ func (operations *mediaOperations) writeArchiveCatalog(ctx context.Context, spec
 		current, currentErr := bundlePublisher.Current(stored.metadata.PackageID)
 		if currentErr != nil {
 			return nil, nil, currentErr
+		}
+		if current.Revision != stored.metadata.Revision || current.MetadataPath != stored.path {
+			return nil, nil, archivecatalog.ErrCatalogReconciliation
 		}
 		row, rowErr := archivecatalog.PackageRowFrom(stored.metadata, current)
 		if rowErr != nil {
@@ -1072,6 +1078,13 @@ func (operations *mediaOperations) writeArchiveCatalog(ctx context.Context, spec
 		return nil, nil, err
 	}
 	output := stepOutput(target, result.Checksum)
+	if allPackageRows && spec.Parameters.ArchiveRunID != "" {
+		p := execution.CatalogPublication{ArchiveStorageID: target.StorageID, ArchiveRunID: spec.Parameters.ArchiveRunID, CatalogSHA256: result.Checksum}
+		for _, row := range packageRows {
+			p.Packages = append(p.Packages, execution.PublishedPackage{PackageID: row.PackageID, Revision: row.Revision, ManifestDigest: row.ManifestDigest})
+		}
+		output.CatalogPublication = &p
+	}
 	return []execution.StepOutput{output}, verificationReferences(spec.Operation, []execution.StepOutput{output}), nil
 }
 
@@ -1085,10 +1098,14 @@ func (operations *mediaOperations) verifyArchiveCatalog(ctx context.Context, spe
 	if err != nil {
 		return nil, nil, err
 	}
+	started := operations.now().UTC()
 	verification, err := reconciler.Verify()
 	if err != nil {
 		return nil, nil, err
 	}
+	verification.ArchiveStorageID = spec.Parameters.ArchiveStorageID
+	verification.ObservedAt = started
+	verification.VolumeID = roots.VolumeID(spec.Parameters.ArchiveStorageID)
 	payload, err := json.MarshalIndent(verification, "", "  ")
 	if err != nil {
 		return nil, nil, err
@@ -1100,6 +1117,25 @@ func (operations *mediaOperations) verifyArchiveCatalog(ctx context.Context, spe
 		return nil, nil, err
 	}
 	output := stepOutput(target, checksum)
+	summary := execution.CatalogVerification{ArchiveStorageID: verification.ArchiveStorageID, ReportID: target.ID, ReportSHA256: checksum, ObservedAt: verification.ObservedAt, CatalogSHA256: verification.CatalogSHA256, LegacyPackages: verification.Coverage.LegacyPackages, UnresolvedVideos: len(verification.Coverage.UnresolvedVideos)}
+	for _, entry := range verification.Entries {
+		if entry.State == archivecatalog.ConsistencyCurrent {
+			summary.CurrentPackages++
+		} else {
+			summary.MismatchedPackages++
+		}
+	}
+	switch {
+	case verification.Coverage.State == "INCOMPLETE":
+		summary.State, summary.NextCheck = "INCOMPLETE", "REVIEW_VERIFICATION_COVERAGE"
+	case verification.Coverage.State == "EMPTY":
+		summary.State, summary.NextCheck = "EMPTY", "VERIFY_AFTER_PUBLICATION"
+	case verification.Current():
+		summary.State, summary.NextCheck = "CURRENT", "NONE"
+	default:
+		summary.State, summary.NextCheck = "MISMATCH", "REVIEW_CATALOG_DIFFERENCES"
+	}
+	output.CatalogVerification = &summary
 	return []execution.StepOutput{output}, []string{fmt.Sprintf("archive-catalog://verify/current=%t/entries=%d", verification.Current(), len(verification.Entries))}, nil
 }
 
@@ -1112,12 +1148,18 @@ func (operations *mediaOperations) rebuildArchiveCatalog(_ context.Context, spec
 	if err != nil {
 		return nil, nil, err
 	}
-	result, err := reconciler.Rebuild()
+	repair, err := reconciler.RebuildWithEvidence()
 	if err != nil {
 		return nil, nil, err
 	}
-	output := stepOutput(spec.Outputs[0], result.Checksum)
-	return []execution.StepOutput{output}, []string{fmt.Sprintf("archive-catalog://rebuild/rows=%d", result.RowCount)}, nil
+	output := stepOutput(spec.Outputs[0], repair.Catalog.Checksum)
+	refs := []string{fmt.Sprintf("archive-catalog://rebuild/rows=%d", repair.Catalog.RowCount), fmt.Sprintf("archive-catalog://rebuild/before=%s/after=%s/current=%t", repair.Before.CatalogSHA256, repair.After.CatalogSHA256, repair.After.Current())}
+	for _, entry := range repair.Before.Entries {
+		if entry.State != archivecatalog.ConsistencyCurrent {
+			refs = append(refs, fmt.Sprintf("archive-catalog://repair/%s/%s/revision=%d-%d/manifest=%s-%s/fields=%s", url.PathEscape(entry.PackageID), entry.State, entry.CatalogRevision, entry.PackageRevision, entry.CatalogDigest, entry.PackageDigest, strings.Join(entry.Differences, ",")))
+		}
+	}
+	return []execution.StepOutput{output}, refs, nil
 }
 
 func packageForOriginal(packages []archiveStoredPackage, originalAssetID string) (archiveStoredPackage, bool) {

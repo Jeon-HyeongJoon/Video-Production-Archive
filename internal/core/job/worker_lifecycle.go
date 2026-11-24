@@ -237,7 +237,7 @@ func (handler *WorkerLifecycleHandler) settle(
 		}
 		outputRecord, outputErr := execution.NewStepOutputRecordWithInspections(
 			*step.ExecutionSpec, parameters.FencingToken, envelope.Actor.ID, now,
-			parameters.OutputRecord.Outputs, parameters.OutputRecord.VerificationReferences, parameters.OutputRecord.InspectedMedia,
+			parameters.OutputRecord.ReportedOutputs(), parameters.OutputRecord.VerificationReferences, parameters.OutputRecord.InspectedMedia,
 		)
 		if outputErr != nil {
 			return command.Change{}, ErrInvalidWorkerLifecycle

@@ -128,6 +128,15 @@ func (registry *Registry) ExecuteOperation(ctx context.Context, spec execution.S
 			return inputFailure("UNREGISTERED_STORAGE")
 		}
 	}
+	if spec.Operation == execution.OperationVerifyArchiveCatalog {
+		archiveRoot, ok := registry.roots.Root(spec.Parameters.ArchiveStorageID)
+		if !ok {
+			return inputFailure("UNREGISTERED_STORAGE")
+		}
+		if archiveRoot.Overlaps(registry.roots.MustRoot(spec.Outputs[0].StorageID)) {
+			return inputFailure("VERIFICATION_REPORT_STORAGE_OVERLAPS_ARCHIVE")
+		}
+	}
 	var outputs []execution.StepOutput
 	var verificationReferences []string
 	var inspectedMedia []execution.InspectedMedia
@@ -393,6 +402,7 @@ func typedFailureCause(err error) (string, string, bool) {
 	}
 	classifications := []classification{
 		{archivebundle.ErrPackageExists, "ARCHIVE_PACKAGE_ALREADY_EXISTS", "The Archive Package already exists"},
+		{archivebundle.ErrLayoutPathMismatch, "PACKAGE_LAYOUT_PATH_MISMATCH", "The saved metadata path differs from the archive package layout"},
 		{archivebundle.ErrPackageState, "ARCHIVE_PACKAGE_STATE_INVALID", "The Archive Package state does not permit this operation"},
 		{archivebundle.ErrInvalidRequest, "ARCHIVE_PACKAGE_REQUEST_INVALID", "The Archive Package request failed validation"},
 		{archivecatalog.ErrCatalogReconciliation, "ARCHIVE_CATALOG_RECONCILIATION_FAILED", "Archive Catalog reconciliation failed"},

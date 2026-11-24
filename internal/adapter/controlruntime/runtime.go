@@ -336,6 +336,7 @@ func OpenWithDependencies(ctx context.Context, configuration bootconfig.Configur
 	if err != nil {
 		return fail(err)
 	}
+	systemStatus.SetDestinationReaders(storageRepository, commandStore)
 	systemStatus.SetCapabilityReader(runtime.evidence)
 	workRecovery, err := workrecovery.New(workDiagnostics, jobCommands, commandStore)
 	if err != nil {

@@ -436,6 +436,13 @@ func (roots *StorageRoots) SyncAttachedVolumes(volumes []device.ConnectedVolume)
 // MustRoot is for operation handlers after Registry validation has proved the
 // Storage ID exists. It returns nil for an invalid call instead of widening the
 // filesystem boundary.
+// VolumeID is present when the destination was identified during attached-volume discovery.
+func (roots *StorageRoots) VolumeID(id string) string {
+	roots.mu.RLock()
+	defer roots.mu.RUnlock()
+	return roots.dynamic[id].volumeID
+}
+
 func (roots *StorageRoots) MustRoot(storageID string) *archive.StorageRoot {
 	root, _ := roots.Root(storageID)
 	return root

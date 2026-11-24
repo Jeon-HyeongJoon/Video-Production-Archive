@@ -402,6 +402,17 @@ func (root *ReadOnlyStorageRoot) ExternalProcessPath(requested string) (string, 
 	return root.root.ExternalProcessPath(requested)
 }
 
+// Overlaps reports whether capabilities address the same directory tree.
+func (root *StorageRoot) Overlaps(other *StorageRoot) bool {
+	for _, pair := range [][2]string{{root.root.Name(), other.root.Name()}, {other.root.Name(), root.root.Name()}} {
+		rel, err := filepath.Rel(pair[0], pair[1])
+		if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
+}
+
 func (root *StorageRoot) Close() error { return root.root.Close() }
 
 // ExternalProcessPath resolves a normalized relative path beneath this

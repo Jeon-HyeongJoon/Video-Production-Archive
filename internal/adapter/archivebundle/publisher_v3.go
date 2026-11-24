@@ -317,10 +317,14 @@ func inspectCompactAt(root *archive.StorageRoot, readDirectory, logicalDirectory
 		case file.Embedded:
 			return Package{}, fmt.Errorf("unsupported embedded file %s: %w", file.Path, ErrInvalidRequest)
 		default:
-			payload, err = root.ReadFile(path.Join(readDirectory, file.Path))
+			size, checksum, err := root.FileSHA256(path.Join(readDirectory, file.Path))
 			if err != nil {
 				return Package{}, err
 			}
+			if size != file.Size || checksum != file.Checksum {
+				return Package{}, fmt.Errorf("compact file %s checksum or size: %w", file.Path, ErrInvalidRequest)
+			}
+			continue
 		}
 		if int64(len(payload)) != file.Size || digest(payload) != file.Checksum {
 			return Package{}, fmt.Errorf("compact file %s checksum or size: %w", file.Path, ErrInvalidRequest)

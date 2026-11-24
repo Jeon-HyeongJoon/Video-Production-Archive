@@ -4241,71 +4241,85 @@
       "id": "ARC-021",
       "design": "destination-revision-preflight",
       "level": "integration",
-      "status": "planned",
+      "status": "implemented",
       "statement": "기존 패키지의 수정 명세와 실제 복구 문서 경로가 다르면 Worker는 쓰기 전에 거부해야 한다.",
       "given": "기준 리비전 1인 v2 패키지에 v3 복구 문서를 출력으로 지정한 STT 명세와 유효한 자막 입력이 있다.",
       "when": "Worker가 패키지 수정 Step을 실행한다.",
-      "then": "PACKAGE_LAYOUT_PATH_MISMATCH를 반환하고 공개된 리비전·manifest·자막을 원래대로 보존한다."
+      "then": "PACKAGE_LAYOUT_PATH_MISMATCH를 반환하고 공개된 리비전·manifest·자막을 원래대로 보존한다.",
+      "test_file": "internal/application/workerexecutor/destination_contract_test.go",
+      "test_name": "TestDestinationRevisionRefusesWrongLayoutBeforePublishing"
     },
     {
       "id": "ARC-022",
       "design": "destination-verification-coverage",
       "level": "integration",
-      "status": "planned",
+      "status": "implemented",
       "statement": "목적지 검증은 조사 범위 안의 결과 영상 후보와 판독하지 못한 상대경로를 설명해야 한다.",
       "given": "빈 목적지, staging만 있는 목적지, 루트에 미등록 영상이 있는 목적지, 패키지 ID 없는 행사 영상 두 개가 있는 목적지가 있다.",
       "when": "Worker가 각 목적지를 읽기 전용 검증한다.",
-      "then": "앞의 두 곳은 EMPTY와 후보 0개, 뒤의 두 곳은 INCOMPLETE와 각각 미해결 경로 1개·2개를 기록하며 어느 경우에도 CURRENT를 반환하지 않는다."
+      "then": "앞의 두 곳은 EMPTY와 후보 0개, 뒤의 두 곳은 INCOMPLETE와 각각 미해결 경로 1개·2개를 기록하며 어느 경우에도 CURRENT를 반환하지 않는다.",
+      "test_file": "internal/adapter/archivecatalog/destination_contract_test.go",
+      "test_name": "TestDestinationVerificationAccountsForUnindexedVideos"
     },
     {
       "id": "ARC-023",
       "design": "destination-rebuild-coverage",
       "level": "integration",
-      "status": "planned",
+      "status": "implemented",
       "statement": "검증 범위에 미해결 결과 영상이 있으면 기존 루트 카탈로그와 패키지를 보존해야 한다.",
       "given": "리비전 4 패키지의 CSV 행은 1이고 다른 정상 행도 있다. 별도 미등록 영상이 남은 경우와 조사 범위 전체가 확인된 경우가 있다.",
       "when": "Worker가 전체 카탈로그 재생성을 시도한다.",
-      "then": "미등록 영상이 남으면 교체를 거부한다. 전체가 확인되면 뒤처진 행을 리비전 4로 복원해 사후 대조가 일치하고 다른 행과 패키지 파일은 보존된다."
+      "then": "미등록 영상이 남으면 교체를 거부한다. 전체가 확인되면 뒤처진 행을 리비전 4로 복원해 사후 대조가 일치하고 다른 행과 패키지 파일은 보존된다.",
+      "test_file": "internal/adapter/archivecatalog/destination_contract_test.go",
+      "test_name": "TestDestinationRebuildRetainsCatalogWhenCoverageIsIncomplete"
     },
     {
       "id": "ARC-024",
       "design": "destination-catalog-revision-order",
       "level": "integration",
-      "status": "planned",
+      "status": "implemented",
       "statement": "카탈로그 행의 지연 게시 또는 같은 리비전의 충돌로 최신 게시 근거가 소실되지 않아야 한다.",
       "given": "같은 package ID의 리비전 4가 이미 게시되어 있다.",
       "when": "리비전 1 또는 리비전 4의 다른 digest가 도착하거나 동일한 행을 재전송한다.",
-      "then": "앞의 두 요청은 거부하고 동일한 행은 같은 CSV checksum으로 멱등 성공하며 세 경우 모두 기존 CSV bytes를 유지한다."
+      "then": "앞의 두 요청은 거부하고 동일한 행은 같은 CSV checksum으로 멱등 성공하며 세 경우 모두 기존 CSV bytes를 유지한다.",
+      "test_file": "internal/adapter/archivecatalog/destination_contract_test.go",
+      "test_name": "TestDestinationCatalogRefusesOlderOrConflictingPublication"
     },
     {
       "id": "ARC-025",
       "design": "destination-event-catalog",
       "level": "integration",
-      "status": "planned",
+      "status": "implemented",
       "statement": "v4 행사 카탈로그는 검증된 결과 영상마다 고유 패키지 행을 생성하고 같은 드라이브의 기존 패키지 행을 보존해야 한다.",
       "given": "v3 패키지 하나와 두 채널의 ID·revision·파일 checksum·원본 참조가 기록된 v4 행사 하나가 같은 목적지에 있다.",
       "when": "복구 문서로 전체 CSV를 재생성하고 다시 검증한다.",
-      "then": "기존 패키지 행 하나와 같은 행사 폴더의 독립된 두 패키지 행이 각각 올바른 영상 경로·리비전·manifest digest·원본 수로 일치하고 행사 파일은 보존된다."
+      "then": "기존 패키지 행 하나와 같은 행사 폴더의 독립된 두 패키지 행이 각각 올바른 영상 경로·리비전·manifest digest·원본 수로 일치하고 행사 파일은 보존된다.",
+      "test_file": "internal/adapter/archivecatalog/destination_contract_test.go",
+      "test_name": "TestDestinationEventCatalogUsesOneRowPerVerifiedChannel"
     },
     {
       "id": "DSH-046",
       "design": "destination-run-publication-evidence",
       "level": "integration",
-      "status": "planned",
+      "status": "implemented",
       "statement": "실행별 카탈로그 요약은 해당 실행에서 실제 게시가 입증된 고유 패키지 수와 기록 시각을 표시해야 한다.",
       "given": "입력 5개인 실행이 렌더에서 실패한 경우와 5컷 합본 패키지 하나의 카탈로그 게시 기록이 있는 경우가 있다.",
       "when": "작업 공간이 해당 ArchiveRun을 조회한다.",
-      "then": "입력 수는 둘 다 5이며 실패 사례는 카탈로그 0건·기록 시각 없음, 합본 사례는 1건·성공한 게시 시각으로 표시한다."
+      "then": "입력 수는 둘 다 5이며 실패 사례는 카탈로그 0건·기록 시각 없음, 합본 사례는 1건·성공한 게시 시각으로 표시한다.",
+      "test_file": "internal/application/archiveintakeworkspace/destination_contract_test.go",
+      "test_name": "TestDestinationRunSummaryCountsOnlyProvenPackagePublications"
     },
     {
       "id": "MCP-014",
       "design": "destination-catalog-observation",
       "level": "integration",
-      "status": "planned",
+      "status": "implemented",
       "statement": "Archivist는 실행 선택 없이 목적지별 마지막 카탈로그 검증 근거와 다음 확인 항목을 읽을 수 있어야 한다.",
       "given": "한 등록 목적지에는 15건 일치·1건 불일치 보고서가 있고 다른 목적지에는 검증 기록이 없다.",
       "when": "Archivist가 선택 없이 시스템 상태를 조회한다.",
-      "then": "각 Storage ID별로 첫 목적지는 MISMATCH·집계·검증 시각·CSV digest·보고서 참조·차이 검토를, 둘째는 NOT_OBSERVED와 검증 요청을 반환한다."
+      "then": "각 Storage ID별로 첫 목적지는 MISMATCH·집계·검증 시각·CSV digest·보고서 참조·차이 검토를, 둘째는 NOT_OBSERVED와 검증 요청을 반환한다.",
+      "test_file": "internal/adapter/httpmcp/destination_contract_test.go",
+      "test_name": "TestDestinationStatusReturnsScopedVerificationEvidenceWithoutRun"
     }
   ]
 }

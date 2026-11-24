@@ -294,6 +294,9 @@ func (handler *Handler) create(envelope command.Envelope, snapshot command.Snaps
 	} else if template.Name == pipeline.ArchivePublicationRecovery().Name || template.Name == pipeline.ArchiveTranscriptionRecoveryName {
 		return command.Change{}, command.DeterministicFailure("INVALID_JOB_RECOVERY_SOURCE", ErrInvalidJob)
 	}
+	if template.Name == pipeline.ArchiveCatalogVerification().Name && parameters.StepExecutionSpecs["verify"].Operation != execution.OperationVerifyArchiveCatalog {
+		return command.Change{}, command.DeterministicFailure("INVALID_JOB", ErrInvalidJob)
+	}
 	priority := parameters.ExecutionPriority
 	if priority == "" {
 		priority = resource.Background
@@ -586,6 +589,8 @@ func templateByName(name string) (pipeline.Template, bool) {
 		return pipeline.FinalEdit(), true
 	case pipeline.LargeFileIntake().Name:
 		return pipeline.LargeFileIntake(), true
+	case pipeline.ArchiveCatalogVerification().Name:
+		return pipeline.ArchiveCatalogVerification(), true
 	case pipeline.ArchiveIntakeInspection().Name:
 		return pipeline.ArchiveIntakeInspection(), true
 	case pipeline.ArchiveTranscription().Name:

@@ -91,7 +91,17 @@ function gateState(current) {
 }
 
 function catalogState(current) {
-  return current.archive_run_state === "COMPLETED" && current.catalog_row_count ? "done" : current.catalog_row_count ? "part" : "todo";
+  if (current.catalog_count_unknown) return "part";
+  if (!current.catalog_row_count) return "todo";
+  return current.archive_run_state === "COMPLETED" ? "done" : "part";
+}
+
+function catalogRecord(current) {
+  if (current.catalog_count_unknown) {
+    return current.catalog_row_count ? `${formatCount(current.catalog_row_count)}건 확인 · 전체 게시 건수 기록 없음` : "게시 건수 기록 없음";
+  }
+  if (current.catalog_row_count) return `${formatCount(current.catalog_row_count)}행 · ${shortTime(current.catalog_updated_at)} 기록`;
+  return current.archive_run_id ? "게시 0건" : "실행 뒤 기록";
 }
 
 // StepNodes are the stage's steps grouped without connector lines: the
@@ -109,7 +119,7 @@ function StepNodes({ drive: current }) {
       lines = text ? [text] : [];
     } else if (id === "catalog") {
       state = catalogState(current);
-      lines = [current.catalog_row_count ? `${formatCount(current.catalog_row_count)}행 · ${shortTime(current.catalog_updated_at)} 기록` : "실행 뒤 기록"];
+      lines = [catalogRecord(current)];
     } else {
       const counts = tally(current, id);
       state = tallyState(counts);
@@ -179,7 +189,7 @@ function progressHover(current) {
     `최근 작업 폴더 ${progress.storedFolders} / ${progress.folders}${transcribed ? ` · 자막·텍스트 ${transcribed} 폴더` : ""}`,
     `전체 발견 ${formatCount(progress.discoveredFolders)} 폴더`,
     `작업 범위 r${current.input_revision} 고정 · ${folders.length} 폴더 · ${formatCount(progress.total)} 영상 · ${formatBytes(bytes)}`,
-    current.archive_run_state === "COMPLETED" ? `CSV ${formatCount(current.catalog_row_count)}행 · ${shortTime(current.catalog_updated_at)} 기록` : "",
+    current.catalog_row_count || current.catalog_count_unknown || current.archive_run_state === "COMPLETED" ? `CSV ${catalogRecord(current)}` : "",
   ].filter(Boolean).join("\n");
 }
 

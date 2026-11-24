@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"path"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -30,6 +31,7 @@ import (
 var ErrInvalidConfiguration = errors.New("archive intake workspace configuration is invalid")
 
 type projectionDriveState struct {
+	publishedPackages map[string]bool
 	view              DriveView
 	folders           map[string]FolderView
 	discoveredFolders map[string]FolderView
@@ -130,12 +132,17 @@ func (service *Service) Projection(ctx context.Context) ([]DriveView, error) {
 		receiptsByRunID[receipt.ID] = receipt
 	}
 	archiveRunsByDrive := make(map[string]archiverun.State)
+	recoveredPublications := map[string][]job.State{}
 	if snapshots, listErr := listSnapshots(service.jobs); listErr != nil {
 		return nil, listErr
 	} else {
 		for _, snapshot := range snapshots {
 			run, decodeErr := archiverun.Decode(snapshot)
 			if decodeErr != nil {
+				if recovered, err := job.Decode(snapshot); err == nil && recovered.TemplateName == pipeline.ArchivePublicationRecovery().Name {
+					runID, _ := jobArchiveRunAndFolder(recovered)
+					recoveredPublications[runID] = append(recoveredPublications[runID], recovered)
+				}
 				continue
 			}
 			driveID := run.SourceVolumeID
@@ -180,7 +187,7 @@ func (service *Service) Projection(ctx context.Context) ([]DriveView, error) {
 			state = &projectionDriveState{view: DriveView{
 				WorkspaceDriveID: receipt.WorkspaceDriveID, ArchiveRunID: receipt.ID, SessionID: receipt.SessionID,
 				WorkerID: receipt.WorkerID, State: "IN_PROGRESS", InputRevision: receipt.InputRevision,
-				FileCount: len(receipt.Files), CatalogRowCount: len(receipt.Files), CatalogUpdatedAt: receipt.CompletedAt,
+				FileCount: len(receipt.Files),
 			}, folders: make(map[string]FolderView), discoveredFolders: make(map[string]FolderView)}
 			drives[receipt.WorkspaceDriveID] = state
 		} else if receipt.InputRevision >= state.view.InputRevision {
@@ -189,10 +196,11 @@ func (service *Service) Projection(ctx context.Context) ([]DriveView, error) {
 			state.view.WorkerID = receipt.WorkerID
 			state.view.InputRevision = receipt.InputRevision
 			state.view.FileCount = len(receipt.Files)
-			state.view.CatalogRowCount = len(receipt.Files)
-			state.view.CatalogUpdatedAt = receipt.CompletedAt
 		}
 		service.projectArchiveRun(&state.view, receipt)
+		for _, j := range recoveredPublications[receipt.ID] {
+			state.projectCatalog(j)
+		}
 		if service.intakeSessions != nil {
 			intakeSession, sessionErr := service.intakeSessions.Session(ctx, receipt.SessionID)
 			if sessionErr != nil {
@@ -246,7 +254,7 @@ func (service *Service) Projection(ctx context.Context) ([]DriveView, error) {
 					return nil, err
 				}
 				stageOneJob = jobState
-				projectCatalogUpdatedAt(&state.view, jobState)
+				state.projectCatalog(jobState)
 				view.CurrentStepID = jobState.CurrentStepID
 				view.StepState = currentStepState(jobState)
 				view.Stages = append(view.Stages, projectStageOne(jobState, view.VideoCount)...)
@@ -272,7 +280,7 @@ func (service *Service) Projection(ctx context.Context) ([]DriveView, error) {
 			}
 			if stageTwo, ok := transcriptionJobs[receipt.ID+"\x00"+coordinated.Folder]; ok {
 				for _, stageTwoJob := range stageTwo {
-					projectCatalogUpdatedAt(&state.view, stageTwoJob)
+					state.projectCatalog(stageTwoJob)
 					view.TranscriptQualities = append(view.TranscriptQualities, transcriptQualities(stageTwoJob)...)
 				}
 				view.TranscriptionJobID = stageTwo[0].ID
@@ -985,12 +993,59 @@ func completedJob(state job.State) bool {
 	return true
 }
 
-func projectCatalogUpdatedAt(view *DriveView, state job.State) {
+func (drive *projectionDriveState) projectCatalog(state job.State) {
+	view := &drive.view
 	for _, step := range state.Steps {
-		if step.Workflow.ID == "archive_catalog" && step.Workflow.State == workflow.Completed &&
-			step.LastEventAt.After(view.CatalogUpdatedAt) {
-			view.CatalogUpdatedAt = step.LastEventAt
+		if (step.Workflow.ID != "archive_catalog" && step.Workflow.ID != "reconcile_archive_publication") || step.Workflow.State != workflow.Completed {
+			continue
 		}
+		spec := step.ExecutionSpec
+		if spec != nil && ((spec.Parameters.ArchiveRunID != "" && spec.Parameters.ArchiveRunID != view.ArchiveRunID) || (view.ArchiveStorageID != "" && spec.Parameters.ArchiveStorageID != "" && spec.Parameters.ArchiveStorageID != view.ArchiveStorageID)) {
+			continue
+		}
+		at := step.LastEventAt
+		record := step.OutputRecord
+		if record != nil && !record.RecordedAt.IsZero() {
+			at = record.RecordedAt
+		}
+		if at.After(view.CatalogUpdatedAt) {
+			view.CatalogUpdatedAt = at
+		}
+		if record == nil || spec == nil || spec.Parameters.ArchiveRunID != view.ArchiveRunID || len(record.Outputs) != 1 {
+			view.CatalogCountUnknown = true
+			continue
+		}
+		output := record.Outputs[0]
+		var ids []string
+		if p := record.CatalogPublication; p != nil {
+			if p.Matches(view.ArchiveRunID, spec.Parameters.ArchiveStorageID, output) {
+				for _, pkg := range p.Packages {
+					ids = append(ids, pkg.PackageID)
+				}
+			}
+		} else if output.Kind == execution.OutputArchiveCatalog && output.StorageID == spec.Parameters.ArchiveStorageID && record.ValidateFor(*spec) == nil {
+			ref := "verification://write_archive_catalog/" + output.ID + "/" + output.Checksum
+			if slices.Contains(record.VerificationReferences, ref) {
+				for _, input := range spec.Inputs {
+					if input.StorageID != output.StorageID || input.ArtifactID == "" || (input.Kind != execution.OutputArchiveRevision && input.Kind != execution.OutputOrganizedMedia) {
+						ids = nil
+						break
+					}
+					ids = append(ids, input.ArtifactID)
+				}
+			}
+		}
+		if len(ids) == 0 {
+			view.CatalogCountUnknown = true
+			continue
+		}
+		if drive.publishedPackages == nil {
+			drive.publishedPackages = map[string]bool{}
+		}
+		for _, id := range ids {
+			drive.publishedPackages[output.StorageID+"\x00"+id] = true
+		}
+		view.CatalogRowCount = len(drive.publishedPackages)
 	}
 }
 

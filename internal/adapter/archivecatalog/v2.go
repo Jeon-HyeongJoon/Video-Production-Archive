@@ -56,19 +56,29 @@ type PackageRow struct {
 }
 
 type VerificationEntry struct {
-	PackageID    string           `json:"package_id,omitempty"`
-	ResultFolder string           `json:"result_folder,omitempty"`
-	State        ConsistencyState `json:"state"`
-	Detail       string           `json:"detail,omitempty"`
+	PackageID       string           `json:"package_id,omitempty"`
+	ResultFolder    string           `json:"result_folder,omitempty"`
+	State           ConsistencyState `json:"state"`
+	Detail          string           `json:"detail,omitempty"`
+	CatalogRevision uint64           `json:"catalog_revision,omitempty"`
+	PackageRevision uint64           `json:"package_revision,omitempty"`
+	CatalogDigest   string           `json:"catalog_manifest_digest,omitempty"`
+	PackageDigest   string           `json:"package_manifest_digest,omitempty"`
+	Differences     []string         `json:"differences,omitempty"`
 }
 
 type Verification struct {
-	Entries []VerificationEntry `json:"entries"`
+	VolumeID         string              `json:"volume_id,omitempty"`
+	Coverage         Coverage            `json:"coverage"`
+	CatalogSHA256    string              `json:"catalog_sha256,omitempty"`
+	ArchiveStorageID string              `json:"archive_storage_id,omitempty"`
+	ObservedAt       time.Time           `json:"observed_at,omitzero"`
+	Entries          []VerificationEntry `json:"entries"`
 }
 
 func (verification Verification) Current() bool {
-	if len(verification.Entries) == 0 {
-		return true
+	if verification.Coverage.State != "COMPLETE" || (len(verification.Entries) == 0 && verification.Coverage.LegacyPackages == 0) {
+		return false
 	}
 	for _, entry := range verification.Entries {
 		if entry.State != ConsistencyCurrent {
@@ -122,7 +132,8 @@ func (publisher *Publisher) PublishPackageRowsMerged(rows []PackageRow, temporar
 		return organization.ArchiveCatalog{}, errors.Join(ErrPublishFailed, err)
 	}
 	defer lock.Close()
-	existing := []PackageRow(nil)
+	var existing []PackageRow
+	var existingDigest string
 	exists, err := publisher.root.Exists(publishedPath)
 	if err != nil {
 		return organization.ArchiveCatalog{}, err
@@ -132,6 +143,7 @@ func (publisher *Publisher) PublishPackageRowsMerged(rows []PackageRow, temporar
 		if readErr != nil {
 			return organization.ArchiveCatalog{}, readErr
 		}
+		existingDigest = payloadDigest(payload)
 		existing, err = parsePackageRows(payload)
 		if err != nil {
 			return organization.ArchiveCatalog{}, err
@@ -141,8 +153,28 @@ func (publisher *Publisher) PublishPackageRowsMerged(rows []PackageRow, temporar
 	for _, row := range existing {
 		merged[row.PackageID] = row
 	}
+	changed := false
 	for _, row := range normalized {
+		if prior, found := merged[row.PackageID]; found {
+			if prior.Revision > row.Revision || (prior.Revision == row.Revision && !samePackageRow(prior, row)) {
+				return organization.ArchiveCatalog{}, ErrCatalogReconciliation
+			}
+			if row.Revision == prior.Revision {
+				continue
+			}
+			if row.Revision > prior.Revision {
+				r := Reconciler{root: publisher.root}
+				current, err := r.currentRow(row)
+				if err != nil || !samePackageRow(current, row) {
+					return organization.ArchiveCatalog{}, errors.Join(ErrCatalogReconciliation, err)
+				}
+			}
+		}
 		merged[row.PackageID] = row
+		changed = true
+	}
+	if !changed {
+		return publishedCatalog(existing, publishedPath, existingDigest), nil
 	}
 	all := make([]PackageRow, 0, len(merged))
 	for _, row := range merged {
@@ -176,14 +208,17 @@ func (publisher *Publisher) publishPackageRows(rows []PackageRow, temporaryPath,
 	if err := publisher.root.Rename(temporaryPath, publishedPath); err != nil {
 		return organization.ArchiveCatalog{}, errors.Join(ErrPublishFailed, err)
 	}
-	digest := sha256.Sum256(verified)
+	return publishedCatalog(rows, publishedPath, payloadDigest(verified)), nil
+}
+
+func publishedCatalog(rows []PackageRow, publishedPath, checksum string) organization.ArchiveCatalog {
 	workspaceDriveID := "MULTIPLE"
 	if len(rows) == 1 {
 		workspaceDriveID = rows[0].WorkspaceDriveID
 	}
 	return organization.ArchiveCatalog{
-		WorkspaceDriveID: workspaceDriveID, Path: publishedPath, RowCount: len(rows), Checksum: hex.EncodeToString(digest[:]),
-	}, nil
+		WorkspaceDriveID: workspaceDriveID, Path: publishedPath, RowCount: len(rows), Checksum: checksum,
+	}
 }
 
 type Reconciler struct {
@@ -199,15 +234,42 @@ func NewReconciler(root *archive.StorageRoot) (*Reconciler, error) {
 }
 
 func (reconciler *Reconciler) Verify() (Verification, error) {
-	packages, invalid, err := reconciler.scanPackages()
+	before, err := reconciler.catalogDigest()
 	if err != nil {
 		return Verification{}, err
 	}
-	rows, err := reconciler.currentPackageRows()
+	packages, invalid, coverage, err := reconciler.scanPackages()
 	if err != nil {
 		return Verification{}, err
 	}
-	result := Verification{Entries: append([]VerificationEntry(nil), invalid...)}
+	var rows []PackageRow
+	if !coverage.legacyRoot {
+		rows, err = reconciler.currentPackageRows()
+		if err != nil {
+			coverage.State = "INCOMPLETE"
+			coverage.Issues = append(coverage.Issues, "archive-catalog.csv could not be read as package rows")
+		}
+	}
+	after, err := reconciler.catalogDigest()
+	if err != nil {
+		return Verification{}, err
+	}
+	if after != before {
+		coverage.State = "INCOMPLETE"
+		coverage.Issues = append(coverage.Issues, "archive-catalog.csv changed during verification")
+	}
+	if err := reconciler.stable(coverage); err != nil {
+		coverage.State = "INCOMPLETE"
+		coverage.Issues = append(coverage.Issues, err.Error())
+	}
+	return compareRows(packages, rows, invalid, coverage, after), nil
+}
+
+func compareRows(packages, rows []PackageRow, invalid []VerificationEntry, coverage Coverage, digest string) Verification {
+	if coverage.State == "EMPTY" && len(rows) > 0 {
+		coverage.State = "COMPLETE"
+	}
+	result := Verification{Coverage: coverage, CatalogSHA256: digest, Entries: append([]VerificationEntry(nil), invalid...)}
 	rowsByID := make(map[string][]PackageRow, len(rows))
 	for _, row := range rows {
 		rowsByID[row.PackageID] = append(rowsByID[row.PackageID], row)
@@ -225,9 +287,20 @@ func (reconciler *Reconciler) Verify() (Verification, error) {
 		case len(rowsByID[candidate.PackageID]) == 0:
 			entry.State = ConsistencyCatalogMissing
 			entry.Detail = "catalog row is missing"
+			entry.PackageRevision = candidate.Revision
+			entry.PackageDigest = candidate.ManifestDigest
 		case len(rowsByID[candidate.PackageID]) != 1 || !samePackageRow(candidate, rowsByID[candidate.PackageID][0]):
 			entry.State = ConsistencyCatalogMismatch
 			entry.Detail = "catalog row does not match package"
+			old := rowsByID[candidate.PackageID][0]
+			entry.CatalogRevision, entry.PackageRevision = old.Revision, candidate.Revision
+			entry.CatalogDigest, entry.PackageDigest = old.ManifestDigest, candidate.ManifestDigest
+			oldFields, newFields := packageRowRecord(old), packageRowRecord(candidate)
+			for i := range newFields {
+				if newFields[i] != oldFields[i] {
+					entry.Differences = append(entry.Differences, packageHeader[i])
+				}
+			}
 		}
 		result.Entries = append(result.Entries, entry)
 		delete(rowsByID, candidate.PackageID)
@@ -235,7 +308,7 @@ func (reconciler *Reconciler) Verify() (Verification, error) {
 	for packageID, orphanRows := range rowsByID {
 		for _, row := range orphanRows {
 			result.Entries = append(result.Entries, VerificationEntry{
-				PackageID: packageID, ResultFolder: row.ResultFolder, State: ConsistencyCatalogOrphan, Detail: "package folder is missing",
+				PackageID: packageID, ResultFolder: row.ResultFolder, State: ConsistencyCatalogOrphan, Detail: "package folder is missing", CatalogRevision: row.Revision, CatalogDigest: row.ManifestDigest,
 			})
 		}
 	}
@@ -248,31 +321,83 @@ func (reconciler *Reconciler) Verify() (Verification, error) {
 		}
 		return result.Entries[i].State < result.Entries[j].State
 	})
-	return result, nil
+	return result
+}
+
+type RebuildEvidence struct {
+	Catalog       organization.ArchiveCatalog
+	Before, After Verification
 }
 
 func (reconciler *Reconciler) Rebuild() (organization.ArchiveCatalog, error) {
-	lock, err := reconciler.root.AcquireExclusiveLock(context.Background(), ".archive-catalog.csv.lock")
+	repair, err := reconciler.RebuildWithEvidence()
+	return repair.Catalog, err
+}
+
+func (reconciler *Reconciler) RebuildWithEvidence() (RebuildEvidence, error) {
+	before, err := reconciler.catalogDigest()
 	if err != nil {
-		return organization.ArchiveCatalog{}, err
+		return RebuildEvidence{}, err
 	}
-	defer lock.Close()
-	packages, invalid, err := reconciler.scanPackages()
+	rows, err := reconciler.currentPackageRows()
 	if err != nil {
-		return organization.ArchiveCatalog{}, err
+		return RebuildEvidence{}, err
 	}
-	if len(invalid) != 0 {
-		return organization.ArchiveCatalog{}, ErrCatalogReconciliation
+	packages, invalid, coverage, err := reconciler.scanPackages()
+	if err != nil {
+		return RebuildEvidence{}, err
+	}
+	if len(invalid) != 0 || coverage.State == "INCOMPLETE" {
+		return RebuildEvidence{}, ErrCatalogReconciliation
 	}
 	seen := make(map[string]bool, len(packages))
 	for _, row := range packages {
 		if seen[row.PackageID] {
-			return organization.ArchiveCatalog{}, ErrCatalogReconciliation
+			return RebuildEvidence{}, ErrCatalogReconciliation
 		}
 		seen[row.PackageID] = true
 	}
-	publisher := &Publisher{root: reconciler.root, beforeReplace: reconciler.beforeReplace}
-	return publisher.publishPackageRows(packages, ".archive-catalog.csv.rebuild.partial", "archive-catalog.csv")
+	repair := RebuildEvidence{Before: compareRows(packages, rows, nil, coverage, before)}
+	lock, err := reconciler.root.AcquireExclusiveLock(context.Background(), ".archive-catalog.csv.lock")
+	if err != nil {
+		return RebuildEvidence{}, err
+	}
+	defer lock.Close()
+	publisher := &Publisher{root: reconciler.root, beforeReplace: func() error {
+		if reconciler.beforeReplace != nil {
+			if err := reconciler.beforeReplace(); err != nil {
+				return err
+			}
+		}
+		if err := reconciler.stable(coverage); err != nil {
+			return err
+		}
+		after, err := reconciler.catalogDigest()
+		if err != nil || after != before {
+			return errors.Join(ErrCatalogReconciliation, err)
+		}
+		return nil
+	}}
+	repair.Catalog, err = publisher.publishPackageRows(packages, ".archive-catalog.csv.rebuild.partial", "archive-catalog.csv")
+	if err != nil {
+		return repair, err
+	}
+	rows, err = reconciler.currentPackageRows()
+	if err != nil {
+		return repair, err
+	}
+	after, err := reconciler.catalogDigest()
+	if err != nil || after != repair.Catalog.Checksum {
+		return repair, errors.Join(ErrCatalogReconciliation, err)
+	}
+	if err := reconciler.stable(coverage); err != nil {
+		return repair, err
+	}
+	repair.After = compareRows(packages, rows, nil, coverage, after)
+	if len(packages) > 0 && !repair.After.Current() {
+		return repair, ErrCatalogReconciliation
+	}
+	return repair, nil
 }
 
 func (reconciler *Reconciler) currentPackageRows() ([]PackageRow, error) {
@@ -285,38 +410,6 @@ func (reconciler *Reconciler) currentPackageRows() ([]PackageRow, error) {
 		return nil, err
 	}
 	return parsePackageRowsForVerification(payload)
-}
-
-func (reconciler *Reconciler) scanPackages() ([]PackageRow, []VerificationEntry, error) {
-	entries, err := reconciler.root.ReadDir(".")
-	if err != nil {
-		return nil, nil, err
-	}
-	packages := make([]PackageRow, 0)
-	invalid := make([]VerificationEntry, 0)
-	for _, entry := range entries {
-		name := entry.Name()
-		if !entry.IsDir() || strings.HasPrefix(name, ".") || name == "packages" || name == "catalog" {
-			continue
-		}
-		metadataExists, metadataErr := reconciler.root.Exists(path.Join(name, "metadata.json"))
-		currentExists, currentErr := reconciler.root.Exists(path.Join(name, "current.json"))
-		compactExists, compactErr := reconciler.root.Exists(path.Join(name, archivebundle.CompactPackageDocumentName))
-		if metadataErr != nil || currentErr != nil || compactErr != nil {
-			return nil, nil, errors.Join(metadataErr, currentErr, compactErr)
-		}
-		if !metadataExists && !currentExists && !compactExists {
-			continue
-		}
-		row, rowErr := reconciler.inspectPackage(name)
-		if rowErr != nil {
-			invalid = append(invalid, VerificationEntry{ResultFolder: name, State: ConsistencyLayoutInvalid, Detail: rowErr.Error()})
-			continue
-		}
-		packages = append(packages, row)
-	}
-	sort.Slice(packages, func(i, j int) bool { return packages[i].PackageID < packages[j].PackageID })
-	return packages, invalid, nil
 }
 
 func (reconciler *Reconciler) inspectPackage(directory string) (PackageRow, error) {
@@ -370,7 +463,7 @@ func (reconciler *Reconciler) inspectPackage(directory string) (PackageRow, erro
 		return PackageRow{}, ErrCatalogReconciliation
 	}
 	manifestPayload, err := reconciler.root.ReadFile(path.Join(directory, "manifest-sha256.txt"))
-	if err != nil || payloadDigest(manifestPayload) != current.ManifestDigest || reconciler.verifyManifest(directory, manifestPayload) != nil {
+	if err != nil || !manifestContains(manifestPayload, metadata.VideoFileName) || !manifestContains(manifestPayload, "metadata.json") || !manifestContains(manifestPayload, "video-info.csv") || payloadDigest(manifestPayload) != current.ManifestDigest || reconciler.verifyManifest(directory, manifestPayload) != nil {
 		return PackageRow{}, errors.Join(ErrCatalogReconciliation, err)
 	}
 	videoInfo, err := reconciler.root.ReadFile(path.Join(directory, "video-info.csv"))
@@ -434,7 +527,7 @@ func (reconciler *Reconciler) verifyManifest(directory string, payload []byte) e
 }
 
 func validPackageFileName(name string) bool {
-	return name != "" && name == path.Base(name) && name != "." && !strings.HasPrefix(name, ".")
+	return name != "" && !strings.ContainsAny(name, "\\/:") && name == path.Base(name) && name != "." && !strings.HasPrefix(name, ".")
 }
 
 func normalizePackageRow(row *PackageRow) bool {
@@ -453,7 +546,7 @@ func normalizePackageRow(row *PackageRow) bool {
 	if !row.CompletedAt.IsZero() {
 		row.CompletedAt = row.CompletedAt.UTC()
 	}
-	if (row.LayoutVersion != archive.PackageLayoutFlatResultFolder && row.LayoutVersion != archive.PackageLayoutCompactResultFolder) ||
+	if (row.LayoutVersion != archive.PackageLayoutFlatResultFolder && row.LayoutVersion != archive.PackageLayoutCompactResultFolder && row.LayoutVersion != archive.PackageLayoutEventFolder) ||
 		row.PackageID == "" || row.Revision == 0 ||
 		!checksumPattern.MatchString(row.ManifestDigest) || !row.ArchiveState.Valid() || !row.Disposition.Valid() ||
 		row.Disposition == vocabulary.OrganizationHold || row.SourceCount <= 0 || row.ResultTitle == "" ||
@@ -471,11 +564,13 @@ func normalizePackageRow(row *PackageRow) bool {
 func encodePackageRows(rows []PackageRow) ([]byte, error) {
 	rows = append([]PackageRow(nil), rows...)
 	seen := make(map[string]bool, len(rows))
+	paths := make(map[string]bool, len(rows))
 	for index := range rows {
-		if !normalizePackageRow(&rows[index]) || seen[rows[index].PackageID] {
+		if !normalizePackageRow(&rows[index]) || seen[rows[index].PackageID] || paths[strings.ToLower(rows[index].ResultVideoPath)] {
 			return nil, ErrInvalidRequest
 		}
 		seen[rows[index].PackageID] = true
+		paths[strings.ToLower(rows[index].ResultVideoPath)] = true
 	}
 	sort.Slice(rows, func(i, j int) bool {
 		if rows[i].ArchiveDate != rows[j].ArchiveDate {

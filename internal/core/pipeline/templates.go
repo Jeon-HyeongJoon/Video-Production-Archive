@@ -145,6 +145,11 @@ func LargeFileIntake() Template {
 	)
 }
 
+// ArchiveCatalogVerification runs a destination scan independently of an intake run.
+func ArchiveCatalogVerification() Template {
+	return newTemplate("archive-catalog-maintenance", heavyStep("verify", vocabulary.ProcessingChecksum))
+}
+
 // ArchiveIntakeInspection is the Worker-side boundary between a fixed folder
 // scope and the per-folder organization Jobs created from its observations.
 func ArchiveIntakeInspection() Template {

@@ -1,6 +1,6 @@
 # 18. 목적지 메타데이터의 기록과 대조
 
-이 설계는 ARCHIVE_PRIMARY 전체에서 무엇이 보관됐는지, 어떤 기록이 뒤처졌는지, 무엇을 근거로 복구할지를 정한다. 현재 기본 게시 형식은 v3다. 아래 7개 개선 계약은 설계 브랜치의 `planned` 상태다. [기존 패키지와 카탈로그](04-data-archive.md#6-아카이브-패키지와-보관됨) · [행사별 배치](17-source-classification-policy.md#3-실행과-목적지)
+이 설계는 ARCHIVE_PRIMARY 전체에서 무엇이 보관됐는지, 어떤 기록이 뒤처졌는지, 무엇을 근거로 복구할지를 정한다. 현재 기본 게시 형식은 v3다. 아래 7개 계약은 요구사항 카탈로그와 기본 통합 테스트에 연결되어 있다. [기존 패키지와 카탈로그](04-data-archive.md#6-아카이브-패키지와-보관됨) · [행사별 배치](17-source-classification-policy.md#3-실행과-목적지)
 
 ## 1. 원인과 재현 근거
 
@@ -13,7 +13,7 @@
 | 행사 시험 목적지의 영상 4개가 검사에서 누락됨 | 복구 파일명이 v2·v3와 다른 폴더를 검증기가 건너뛰고 빈 검사 목록에 `Current() == true`를 반환한다. 행사 2곳에 MP4·개별 JSON·SRT가 각 4개 있고 영상 해시가 모두 맞았으나 설치된 CLI는 `current=true/entries=0`을 기록했다. |
 | 지연된 게시와 불완전한 재생성 | 파일 잠금은 쓰기를 직렬화하지만 현재 병합은 같은 ID의 나중 요청으로 행을 대체한다. 임시 StorageRoot에서 리비전 4 행을 1로 덮어쓰는 사례와 미등록 영상이 있는데도 재생성이 성공하는 사례를 재현했다. 이 둘은 별도 재현 결과다. |
 
-현재 코드는 **새** STT 명세에 1단계 게시 경로를 전달하고, 같은 기준 리비전의 바로 다음 게시를 재사용한다. 과거에 저장된 잘못된 명세는 여전히 파일 수정 **후** 경로 대조에 걸린다. 이번에 현행 Worker로도 v2 패키지가 리비전 1에서 2로 바뀐 직후 실패하는 것을 재현했다. 이 근거로 쓰기 전 검사를 설계한다. [명세의 경로 전달](../../internal/application/archivetranscription/projection.go) · [Worker의 수정과 결과 확인](../../internal/application/workerexecutor/media.go)
+조사 당시 코드는 **새** STT 명세에 1단계 게시 경로를 전달하고, 같은 기준 리비전의 바로 다음 게시를 재사용한다. 과거에 저장된 잘못된 명세는 파일 수정 **후** 경로 대조에 걸린다. 당시 Worker에서도 v2 패키지가 리비전 1에서 2로 바뀐 직후 실패하는 것을 재현했다. 수정된 Worker는 패키지 잠금 아래에서 이 경로를 쓰기 전에 대조한다. [명세의 경로 전달](../../internal/application/archivetranscription/projection.go) · [Worker의 수정과 결과 확인](../../internal/application/workerexecutor/media.go)
 
 운영 v2·v3 패키지 16개의 원본 16행에서 `video-info.csv` 23열과 패키지 원본 정보는 일치했다. v1 패키지 3개는 별도 구형 원장의 원본 46행에 대응했다. v1의 원본 행 수를 최신 패키지 행 수에 더하지 않는다.
 
@@ -43,10 +43,10 @@ v2는 `current.json`·`metadata.json`, v3는 `.archive-package.json`을 사용�
 |---|---|
 | `<행사>/event.json` | `layout_version=4`, 안정된 `occasion_id`, 행사 `revision`, `channels[]`의 고유 `package_id, metadata_file, metadata_sha256`. 각 참조는 해당 행사 직속 파일명이다. 중복 소유, Windows 대소문자 충돌, 절대경로·상위 이동을 거부한다. |
 | `<채널>.json` | `schema_version=1`, layout·패키지 ID·revision·상태, 실행·입력 revision·원본 드라이브·판정·Profile, 결과 경로·처리일, 순서 있는 `sources[]`, QC 실측 `output_inspection`, `files[]`의 역할·직속 경로·크기·SHA-256. 이 JSON의 저장된 바이트 SHA-256이 채널 manifest digest다. 문서 안에는 자신의 해시를 넣지 않는다. |
-| 영상·자막·근거 | 원본의 기술정보와 결과 영상의 길이·크기·해상도·codec·비트레이트를 각각 보존한다. 소스 합본에는 입력 순서와 마커 시각, STT 게시에는 자막·전사 참조와 각각의 해시·품질 사유·건수를 기록한다. 미관측값은 추정하지 않는다. |
+| 영상·자막·근거 | 원본의 기술정보와 결과 영상의 길이·크기·해상도·codec·비트레이트를 각각 보존한다. 소스 합본의 `source_timeline`에는 입력 순서와 마커 시각을 둔다. STT 게시의 `files[]`는 `SUBTITLE`, `TRANSCRIPT`, `TRANSCRIPT_TEXT` 역할과 해시를 기록하고 `transcript_quality`는 품질 사유·건수를 보존한다. 미관측값은 추정하지 않는다. |
 | `archive-catalog.csv` | 기존 검색 열을 유지한다. 같은 `result_folder`에 여러 행이 있을 수 있다. package ID와 결과 영상 상대경로는 각각 유일하다. 각 행에서 채널 JSON과 게시된 자막으로 이동한다. `ARC-025` |
 
-행사 내 추가 게시는 행사 잠금 아래 이전 manifest revision을 확인하고 검증된 채널을 합친 뒤 행사 manifest를 마지막에 교체한다. 같은 이름의 공개 파일을 갱신할 때는 이전 revision bytes와 교체 의도를 먼저 내구성 있게 기록한다. 중단 시 이전 또는 새 manifest와 해시가 맞는 파일 묶음으로 복구한 뒤 읽기를 재개한다. 미완료 묶음은 정상 행으로 게시하지 않는다. 현재 시험 JSON은 원본 경로와 영상 checksum을 제공하지만 정식 package ID·revision 계약이 없다. 별도 원본 대조와 패키지 식별을 거치기 전에는 미해결 시험 결과로 보고한다.
+후속 v4 쓰기 설계에서 행사 내 추가 게시는 행사 잠금 아래 이전 manifest revision을 확인하고 검증된 채널을 합친 뒤 행사 manifest를 마지막에 교체한다. 같은 이름의 공개 파일을 갱신할 때는 이전 revision bytes와 교체 의도를 먼저 내구성 있게 기록한다. 중단 시 이전 또는 새 manifest와 해시가 맞는 파일 묶음으로 복구한 뒤 읽기를 재개한다. 미완료 묶음은 정상 행으로 게시하지 않는다. 현재 시험 JSON은 원본 경로와 영상 checksum을 제공하지만 정식 package ID·revision 계약이 없다. 별도 원본 대조와 패키지 식별을 거치기 전에는 미해결 시험 결과로 보고한다.
 
 ## 5. 게시 중단과 복구
 
@@ -57,7 +57,7 @@ v2는 `current.json`·`metadata.json`, v3는 `.archive-package.json`을 사용�
 
 ## 6. 아키비스트가 확인할 근거
 
-읽기 전용 `archive.system.status.get.v1`에 `destination_catalogs[]`를 추가한다. 목적지 Storage ID별로 마지막 검증 보고서 ID·관측 시각·CSV SHA-256·일치·불일치·미해결 수·다음 확인 항목을 제공한다. 시스템 상태는 원본 선택이나 실행 고정 없이 조회한다. 상세 목록은 보고서 참조로 읽고 기본 응답에는 파일 경로나 자막 원문을 싣지 않는다. 알려진 게시 뒤 사후 대조 전이면 `STALE`, 미관측은 `NOT_OBSERVED`, 빈 목적지는 `EMPTY`, 부분 조사는 `INCOMPLETE`, 확인된 행 차이는 `MISMATCH`로 표시한다. 범위가 불완전하면서 차이도 발견된 경우에는 두 근거를 모두 보존한다. 이전 보고서만으로 오프라인 목적지가 현재 일치한다고 표시하지 않는다. 읽기 요청 자체는 복구 명령을 발생시키지 않는다. `MCP-014`
+관리 검증은 `archive-catalog-maintenance` Job의 `verify` Step에서 실행한다. 결과 JSON은 별도 보고서 Storage에 게시하고, Control은 성공한 Worker 출력에서 요약과 보고서 checksum을 읽는다. 직접 CLI로 검사하면 같은 형식의 로컬 보고서를 얻는다. 읽기 전용 `archive.system.status.get.v1`에 `destination_catalogs[]`를 추가한다. 목적지 Storage ID별로 마지막 검증 보고서 ID·관측 시각·CSV SHA-256·일치·불일치·미해결 수·다음 확인 항목을 제공한다. 시스템 상태는 원본 선택이나 실행 고정 없이 조회한다. 상세 목록은 보고서 참조로 읽고 기본 응답에는 파일 경로나 자막 원문을 싣지 않는다. 알려진 게시 뒤 사후 대조 전이면 `STALE`, 미관측은 `NOT_OBSERVED`, 빈 목적지는 `EMPTY`, 부분 조사는 `INCOMPLETE`, 확인된 행 차이는 `MISMATCH`로 표시한다. 범위가 불완전하면서 차이도 발견된 경우에는 두 근거를 모두 보존한다. 이전 보고서만으로 오프라인 목적지가 현재 일치한다고 표시하지 않는다. 읽기 요청 자체는 복구 명령을 발생시키지 않는다. `MCP-014`
 
 ## 7. 구현 순서와 인수
 
@@ -71,6 +71,16 @@ v2는 `current.json`·`metadata.json`, v3는 `.archive-package.json`을 사용�
 | 2 | MCP-014 | TestDestinationStatusReturnsScopedVerificationEvidenceWithoutRun |
 | 3 | ARC-025 | TestDestinationEventCatalogUsesOneRowPerVerifiedChannel |
 
-설계 브랜치에서 `go test -tags destination_catalog_contract -run '^TestDestination' -count=1 ./internal/adapter/archivecatalog ./internal/application/workerexecutor ./internal/application/archiveintakeworkspace ./internal/adapter/httpmcp`로 실행한다. 구현 시 계약마다 테스트를 기본 검증으로 옮기고 카탈로그 참조와 상태를 함께 전환한다.
+개별 계약은 `go test -run '^TestDestination' -count=1 ./internal/adapter/archivecatalog ./internal/application/workerexecutor ./internal/application/archiveintakeworkspace ./internal/adapter/httpmcp`로 실행한다. 전체 요구사항과 테스트는 `make verify`로 대조한다.
 
 Windows 인수는 고정 시험 목적지에서 수행한다. 구형 원장과 v2·v3·v4, 미등록 행사, 리비전 1 CSV와 리비전 4 패키지를 재현한다. CSV 교체 직전·직후 중단, 같은 요청 재전송, 구버전 게시를 시험한다. 재생성 전후 파일 해시와 행 차이, Archivist가 읽은 목적지별 보고서와 독립적인 파일 대조 결과가 일치해야 운영 복구로 넘어간다.
+
+### Windows 검증 결과 (2026-11-24)
+
+| 읽은 목적지 | 범위와 대조 결과 |
+|---|---|
+| 운영 `C:/ArchiveStorage` | 영상 후보 19개. v2 15개·v3 1개 중 루트 CSV와 일치 15개, 불일치 1개. v1 패키지 3개와 구형 원본 원장 46행은 별도로 대조했다. 미해결 영상 0개. |
+| 고정 시험 목적지의 `output` | 행사 2개, 영상 후보 4개, 미해결 영상 4개. 두 행사 문서에 정식 채널 참조가 없어 검사 상태는 `INCOMPLETE`였다. |
+| 격리된 재생성 시험 | 미등록 영상이 있으면 CSV 교체를 중단했다. 이를 해소한 경우 리비전 1 행을 4로 복원하고 다른 행과 패키지 파일의 해시를 보존했다. |
+
+운영 차이 한 건은 `VP-20261110-d2cf9253c403`의 리비전·manifest·완료 시각·전사 JSON·텍스트·자막 경로다. 읽기 전용 검사의 루트 CSV SHA-256은 이전 조사와 같은 `f7750e591028e040e23da14c751ea4eea6680ff00f430dbc902cf7acc887a704`이었다. Windows 시험 로그와 원본 보고서는 작업 공간의 `evidence/destination-catalog-acceptance-20261124T101124/` 아래에 보관했다. 운영 복구는 별도 작업으로 남아 있다.

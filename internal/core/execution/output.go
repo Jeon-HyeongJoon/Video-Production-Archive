@@ -15,22 +15,25 @@ import (
 var ErrInvalidStepOutputRecord = errors.New("Step output record is incomplete or does not match its execution spec")
 
 type StepOutput struct {
-	ID                string                           `json:"id"`
-	Kind              OutputKind                       `json:"kind"`
-	StorageID         string                           `json:"storage_id"`
-	RelativePath      string                           `json:"relative_path"`
-	Checksum          string                           `json:"checksum"`
-	TranscriptQuality *transcription.QualityAssessment `json:"transcript_quality,omitempty"`
+	CatalogPublication  *CatalogPublication              `json:"catalog_publication,omitempty"`
+	CatalogVerification *CatalogVerification             `json:"catalog_verification,omitempty"`
+	ID                  string                           `json:"id"`
+	Kind                OutputKind                       `json:"kind"`
+	StorageID           string                           `json:"storage_id"`
+	RelativePath        string                           `json:"relative_path"`
+	Checksum            string                           `json:"checksum"`
+	TranscriptQuality   *transcription.QualityAssessment `json:"transcript_quality,omitempty"`
 }
 
 type StepOutputRecord struct {
-	SpecDigest             string           `json:"spec_digest"`
-	FencingToken           uint64           `json:"fencing_token"`
-	WorkerID               string           `json:"worker_id"`
-	RecordedAt             time.Time        `json:"recorded_at"`
-	Outputs                []StepOutput     `json:"outputs"`
-	VerificationReferences []string         `json:"verification_references"`
-	InspectedMedia         []InspectedMedia `json:"inspected_media,omitempty"`
+	CatalogPublication     *CatalogPublication `json:"catalog_publication,omitempty"`
+	SpecDigest             string              `json:"spec_digest"`
+	FencingToken           uint64              `json:"fencing_token"`
+	WorkerID               string              `json:"worker_id"`
+	RecordedAt             time.Time           `json:"recorded_at"`
+	Outputs                []StepOutput        `json:"outputs"`
+	VerificationReferences []string            `json:"verification_references"`
+	InspectedMedia         []InspectedMedia    `json:"inspected_media,omitempty"`
 }
 
 // InspectedMedia is the normalized, path-safe result of one Worker-side
@@ -82,6 +85,22 @@ func NewStepOutputRecordWithInspections(
 			output.RelativePath != target.RelativePath || !sha256Pattern.MatchString(output.Checksum) {
 			return StepOutputRecord{}, ErrInvalidStepOutputRecord
 		}
+		if p := output.CatalogPublication; p != nil {
+			if record.CatalogPublication != nil || (spec.Operation != OperationWriteArchiveCatalog && spec.Operation != OperationReconcileArchivePublication) || !p.Matches(spec.Parameters.ArchiveRunID, spec.Parameters.ArchiveStorageID, *output) {
+				return StepOutputRecord{}, ErrInvalidStepOutputRecord
+			}
+			clone := *p
+			clone.Packages = append([]PublishedPackage(nil), p.Packages...)
+			output.CatalogPublication = nil
+			record.CatalogPublication = &clone
+		}
+		if v := output.CatalogVerification; v != nil {
+			if spec.Operation != OperationVerifyArchiveCatalog || !v.Matches(spec.Parameters.ArchiveStorageID, *output) {
+				return StepOutputRecord{}, ErrInvalidStepOutputRecord
+			}
+			clone := *v
+			output.CatalogVerification = &clone
+		}
 		if output.Kind == OutputTranscript {
 			if output.TranscriptQuality == nil || output.TranscriptQuality.Validate() != nil {
 				return StepOutputRecord{}, ErrInvalidStepOutputRecord
@@ -130,9 +149,19 @@ func NewStepOutputRecordWithInspections(
 	return record, nil
 }
 
+// ReportedOutputs restores the Worker representation when Control settles a record.
+func (record StepOutputRecord) ReportedOutputs() []StepOutput {
+	if record.CatalogPublication == nil || len(record.Outputs) != 1 {
+		return record.Outputs
+	}
+	outputs := append([]StepOutput(nil), record.Outputs...)
+	outputs[0].CatalogPublication = record.CatalogPublication
+	return outputs
+}
+
 func (record StepOutputRecord) ValidateFor(spec StepExecutionSpec) error {
 	normalized, err := NewStepOutputRecordWithInspections(
-		spec, record.FencingToken, record.WorkerID, record.RecordedAt, record.Outputs, record.VerificationReferences, record.InspectedMedia,
+		spec, record.FencingToken, record.WorkerID, record.RecordedAt, record.ReportedOutputs(), record.VerificationReferences, record.InspectedMedia,
 	)
 	if err != nil || record.SpecDigest != spec.Digest || !reflect.DeepEqual(record, normalized) {
 		return ErrInvalidStepOutputRecord

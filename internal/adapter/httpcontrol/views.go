@@ -135,8 +135,9 @@ type driveView struct {
 	StageTwoRemaining          int                           `json:"stage_two_remaining"`
 	HoldCount                  int                           `json:"hold_count"`
 	EligibleTranscriptionCount int                           `json:"eligible_transcription_count"`
+	CatalogCountUnknown        bool                          `json:"catalog_count_unknown,omitempty"`
 	CatalogRowCount            int                           `json:"catalog_row_count"`
-	CatalogUpdatedAt           time.Time                     `json:"catalog_updated_at,omitempty"`
+	CatalogUpdatedAt           time.Time                     `json:"catalog_updated_at,omitzero"`
 	Folders                    []driveFolderView             `json:"folders"`
 	DiscoveredFileCount        int                           `json:"discovered_file_count"`
 	DiscoveredFolderCount      int                           `json:"discovered_folder_count"`

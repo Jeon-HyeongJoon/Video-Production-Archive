@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"path"
 	"sort"
 	"strings"
@@ -160,6 +161,14 @@ func MaterializeDependentStepExecutionSpec(request MaterializeRequest) (StepExec
 				if candidate.ID == parameters.ArchivePackageID && candidate.Kind == OutputOrganizedMedia && candidate.RelativePath != "" {
 					relativePath = candidate.RelativePath
 					break
+				}
+			}
+			if legacy, err := archive.PackageDirectory(parameters.ArchivePackageID); err == nil {
+				for _, dir := range []string{legacy, path.Join("packages", parameters.ArchivePackageID)} {
+					if relativePath == path.Join(dir, "revisions", fmt.Sprintf("%06d", parameters.ArchivePackageRevision), "metadata.json") {
+						relativePath = path.Join(dir, "revisions", fmt.Sprintf("%06d", parameters.ArchivePackageRevision+1), "metadata.json")
+						break
+					}
 				}
 			}
 			outputs = []OutputTarget{{

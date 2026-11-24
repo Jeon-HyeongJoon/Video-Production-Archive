@@ -149,7 +149,7 @@ func (scanner *Scanner) walk(ctx context.Context, directory string, grouped map[
 		if extensions != nil {
 			extensions[ext]++
 		}
-		if !supported(ext) {
+		if !SupportedVideoExtension(ext) {
 			continue
 		}
 		folder := path.Dir(relative)
@@ -182,7 +182,7 @@ func (scanner *Scanner) walk(ctx context.Context, directory string, grouped map[
 	return nil
 }
 
-func supported(extension string) bool {
+func SupportedVideoExtension(extension string) bool {
 	switch strings.ToLower(extension) {
 	case ".mp4", ".mov", ".mkv", ".mxf", ".avi", ".mts", ".m2ts":
 		return true
