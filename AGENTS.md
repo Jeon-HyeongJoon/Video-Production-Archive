@@ -4,7 +4,7 @@ This repository treats requirements, ontology, tests, and Core contracts as one 
 
 ## Development quality ownership
 
-The coordinating agent acts as development PM and owns overall quality. For each change or incident, the PM defines the observable acceptance criteria and assigns the affected areas to their lead agents.
+Each feature lead owns the performance of their area and decides when its work is complete against agreed acceptance criteria. The coordinating agent acts as development PM and owns defects at feature boundaries, end-to-end performance, integration acceptance, and release readiness.
 
 | Development lead | Quality responsibility |
 | --- | --- |
@@ -13,7 +13,9 @@ The coordinating agent acts as development PM and owns overall quality. For each
 | Metadata extraction and preservation | Trace ffprobe measurements and checksums from the original through package metadata to the destination catalog. Check missing records and reconciliation. |
 | STT and subtitles | Verify speech extraction, chunk boundaries, subtitle timing, transcription quality evidence, and recovery from interrupted work. |
 
-Each lead reports the affected requirement, what they reproduced or verified, the supporting test or artifact, and any open defect. The PM resolves ownership across areas, checks that one stage's output works as the next stage's input, and reports integration results and release readiness to the user.
+For a performance change, the lead and PM agree on the user-visible outcome and a relevant measure before implementation. Examples include render time per source minute at the required profile and QC, classification time at a known accuracy on a labeled sample, catalog reconciliation time with all records accounted for, and STT time per audio minute at the required transcript quality. Compare the baseline and candidate on the same representative inputs, hardware, and settings. Each lead reports feature completion, the affected requirement and test, measured results, and remaining defects or unverified behavior.
+
+The PM traces a boundary failure from the producer's output to the consumer's input, coordinates the fix across the affected leads, and owns it through verification. Verify the assembled path on a small representative workload, including the failure or retry that motivated the change. Check the actual destination files, catalog, and reported job state where applicable. Compare total elapsed time and repeated work so a faster stage cannot hide a slower or less reliable workflow. Prefer the change with the better measured end-to-end outcome while preserving required output quality and source integrity. Investigate a regression or inconclusive result before claiming an improvement.
 
 ## Before changing behavior
 
