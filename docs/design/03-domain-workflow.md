@@ -38,7 +38,7 @@ Summary는 Transcript와 분리된 리비전 대상 Artifact subtype이다. Summ
 
 Rendering은 versioned Profile만 실행한다. v1 `archive-event-1080p`는 호환성을 우선한 H.264/AAC MP4, 최대 1920×1080, 짝수 크기, 제한된 thread 수를 사용한다. FFmpeg는 인수 배열로 실행하고 같은 출력 디렉터리의 임시 파일을 검증한 뒤 원자적으로 게시하며, 게시된 파일의 checksum과 Profile·처리기·Worker를 Rendition provenance에 기록한다. 실제 Windows FFmpeg 검증 전까지 하드웨어 encoder는 허용 목록에 넣지 않는다. `RND-001~003`
 
-QC는 렌더 요청값을 그대로 신뢰하지 않는다. 게시 파일을 ffprobe와 SHA-256으로 다시 관찰한 `OutputObservation`을 원본 `MediaInspection`, 렌더 Profile 및 Rendition과 비교한다. decodable·checksum·크기·container·video codec·해상도·길이와 원본의 오디오 유무가 요구하는 audio codec 검사가 모두 통과한 `QCAssessment`만 PASSED다. 원본에 오디오가 있으면 AAC를, 없으면 오디오 스트림 부재를 기대값으로 보존한다. 이 평가는 다음 단계에서 provenance를 가진 `QCReport` sidecar로 게시한다. `QCT-001~002`
+QC는 렌더 요청값을 그대로 신뢰하지 않는다. 게시 파일을 ffprobe와 SHA-256으로 다시 관찰한 `OutputObservation`을 원본 `MediaInspection`, 렌더 Profile 및 Rendition과 비교한다. decodable·checksum·크기·container·video codec·해상도·길이와 원본의 오디오 유무가 요구하는 audio codec 검사가 모두 통과한 `QCAssessment`만 PASSED다. 원본에 오디오가 있으면 AAC를, 없으면 오디오 스트림 부재를 기대값으로 보존한다. ffprobe가 MOV 계열 공통 형식명을 반환하면 QC는 식별 가능한 `major_brand`로 MP4·QuickTime·3GP·3G2를 구분한다. 브랜드를 식별할 수 없는 관찰은 기존 형식 목록을 보존한다. 이 평가는 다음 단계에서 provenance를 가진 `QCReport` sidecar로 게시한다. `QCT-001~002`
 
 Catalog는 파일을 이동하거나 경로를 검색 키로 사용하지 않는다. 사람 또는 Archivist가 작성한 제목·설명·키워드는 OriginalAsset별 추가 전용 `CatalogRecord` 리비전으로 남긴다. 자산 검색은 최신 CatalogRecord와 최신 MediaInspection을 결합해 text·video codec·길이 조건을 적용하며 OriginalAsset 콘텐츠 정체성을 반환한다. 전사 검색은 별도 segment hit 모델로 최신 Transcript의 timecode를 반환한다. `CAT-001~003`
 

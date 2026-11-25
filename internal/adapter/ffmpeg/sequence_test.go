@@ -127,6 +127,44 @@ func TestSequenceRendererPublishesTimelineOrderedTwentyMbpsVideoAndMarkerSidecar
 			t.Fatal("previous markers changed", err)
 		}
 	})
+	for _, missing := range []string{"neither", "markers", "video"} {
+		t.Run("retry with missing "+missing, func(t *testing.T) {
+			paths := map[string]string{"video": publishedVideo, "markers": filepath.Join(directory, request.PublishedMarkerPath)}
+			existing := map[string]os.FileInfo{}
+			for name, file := range paths {
+				if name == missing {
+					if err := os.Remove(file); err != nil {
+						t.Fatal(err)
+					}
+					continue
+				}
+				info, err := os.Stat(file)
+				if err != nil {
+					t.Fatal(err)
+				}
+				existing[name] = info
+			}
+			retry := request
+			retry.TemporaryOutputPath += ".2"
+			retry.TemporaryMarkerPath += ".2"
+			replayed, err := renderer.Render(context.Background(), retry)
+			if err != nil || replayed.Rendition.Artifact.Checksum != result.Rendition.Artifact.Checksum ||
+				replayed.MarkerArtifact.Checksum != result.MarkerArtifact.Checksum {
+				t.Fatalf("retry returned a different sequence: %+v, %v", replayed, err)
+			}
+			for name, prior := range existing {
+				current, err := os.Stat(paths[name])
+				if err != nil || !os.SameFile(prior, current) || !prior.ModTime().Equal(current.ModTime()) {
+					t.Errorf("retry replaced existing %s: %v", name, err)
+				}
+			}
+			for _, temp := range []string{retry.TemporaryOutputPath, filepath.Join(directory, retry.TemporaryMarkerPath)} {
+				if _, err := os.Stat(temp); !errors.Is(err, os.ErrNotExist) {
+					t.Errorf("retry left temporary file %s: %v", temp, err)
+				}
+			}
+		})
+	}
 	verificationFailure := request
 	verificationFailure.RenditionID = "RENDITION-VERIFY-FAIL"
 	verificationFailure.TemporaryOutputPath = filepath.Join(directory, "organized", "SOURCE-1", "verify-fail.mp4.partial")

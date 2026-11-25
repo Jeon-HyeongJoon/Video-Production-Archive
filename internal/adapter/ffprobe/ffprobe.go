@@ -11,6 +11,7 @@ import (
 	"math"
 	"os"
 	"os/exec"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -72,18 +73,7 @@ func (inspector *Inspector) Inspect(ctx context.Context, request Request) (media
 		strings.TrimSpace(request.OriginalChecksum) == "" || strings.TrimSpace(request.ResolvedInputPath) == "" {
 		return mediaanalysis.MediaInspection{}, ErrInvalidRequest
 	}
-	arguments := []string{
-		"-v", "error",
-		"-print_format", "json",
-		"-show_format",
-		"-show_streams",
-		"-i", request.ResolvedInputPath,
-	}
-	payload, err := inspector.runner.Output(ctx, inspector.executable, arguments)
-	if err != nil {
-		return mediaanalysis.MediaInspection{}, fmt.Errorf("%w: %w", ErrProbeFailed, err)
-	}
-	observed, err := decode(payload)
+	observed, _, err := inspector.probe(ctx, request.ResolvedInputPath)
 	if err != nil {
 		return mediaanalysis.MediaInspection{}, err
 	}
@@ -150,23 +140,12 @@ func (inspector *Inspector) InspectStorageOutput(ctx context.Context, root *arch
 }
 
 func (inspector *Inspector) inspectOutputStreams(ctx context.Context, resolvedPath string) (qc.OutputObservation, error) {
-	arguments := []string{
-		"-v", "error",
-		"-print_format", "json",
-		"-show_format",
-		"-show_streams",
-		"-i", resolvedPath,
-	}
-	payload, err := inspector.runner.Output(ctx, inspector.executable, arguments)
-	if err != nil {
-		return qc.OutputObservation{}, fmt.Errorf("%w: %w", ErrProbeFailed, err)
-	}
-	observed, err := decode(payload)
+	observed, brand, err := inspector.probe(ctx, resolvedPath)
 	if err != nil {
 		return qc.OutputObservation{}, err
 	}
 	output := qc.OutputObservation{
-		Containers: append([]string(nil), observed.Containers...), DurationMillis: observed.DurationMillis, Decodable: true,
+		Containers: qcContainers(observed.Containers, brand), DurationMillis: observed.DurationMillis, Decodable: true,
 	}
 	primaryVideo := int(^uint(0) >> 1)
 	for _, stream := range observed.VideoStreams {
@@ -185,10 +164,29 @@ func (inspector *Inspector) inspectOutputStreams(ctx context.Context, resolvedPa
 			output.AudioCodec = strings.ToLower(strings.TrimSpace(stream.Codec))
 		}
 	}
-	for index := range output.Containers {
-		output.Containers[index] = strings.ToLower(strings.TrimSpace(output.Containers[index]))
-	}
 	return output, nil
+}
+
+// The MOV demuxer lists every format it supports. A recognized major brand
+// identifies which one was actually written, independently of the file name.
+func qcContainers(containers []string, majorBrand string) []string {
+	for i, name := range containers {
+		containers[i] = strings.ToLower(strings.TrimSpace(name))
+	}
+	if slices.Contains(containers, "mov") && slices.Contains(containers, "mp4") {
+		brand := strings.ToLower(strings.TrimSpace(majorBrand))
+		switch {
+		case brand == "qt":
+			return []string{"mov"}
+		case strings.HasPrefix(brand, "3gp"):
+			return []string{"3gp"}
+		case strings.HasPrefix(brand, "3g2"):
+			return []string{"3g2"}
+		case brand == "isom" || brand == "mp41" || brand == "mp42":
+			return []string{"mp4"}
+		}
+	}
+	return containers
 }
 
 type probeDocument struct {
@@ -217,11 +215,21 @@ type probeDocument struct {
 	} `json:"streams"`
 }
 
-func decode(payload []byte) (mediaanalysis.MediaInspection, error) {
+func (inspector *Inspector) probe(ctx context.Context, resolvedPath string) (mediaanalysis.MediaInspection, string, error) {
+	arguments := []string{"-v", "error", "-print_format", "json", "-show_format", "-show_streams", "-i", resolvedPath}
+	payload, err := inspector.runner.Output(ctx, inspector.executable, arguments)
+	if err != nil {
+		return mediaanalysis.MediaInspection{}, "", fmt.Errorf("%w: %w", ErrProbeFailed, err)
+	}
 	var document probeDocument
 	if err := json.Unmarshal(payload, &document); err != nil {
-		return mediaanalysis.MediaInspection{}, fmt.Errorf("%w: %v", ErrInvalidOutput, err)
+		return mediaanalysis.MediaInspection{}, "", fmt.Errorf("%w: %v", ErrInvalidOutput, err)
 	}
+	observed, err := document.inspection()
+	return observed, document.Format.Tags["major_brand"], err
+}
+
+func (document *probeDocument) inspection() (mediaanalysis.MediaInspection, error) {
 	duration, err := parseDurationMillis(document.Format.Duration)
 	if err != nil {
 		return mediaanalysis.MediaInspection{}, err

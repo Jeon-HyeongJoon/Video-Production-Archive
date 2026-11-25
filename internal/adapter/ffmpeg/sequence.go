@@ -141,24 +141,36 @@ func (renderer *SequenceRenderer) Render(ctx context.Context, request SequenceRe
 		return SequenceResult{}, errors.Join(ErrRenderFailed, err)
 	}
 	// Preflight both published names under the Worker's output locks before
-	// replacing either one. An earlier verified video or marker is immutable.
-	if err := matchExistingSequenceFile(renderer.markerRoot, publishedMarkerPath, temporaryMarkerPath); err != nil {
+	// publishing a missing member of the pair.
+	markerExists, err := matchingSequenceFileExists(renderer.markerRoot, publishedMarkerPath, temporaryMarkerPath)
+	if err != nil {
 		return SequenceResult{}, errors.Join(ErrRenderFailed, err)
 	}
 	currentVideo, stagedVideo := artifactPath, request.TemporaryArtifactPath
 	if request.OutputRoot == nil {
 		currentVideo, stagedVideo = request.PublishedOutputPath, request.TemporaryOutputPath
 	}
-	if err := matchExistingSequenceFile(request.OutputRoot, currentVideo, stagedVideo); err != nil {
+	videoExists, err := matchingSequenceFileExists(request.OutputRoot, currentVideo, stagedVideo)
+	if err != nil {
 		return SequenceResult{}, errors.Join(ErrRenderFailed, err)
 	}
 	if err := ctx.Err(); err != nil {
 		return SequenceResult{}, err
 	}
-	if err := renderer.publisher.Publish(request.TemporaryOutputPath, request.PublishedOutputPath); err != nil {
+	if videoExists {
+		err = removeTemporaryFile(request.OutputRoot, request.TemporaryArtifactPath, request.TemporaryOutputPath)
+	} else {
+		err = renderer.publisher.Publish(request.TemporaryOutputPath, request.PublishedOutputPath)
+	}
+	if err != nil {
 		return SequenceResult{}, errors.Join(ErrRenderFailed, err)
 	}
-	if err := renderer.markerRoot.Rename(temporaryMarkerPath, publishedMarkerPath); err != nil {
+	if markerExists {
+		err = renderer.markerRoot.Remove(temporaryMarkerPath)
+	} else {
+		err = renderer.markerRoot.Rename(temporaryMarkerPath, publishedMarkerPath)
+	}
+	if err != nil {
 		return SequenceResult{}, errors.Join(ErrRenderFailed, err)
 	}
 
@@ -197,7 +209,7 @@ func (renderer *SequenceRenderer) Render(ctx context.Context, request SequenceRe
 	return SequenceResult{Rendition: rendition, MarkerArtifact: markerArtifact}, nil
 }
 
-func matchExistingSequenceFile(root *archive.StorageRoot, published, staged string) error {
+func matchingSequenceFileExists(root *archive.StorageRoot, published, staged string) (bool, error) {
 	stat := os.Lstat
 	hash := hashFile
 	if root != nil {
@@ -206,26 +218,26 @@ func matchExistingSequenceFile(root *archive.StorageRoot, published, staged stri
 	}
 	info, err := stat(published)
 	if errors.Is(err, os.ErrNotExist) {
-		return nil
+		return false, nil
 	}
 	if err != nil {
-		return err
+		return false, err
 	}
 	if !info.Mode().IsRegular() {
-		return ErrSequenceOutputConflict
+		return false, ErrSequenceOutputConflict
 	}
 	size, sum, err := hash(published)
 	if err != nil {
-		return err
+		return false, err
 	}
 	newSize, newSum, err := hash(staged)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if size != newSize || sum != newSum {
-		return ErrSequenceOutputConflict
+		return false, ErrSequenceOutputConflict
 	}
-	return nil
+	return true, nil
 }
 
 func sequenceArguments(inputPaths []string, hasAudio bool, outputPath string, profile rendering.Profile) []string {

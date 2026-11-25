@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -58,4 +59,31 @@ func TestFFprobeAdapterObservesPublishedRenditionBytesForQC(t *testing.T) {
 	if !reflect.DeepEqual(gotArguments, wantArguments) {
 		t.Fatalf("ffprobe QC arguments=%q want=%q", gotArguments, wantArguments)
 	}
+	t.Run("published MP4 family containers", func(t *testing.T) {
+		encoder, err := exec.LookPath("ffmpeg")
+		if err != nil {
+			t.Skip("FFmpeg required")
+		}
+		probe, err := exec.LookPath("ffprobe")
+		if err != nil {
+			t.Skip("FFprobe required")
+		}
+		inspector, err := NewInspector(probe, "test", "worker", OSRunner{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, muxer := range []string{"mp4", "mov", "3gp", "3g2"} {
+			file := filepath.Join(directory, muxer+"-rendition.mp4")
+			cmd := exec.Command(encoder, "-v", "error", "-nostdin", "-f", "lavfi", "-i", "color=s=32x32:r=1",
+				"-frames:v", "1", "-c:v", "libx264", "-threads", "1", "-f", muxer, file)
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("%s: %v: %s", muxer, err, out)
+			}
+			observed, err := inspector.InspectPublishedOutput(context.Background(), file)
+			if err != nil || !reflect.DeepEqual(observed.Containers, []string{muxer}) {
+				t.Errorf("%s bytes under .mp4 name: containers=%v, err=%v", muxer, observed.Containers, err)
+			}
+		}
+	})
+
 }
