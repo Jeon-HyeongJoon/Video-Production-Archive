@@ -46,7 +46,19 @@ func TestMain(m *testing.M) {
 			fmt.Fprintln(os.Stderr, "whisper fixture received no -of argument")
 			os.Exit(2)
 		}
-		if err := os.WriteFile(outputPrefix+".json", []byte(os.Getenv("WHISPER_FIXTURE_JSON")), 0o600); err != nil {
+		payload := os.Getenv("WHISPER_FIXTURE_JSON")
+		if table := os.Getenv("WHISPER_FIXTURE_BY_OFFSET"); table != "" {
+			var responses map[string]string
+			if err := json.Unmarshal([]byte(table), &responses); err != nil {
+				panic(err)
+			}
+			for i, arg := range arguments {
+				if arg == "-ot" {
+					payload = responses[arguments[i+1]]
+				}
+			}
+		}
+		if err := os.WriteFile(outputPrefix+".json", []byte(payload), 0o600); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
 		}
@@ -63,7 +75,7 @@ type chunkFixtureRunner struct {
 func (runner *chunkFixtureRunner) Run(_ context.Context, _ string, arguments []string) error {
 	runner.calls = append(runner.calls, append([]string(nil), arguments...))
 	if runner.failAt == len(runner.calls) {
-		return errors.New("fixture chunk failure")
+		return context.Canceled
 	}
 	value := func(flag string) string {
 		for index := 0; index+1 < len(arguments); index++ {
@@ -78,7 +90,8 @@ func (runner *chunkFixtureRunner) Run(_ context.Context, _ string, arguments []s
 	if prefix == "" || duration <= 200 {
 		return errors.New("invalid chunk fixture arguments")
 	}
-	payload := fmt.Sprintf(`{"result":{"language":"ko"},"transcription":[{"offsets":{"from":100,"to":%d},"text":"청크 %d"}]}`, minInt64(duration-100, 900), len(runner.calls))
+	start, _ := strconv.ParseInt(value("-ot"), 10, 64)
+	payload := fmt.Sprintf(`{"result":{"language":"ko"},"transcription":[{"offsets":{"from":%d,"to":%d},"text":"청크"}]}`, start+100, start+minInt64(duration-100, 900))
 	return os.WriteFile(prefix+".json", []byte(payload), 0o600)
 }
 
@@ -153,6 +166,16 @@ func TestWhisperCPPAdapterExecutesArgumentArrayAndPublishesVerifiedTranscript(t 
 		t.Fatal(err)
 	}
 	inputPath := filepath.Join(directory, "audio", "event & keep.wav")
+	createInput := func(name string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(name), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(name, fixturePCM16WAV(t, 3000, func(int64) bool { return false }), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	createInput(inputPath)
 	modelPath := filepath.Join(directory, "models", "large;keep.bin")
 	temporaryPath := filepath.Join(directory, "output", "event.json.partial")
 	publishedPath := filepath.Join(directory, "output", "event.json")
@@ -216,46 +239,102 @@ func TestWhisperCPPAdapterExecutesArgumentArrayAndPublishesVerifiedTranscript(t 
 		t.Fatalf("invalid transcript was published: %v", err)
 	}
 
-	t.Run("long Windows file arguments retain the resolved paths", func(t *testing.T) {
-		if runtime.GOOS != "windows" {
-			t.Skip("Windows native path handling")
-		}
-		directory := filepath.Join(t.TempDir(), strings.Repeat("a", 90), strings.Repeat("b", 90), strings.Repeat("c", 80))
-		model, audio := filepath.Join(directory, "model ;.bin"), filepath.Join(directory, "audio &.wav")
-		output := filepath.Join(directory, "transcript.json")
-		t.Setenv("WHISPER_FIXTURE_JSON", rawJSON)
-		_, err := transcriber.Transcribe(context.Background(), Request{
-			TranscriptID: "TRANSCRIPT-LONG", AudioArtifact: audioInput, ResolvedAudioPath: audio, ResolvedModelPath: model,
-			TemporaryOutputPath: output + ".partial", PublishedOutputPath: output, ArtifactPath: "transcript/event.json", Profile: profile,
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		args, err := os.ReadFile(argumentsPath)
-		if err != nil {
-			t.Fatal(err)
-		}
-		fields := strings.Split(strings.TrimSpace(string(args)), "\n")
-		want := map[string]string{"-m": model, "-f": audio, "-of": output + ".partial.whisper"}
-		for i := 0; i+1 < len(fields); i++ {
-			if name, ok := want[fields[i]]; ok {
-				extended := `\\?\` + name
-				if server, unc := strings.CutPrefix(name, `\\`); unc {
-					extended = `\\?\UNC\` + server
+	t.Run("single and chunked engines keep absolute cues within measured PCM", func(t *testing.T) {
+		for _, duration := range []int64{6278, 10000} {
+			t.Run(strconv.FormatInt(duration, 10), func(t *testing.T) {
+				root, err := archive.OpenStorageRoot(t.TempDir())
+				if err != nil {
+					t.Fatal(err)
 				}
-				if fields[i+1] != extended {
-					t.Fatalf("%s does not identify the extended path to %s", fields[i], name)
+				defer root.Close()
+				wav := fixturePCM16WAV(t, duration, func(ms int64) bool {
+					return (ms >= 2500 && ms < 3100) || (ms >= 5700 && ms < 6300)
+				})
+				if duration == 6278 {
+					// The WAV header advertises more samples than the file contains.
+					binary.LittleEndian.PutUint32(wav[40:], uint32(len(wav)-44+32000))
 				}
-				delete(want, fields[i])
-			}
-		}
-		if len(want) != 0 {
-			t.Fatalf("missing long path arguments: %v", want)
-		}
-		if _, err := os.Stat(output); err != nil {
-			t.Fatal(err)
+				if err := root.WriteFile("speech.wav", wav, 0600); err != nil {
+					t.Fatal(err)
+				}
+				input := audioInput
+				input.Artifact.Path, input.Artifact.Size, input.Artifact.Checksum = "speech.wav", int64(len(wav)), fmt.Sprintf("%x", sha256.Sum256(wav))
+				engine := *transcriber
+				first := `{"result":{"language":"ko"},"transcription":[{"offsets":{"from":0,"to":500},"text":"시작"}]}`
+				last := fmt.Sprintf(`{"result":{"language":"ko"},"transcription":[{"offsets":{"from":%d,"to":%d},"text":"마지막"},{"offsets":{"from":%d,"to":%d},"text":"밖"}]}`, duration-50, duration+900, duration+901, duration+1000)
+				want := []transcription.Segment{{Sequence: 1, StartMillis: duration - 50, EndMillis: duration, Text: "마지막"}}
+				if duration == 6278 {
+					t.Setenv("WHISPER_FIXTURE_JSON", last)
+				} else {
+					engine.chunkPolicy = chunkPolicy{MinimumMillis: 2000, TargetMillis: 3000, MaximumMillis: 4000, SilenceMillis: 400, ContextMillis: 500}
+					middle := `{"result":{"language":"ko"},"transcription":[{"offsets":{"from":100,"to":900},"text":"범위 밖"},{"offsets":{"from":3300,"to":3480},"text":"가운데"}]}`
+					table, err := json.Marshal(map[string]string{"0": first, "2800": middle, "6000": last})
+					if err != nil {
+						t.Fatal(err)
+					}
+					t.Setenv("WHISPER_FIXTURE_BY_OFFSET", string(table))
+					want = []transcription.Segment{
+						{Sequence: 1, StartMillis: 0, EndMillis: 500, Text: "시작"},
+						{Sequence: 2, StartMillis: 3300, EndMillis: 3480, Text: "가운데"},
+						{Sequence: 3, StartMillis: 9950, EndMillis: 10000, Text: "마지막"},
+					}
+				}
+				inputPath, _ := root.ExternalProcessPath(input.Artifact.Path)
+				tmp, _ := root.ExternalProcessPath("out/transcript.partial")
+				final, _ := root.ExternalProcessPath("out/transcript.json")
+				got, err := engine.Transcribe(context.Background(), Request{
+					TranscriptID: "TRANSCRIPT-BOUNDS", AudioArtifact: input, InputRoot: root,
+					ResolvedAudioPath: inputPath, ResolvedModelPath: modelPath, Profile: profile,
+					OutputRoot: root, ArtifactPath: "out/transcript.json", TemporaryArtifactPath: "out/transcript.partial",
+					TemporaryOutputPath: tmp, PublishedOutputPath: final,
+				})
+				if err != nil || !reflect.DeepEqual(got.Content.Segments, want) {
+					t.Fatalf("published cues = %+v, want %+v, err = %v", got.Content.Segments, want, err)
+				}
+			})
 		}
 	})
+
+	if runtime.GOOS == "windows" {
+		t.Run("long Windows file arguments retain the resolved paths", func(t *testing.T) {
+			directory := filepath.Join(t.TempDir(), strings.Repeat("a", 90), strings.Repeat("b", 90), strings.Repeat("c", 80))
+			model, audio := filepath.Join(directory, "model ;.bin"), filepath.Join(directory, "audio &.wav")
+			output := filepath.Join(directory, "transcript.json")
+			createInput(audio)
+			t.Setenv("WHISPER_FIXTURE_JSON", rawJSON)
+			_, err := transcriber.Transcribe(context.Background(), Request{
+				TranscriptID: "TRANSCRIPT-LONG", AudioArtifact: audioInput, ResolvedAudioPath: audio, ResolvedModelPath: model,
+				TemporaryOutputPath: output + ".partial", PublishedOutputPath: output, ArtifactPath: "transcript/event.json", Profile: profile,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			args, err := os.ReadFile(argumentsPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			fields := strings.Split(strings.TrimSpace(string(args)), "\n")
+			want := map[string]string{"-m": model, "-f": audio, "-of": output + ".partial.whisper"}
+			for i := 0; i+1 < len(fields); i++ {
+				if name, ok := want[fields[i]]; ok {
+					extended := `\\?\` + name
+					if server, unc := strings.CutPrefix(name, `\\`); unc {
+						extended = `\\?\UNC\` + server
+					}
+					if fields[i+1] != extended {
+						t.Fatalf("%s does not identify the extended path to %s", fields[i], name)
+					}
+					delete(want, fields[i])
+				}
+			}
+			if len(want) != 0 {
+				t.Fatalf("missing long path arguments: %v", want)
+			}
+			if _, err := os.Stat(output); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
 
 	t.Run("long audio uses silence-aware bounded chunks and global timecodes", func(t *testing.T) {
 		rootDirectory := t.TempDir()
@@ -355,4 +434,140 @@ func containsArgument(arguments []string, value string) bool {
 		}
 	}
 	return false
+}
+
+// Requirement: TRN-010
+func TestRetryReusesOnlyVerifiedChunksOfTheSameTranscription(t *testing.T) {
+	for _, change := range []string{"same", "model", "audio", "profile", "boundaries", "processor", "corrupt checkpoint"} {
+		t.Run(change, func(t *testing.T) {
+			dir := t.TempDir()
+			root, err := archive.OpenStorageRoot(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer root.Close()
+			write := func(name string, data []byte) {
+				t.Helper()
+				if err := root.WriteFile(name, data, 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			wav := fixturePCM16WAV(t, 10000, func(int64) bool { return false })
+			write("speech.wav", wav)
+			write("model.bin", []byte("version A"))
+			audioProfile, err := audio.KoreanSpeechEnhancementProfile(2)
+			if err != nil {
+				t.Fatal(err)
+			}
+			input, err := audio.NewAudioArtifact(archive.Artifact{
+				ID: "AUDIO-1", Path: "speech.wav", Size: int64(len(wav)), Checksum: fmt.Sprintf("%x", sha256.Sum256(wav)),
+				Origin: archive.Provenance{
+					OriginalAssetID: "ASSET-1", InputArtifactIDs: []string{}, ProcessingKind: vocabulary.ProcessingAudioExtract,
+					ProcessorVersion: "ffmpeg", ProfileVersion: audioProfile.Reference(), CreatedBy: "W1", CreatedAt: time.Now().UTC(),
+				},
+			}, audioProfile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			resolved := func(name string) string {
+				t.Helper()
+				p, err := root.ExternalProcessPath(name)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return p
+			}
+			request := Request{
+				TranscriptID: "T1", AudioArtifact: input, InputRoot: root, ResolvedAudioPath: resolved("speech.wav"),
+				ModelRoot: root, ModelRelativePath: "model.bin", ResolvedModelPath: resolved("model.bin"),
+				OutputRoot: root, ArtifactPath: "out/T1.json", PublishedOutputPath: resolved("out/T1.json"),
+				TemporaryArtifactPath: "out/T1.partial.1", TemporaryOutputPath: resolved("out/T1.partial.1"),
+				Profile: transcription.Profile{ID: "event-ko", Version: 1, ModelID: "model", Language: "ko", ThreadCount: 2},
+			}
+			runner := &chunkFixtureRunner{failAt: 2}
+			engine, err := NewTranscriber("fixture", "processor-1", "W1", runner, AtomicPublisher{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			engine.chunkPolicy = chunkPolicy{MinimumMillis: 2000, TargetMillis: 3000, MaximumMillis: 4000, SilenceMillis: 400, ContextMillis: 100}
+			if _, err := engine.Transcribe(context.Background(), request); !errors.Is(err, context.Canceled) {
+				t.Fatalf("interruption: %v", err)
+			}
+			if _, err := root.Stat(request.ArtifactPath); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("interrupted publication: %v", err)
+			}
+			switch change {
+			case "model":
+				write("model.bin", []byte("version B"))
+			case "audio":
+				wav[44] ^= 1
+				write("speech.wav", wav)
+				if _, err := engine.Transcribe(context.Background(), request); err == nil {
+					t.Fatal("changed audio was accepted with the old verified checksum")
+				}
+				request.AudioArtifact.Artifact.Checksum = fmt.Sprintf("%x", sha256.Sum256(wav))
+			case "profile":
+				request.Profile.ThreadCount++
+			case "boundaries":
+				engine.chunkPolicy.ContextMillis++
+			case "processor":
+				engine.processorVersion = "processor-2"
+			case "corrupt checkpoint":
+				// Preserve valid JSON and timings. The altered text must still miss.
+				files, err := filepath.Glob(filepath.Join(dir, "staging", ".archive-stt", "*", "*.json"))
+				if err != nil || len(files) != 1 {
+					t.Fatalf("checkpoint files: %v (%v)", files, err)
+				}
+				data, err := os.ReadFile(files[0])
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !bytes.Contains(data, []byte("청크")) {
+					t.Fatal("missing completed cue")
+				}
+				if err := os.WriteFile(files[0], bytes.ReplaceAll(data, []byte("청크"), []byte("손상")), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			request.TemporaryArtifactPath = "out/T1.partial.2"
+			request.TemporaryOutputPath = resolved(request.TemporaryArtifactPath)
+			runner.calls = nil
+			runner.failAt = 0
+			got, err := engine.Transcribe(context.Background(), request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			retried := append([][]string(nil), runner.calls...)
+			runner.calls = nil
+			// A clean target forces a full run of this exact input and plan.
+			request.ArtifactPath = "out/reference.json"
+			request.PublishedOutputPath = resolved(request.ArtifactPath)
+			fresh, err := engine.Transcribe(context.Background(), request)
+			if err != nil || got.Artifact.Checksum != fresh.Artifact.Checksum || !reflect.DeepEqual(got.Content, fresh.Content) {
+				t.Fatalf("retry differs from fresh result: %+v %+v %v", got.Content, fresh.Content, err)
+			}
+			offsets := func(calls [][]string) []string {
+				var starts []string
+				for _, args := range calls {
+					for i, arg := range args {
+						if arg == "-ot" {
+							starts = append(starts, args[i+1])
+							break
+						}
+					}
+				}
+				return starts
+			}
+			want := offsets(runner.calls)
+			if change == "same" {
+				want = want[1:]
+			}
+			if actual := offsets(retried); !reflect.DeepEqual(actual, want) {
+				t.Fatalf("retry engine offsets %v, want %v", actual, want)
+			}
+			if files, _ := filepath.Glob(filepath.Join(dir, "staging", ".archive-stt", "*", "*.json")); len(files) != 0 {
+				t.Fatalf("published target retained private chunks: %v", files)
+			}
+		})
+	}
 }

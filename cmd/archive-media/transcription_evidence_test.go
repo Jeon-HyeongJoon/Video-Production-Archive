@@ -58,6 +58,12 @@ func TestMain(m *testing.M) {
 		os.Exit(0)
 	}
 	payload := `{"result":{"language":"ko"},"transcription":[{"offsets":{"from":0,"to":500},"text":"private-transcript-sentinel"}]}`
+	if mode == "korean" {
+		payload = `{"result":{"language":"ko"},"transcription":[{"offsets":{"from":0,"to":1600},"text":"행사 녹화"},{"offsets":{"from":1700,"to":2000},"text":"범위 밖"}]}`
+	}
+	if mode == "bad-utf8" {
+		payload = strings.Replace(payload, "private-transcript-sentinel", "깨진 "+string([]byte{0xff}), 1)
+	}
 	if mode == "invalid" {
 		payload = "{"
 	}
@@ -78,7 +84,7 @@ type cliSample struct {
 
 func runTranscriptionFixture(t *testing.T, mode string) (int, commandResult, []cliSample) {
 	t.Helper()
-	root, logs := t.TempDir(), t.TempDir()
+	root, logs, source := t.TempDir(), t.TempDir(), t.TempDir()
 	exe, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
@@ -86,7 +92,7 @@ func runTranscriptionFixture(t *testing.T, mode string) (int, commandResult, []c
 	config := fmt.Sprintf(`schema_version: 1
 media:
   id: test-media
-  storage_roots: [{storage_id: media, root: %s}]
+  storage_roots: [{storage_id: media, root: %s}, {storage_id: source, root: %s}]
   process_logs: {root: %s, max_file_bytes: 4096, tail_bytes: 1024, retention: 1h, max_total_bytes: 16384}
   tools:
     ffmpeg: {executable: %s, version: fixture}
@@ -97,7 +103,7 @@ media:
       model_storage_id: media
       model_relative_path: model.bin
       profile: {id: ko, version: 1, model_id: model, language: ko, thread_count: 1}
-`, strconv.Quote(root), strconv.Quote(logs), strconv.Quote(exe), strconv.Quote(exe), strconv.Quote(exe))
+`, strconv.Quote(root), strconv.Quote(source), strconv.Quote(logs), strconv.Quote(exe), strconv.Quote(exe), strconv.Quote(exe))
 	write := func(name string, payload []byte) {
 		t.Helper()
 		if err := os.WriteFile(filepath.Join(root, name), payload, 0600); err != nil {
@@ -132,6 +138,11 @@ media:
 	if mode == "output-open" || mode == "other-output" {
 		spec.Outputs[0].RelativePath = "staging/" + strings.Repeat("a", 100) + "/" + strings.Repeat("b", 100) + "/transcript.json"
 	}
+	var verifyPackage func(commandResult)
+	if mode == "bad-utf8" || mode == "korean" {
+		spec.Inputs, spec.Outputs = spec.Inputs[:1], spec.Outputs[:1]
+		verifyPackage = prepareSTTPackage(t, root, source, spec.Inputs[0], spec.Outputs[0])
+	}
 	data, err := json.Marshal(spec)
 	if err != nil {
 		t.Fatal(err)
@@ -161,6 +172,9 @@ media:
 		if err != nil || bytes.Contains(raw, []byte("private-transcript-sentinel")) || !bytes.Contains(raw, []byte("private-diagnostic-sentinel")) || result.ProcessLog.SanitizedTail != "" {
 			t.Fatalf("unexpected process evidence: %v %+v", err, result.ProcessLog)
 		}
+	}
+	if verifyPackage != nil {
+		verifyPackage(result)
 	}
 	return code, result, samples
 }
@@ -193,11 +207,17 @@ func TestTranscriptionReportsObservedEngineProgressForEachInput(t *testing.T) {
 
 // Requirement: TRN-009
 func TestTranscriptionFailureIdentifiesLastObservedBoundaryAndSafeCause(t *testing.T) {
+	t.Run("valid Korean publishes one revision", func(t *testing.T) {
+		code, result, _ := runTranscriptionFixture(t, "korean")
+		if code != 0 || !result.Success || len(result.Outputs) != 1 {
+			t.Fatalf("Korean transcription: %+v", result)
+		}
+	})
 	openCause := "WHISPER_OUTPUT_OPEN_FAILED"
 	if runtime.GOOS == "windows" {
 		openCause = "WHISPER_LONG_OUTPUT_OPEN_FAILED"
 	}
-	for _, tc := range []struct{ mode, cause string }{{"output-open", openCause}, {"other-output", "PROCESS_EXIT_NONZERO"}, {"bad-model", "WHISPER_MODEL_INVALID"}, {"bad-audio", "WHISPER_CHUNK_PLAN_FAILED"}, {"exit", "PROCESS_EXIT_NONZERO"}, {"invalid", "WHISPER_OUTPUT_INVALID"}, {"missing", "WHISPER_OUTPUT_UNAVAILABLE"}} {
+	for _, tc := range []struct{ mode, cause string }{{"output-open", openCause}, {"other-output", "PROCESS_EXIT_NONZERO"}, {"bad-model", "WHISPER_MODEL_INVALID"}, {"bad-audio", "WHISPER_CHUNK_PLAN_FAILED"}, {"exit", "PROCESS_EXIT_NONZERO"}, {"invalid", "WHISPER_OUTPUT_INVALID"}, {"bad-utf8", "WHISPER_OUTPUT_INVALID"}, {"missing", "WHISPER_OUTPUT_UNAVAILABLE"}} {
 		t.Run(tc.mode, func(t *testing.T) {
 			code, r, samples := runTranscriptionFixture(t, tc.mode)
 			if code != 1 || r.Success || r.CauseCode != tc.cause || len(r.VerificationReferences) != 0 {

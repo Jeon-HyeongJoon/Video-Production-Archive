@@ -633,12 +633,12 @@ func (operations *mediaOperations) transcribeAudio(ctx context.Context, spec exe
 			return nil, nil, ErrProductionExecution
 		}
 		inputRoot := roots.MustRoot(input.StorageID)
-		size, checksum, err := inputRoot.FileSHA256(input.RelativePath)
-		if err != nil || checksum != input.Checksum {
+		info, err := inputRoot.Stat(input.RelativePath)
+		if err != nil {
 			return nil, nil, ErrProductionExecution
 		}
 		audioArtifact, err := audio.NewAudioArtifact(archive.Artifact{
-			ID: input.ArtifactID, Path: input.RelativePath, Size: size, Checksum: checksum,
+			ID: input.ArtifactID, Path: input.RelativePath, Size: info.Size(), Checksum: input.Checksum,
 			Origin: archive.Provenance{
 				OriginalAssetID: input.OriginalAssetID, InputArtifactIDs: []string{}, ProcessingKind: vocabulary.ProcessingAudioExtract,
 				ProcessorVersion: operations.configuration.Tools.FFmpeg.Version, ProfileVersion: audioProfile.Reference(),
@@ -666,6 +666,7 @@ func (operations *mediaOperations) transcribeAudio(ctx context.Context, spec exe
 			InputIndex: uint32(index + 1), InputCount: uint32(len(spec.Outputs)),
 			TranscriptID: target.ID, AudioArtifact: audioArtifact, InputRoot: inputRoot,
 			ResolvedAudioPath: audioPath, ResolvedModelPath: modelPath,
+			ModelRoot: roots.MustRoot(tool.ModelStorageID), ModelRelativePath: tool.ModelRelativePath,
 			TemporaryOutputPath: publisher.temporaryResolved, PublishedOutputPath: publisher.publishedResolved,
 			ArtifactPath: target.RelativePath, TemporaryArtifactPath: temporaryRelative, OutputRoot: outputRoot, Profile: tool.Profile,
 		})

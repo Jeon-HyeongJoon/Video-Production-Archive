@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 	"unicode/utf16"
+	"unicode/utf8"
 
 	"videoarchive/internal/adapter/processprogress"
 	"videoarchive/internal/core/archive"
@@ -84,6 +85,8 @@ type Request struct {
 	InputRoot             *archive.StorageRoot
 	ResolvedAudioPath     string
 	ResolvedModelPath     string
+	ModelRoot             *archive.StorageRoot
+	ModelRelativePath     string
 	TemporaryOutputPath   string
 	PublishedOutputPath   string
 	ArtifactPath          string
@@ -119,6 +122,7 @@ func (transcriber *Transcriber) Transcribe(ctx context.Context, request Request)
 		return transcription.Transcript{}, err
 	}
 	artifactPath, pathOK := normalizeArtifactPath(request.ArtifactPath)
+	request.ArtifactPath = artifactPath
 	audioArtifact := request.AudioArtifact
 	if strings.TrimSpace(request.TranscriptID) == "" || audioArtifact.Validate() != nil ||
 		strings.TrimSpace(request.ResolvedAudioPath) == "" || strings.TrimSpace(request.ResolvedModelPath) == "" ||
@@ -149,17 +153,9 @@ func (transcriber *Transcriber) Transcribe(ctx context.Context, request Request)
 			_ = os.Remove(request.TemporaryOutputPath)
 		}
 	}()
-	chunks := []speechChunk{{}}
-	if request.InputRoot != nil {
-		input, openErr := request.InputRoot.Open(audioArtifact.Artifact.Path)
-		if openErr != nil {
-			return transcription.Transcript{}, errors.Join(ErrTranscriptionFailed, ErrChunkPlan, openErr)
-		}
-		chunks, err = planSpeechChunks(input, transcriber.chunkPolicy)
-		closeErr := input.Close()
-		if err != nil || closeErr != nil {
-			return transcription.Transcript{}, errors.Join(ErrTranscriptionFailed, ErrChunkPlan, err, closeErr)
-		}
+	chunks, err := transcriber.planRequestChunks(request)
+	if err != nil {
+		return transcription.Transcript{}, errors.Join(ErrTranscriptionFailed, ErrChunkPlan, err)
 	}
 	if request.InputRoot != nil {
 		_ = execution.ReportProgress(ctx, execution.ProgressUpdate{
@@ -167,6 +163,10 @@ func (transcriber *Transcriber) Transcribe(ctx context.Context, request Request)
 			Operation: execution.OperationTranscribeAudio, Status: execution.ProgressPlanned,
 			ChunkCount: uint32(len(chunks)), SourceEndMillis: chunks[len(chunks)-1].LogicalEndMillis,
 		})
+	}
+	checkpoints, err := newChunkCheckpoints(request, transcriber.processorVersion, profile, chunks)
+	if err != nil {
+		return transcription.Transcript{}, errors.Join(ErrTranscriptionFailed, err)
 	}
 	var language string
 	segments := make([]transcription.Segment, 0)
@@ -189,130 +189,43 @@ func (transcriber *Transcriber) Transcribe(ctx context.Context, request Request)
 				Progress: progress,
 			})
 		}
-		suffix := ""
-		if len(chunks) > 1 {
-			suffix = "." + fmt.Sprintf("%04d", index+1)
+		if err := ctx.Err(); err != nil {
+			return transcription.Transcript{}, errors.Join(ErrTranscriptionFailed, err)
 		}
-		rawPrefix := request.TemporaryOutputPath + ".whisper" + suffix
-		rawPath := rawPrefix + ".json"
-		rawArtifactPath := request.TemporaryArtifactPath + ".whisper" + suffix + ".json"
-		cleanupRaw := func() {
-			if request.OutputRoot != nil {
-				_ = request.OutputRoot.Remove(rawArtifactPath)
-			} else {
-				_ = os.Remove(rawPath)
+		part, cached := checkpoints.load(index, chunk)
+		if !cached {
+			reportChunk(execution.ProgressStarted, float64(index)/float64(len(chunks)))
+			raw, runErr := transcriber.runChunk(ctx, request, profile, chunk, index, len(chunks), func(percent uint32) {
+				observedPercent = percent
+				reportChunk(execution.ProgressProcessing, 0)
+			})
+			if runErr != nil {
+				reportChunk(execution.ProgressFailed, 0)
+				return transcription.Transcript{}, runErr
+			}
+			part, err = parseChunk(raw, chunk, chunks[len(chunks)-1].LogicalEndMillis, len(chunks) == 1)
+			if err != nil {
+				reportChunk(execution.ProgressFailed, 0)
+				return transcription.Transcript{}, errors.Join(ErrTranscriptionFailed, ErrOutputInvalid, err)
 			}
 		}
-		reportChunk(execution.ProgressStarted, float64(index)/float64(len(chunks)))
-		arguments := []string{"-m", whisperPathArgument(request.ResolvedModelPath), "-f", whisperPathArgument(request.ResolvedAudioPath)}
-		if len(chunks) > 1 {
-			arguments = append(arguments,
-				"-ot", strconv.FormatInt(chunk.ProcessStartMillis, 10),
-				"-d", strconv.FormatInt(chunk.ProcessEndMillis-chunk.ProcessStartMillis, 10),
-			)
-		}
-		// whisper appends .json to -of before opening the file.
-		outputArgument := strings.TrimSuffix(whisperPathArgument(rawPath), ".json")
-		arguments = append(arguments, "-oj", "-of", outputArgument, "-l", profile.Language, "-t", strconv.Itoa(profile.ThreadCount), "-np")
-		var runErr error
-		if stream, ok := transcriber.runner.(execution.StreamRunner); ok && request.InputRoot != nil {
-			// Only numeric whisper progress reaches the reporter. Limit live updates to ten per chunk.
-			openFailureLine := "open: failed to open '" + outputArgument + ".json' for writing"
-			var observedFailure error
-			lines := processprogress.Lines{MaxLineBytes: max(256, len(openFailureLine)), OnLine: func(line string) {
-				switch line {
-				case openFailureLine:
-					failure := &OutputOpenFailure{}
-					if runtime.GOOS == "windows" {
-						failure.WindowsPathUnits = len(utf16.Encode([]rune(rawPath)))
-						failure.ExtendedPath = strings.HasPrefix(outputArgument, `\\?\`)
-					}
-					observedFailure = failure
-					return
-				case "whisper_model_load: invalid model data (bad magic)":
-					observedFailure = ErrInvalidModel
-					return
-				}
-				value, found := strings.CutPrefix(strings.TrimSpace(line), "whisper_print_progress_callback: progress =")
-				if !found {
-					return
-				}
-				value = strings.TrimSpace(value)
-				if !strings.HasSuffix(value, "%") {
-					return
-				}
-				n, err := strconv.ParseUint(strings.TrimSuffix(value, "%"), 10, 32)
-				if err == nil && n <= 100 && uint32(n)/10 > observedPercent/10 {
-					observedPercent = uint32(n)
-					reportChunk(execution.ProgressProcessing, 0)
-				}
-			}}
-			arguments[len(arguments)-1] = "-pp"
-			runErr = stream.RunStreams(ctx, transcriber.executable, arguments, nil, &lines)
-			lines.Flush()
-			if runErr != nil && observedFailure != nil {
-				runErr = errors.Join(runErr, observedFailure)
+		if (profile.Language != "auto" && part.Language != profile.Language) || (language != "" && language != part.Language) {
+			reportChunk(execution.ProgressFailed, 0)
+			if profile.Language == "auto" {
+				checkpoints.clear()
 			}
-		} else {
-			runErr = transcriber.runner.Run(ctx, transcriber.executable, arguments)
-		}
-		if runErr != nil {
-			// The engine never opened this target. Its existing contents may
-			// belong to another owner, including a conflicting directory.
-			var openFailure *OutputOpenFailure
-			if errors.As(runErr, &openFailure) {
-				if request.OutputRoot != nil {
-					info, statErr := request.OutputRoot.Stat(rawArtifactPath)
-					openFailure.TargetDirectory = statErr == nil && info.IsDir()
-				}
-			} else {
-				cleanupRaw()
-			}
-			reportChunk(execution.ProgressFailed, float64(index)/float64(len(chunks)))
-			return transcription.Transcript{}, errors.Join(ErrTranscriptionFailed, runErr)
-		}
-		var rawPayload []byte
-		if request.OutputRoot != nil {
-			rawPayload, err = request.OutputRoot.ReadFile(rawArtifactPath)
-			if errors.Is(err, os.ErrNotExist) {
-				// A reachable output directory with a missing JSON is a tool failure.
-				if _, dirErr := request.OutputRoot.ReadDir(path.Dir(rawArtifactPath)); dirErr == nil {
-					err = ErrOutputRead
-				}
-			}
-		} else {
-			rawPayload, err = os.ReadFile(rawPath)
-		}
-		cleanupRaw()
-		if err != nil {
-			reportChunk(execution.ProgressFailed, float64(index)/float64(len(chunks)))
-			return transcription.Transcript{}, errors.Join(ErrTranscriptionFailed, ErrOutputRead, err)
-		}
-		decoded, decodeErr := decodeWhisperJSON(rawPayload)
-		if decodeErr != nil {
-			reportChunk(execution.ProgressFailed, float64(index)/float64(len(chunks)))
-			return transcription.Transcript{}, errors.Join(ErrTranscriptionFailed, ErrOutputInvalid, decodeErr)
-		}
-		if language == "" {
-			language = strings.ToLower(strings.TrimSpace(decoded.Result.Language))
-		} else if language != strings.ToLower(strings.TrimSpace(decoded.Result.Language)) {
-			reportChunk(execution.ProgressFailed, float64(index)/float64(len(chunks)))
 			return transcription.Transcript{}, errors.Join(ErrTranscriptionFailed, ErrOutputInvalid)
 		}
-		if len(chunks) == 1 {
-			parsed, parseErr := parseWhisperJSON(rawPayload)
-			if parseErr != nil {
-				reportChunk(execution.ProgressFailed, float64(index)/float64(len(chunks)))
-				return transcription.Transcript{}, errors.Join(ErrTranscriptionFailed, ErrOutputInvalid, parseErr)
-			}
-			segments = append(segments, parsed.Segments...)
-		} else {
-			segments = append(segments, ownedChunkSegments(decoded, chunk, false)...)
+		language = part.Language
+		segments = append(segments, part.Segments...)
+		if !cached {
+			checkpoints.save(index, part)
 		}
 		reportChunk(execution.ProgressCompleted, float64(index+1)/float64(len(chunks)))
 	}
-	content, err := mergeWhisperSegments(language, segments)
+	content, err := transcription.NewContent(language, numberSegments(segments))
 	if err != nil {
+		checkpoints.clear()
 		return transcription.Transcript{}, errors.Join(ErrTranscriptionFailed, ErrOutputInvalid, err)
 	}
 	document := transcriptDocument{SchemaVersion: 1, ProfileReference: profile.Reference(), Content: content}
@@ -332,6 +245,9 @@ func (transcriber *Transcriber) Transcribe(ctx context.Context, request Request)
 	if err != nil {
 		return transcription.Transcript{}, err
 	}
+	if err := ctx.Err(); err != nil {
+		return transcription.Transcript{}, errors.Join(ErrTranscriptionFailed, err)
+	}
 	if request.OutputRoot != nil {
 		if err := request.OutputRoot.WriteFile(request.TemporaryArtifactPath, payload, 0o600); err != nil {
 			return transcription.Transcript{}, errors.Join(ErrTranscriptionFailed, ErrPublish, err)
@@ -342,7 +258,147 @@ func (transcriber *Transcriber) Transcribe(ctx context.Context, request Request)
 	if err := transcriber.publisher.Publish(request.TemporaryOutputPath, request.PublishedOutputPath); err != nil {
 		return transcription.Transcript{}, errors.Join(ErrTranscriptionFailed, ErrPublish, err)
 	}
+	if request.OutputRoot != nil {
+		// A shorter replacement input may now have a single chunk.
+		_ = request.OutputRoot.RemoveAll(checkpointDirectory(artifactPath))
+	}
 	return transcript, nil
+}
+
+// Direct Adapter callers supply a resolved WAV path. Registered Worker inputs
+// must identify the same file for measurement and for the subprocess.
+func (transcriber *Transcriber) planRequestChunks(request Request) ([]speechChunk, error) {
+	root, name := request.InputRoot, request.AudioArtifact.Artifact.Path
+	if root == nil {
+		var err error
+		root, err = archive.OpenStorageRoot(filepath.Dir(request.ResolvedAudioPath))
+		if err != nil {
+			return nil, err
+		}
+		defer root.Close()
+		name = filepath.Base(request.ResolvedAudioPath)
+	} else {
+		resolved, err := root.ExternalProcessPath(name)
+		if err != nil || filepath.Clean(resolved) != filepath.Clean(request.ResolvedAudioPath) {
+			return nil, ErrInvalidRequest
+		}
+		// The digest used for retry must describe this attempt's actual WAV.
+		size, checksum, err := root.FileSHA256(name)
+		if err != nil {
+			return nil, err
+		}
+		if size != request.AudioArtifact.Artifact.Size || checksum != request.AudioArtifact.Artifact.Checksum {
+			return nil, ErrInvalidRequest
+		}
+	}
+	input, err := root.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	chunks, err := planSpeechChunks(input, transcriber.chunkPolicy)
+	return chunks, errors.Join(err, input.Close())
+}
+
+func (transcriber *Transcriber) runChunk(ctx context.Context, request Request, profile transcription.Profile, chunk speechChunk, index, count int, onPercent func(uint32)) ([]byte, error) {
+	suffix := ""
+	if count > 1 {
+		suffix = "." + fmt.Sprintf("%04d", index+1)
+	}
+	rawPrefix := request.TemporaryOutputPath + ".whisper" + suffix
+	rawPath := rawPrefix + ".json"
+	rawArtifactPath := request.TemporaryArtifactPath + ".whisper" + suffix + ".json"
+	cleanupRaw := func() {
+		if request.OutputRoot != nil {
+			_ = request.OutputRoot.Remove(rawArtifactPath)
+		} else {
+			_ = os.Remove(rawPath)
+		}
+	}
+	arguments := []string{"-m", whisperPathArgument(request.ResolvedModelPath), "-f", whisperPathArgument(request.ResolvedAudioPath)}
+	if count > 1 {
+		arguments = append(arguments,
+			"-ot", strconv.FormatInt(chunk.ProcessStartMillis, 10),
+			"-d", strconv.FormatInt(chunk.ProcessEndMillis-chunk.ProcessStartMillis, 10),
+		)
+	}
+	// whisper appends .json to -of before opening the file.
+	outputArgument := strings.TrimSuffix(whisperPathArgument(rawPath), ".json")
+	arguments = append(arguments, "-oj", "-of", outputArgument, "-l", profile.Language, "-t", strconv.Itoa(profile.ThreadCount), "-np")
+	var runErr error
+	var observedPercent uint32
+	if stream, ok := transcriber.runner.(execution.StreamRunner); ok && request.InputRoot != nil {
+		// Only numeric whisper progress reaches the reporter. Limit live updates to ten per chunk.
+		openFailureLine := "open: failed to open '" + outputArgument + ".json' for writing"
+		var observedFailure error
+		lines := processprogress.Lines{MaxLineBytes: max(256, len(openFailureLine)), OnLine: func(line string) {
+			switch line {
+			case openFailureLine:
+				failure := &OutputOpenFailure{}
+				if runtime.GOOS == "windows" {
+					failure.WindowsPathUnits = len(utf16.Encode([]rune(rawPath)))
+					failure.ExtendedPath = strings.HasPrefix(outputArgument, `\\?\`)
+				}
+				observedFailure = failure
+				return
+			case "whisper_model_load: invalid model data (bad magic)":
+				observedFailure = ErrInvalidModel
+				return
+			}
+			value, found := strings.CutPrefix(strings.TrimSpace(line), "whisper_print_progress_callback: progress =")
+			if !found {
+				return
+			}
+			value = strings.TrimSpace(value)
+			if !strings.HasSuffix(value, "%") {
+				return
+			}
+			n, err := strconv.ParseUint(strings.TrimSuffix(value, "%"), 10, 32)
+			if err == nil && n <= 100 && uint32(n)/10 > observedPercent/10 {
+				observedPercent = uint32(n)
+				onPercent(observedPercent)
+			}
+		}}
+		arguments[len(arguments)-1] = "-pp"
+		runErr = stream.RunStreams(ctx, transcriber.executable, arguments, nil, &lines)
+		lines.Flush()
+		if runErr != nil && observedFailure != nil {
+			runErr = errors.Join(runErr, observedFailure)
+		}
+	} else {
+		runErr = transcriber.runner.Run(ctx, transcriber.executable, arguments)
+	}
+	if runErr != nil {
+		// The engine never opened this target. Its existing contents may
+		// belong to another owner, including a conflicting directory.
+		var openFailure *OutputOpenFailure
+		if errors.As(runErr, &openFailure) {
+			if request.OutputRoot != nil {
+				info, statErr := request.OutputRoot.Stat(rawArtifactPath)
+				openFailure.TargetDirectory = statErr == nil && info.IsDir()
+			}
+		} else {
+			cleanupRaw()
+		}
+		return nil, errors.Join(ErrTranscriptionFailed, runErr)
+	}
+	var err error
+	var rawPayload []byte
+	if request.OutputRoot != nil {
+		rawPayload, err = request.OutputRoot.ReadFile(rawArtifactPath)
+		if errors.Is(err, os.ErrNotExist) {
+			// A reachable output directory with a missing JSON is a tool failure.
+			if _, dirErr := request.OutputRoot.ReadDir(path.Dir(rawArtifactPath)); dirErr == nil {
+				err = ErrOutputRead
+			}
+		}
+	} else {
+		rawPayload, err = os.ReadFile(rawPath)
+	}
+	cleanupRaw()
+	if err != nil {
+		return nil, errors.Join(ErrTranscriptionFailed, ErrOutputRead, err)
+	}
+	return rawPayload, nil
 }
 
 // The Windows whisper.cpp CLI requires extended-length names beyond MAX_PATH.
@@ -380,85 +436,75 @@ type whisperOutput struct {
 	} `json:"transcription"`
 }
 
-func parseWhisperJSON(payload []byte) (transcription.Content, error) {
-	output, err := decodeWhisperJSON(payload)
-	if err != nil {
+// whisper.cpp runs on the original WAV with -ot/-d. Its JSON offsets are
+// absolute even when the first returned cue predates the requested window.
+func parseChunk(payload []byte, chunk speechChunk, duration int64, single bool) (transcription.Content, error) {
+	var output whisperOutput
+	if !utf8.Valid(payload) {
+		return transcription.Content{}, ErrOutputInvalid
+	}
+	if err := json.Unmarshal(payload, &output); err != nil {
 		return transcription.Content{}, err
 	}
+	language := strings.ToLower(strings.TrimSpace(output.Result.Language))
+	if language == "" || output.Transcription == nil {
+		return transcription.Content{}, transcription.ErrInvalidContent
+	}
 	segments := make([]transcription.Segment, 0, len(output.Transcription))
-	for index, segment := range output.Transcription {
-		segments = append(segments, transcription.Segment{
-			Sequence: uint32(index + 1), StartMillis: segment.Offsets.From, EndMillis: segment.Offsets.To, Text: segment.Text,
-		})
-	}
-	return transcription.NewContent(output.Result.Language, segments)
-}
-
-func decodeWhisperJSON(payload []byte) (whisperOutput, error) {
-	var output whisperOutput
-	if err := json.Unmarshal(payload, &output); err != nil {
-		return whisperOutput{}, err
-	}
-	if strings.TrimSpace(output.Result.Language) == "" {
-		return whisperOutput{}, transcription.ErrInvalidContent
-	}
-	return output, nil
-}
-
-func ownedChunkSegments(output whisperOutput, chunk speechChunk, whole bool) []transcription.Segment {
-	segments := make([]transcription.Segment, 0, len(output.Transcription))
-	relativeOffsets := !whole && chunk.ProcessStartMillis > 0 && len(output.Transcription) > 0 &&
-		output.Transcription[0].Offsets.From+1000 < chunk.ProcessStartMillis
 	for _, raw := range output.Transcription {
 		start, end := raw.Offsets.From, raw.Offsets.To
-		if relativeOffsets {
-			start += chunk.ProcessStartMillis
-			end += chunk.ProcessStartMillis
-		}
-		text := strings.TrimSpace(raw.Text)
-		if text == "" || end <= start {
+		if start >= duration || end <= 0 {
 			continue
 		}
-		if !whole {
+		start, end = max(start, int64(0)), min(end, duration)
+		if !single {
+			if end <= start || strings.TrimSpace(raw.Text) == "" {
+				continue
+			}
+			// Clamp against the measured outer bounds before assigning overlap
+			// ownership. An overlong final cue can otherwise lose its owner.
 			midpoint := start + (end-start)/2
 			if midpoint < chunk.LogicalStartMillis || midpoint >= chunk.LogicalEndMillis {
 				continue
 			}
-			start = maxInt64(start, chunk.LogicalStartMillis)
-			end = minInt64(end, chunk.LogicalEndMillis)
-			if end <= start {
-				continue
-			}
+			start, end = max(start, chunk.LogicalStartMillis), min(end, chunk.LogicalEndMillis)
 		}
-		segments = append(segments, transcription.Segment{StartMillis: start, EndMillis: end, Text: text})
+		segments = append(segments, transcription.Segment{StartMillis: start, EndMillis: end, Text: raw.Text})
+	}
+	if !single {
+		segments = mergeChunkOverlaps(segments)
+		if len(segments) == 0 {
+			return transcription.Content{Language: language}, nil
+		}
+	}
+	return transcription.NewContent(language, numberSegments(segments))
+}
+
+func numberSegments(segments []transcription.Segment) []transcription.Segment {
+	for index := range segments {
+		segments[index].Sequence = uint32(index + 1)
 	}
 	return segments
 }
 
-func mergeWhisperSegments(language string, segments []transcription.Segment) (transcription.Content, error) {
+func mergeChunkOverlaps(segments []transcription.Segment) []transcription.Segment {
 	sort.SliceStable(segments, func(i, j int) bool {
 		if segments[i].StartMillis == segments[j].StartMillis {
 			return segments[i].EndMillis < segments[j].EndMillis
 		}
 		return segments[i].StartMillis < segments[j].StartMillis
 	})
-	merged := make([]transcription.Segment, 0, len(segments))
+	merged := segments[:0]
 	var previousEnd int64
 	for _, segment := range segments {
 		if segment.EndMillis <= previousEnd {
 			continue
 		}
-		if segment.StartMillis < previousEnd {
-			segment.StartMillis = previousEnd
-		}
-		if segment.EndMillis <= segment.StartMillis || strings.TrimSpace(segment.Text) == "" {
-			continue
-		}
-		segment.Sequence = uint32(len(merged) + 1)
+		segment.StartMillis = max(segment.StartMillis, previousEnd)
 		merged = append(merged, segment)
 		previousEnd = segment.EndMillis
 	}
-	return transcription.NewContent(language, merged)
+	return merged
 }
 
 func normalizeArtifactPath(value string) (string, bool) {
