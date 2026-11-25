@@ -18,6 +18,10 @@ For a performance change, the lead and PM agree on the user-visible outcome and 
 
 The PM traces a boundary failure from the producer's output to the consumer's input, coordinates the fix across the affected leads, and owns it through verification. Verify the assembled path on a small representative workload, including the failure or retry that motivated the change. Check the actual destination files, catalog, and reported job state where applicable. Compare total elapsed time and repeated work so a faster stage cannot hide a slower or less reliable workflow. Prefer the change with the better measured end-to-end outcome while preserving required output quality and source integrity. Investigate a regression or inconclusive result before claiming an improvement.
 
+Each lead works in a closed loop within their module. Select an observable requirement and a fixed input, run the module through its normal entry point, isolate any mismatch, fix the cause, and rerun both the failing case and a healthy control. Keep the revision, input identity, tool versions, expected and observed results, measurements, and untested conditions with the handoff. A reproducible defect stays open through the next run.
+
+When the module is ready, the PM assembles the reported revisions and runs the real workflow on the test device. For each mismatch, send the responsible lead the input, the first incorrect observation, and the acceptance condition. If two modules disagree, name a lead for each side and use the same case. Close the issue only after the corrected revision reproduces the expected outcome in the assembled workflow.
+
 ## Before changing behavior
 
 - Read `requirements/catalog.json`, `requirements/README.md`, `ontology/terms.json`, and the owning file under `docs/design/`.
