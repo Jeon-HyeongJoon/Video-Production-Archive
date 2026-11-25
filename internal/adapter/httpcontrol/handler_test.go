@@ -1455,6 +1455,9 @@ func assertArchiveWorkspaceGolden(t *testing.T, handler http.Handler, scene arch
 	}
 
 	goldenName := fmt.Sprintf("archive_workspace_%s_%s", scene, runtime.GOOS)
+	if runtime.GOOS == "linux" && runtime.GOARCH == "arm64" {
+		goldenName += "_arm64"
+	}
 	goldenPath := filepath.Join(testdata, goldenName+".golden.png")
 	if os.Getenv("UPDATE_ARCHIVE_WORKSPACE_GOLDEN") == "1" {
 		payload, readErr := os.ReadFile(actualPath)

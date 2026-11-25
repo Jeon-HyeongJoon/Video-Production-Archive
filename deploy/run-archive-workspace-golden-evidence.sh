@@ -18,7 +18,7 @@ fi
 export ARCHIVE_WORKSPACE_GOLDEN_EVIDENCE_DIR="${image_dir}"
 
 go test -json -count=1 \
-  -run '^(TestArchiveOrganizationWorkspaceMatchesOperatingSystemGolden|TestArchiveWorkspaceJobManagementWithArchivistPaneMatchesOperatingSystemGolden|TestWorkspaceRoutesJobListsAndCompletedResultsToPersistentJobDetail|TestArchiveWorkspaceKeepsLayoutAcrossViewportWidths|TestJobManagementSelectsArchiveDriveAndFolderScopeAndDriveDetailDoesNotCreateWork|TestDriveDetailShowsFolderStructureAndVideoRecordsWithoutWorkCreation|TestArchivistPaneShowsRecallToolsSelectionAndDisablesBusySend|TestArchivistAddSettingsShowsOnlyNameHostAndDetectedCLI|TestWorkspaceSeparatesStoredAndCommittedArchiveRecords|TestWorkspaceShowsReservationAdjustedWorkerCapacity)$' \
+  -run '^(TestArchiveOrganizationWorkspaceMatchesOperatingSystemGolden|TestArchiveWorkspaceJobManagementWithArchivistPaneMatchesOperatingSystemGolden|TestWorkspaceRoutesJobListsAndCompletedResultsToPersistentJobDetail|TestArchiveWorkspaceKeepsLayoutAcrossViewportWidths|TestJobManagementSelectsArchiveDriveAndFolderScopeAndDriveDetailDoesNotCreateWork|TestDriveDetailShowsFolderStructureAndVideoRecordsWithoutWorkCreation|TestArchivistPaneShowsRecallToolsSelectionAndDisablesBusySend|TestArchivistAddSettingsShowsOnlyNameHostAndDetectedCLI|TestWorkspaceSeparatesStoredAndCommittedArchiveRecords|TestWorkspaceShowsReservationAdjustedWorkerCapacity|TestNewArchiveWorkShowsExpectedRelativeOutputLayoutBeforeStart)$' \
   ./internal/adapter/httpcontrol | tee "${raw_log}"
 
 go run ./cmd/testevidence \
@@ -29,14 +29,13 @@ go run ./cmd/testevidence \
   -revision "${revision}" \
   -repository archive
 
-approved_goldens=(internal/adapter/httpcontrol/testdata/archive_workspace_*_*.golden.png)
-if [ "${#approved_goldens[@]}" -ne 18 ]; then
-  printf 'expected 18 operating-system golden files, found %s\n' "${#approved_goldens[@]}" >&2
-  exit 1
-fi
-for approved in "${approved_goldens[@]}"; do
-  cp "${approved}" "${image_dir}/$(basename "${approved}")"
+testdata=internal/adapter/httpcontrol/testdata
+for platform in darwin linux linux_arm64 windows; do
+  for scene in pre-run stage-one stt-ready complete jobs job-detail; do
+    cp "${testdata}/archive_workspace_${scene}_${platform}.golden.png" "${image_dir}/"
+  done
 done
+cp "${testdata}/archive_workspace_output-preview_darwin.golden.png" "${image_dir}/"
 
 (
   cd "${image_dir}"
