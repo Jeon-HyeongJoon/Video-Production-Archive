@@ -229,6 +229,8 @@ func TestDamagedRecordingStopsAfterOneWorkerAttemptAcrossControlRestart(t *testi
 			t.Fatalf("source %s changed: %s, %v", name, after, err)
 		}
 	}
+	t.Logf("render attempts=%d, cause=%s, exit=%d, work=%s, published=%d, source hashes preserved=%d",
+		len(evidence), evidence[0].CauseCode, *evidence[0].ProcessExitCode, run.Data.Summary.State, *run.Data.Summary.Results, len(originals))
 }
 
 func damagedRecordingSiblings(t *testing.T, ffmpeg, probe, folder string) map[string]string {
