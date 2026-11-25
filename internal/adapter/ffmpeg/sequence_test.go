@@ -97,6 +97,36 @@ func TestSequenceRendererPublishesTimelineOrderedTwentyMbpsVideoAndMarkerSidecar
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := verificationRenderer.Render(context.Background(), request); err == nil {
+		t.Fatal("rejected replacement sequence was accepted")
+	}
+	priorVideo, err := os.ReadFile(publishedVideo)
+	if err != nil || string(priorVideo) != string(payload) {
+		t.Fatalf("prior sequence changed: %v", err)
+	}
+	priorMarker, err := markerRoot.ReadFile(request.PublishedMarkerPath)
+	if err != nil || string(priorMarker) != string(markerPayload) {
+		t.Fatalf("prior markers changed: %v", err)
+	}
+	t.Run("conflicting replacement preserves both published files", func(t *testing.T) {
+		t.Setenv("FFMPEG_FIXTURE_PAYLOAD", "different verified sequence")
+		replacement, err := NewSequenceRenderer(executablePath, "ffmpeg-8.0", "WORKER-1", OSRunner{},
+			payloadVerifier{expected: []byte("different verified sequence")}, AtomicPublisher{}, markerRoot)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err = replacement.Render(context.Background(), request); !errors.Is(err, ErrSequenceOutputConflict) {
+			t.Fatal(err)
+		}
+		video, err := os.ReadFile(publishedVideo)
+		if err != nil || string(video) != string(priorVideo) {
+			t.Fatal("previous video changed", err)
+		}
+		markers, err := markerRoot.ReadFile(request.PublishedMarkerPath)
+		if err != nil || string(markers) != string(priorMarker) {
+			t.Fatal("previous markers changed", err)
+		}
+	})
 	verificationFailure := request
 	verificationFailure.RenditionID = "RENDITION-VERIFY-FAIL"
 	verificationFailure.TemporaryOutputPath = filepath.Join(directory, "organized", "SOURCE-1", "verify-fail.mp4.partial")
@@ -135,6 +165,14 @@ func TestSequenceRendererPublishesTimelineOrderedTwentyMbpsVideoAndMarkerSidecar
 	markerFailure.PublishedMarkerPath = "organized/SOURCE-1/marker-target"
 	if failed, err := renderer.Render(context.Background(), markerFailure); err == nil || failed.Rendition.Artifact.ID != "" {
 		t.Fatalf("marker publish failure returned a completed rendition: result=%+v err=%v", failed, err)
+	}
+	for _, attempt := range []SequenceRequest{request, verificationFailure, publishFailure, markerFailure} {
+		if _, err := os.Stat(attempt.TemporaryOutputPath); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("left temporary sequence %s: %v", attempt.TemporaryOutputPath, err)
+		}
+		if exists, err := markerRoot.Exists(attempt.TemporaryMarkerPath); err != nil || exists {
+			t.Fatalf("left temporary marker %s: %v", attempt.TemporaryMarkerPath, err)
+		}
 	}
 }
 

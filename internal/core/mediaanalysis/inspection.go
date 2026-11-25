@@ -18,14 +18,15 @@ type Rational struct {
 }
 
 type VideoStream struct {
-	Index       int      `json:"index"`
-	Codec       string   `json:"codec"`
-	Profile     string   `json:"profile,omitempty"`
-	Width       int      `json:"width"`
-	Height      int      `json:"height"`
-	FrameRate   Rational `json:"frame_rate"`
-	PixelFormat string   `json:"pixel_format,omitempty"`
-	BitRate     int64    `json:"bit_rate"`
+	Index          int      `json:"index"`
+	DurationMillis int64    `json:"duration_millis,omitempty"`
+	Codec          string   `json:"codec"`
+	Profile        string   `json:"profile,omitempty"`
+	Width          int      `json:"width"`
+	Height         int      `json:"height"`
+	FrameRate      Rational `json:"frame_rate"`
+	PixelFormat    string   `json:"pixel_format,omitempty"`
+	BitRate        int64    `json:"bit_rate"`
 }
 
 type AudioStream struct {
@@ -77,7 +78,7 @@ func NewMediaInspection(source MediaInspection) (MediaInspection, error) {
 		stream.Profile = strings.TrimSpace(stream.Profile)
 		stream.PixelFormat = strings.ToLower(strings.TrimSpace(stream.PixelFormat))
 		stream.FrameRate = normalizeRational(stream.FrameRate)
-		if stream.Index < 0 || indexes[stream.Index] || stream.Codec == "" || stream.Width <= 0 || stream.Height <= 0 || stream.BitRate < 0 ||
+		if stream.Index < 0 || indexes[stream.Index] || stream.Codec == "" || stream.Width <= 0 || stream.Height <= 0 || stream.BitRate < 0 || stream.DurationMillis < 0 ||
 			stream.FrameRate.Numerator <= 0 || stream.FrameRate.Denominator <= 0 {
 			return MediaInspection{}, ErrInvalidInspection
 		}

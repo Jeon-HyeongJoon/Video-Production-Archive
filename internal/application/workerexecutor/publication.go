@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"path"
 
 	"videoarchive/internal/core/execution"
@@ -29,6 +30,24 @@ func (p *storagePublisher) receiptPath() string {
 	return fmt.Sprintf(".archive-receipts/%x.json", id[:])
 }
 
+// The renderer discarded its attempt file on a synchronous failure. If the
+// rename already took effect (e.g. a directory sync failed), keep the receipt
+// so a later attempt can verify and reuse the published bytes.
+func (p *storagePublisher) discardUnpublishedReceipt() error {
+	if p.receipt.Size == 0 {
+		return nil
+	}
+	exists, err := p.root.Exists(p.publishedRelative)
+	if exists || err != nil {
+		return err
+	}
+	err = p.root.Remove(p.receiptPath())
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	return err
+}
+
 func (p *storagePublisher) recordBeforePublish() error {
 	r := p.receipt
 	if r.Size <= 0 || len(r.Checksum) != 64 {
@@ -42,6 +61,7 @@ func (p *storagePublisher) recordBeforePublish() error {
 	if err := p.root.MkdirAll(path.Dir(file), 0700); err != nil {
 		return err
 	}
+	defer p.root.Remove(file + ".partial")
 	if err := p.root.WriteFile(file+".partial", payload, 0600); err != nil {
 		return err
 	}

@@ -111,4 +111,4 @@ traceability ok: 360 requirements (318 implemented, 42 planned), 318 one-to-one 
 7. 테스트 과정에서 기술 제한이나 더 나은 구조가 발견되면 소유 설계와 요구사항을 검토해 고친 뒤 같은 변경에서 테스트도 고친다.
 8. 최소 구현 후 `reqcheck`와 전체 테스트를 통과시키고 `implemented`로 전환한다.
 
-파일별 진행과 목적지 트리는 [작업 공간 UX](../docs/design/14-archive-workspace-ux.md)의 `DSH-043`, `DSH-044`, `DSH-055`로 검증한다. 손상된 미디어의 치명적인 디코더 종료는 `WRK-022`에서 검증한다.
+파일별 진행과 목적지 트리는 [작업 공간 UX](../docs/design/14-archive-workspace-ux.md)의 `DSH-043`, `DSH-044`, `DSH-055`로 검증한다. `QCT-005`는 오디오가 끝까지 남은 손상 영상의 QC 판정을, `WRK-022`는 실제 FFmpeg의 치명 종료·출력 실패·취소와 SQLite를 다시 연 뒤의 배정 결과를 통합 테스트로 검증한다.

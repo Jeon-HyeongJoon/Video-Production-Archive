@@ -58,14 +58,29 @@ func (r *progressRunner) Run(ctx context.Context, executable string, args []stri
 		}
 	}}
 	args = append([]string{"-nostats", "-progress", "pipe:1"}, args...)
-	var diagnostics decoderDiagnostics
+	inputs := 1
+	if r.operation == execution.OperationRenderSourceSequence {
+		inputs = 0
+		for _, arg := range args {
+			if arg == "-i" {
+				inputs++
+			}
+		}
+	}
+	diagnostics := decoderDiagnostics{inputs: make([]decoderInput, inputs)}
 	stderr := processprogress.Lines{OnLine: diagnostics.observe, MaxLineBytes: 1024}
 	err := r.stream.RunStreams(ctx, executable, args, &lines, &stderr)
 	stderr.Flush()
 	lines.Flush()
 	report()
-	if err != nil && ctx.Err() == nil && diagnostics.rejectedInput() {
-		return errors.Join(err, &DecodeFailure{r.index, r.count, latest})
+	if err != nil && ctx.Err() == nil {
+		if index, rejected := diagnostics.rejectedInput(err); rejected {
+			failure := &DecodeFailure{r.index, r.count, latest}
+			if r.operation == execution.OperationRenderSourceSequence {
+				failure.InputIndex, failure.InputCount = uint32(index+1), uint32(inputs)
+			}
+			return errors.Join(err, failure)
+		}
 	}
 	return err
 }

@@ -42,6 +42,8 @@ type SequenceResult struct {
 	MarkerArtifact archive.Artifact
 }
 
+var ErrSequenceOutputConflict = errors.New("existing sequence output differs from verified replacement")
+
 type SequenceRenderer struct {
 	executable       string
 	processorVersion string
@@ -64,7 +66,7 @@ func NewSequenceRenderer(executable, processorVersion, workerID string, runner e
 	}, nil
 }
 
-func (renderer *SequenceRenderer) Render(ctx context.Context, request SequenceRequest) (SequenceResult, error) {
+func (renderer *SequenceRenderer) Render(ctx context.Context, request SequenceRequest) (_ SequenceResult, renderErr error) {
 	profile, err := rendering.NewProfile(request.Profile)
 	if err != nil || profile.TargetVideoBitRateKbps != 20_000 || request.Timeline.Validate() != nil {
 		return SequenceResult{}, ErrInvalidRequest
@@ -74,7 +76,8 @@ func (renderer *SequenceRenderer) Render(ctx context.Context, request SequenceRe
 	publishedMarkerPath, publishedMarkerOK := normalizeArtifactPath(request.PublishedMarkerPath)
 	if strings.TrimSpace(request.RenditionID) == "" || strings.TrimSpace(request.MarkerArtifactID) == "" ||
 		strings.TrimSpace(request.TemporaryOutputPath) == "" || strings.TrimSpace(request.PublishedOutputPath) == "" ||
-		!artifactPathOK || !temporaryMarkerOK || !publishedMarkerOK || temporaryMarkerPath == publishedMarkerPath ||
+		!artifactPathOK || !temporaryMarkerOK || !publishedMarkerOK || strings.EqualFold(temporaryMarkerPath, publishedMarkerPath) ||
+		strings.EqualFold(filepath.Clean(request.TemporaryOutputPath), filepath.Clean(request.PublishedOutputPath)) ||
 		filepath.Clean(filepath.Dir(request.TemporaryOutputPath)) != filepath.Clean(filepath.Dir(request.PublishedOutputPath)) ||
 		path.Dir(temporaryMarkerPath) != path.Dir(publishedMarkerPath) {
 		return SequenceResult{}, ErrInvalidRequest
@@ -93,7 +96,7 @@ func (renderer *SequenceRenderer) Render(ctx context.Context, request SequenceRe
 	rootOriginalAssetIDs := make([]string, 0, len(request.Timeline.Clips))
 	for _, clip := range request.Timeline.Clips {
 		inputPath := strings.TrimSpace(request.ResolvedInputPaths[clip.OriginalAssetID])
-		if inputPath == "" {
+		if inputPath == "" || strings.EqualFold(filepath.Clean(request.TemporaryOutputPath), filepath.Clean(inputPath)) {
 			return SequenceResult{}, ErrInvalidRequest
 		}
 		inputPaths = append(inputPaths, inputPath)
@@ -107,11 +110,15 @@ func (renderer *SequenceRenderer) Render(ctx context.Context, request SequenceRe
 		return SequenceResult{}, err
 	}
 	arguments := sequenceArguments(inputPaths, request.HasAudio, request.TemporaryOutputPath, profile)
+	defer func() {
+		if renderErr != nil {
+			renderErr = errors.Join(renderErr, removeTemporaryFile(request.OutputRoot, request.TemporaryArtifactPath, request.TemporaryOutputPath))
+		}
+	}()
 	if err := renderer.runner.Run(ctx, renderer.executable, arguments); err != nil {
 		return SequenceResult{}, errors.Join(ErrRenderFailed, err)
 	}
 	if err := renderer.verifier.Verify(request.TemporaryOutputPath); err != nil {
-		renderer.removeTemporaryVideo(request)
 		return SequenceResult{}, errors.Join(ErrRenderFailed, err)
 	}
 	markerPayload, err := json.Marshal(struct {
@@ -119,18 +126,34 @@ func (renderer *SequenceRenderer) Render(ctx context.Context, request SequenceRe
 		Timeline      organization.SourceTimeline `json:"timeline"`
 	}{SchemaVersion: 1, Timeline: request.Timeline})
 	if err != nil {
-		renderer.removeTemporaryVideo(request)
 		return SequenceResult{}, errors.Join(ErrRenderFailed, err)
 	}
+	defer func() {
+		if renderErr != nil {
+			renderErr = errors.Join(renderErr, removeTemporaryFile(renderer.markerRoot, temporaryMarkerPath, ""))
+		}
+	}()
 	if err := renderer.markerRoot.WriteFile(temporaryMarkerPath, markerPayload, 0o600); err != nil {
-		renderer.removeTemporaryVideo(request)
 		return SequenceResult{}, errors.Join(ErrRenderFailed, err)
 	}
-	defer func() { _ = renderer.markerRoot.Remove(temporaryMarkerPath) }()
 	readBack, err := renderer.markerRoot.ReadFile(temporaryMarkerPath)
 	if err != nil || string(readBack) != string(markerPayload) {
-		renderer.removeTemporaryVideo(request)
 		return SequenceResult{}, errors.Join(ErrRenderFailed, err)
+	}
+	// Preflight both published names under the Worker's output locks before
+	// replacing either one. An earlier verified video or marker is immutable.
+	if err := matchExistingSequenceFile(renderer.markerRoot, publishedMarkerPath, temporaryMarkerPath); err != nil {
+		return SequenceResult{}, errors.Join(ErrRenderFailed, err)
+	}
+	currentVideo, stagedVideo := artifactPath, request.TemporaryArtifactPath
+	if request.OutputRoot == nil {
+		currentVideo, stagedVideo = request.PublishedOutputPath, request.TemporaryOutputPath
+	}
+	if err := matchExistingSequenceFile(request.OutputRoot, currentVideo, stagedVideo); err != nil {
+		return SequenceResult{}, errors.Join(ErrRenderFailed, err)
+	}
+	if err := ctx.Err(); err != nil {
+		return SequenceResult{}, err
 	}
 	if err := renderer.publisher.Publish(request.TemporaryOutputPath, request.PublishedOutputPath); err != nil {
 		return SequenceResult{}, errors.Join(ErrRenderFailed, err)
@@ -174,12 +197,35 @@ func (renderer *SequenceRenderer) Render(ctx context.Context, request SequenceRe
 	return SequenceResult{Rendition: rendition, MarkerArtifact: markerArtifact}, nil
 }
 
-func (renderer *SequenceRenderer) removeTemporaryVideo(request SequenceRequest) {
-	if request.OutputRoot != nil {
-		_ = request.OutputRoot.Remove(request.TemporaryArtifactPath)
-		return
+func matchExistingSequenceFile(root *archive.StorageRoot, published, staged string) error {
+	stat := os.Lstat
+	hash := hashFile
+	if root != nil {
+		stat = root.Stat
+		hash = root.FileSHA256
 	}
-	_ = os.Remove(request.TemporaryOutputPath)
+	info, err := stat(published)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() {
+		return ErrSequenceOutputConflict
+	}
+	size, sum, err := hash(published)
+	if err != nil {
+		return err
+	}
+	newSize, newSum, err := hash(staged)
+	if err != nil {
+		return err
+	}
+	if size != newSize || sum != newSum {
+		return ErrSequenceOutputConflict
+	}
+	return nil
 }
 
 func sequenceArguments(inputPaths []string, hasAudio bool, outputPath string, profile rendering.Profile) []string {

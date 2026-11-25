@@ -88,6 +88,8 @@ func (renderer *Renderer) Render(ctx context.Context, request Request) (renderin
 	if strings.TrimSpace(request.RenditionID) == "" || strings.TrimSpace(request.OriginalAssetID) == "" ||
 		strings.TrimSpace(request.ResolvedInputPath) == "" || strings.TrimSpace(request.TemporaryOutputPath) == "" ||
 		strings.TrimSpace(request.PublishedOutputPath) == "" || !ok ||
+		strings.EqualFold(filepath.Clean(request.TemporaryOutputPath), filepath.Clean(request.PublishedOutputPath)) ||
+		strings.EqualFold(filepath.Clean(request.TemporaryOutputPath), filepath.Clean(request.ResolvedInputPath)) ||
 		filepath.Clean(filepath.Dir(request.TemporaryOutputPath)) != filepath.Clean(filepath.Dir(request.PublishedOutputPath)) {
 		return rendering.Rendition{}, ErrInvalidRequest
 	}
@@ -112,7 +114,7 @@ func (renderer *Renderer) Render(ctx context.Context, request Request) (renderin
 		TemporaryOutput: request.TemporaryOutputPath, PublishedOutput: request.PublishedOutputPath,
 	}
 	if err := execution.RunVerified(ctx, plan, renderer.runner, renderer.verifier, renderer.publisher); err != nil {
-		return rendering.Rendition{}, errors.Join(ErrRenderFailed, err)
+		return rendering.Rendition{}, errors.Join(ErrRenderFailed, err, removeTemporaryFile(request.OutputRoot, request.TemporaryArtifactPath, request.TemporaryOutputPath))
 	}
 	var size int64
 	var checksum string
@@ -137,6 +139,28 @@ func (renderer *Renderer) Render(ctx context.Context, request Request) (renderin
 		return rendering.Rendition{}, err
 	}
 	return rendition, nil
+}
+
+// Remove only the attempt's media file. An occupied directory is an output
+// error and may contain someone else's files.
+func removeTemporaryFile(root *archive.StorageRoot, relative, resolved string) error {
+	var info os.FileInfo
+	var err error
+	if root != nil {
+		info, err = root.Stat(relative)
+	} else {
+		info, err = os.Lstat(resolved)
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil || !info.Mode().IsRegular() {
+		return err
+	}
+	if root != nil {
+		return root.Remove(relative)
+	}
+	return os.Remove(resolved)
 }
 
 func renderArguments(inputPath, outputPath string, profile rendering.Profile) []string {

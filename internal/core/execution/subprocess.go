@@ -45,5 +45,8 @@ func RunVerified(ctx context.Context, plan Plan, runner Runner, verifier Verifie
 	if err := verifier.Verify(plan.TemporaryOutput); err != nil {
 		return err
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	return publisher.Publish(plan.TemporaryOutput, plan.PublishedOutput)
 }

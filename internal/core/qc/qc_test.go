@@ -132,4 +132,17 @@ func TestSourceTimelineQCUsesClipSumInsteadOfAnySingleOriginalDuration(t *testin
 	if err != nil || failed.Outcome != Failed {
 		t.Fatalf("single-clip duration passed timeline QC: report=%+v err=%v", failed, err)
 	}
+	// With mapped audio the final video ends after the last cut plus that
+	// clip's video, even when the same timeline has a longer audio tail.
+	durations := map[string]int64{"ASSET-1": 9000, "ASSET-2": 12000, "ASSET-3": 4000}
+	output.DurationMillis, output.VideoDurationMillis = 30_040, 26_000
+	withTracks, err := EvaluateTimelineWithVideoDurations("QC-TRACKS", rendition, profile, timeline, true, durations, output, Policy{DurationToleranceMillis: 100}, "WORKER-1", now)
+	if err != nil || withTracks.Outcome != Passed {
+		t.Fatal(withTracks, err)
+	}
+	output.VideoDurationMillis = 0
+	missing, err := EvaluateTimelineWithVideoDurations("QC-MISSING", rendition, profile, timeline, true, durations, output, Policy{DurationToleranceMillis: 100}, "WORKER-1", now)
+	if err != nil || missing.Outcome != Failed || missing.Failure() == nil || len(missing.Failure().Checks) != 1 || missing.Failure().Checks[0].Kind != CheckVideoDuration || missing.Failure().Checks[0].Actual != "unavailable" {
+		t.Fatal(missing, err)
+	}
 }

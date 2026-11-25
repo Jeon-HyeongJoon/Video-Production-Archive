@@ -419,7 +419,7 @@ func firstWorkerSpec(archiveRunID, jobID, templateName, sourceStorageID, working
 		inputs = append(inputs, execution.InputReference{
 			OriginalAssetID: input.OriginalAssetID, OriginalName: path.Base(input.RelativePath), InspectionID: input.Inspection.ID,
 			StorageID: sourceStorageID, RelativePath: input.RelativePath, Checksum: input.Inspection.OriginalChecksum,
-			DurationMillis: input.Inspection.DurationMillis, SourceCreatedAt: input.Inspection.ContainerCreatedAt,
+			DurationMillis: input.Inspection.DurationMillis, VideoDurationMillis: video.DurationMillis, SourceCreatedAt: input.Inspection.ContainerCreatedAt,
 			SourceSizeBytes: input.Inspection.SizeBytes, SourceContainer: strings.Join(input.Inspection.Containers, ","),
 			SourceBitRateBPS: input.Inspection.BitRate, VideoCodec: video.Codec, VideoProfile: video.Profile,
 			Width: video.Width, Height: video.Height, FrameRateNumerator: video.FrameRate.Numerator,

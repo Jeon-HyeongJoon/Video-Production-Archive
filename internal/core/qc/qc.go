@@ -26,26 +26,28 @@ const (
 type CheckKind string
 
 const (
-	CheckDecodable  CheckKind = "DECODABLE"
-	CheckChecksum   CheckKind = "CHECKSUM"
-	CheckFileSize   CheckKind = "FILE_SIZE"
-	CheckContainer  CheckKind = "CONTAINER"
-	CheckVideoCodec CheckKind = "VIDEO_CODEC"
-	CheckAudioCodec CheckKind = "AUDIO_CODEC"
-	CheckDimensions CheckKind = "DIMENSIONS"
-	CheckDuration   CheckKind = "DURATION"
+	CheckDecodable     CheckKind = "DECODABLE"
+	CheckChecksum      CheckKind = "CHECKSUM"
+	CheckFileSize      CheckKind = "FILE_SIZE"
+	CheckContainer     CheckKind = "CONTAINER"
+	CheckVideoCodec    CheckKind = "VIDEO_CODEC"
+	CheckAudioCodec    CheckKind = "AUDIO_CODEC"
+	CheckDimensions    CheckKind = "DIMENSIONS"
+	CheckDuration      CheckKind = "DURATION"
+	CheckVideoDuration CheckKind = "VIDEO_DURATION"
 )
 
 type OutputObservation struct {
-	Checksum       string   `json:"checksum"`
-	SizeBytes      int64    `json:"size_bytes"`
-	Containers     []string `json:"containers"`
-	DurationMillis int64    `json:"duration_millis"`
-	VideoCodec     string   `json:"video_codec"`
-	AudioCodec     string   `json:"audio_codec"`
-	Width          int      `json:"width"`
-	Height         int      `json:"height"`
-	Decodable      bool     `json:"decodable"`
+	Checksum            string   `json:"checksum"`
+	SizeBytes           int64    `json:"size_bytes"`
+	Containers          []string `json:"containers"`
+	DurationMillis      int64    `json:"duration_millis"`
+	VideoDurationMillis int64    `json:"video_duration_millis,omitempty"`
+	VideoCodec          string   `json:"video_codec"`
+	AudioCodec          string   `json:"audio_codec"`
+	Width               int      `json:"width"`
+	Height              int      `json:"height"`
+	Decodable           bool     `json:"decodable"`
 }
 
 // Failure carries the failed measurements without publishing an accepted QC output.
@@ -64,7 +66,7 @@ var measurement = regexp.MustCompile(`^[a-zA-Z0-9±=<> ,._-]{0,128}$`)
 
 func (failure *Failure) Safe() *Failure {
 	if failure == nil || !evidenceID.MatchString(failure.AssessmentID) || !evidenceID.MatchString(failure.TargetArtifactID) ||
-		(failure.SourceInspectionID != "" && !evidenceID.MatchString(failure.SourceInspectionID)) || (failure.SourceTimelineID != "" && !evidenceID.MatchString(failure.SourceTimelineID)) || len(failure.Checks) == 0 || len(failure.Checks) > 8 {
+		(failure.SourceInspectionID != "" && !evidenceID.MatchString(failure.SourceInspectionID)) || (failure.SourceTimelineID != "" && !evidenceID.MatchString(failure.SourceTimelineID)) || len(failure.Checks) == 0 || len(failure.Checks) > 9 {
 		return nil
 	}
 	safe := *failure
@@ -72,7 +74,7 @@ func (failure *Failure) Safe() *Failure {
 	seen := map[CheckKind]bool{}
 	for _, check := range failure.Checks {
 		switch check.Kind {
-		case CheckDecodable, CheckChecksum, CheckFileSize, CheckContainer, CheckVideoCodec, CheckAudioCodec, CheckDimensions, CheckDuration:
+		case CheckDecodable, CheckChecksum, CheckFileSize, CheckContainer, CheckVideoCodec, CheckAudioCodec, CheckDimensions, CheckDuration, CheckVideoDuration:
 		default:
 			return nil
 		}
@@ -138,12 +140,16 @@ func Evaluate(assessmentID string, rendition rendering.Rendition, profile render
 		return QCAssessment{}, ErrInvalidAssessment
 	}
 	return evaluateExpectedDuration(
-		assessmentID, rendition, normalizedProfile, normalizedSource.ID, "", normalizedSource.DurationMillis,
+		assessmentID, rendition, normalizedProfile, normalizedSource.ID, "", normalizedSource.DurationMillis, normalizedSource.VideoStreams[0].DurationMillis,
 		len(normalizedSource.AudioStreams) > 0, output, policy, workerID, createdAt,
 	)
 }
 
 func EvaluateTimeline(assessmentID string, rendition rendering.Rendition, profile rendering.Profile, timeline organization.SourceTimeline, expectedAudio bool, output OutputObservation, policy Policy, workerID string, createdAt time.Time) (QCAssessment, error) {
+	return EvaluateTimelineWithVideoDurations(assessmentID, rendition, profile, timeline, expectedAudio, nil, output, policy, workerID, createdAt)
+}
+
+func EvaluateTimelineWithVideoDurations(assessmentID string, rendition rendering.Rendition, profile rendering.Profile, timeline organization.SourceTimeline, expectedAudio bool, videoDurations map[string]int64, output OutputObservation, policy Policy, workerID string, createdAt time.Time) (QCAssessment, error) {
 	normalizedProfile, err := rendering.NewProfile(profile)
 	if err != nil {
 		return QCAssessment{}, ErrInvalidAssessment
@@ -164,10 +170,30 @@ func EvaluateTimeline(assessmentID string, rendition rendering.Rendition, profil
 			return QCAssessment{}, ErrInvalidAssessment
 		}
 	}
-	return evaluateExpectedDuration(assessmentID, rendition, normalizedProfile, "", timeline.ID, timeline.DurationMillis(), expectedAudio, output, policy, workerID, createdAt)
+	expectedVideo := timelineVideoDuration(timeline, expectedAudio, videoDurations)
+	return evaluateExpectedDuration(assessmentID, rendition, normalizedProfile, "", timeline.ID, timeline.DurationMillis(), expectedVideo, expectedAudio, output, policy, workerID, createdAt)
 }
 
-func evaluateExpectedDuration(assessmentID string, rendition rendering.Rendition, profile rendering.Profile, sourceInspectionID, sourceTimelineID string, expectedDuration int64, expectedAudio bool, output OutputObservation, policy Policy, workerID string, createdAt time.Time) (QCAssessment, error) {
+func timelineVideoDuration(timeline organization.SourceTimeline, hasAudio bool, durations map[string]int64) int64 {
+	var end int64
+	for i, clip := range timeline.Clips {
+		// The A/V concat filter starts the next clip at the segment boundary.
+		// The last clip can end with audio only. For video-only concat each
+		// segment ends with its mapped video stream.
+		if hasAudio && i < len(timeline.Clips)-1 {
+			end += clip.OutMillis - clip.InMillis
+			continue
+		}
+		video := durations[clip.OriginalAssetID]
+		if video <= clip.InMillis {
+			return 0
+		}
+		end += min(video, clip.OutMillis) - clip.InMillis
+	}
+	return end
+}
+
+func evaluateExpectedDuration(assessmentID string, rendition rendering.Rendition, profile rendering.Profile, sourceInspectionID, sourceTimelineID string, expectedDuration, expectedVideo int64, expectedAudio bool, output OutputObservation, policy Policy, workerID string, createdAt time.Time) (QCAssessment, error) {
 	output = normalizeOutput(output)
 	if strings.TrimSpace(assessmentID) == "" || strings.TrimSpace(workerID) == "" || createdAt.IsZero() ||
 		policy.DurationToleranceMillis < 0 || expectedDuration <= 0 || output.Checksum == "" || output.SizeBytes <= 0 ||
@@ -175,10 +201,6 @@ func evaluateExpectedDuration(assessmentID string, rendition rendering.Rendition
 		return QCAssessment{}, ErrInvalidAssessment
 	}
 
-	durationDelta := output.DurationMillis - expectedDuration
-	if durationDelta < 0 {
-		durationDelta = -durationDelta
-	}
 	audioExpected := "aac"
 	audioActual := output.AudioCodec
 	audioPassed := output.AudioCodec == "aac"
@@ -198,8 +220,10 @@ func evaluateExpectedDuration(assessmentID string, rendition rendering.Rendition
 		{Kind: CheckAudioCodec, Passed: audioPassed, Expected: audioExpected, Actual: audioActual},
 		{Kind: CheckDimensions, Passed: output.Width <= profile.MaxWidth && output.Height <= profile.MaxHeight && output.Width%2 == 0 && output.Height%2 == 0,
 			Expected: fmt.Sprintf("even <= %dx%d", profile.MaxWidth, profile.MaxHeight), Actual: fmt.Sprintf("%dx%d", output.Width, output.Height)},
-		{Kind: CheckDuration, Passed: durationDelta <= policy.DurationToleranceMillis,
-			Expected: fmt.Sprintf("%d±%dms", expectedDuration, policy.DurationToleranceMillis), Actual: strconv.FormatInt(output.DurationMillis, 10) + "ms"},
+		durationCheck(CheckDuration, expectedDuration, output.DurationMillis, policy.DurationToleranceMillis),
+	}
+	if expectedVideo > 0 {
+		checks = append(checks, durationCheck(CheckVideoDuration, expectedVideo, output.VideoDurationMillis, policy.DurationToleranceMillis))
 	}
 	outcome := Passed
 	for _, check := range checks {
@@ -232,6 +256,15 @@ func normalizeOutput(output OutputObservation) OutputObservation {
 	}
 	sort.Strings(output.Containers)
 	return output
+}
+
+func durationCheck(kind CheckKind, expected, observed, tolerance int64) Check {
+	check := Check{Kind: kind, Expected: fmt.Sprintf("%d±%dms", expected, tolerance), Actual: "unavailable"}
+	if observed > 0 {
+		check.Actual = strconv.FormatInt(observed, 10) + "ms"
+		check.Passed = max(observed, expected)-min(observed, expected) <= tolerance
+	}
+	return check
 }
 
 func contains(values []string, expected string) bool {

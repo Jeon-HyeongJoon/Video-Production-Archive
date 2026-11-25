@@ -24,8 +24,8 @@ func TestFFprobeAdapterObservesPublishedRenditionBytesForQC(t *testing.T) {
 	fixture := `{
   "format": {"format_name":"mov,mp4", "duration":"60.040", "size":"26", "bit_rate":"2000000"},
   "streams": [
-    {"index":2,"codec_type":"video","codec_name":"h264","width":1280,"height":720,"avg_frame_rate":"30/1"},
-    {"index":0,"codec_type":"video","codec_name":"h264","width":1920,"height":1080,"avg_frame_rate":"30/1"},
+    {"index":2,"codec_type":"video","codec_name":"h264","width":1280,"height":720,"duration":"N/A","avg_frame_rate":"30/1"},
+    {"index":0,"codec_type":"video","codec_name":"h264","width":1920,"height":1080,"duration":"58.025","avg_frame_rate":"30/1"},
     {"index":1,"codec_type":"audio","codec_name":"aac","sample_rate":"48000","channels":2}
   ]
 }`
@@ -45,7 +45,8 @@ func TestFFprobeAdapterObservesPublishedRenditionBytesForQC(t *testing.T) {
 	digest := sha256.Sum256(published)
 	if observation.Checksum != hex.EncodeToString(digest[:]) || observation.SizeBytes != int64(len(published)) ||
 		!reflect.DeepEqual(observation.Containers, []string{"mov", "mp4"}) || observation.DurationMillis != 60_040 ||
-		observation.VideoCodec != "h264" || observation.AudioCodec != "aac" || observation.Width != 1920 || observation.Height != 1080 || !observation.Decodable {
+		observation.VideoDurationMillis != 58_025 || observation.VideoCodec != "h264" || observation.AudioCodec != "aac" ||
+		observation.Width != 1920 || observation.Height != 1080 || !observation.Decodable {
 		t.Fatalf("QC observation is incomplete: %+v", observation)
 	}
 	argumentPayload, err := os.ReadFile(argumentsPath)

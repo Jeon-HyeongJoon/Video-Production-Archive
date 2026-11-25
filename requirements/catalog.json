@@ -4084,10 +4084,10 @@
     {
       "id": "QCT-005",
       "design": "worker-qc-failure-evidence",
-      "statement": "Worker는 측정한 QC 불일치를 작업 실패 근거에 남겨 Archivist가 해당 파일의 기대값과 실측값을 비교할 수 있게 해야 한다.",
-      "given": "1초짜리 영상과 9초 원본 검사 기록 및 1.5초 허용차가 있다.",
-      "when": "Worker가 QC를 실행하여 길이 불일치를 확인한다.",
-      "then": "입력 오류에 평가·대상·원본 검사 ID와 실패 검사별 기대값·허용차·실측값이 연결되고 성공 QC 파일을 게시하지 않는다.",
+      "statement": "Worker는 컨테이너 길이와 측정 가능한 주 영상 트랙 길이를 독립적으로 대조하고 QC 불일치의 근거를 남겨야 한다.",
+      "given": "6초 원본의 렌더 결과에서 AAC는 끝까지 남고 영상은 2.5초에서 끝나며 허용차는 1.5초다.",
+      "when": "Worker가 원본 검사 또는 합본 타임라인의 기대값과 출력의 해당 트랙을 대조한다.",
+      "then": "기대 길이를 벗어나거나 기대한 영상 측정값이 없으면 QC_CHECK_FAILED에 평가·대상·원본 검사 또는 타임라인 ID와 실패 항목의 기대값·허용차·실측 결과가 남고 성공 QC와 보관을 막는다. 원본부터 짧은 영상과 허용차 안의 손실은 통과한다.",
       "test_file": "internal/application/workerexecutor/registry_test.go",
       "test_name": "TestFailedQCReportsMeasuredDifferenceForTheOriginalInput",
       "status": "implemented",
@@ -4576,12 +4576,12 @@
     {
       "id": "WRK-022",
       "design": "terminal-input-decode-failure",
-      "level": "unit",
+      "level": "integration",
       "status": "implemented",
       "statement": "렌더 작업에서 확인된 치명적인 원본 디코딩 실패는 입력 실패로 기록한다.",
-      "given": "FFmpeg가 잘못된 원본 패킷을 보고한 후 디코더가 입력 오류로 종료하거나 AAC 설정 불일치와 오디오 필터의 Invalid argument 종료가 함께 관찰된다.",
-      "when": "Worker가 해당 프로세스의 종료와 입력 순번·마지막 출력 위치를 처리한다.",
-      "then": "실패 종료이면 원본 순번·마지막 출력 위치와 SOURCE_DECODE_FAILED를 남기고 동일 입력의 자동 재시도를 끝낸다. 경고 후 성공, 별개의 출력 실패와 필터 설정 오류는 이 실패로 분류하지 않는다.",
+      "given": "FFmpeg가 원본 패킷을 거부하고 입력 디코더의 치명 종료, 디코드 오류율 초과에 따른 종료 또는 AAC 설정 불일치와 오디오 필터의 Invalid argument 종료가 확인된다.",
+      "when": "Worker가 실패한 렌더의 원본 순번·마지막 출력 위치·종료 코드를 보고하고 Control이 결과를 저장한다.",
+      "then": "첫 실패를 INPUT과 SOURCE_DECODE_FAILED로 기록하여 재시작 뒤에도 후속 배정을 끝낸다. 오류·취소 시 해당 시도의 임시 렌더 파일을 정리하고 앞서 검증한 출력을 보존한다. 경고 후 성공과 출력 장치 오류는 원본 실패로 분류하지 않는다.",
       "test_file": "internal/application/workerexecutor/decode_failure_test.go",
       "test_name": "TestWorkerDistinguishesTerminalSourceDecodeFailureFromWarnings"
     }

@@ -175,6 +175,7 @@ func (inspector *Inspector) inspectOutputStreams(ctx context.Context, resolvedPa
 			output.VideoCodec = strings.ToLower(strings.TrimSpace(stream.Codec))
 			output.Width = stream.Width
 			output.Height = stream.Height
+			output.VideoDurationMillis = stream.DurationMillis
 		}
 	}
 	primaryAudio := int(^uint(0) >> 1)
@@ -200,6 +201,7 @@ type probeDocument struct {
 	} `json:"format"`
 	Streams []struct {
 		Index         int    `json:"index"`
+		Duration      string `json:"duration"`
 		CodecType     string `json:"codec_type"`
 		CodecName     string `json:"codec_name"`
 		Profile       string `json:"profile"`
@@ -245,6 +247,14 @@ func decode(payload []byte) (mediaanalysis.MediaInspection, error) {
 	for _, stream := range document.Streams {
 		switch stream.CodecType {
 		case "video":
+			var videoDuration int64
+			if stream.Duration != "" && stream.Duration != "N/A" {
+				// A zero duration, like a missing duration, supplies no track measurement.
+				videoDuration, err = parseMillis(stream.Duration)
+				if err != nil {
+					return mediaanalysis.MediaInspection{}, err
+				}
+			}
 			frameRate, err := parseFrameRate(stream.AverageRate, stream.RealRate)
 			if err != nil {
 				return mediaanalysis.MediaInspection{}, err
@@ -255,7 +265,7 @@ func decode(payload []byte) (mediaanalysis.MediaInspection, error) {
 			}
 			inspection.VideoStreams = append(inspection.VideoStreams, mediaanalysis.VideoStream{
 				Index: stream.Index, Codec: stream.CodecName, Profile: stream.Profile, Width: stream.Width, Height: stream.Height,
-				FrameRate: frameRate, PixelFormat: stream.PixelFormat, BitRate: bitRate,
+				FrameRate: frameRate, PixelFormat: stream.PixelFormat, BitRate: bitRate, DurationMillis: videoDuration,
 			})
 		case "audio":
 			sampleRate, err := parseRequiredInteger(stream.SampleRate)
@@ -276,8 +286,16 @@ func decode(payload []byte) (mediaanalysis.MediaInspection, error) {
 }
 
 func parseDurationMillis(value string) (int64, error) {
+	millis, err := parseMillis(value)
+	if err != nil || millis == 0 {
+		return 0, ErrInvalidOutput
+	}
+	return millis, nil
+}
+
+func parseMillis(value string) (int64, error) {
 	seconds, err := strconv.ParseFloat(value, 64)
-	if err != nil || seconds <= 0 || seconds > float64(math.MaxInt64)/1000 {
+	if err != nil || math.IsNaN(seconds) || seconds < 0 || seconds >= float64(math.MaxInt64)/1000 {
 		return 0, ErrInvalidOutput
 	}
 	return int64(math.Round(seconds * 1000)), nil

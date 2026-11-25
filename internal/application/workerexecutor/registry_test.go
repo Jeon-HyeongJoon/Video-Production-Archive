@@ -841,6 +841,7 @@ func TestQCRenditionUsesEachReadyInputProfileForMultiFileAsIsFolder(t *testing.T
 
 // Requirement: QCT-005
 func TestFailedQCReportsMeasuredDifferenceForTheOriginalInput(t *testing.T) {
+	t.Run("video and audio end independently", testRenderedVideoDuration)
 	config, roots, spec := mediaVerificationFixture(t, 9000)
 	registry, err := NewProduction(config, roots)
 	if err != nil {
@@ -1270,6 +1271,7 @@ func testActualSourceSequence(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	colors := []string{"red", "green", "blue"}
 	for index := 1; index <= 3; index++ {
 		outputPath := filepath.Join(sourcePath, fmt.Sprintf("C%04d.mp4", index))
 		frameRate := 30
@@ -1278,7 +1280,7 @@ func testActualSourceSequence(t *testing.T) {
 		}
 		command := osexec.Command(
 			ffmpegPath, "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
-			"-f", "lavfi", "-i", fmt.Sprintf("testsrc=size=320x180:rate=%d", frameRate),
+			"-f", "lavfi", "-i", fmt.Sprintf("color=c=%s:size=320x180:rate=%d", colors[index-1], frameRate),
 			"-f", "lavfi", "-i", fmt.Sprintf("sine=frequency=%d:sample_rate=48000", 400+index*100),
 			"-t", "1", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", outputPath,
 		)
@@ -1356,6 +1358,26 @@ func testActualSourceSequence(t *testing.T) {
 	for _, relativePath := range []string{"staging/JOB-ACTUAL/sequence.mp4", "staging/JOB-ACTUAL/sequence.markers.json"} {
 		if size, _, err := roots.MustRoot("working").FileSHA256(relativePath); err != nil || size <= 0 {
 			t.Fatalf("actual source sequence output %s is missing: size=%d err=%v", relativePath, size, err)
+		}
+	}
+	root := roots.MustRoot("working")
+	raw, err := root.ReadFile(spec.Outputs[1].RelativePath)
+	renderTestOK(t, err)
+	var sidecar struct{ Timeline organization.SourceTimeline }
+	renderTestOK(t, json.Unmarshal(raw, &sidecar))
+	if !slices.Equal(sidecar.Timeline.Markers, markers) {
+		t.Fatal("sequence marker boundaries", sidecar.Timeline.Markers)
+	}
+	video, err := root.ExternalProcessPath(spec.Outputs[0].RelativePath)
+	renderTestOK(t, err)
+	for i, marker := range sidecar.Timeline.Markers {
+		for side, offset := range []int64{-100, 100} {
+			at := fmt.Sprintf("%.3f", float64(marker.AtMillis+offset)/1000)
+			pixel := mediaCommand(t, ffmpegPath, "-v", "error", "-nostdin", "-ss", at, "-i", video, "-frames:v", "1", "-vf", "scale=1:1", "-pix_fmt", "rgb24", "-f", "rawvideo", "pipe:1")
+			channel := i + side
+			if len(pixel) != 3 || pixel[channel] < 90 || pixel[(channel+1)%3] > 32 || pixel[(channel+2)%3] > 32 {
+				t.Fatalf("cut at %dms: frame at %ss is %v, expected %s", marker.AtMillis, at, pixel, colors[channel])
+			}
 		}
 	}
 }

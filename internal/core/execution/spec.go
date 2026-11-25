@@ -95,6 +95,7 @@ type InputReference struct {
 	RelativePath         string     `json:"relative_path"`
 	Checksum             string     `json:"checksum"`
 	DurationMillis       int64      `json:"duration_millis,omitempty"`
+	VideoDurationMillis  int64      `json:"video_duration_millis,omitempty"`
 	SourceCreatedAt      time.Time  `json:"source_created_at,omitempty"`
 	SourceSizeBytes      int64      `json:"source_size_bytes,omitempty"`
 	SourceContainer      string     `json:"source_container,omitempty"`
@@ -283,7 +284,7 @@ func (spec StepExecutionSpec) validWithoutDigest() bool {
 		if input.OriginalAssetID == "" || input.StorageID == "" || !safeRelative(input.RelativePath) || !sha256Pattern.MatchString(input.Checksum) {
 			return false
 		}
-		if input.SourceSizeBytes < 0 || input.SourceBitRateBPS < 0 || input.VideoBitRateBPS < 0 || input.AudioBitRateBPS < 0 ||
+		if input.VideoDurationMillis < 0 || input.SourceSizeBytes < 0 || input.SourceBitRateBPS < 0 || input.VideoBitRateBPS < 0 || input.AudioBitRateBPS < 0 ||
 			input.AudioSampleRateHz < 0 || input.AudioChannels < 0 ||
 			((input.FrameRateNumerator == 0) != (input.FrameRateDenominator == 0)) || input.FrameRateNumerator < 0 || input.FrameRateDenominator < 0 {
 			return false

@@ -40,6 +40,7 @@ import (
 )
 
 var ErrProductionExecution = errors.New("production MediaOperation failed")
+var errSourceChecksumMismatch = errors.New("source bytes differ from the persisted inspection")
 
 type operationHandler struct {
 	operation execution.Operation
@@ -361,7 +362,7 @@ func (operations *mediaOperations) renderRecording(ctx context.Context, spec exe
 			ArtifactPath: target.RelativePath, TemporaryArtifactPath: temporaryRelative, OutputRoot: outputRoot, Profile: profile,
 		})
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, errors.Join(err, publisher.discardUnpublishedReceipt())
 		}
 		if result.Artifact.Checksum != publisher.receipt.Checksum || result.Artifact.Size != publisher.receipt.Size {
 			return nil, nil, errPublicationConflict
@@ -476,13 +477,13 @@ func (operations *mediaOperations) qcRendition(ctx context.Context, spec executi
 		}
 		var assessment qc.QCAssessment
 		if spec.Parameters.SourceTimeline != nil {
-			expectedAudio, audioErr := timelineExpectedAudio(*spec.Parameters.SourceTimeline, spec.Parameters.SourceInputs)
-			if audioErr != nil {
-				return nil, nil, audioErr
+			hasAudio, durations, mediaErr := timelineMedia(*spec.Parameters.SourceTimeline, spec.Parameters.SourceInputs)
+			if mediaErr != nil {
+				return nil, nil, mediaErr
 			}
-			assessment, err = qc.EvaluateTimeline(target.ID, rendition, profile, *spec.Parameters.SourceTimeline, expectedAudio, observed, qc.Policy{DurationToleranceMillis: 1_500}, operations.configuration.ID, operations.now())
+			assessment, err = qc.EvaluateTimelineWithVideoDurations(target.ID, rendition, profile, *spec.Parameters.SourceTimeline, hasAudio, durations, observed, qc.Policy{DurationToleranceMillis: 1_500}, operations.configuration.ID, operations.now())
 		} else {
-			source, sourceErr := operations.sourceInspection(input.OriginalAssetID, spec.Parameters.SourceInputs, roots)
+			source, sourceErr := operations.sourceInspection(ctx, input.OriginalAssetID, spec.Parameters.SourceInputs, roots)
 			if sourceErr != nil {
 				return nil, nil, sourceErr
 			}
@@ -511,37 +512,56 @@ func (operations *mediaOperations) qcRendition(ctx context.Context, spec executi
 	return outputs, verificationReferences(spec.Operation, outputs), nil
 }
 
-func timelineExpectedAudio(timeline organization.SourceTimeline, sources []execution.InputReference) (bool, error) {
+func timelineMedia(timeline organization.SourceTimeline, sources []execution.InputReference) (bool, map[string]int64, error) {
 	byOriginal := make(map[string]execution.InputReference, len(sources))
 	for _, source := range sources {
 		byOriginal[source.OriginalAssetID] = source
 	}
+	hasAudio := true
+	durations := make(map[string]int64, len(timeline.Clips))
 	for _, clip := range timeline.Clips {
 		source, ok := byOriginal[clip.OriginalAssetID]
 		if !ok {
-			return false, ErrProductionExecution
+			return false, nil, ErrProductionExecution
 		}
-		if !source.HasAudio {
-			return false, nil
-		}
+		hasAudio = hasAudio && source.HasAudio
+		durations[clip.OriginalAssetID] = source.VideoDurationMillis
 	}
-	return true, nil
+	return hasAudio, durations, nil
 }
 
-func (operations *mediaOperations) sourceInspection(originalAssetID string, sources []execution.InputReference, roots *workerconfig.StorageRoots) (mediaanalysis.MediaInspection, error) {
+func (operations *mediaOperations) sourceInspection(ctx context.Context, originalAssetID string, sources []execution.InputReference, roots *workerconfig.StorageRoots) (mediaanalysis.MediaInspection, error) {
 	for _, source := range sources {
 		if source.OriginalAssetID != originalAssetID {
 			continue
 		}
-		size, _, err := roots.MustRoot(source.StorageID).FileSHA256(source.RelativePath)
+		root := roots.MustRoot(source.StorageID)
+		size, checksum, err := root.FileSHA256(source.RelativePath)
 		if err != nil {
 			return mediaanalysis.MediaInspection{}, err
+		}
+		if checksum != source.Checksum {
+			return mediaanalysis.MediaInspection{}, errSourceChecksumMismatch
+		}
+		videoDuration := source.VideoDurationMillis
+		if videoDuration == 0 {
+			// Read legacy timing from the same original bytes. Keep the recorded
+			// container duration as the independent DURATION expectation.
+			resolved, err := root.ExternalProcessPath(source.RelativePath)
+			if err != nil {
+				return mediaanalysis.MediaInspection{}, err
+			}
+			measured, err := operations.inspector.Inspect(ctx, ffprobe.Request{InspectionID: source.InspectionID, OriginalAssetID: originalAssetID, OriginalChecksum: checksum, ResolvedInputPath: resolved})
+			if err != nil {
+				return mediaanalysis.MediaInspection{}, err
+			}
+			videoDuration = measured.VideoStreams[0].DurationMillis
 		}
 		inspection := mediaanalysis.MediaInspection{
 			ID: source.InspectionID, OriginalAssetID: source.OriginalAssetID, OriginalChecksum: source.Checksum,
 			Containers: []string{"source"}, DurationMillis: source.DurationMillis, SizeBytes: size, BitRate: source.VideoBitRateBPS,
 			VideoStreams: []mediaanalysis.VideoStream{{
-				Index: 0, Codec: source.VideoCodec, Width: source.Width, Height: source.Height,
+				Index: 0, Codec: source.VideoCodec, Width: source.Width, Height: source.Height, DurationMillis: videoDuration,
 				FrameRate: mediaanalysis.Rational{Numerator: 30, Denominator: 1}, BitRate: source.VideoBitRateBPS,
 			}},
 			ProcessorVersion: operations.configuration.Tools.FFprobe.Version, ObservedBy: operations.configuration.ID, InspectedAt: operations.now(),

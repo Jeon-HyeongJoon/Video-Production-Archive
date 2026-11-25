@@ -10,6 +10,7 @@ import (
 	osexec "os/exec"
 	"path"
 	"sort"
+	"strings"
 	"time"
 
 	"videoarchive/internal/adapter/archivebundle"
@@ -182,8 +183,11 @@ func (registry *Registry) ExecuteOperation(ctx context.Context, spec execution.S
 				},
 			}
 		}
-		if errors.Is(err, errPublicationConflict) {
+		if errors.Is(err, errPublicationConflict) || errors.Is(err, ffmpeg.ErrSequenceOutputConflict) {
 			return workerclient.ExecutionResult{FailureClass: workflow.FailureInput, ErrorClass: "PUBLICATION_EVIDENCE_CONFLICT", CauseCode: "PUBLICATION_EVIDENCE_CONFLICT", ErrorSummary: "Existing published or staged bytes could not be matched to the verified receipt", LogReference: "worker://publication-conflict"}
+		}
+		if errors.Is(err, errSourceChecksumMismatch) {
+			return inputFailure("INPUT_CHECKSUM_MISMATCH")
 		}
 		if failure, classified := storageFailure(err, operationStorageID(spec)); classified {
 			return failure
@@ -192,7 +196,7 @@ func (registry *Registry) ExecuteOperation(ctx context.Context, spec execution.S
 		if errors.As(err, &failedQC) {
 			return workerclient.ExecutionResult{FailureClass: workflow.FailureInput, ErrorClass: "QC_CHECK_FAILED", CauseCode: "QC_CHECK_FAILED", ErrorSummary: failedQC.Error(), QCFailure: failedQC, LogReference: "worker://qc-check-failed"}
 		}
-		return operationFailureResult(spec.Operation, err)
+		return operationFailureResult(spec, err)
 	}
 	reportPhase(execution.ProgressCheckingOutputs)
 	validationWorkerID := "registry-validation"
@@ -303,8 +307,14 @@ func (registry *Registry) cleanupCancelledOutputs(spec execution.StepExecutionSp
 		partial := temporaryOutputPathForToken(output.RelativePath, fencingToken)
 		if exists, err := root.Exists(partial); err != nil {
 			cleanupConfirmed = false
-		} else if exists && root.RemoveAll(partial) != nil {
-			cleanupConfirmed = false
+		} else if exists {
+			if spec.Operation == execution.OperationRenderRecording || spec.Operation == execution.OperationRenderSourceSequence {
+				// Each renderer already removed the files it started. Other
+				// targets in the batch can still hold prior publication evidence.
+				cleanupConfirmed = false
+			} else if root.RemoveAll(partial) != nil {
+				cleanupConfirmed = false
+			}
 		}
 		if exists, err := root.Exists(output.RelativePath); err != nil {
 			cleanupConfirmed = false
@@ -335,8 +345,8 @@ func inputFailure(errorClass string) workerclient.ExecutionResult {
 	}
 }
 
-func operationFailureResult(operation execution.Operation, err error) workerclient.ExecutionResult {
-	causeCode, summary, exitCode := operationFailureDetails(operation, err)
+func operationFailureResult(spec execution.StepExecutionSpec, err error) workerclient.ExecutionResult {
+	causeCode, summary, exitCode := operationFailureDetails(spec.Operation, err)
 	var processFailure *execution.ProcessFailure
 	var processLog *execution.ProcessLogArtifact
 	logReference := "worker://operation-failed"
@@ -350,6 +360,20 @@ func operationFailureResult(operation execution.Operation, err error) workerclie
 	if errors.As(err, &decode) {
 		class, errorClass = workflow.FailureInput, "SOURCE_DECODE_FAILED"
 		causeCode, summary = errorClass, decode.Error()
+		// Archive Intake asset IDs are opaque. Keep arbitrary legacy identifiers
+		// out of summaries while preserving the index into their saved spec.
+		var assetID string
+		i := int(decode.InputIndex) - 1
+		if timeline := spec.Parameters.SourceTimeline; timeline != nil && i >= 0 && i < len(timeline.Clips) {
+			assetID = timeline.Clips[i].OriginalAssetID
+		} else if i >= 0 && i < len(spec.Inputs) {
+			assetID = spec.Inputs[i].OriginalAssetID
+		}
+		if len(assetID) == len("ASSET-")+24 && strings.HasPrefix(assetID, "ASSET-") {
+			if _, err := hex.DecodeString(assetID[len("ASSET-"):]); err == nil {
+				summary += " · " + assetID
+			}
+		}
 	}
 	return workerclient.ExecutionResult{
 		FailureClass: class, ErrorClass: errorClass,

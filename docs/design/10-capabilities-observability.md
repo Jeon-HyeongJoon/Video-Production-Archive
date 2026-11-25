@@ -149,4 +149,4 @@ artifacts/      manifest, checksum, 보고서 같은 작은 검증 산출물
 
 로컬 CLI acceptance는 실제 Windows Archivist Host·CLI ID·backend ID를 증적에 남기되 credential, resume token, raw 대화와 실제 filesystem path는 정제한다. 강제 연결 종료 전후의 ArchivistTurn event cursor, Tool Call receipt와 Command ID를 비교해 재개 뒤 중복 실행이 없음을 검증한다. `LRH-009`
 
-FFmpeg가 원본 패킷을 거부하고 디코더가 입력 오류로 종료하거나, AAC 설정 불일치와 오디오 필터의 치명 종료가 함께 나타나면 Worker는 실패한 입력의 순번·마지막 출력 위치·종료 코드·로그 참조를 보존한다. 이 입력 실패는 워크플로의 자동 재시도를 끝낸다. 성공 종료의 경고 및 출력 장치 문제는 별도 경계로 유지한다. `WRK-022`
+FFmpeg가 실패 종료했을 때 Worker는 같은 입력의 패킷 거부와 디코더의 입력 오류 종료를 대조한다. 디코드 오류율 초과는 프로세스 종료 69 또는 해당 디코더의 오류율 초과 종료와 함께 확인한다. 단일 입력의 AAC 설정 불일치와 오디오 필터의 치명 종료도 기존 Windows 기록처럼 패킷 거부와 함께 판정한다. 원본 순번, Archive Intake의 원본 ID, 마지막 출력 위치(ms), 실제 종료 코드와 로그 참조가 실패 근거에 남는다. 시퀀스에서 순번은 입력 파일 순서이고 출력 위치는 합본 시간축을 따른다. Control은 `INPUT/SOURCE_DECODE_FAILED`를 첫 시도에서 종결한다. 도구가 경고 후 성공하면 게시 전 QC가 실측하며 출력 장치 오류는 해당 장치 또는 실행 실패로 보고한다. 오류나 취소로 생긴 이번 시도의 임시 영상·마커는 제거하고 이전에 검증한 파일과 다른 실행 토큰의 파일은 보존한다. `WRK-022`
