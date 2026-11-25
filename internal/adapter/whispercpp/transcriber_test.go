@@ -187,13 +187,19 @@ func TestWhisperCPPAdapterExecutesArgumentArrayAndPublishesVerifiedTranscript(t 
 		t.Fatal(err)
 	}
 
-	rawPrefix := temporaryPath + ".whisper"
-	wantArguments := []string{"-m", modelPath, "-f", inputPath, "-oj", "-of", rawPrefix, "-l", "ko", "-t", "4", "-np"}
 	argumentPayload, err := os.ReadFile(argumentsPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	gotArguments := strings.Split(strings.TrimSuffix(string(argumentPayload), "\n"), "\n")
+	if len(gotArguments) != 12 {
+		t.Fatalf("unexpected arguments: %q", gotArguments)
+	}
+	rawPrefix := gotArguments[6]
+	if filepath.Dir(rawPrefix) != filepath.Dir(temporaryPath) || rawPrefix+".json" == publishedPath {
+		t.Fatalf("unexpected raw output target: %q", rawPrefix)
+	}
+	wantArguments := []string{"-m", modelPath, "-f", inputPath, "-oj", "-of", rawPrefix, "-l", "ko", "-t", "4", "-np"}
 	if !reflect.DeepEqual(gotArguments, wantArguments) {
 		t.Fatalf("whisper.cpp arguments=%q want=%q", gotArguments, wantArguments)
 	}
@@ -314,9 +320,12 @@ func TestWhisperCPPAdapterExecutesArgumentArrayAndPublishesVerifiedTranscript(t 
 				t.Fatal(err)
 			}
 			fields := strings.Split(strings.TrimSpace(string(args)), "\n")
-			want := map[string]string{"-m": model, "-f": audio, "-of": output + ".partial.whisper"}
+			want := map[string]string{"-m": model, "-f": audio, "-of": ""}
 			for i := 0; i+1 < len(fields); i++ {
 				if name, ok := want[fields[i]]; ok {
+					if fields[i] == "-of" {
+						name = filepath.Join(directory, filepath.Base(fields[i+1]))
+					}
 					extended := `\\?\` + name
 					if server, unc := strings.CutPrefix(name, `\\`); unc {
 						extended = `\\?\UNC\` + server

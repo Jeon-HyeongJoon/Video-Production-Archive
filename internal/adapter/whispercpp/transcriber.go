@@ -2,6 +2,7 @@ package whispercpp
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -195,7 +196,7 @@ func (transcriber *Transcriber) Transcribe(ctx context.Context, request Request)
 		part, cached := checkpoints.load(index, chunk)
 		if !cached {
 			reportChunk(execution.ProgressStarted, float64(index)/float64(len(chunks)))
-			raw, runErr := transcriber.runChunk(ctx, request, profile, chunk, index, len(chunks), func(percent uint32) {
+			raw, runErr := transcriber.runChunk(ctx, request, profile, chunk, len(chunks), func(percent uint32) {
 				observedPercent = percent
 				reportChunk(execution.ProgressProcessing, 0)
 			})
@@ -299,14 +300,20 @@ func (transcriber *Transcriber) planRequestChunks(request Request) ([]speechChun
 	return chunks, errors.Join(err, input.Close())
 }
 
-func (transcriber *Transcriber) runChunk(ctx context.Context, request Request, profile transcription.Profile, chunk speechChunk, index, count int, onPercent func(uint32)) ([]byte, error) {
-	suffix := ""
-	if count > 1 {
-		suffix = "." + fmt.Sprintf("%04d", index+1)
+func (transcriber *Transcriber) runChunk(ctx context.Context, request Request, profile transcription.Profile, chunk speechChunk, count int, onPercent func(uint32)) ([]byte, error) {
+	// A replay can use the same execution token while an interrupted engine's
+	// raw JSON still exists or arrives late. Only normalized checkpoints are
+	// reusable. Give each subprocess its own file in the target directory.
+	rawName := ".whisper-" + rand.Text() + ".json"
+	rawPath := filepath.Join(filepath.Dir(request.TemporaryOutputPath), rawName)
+	rawArtifactPath := path.Join(path.Dir(request.TemporaryArtifactPath), rawName)
+	if request.OutputRoot != nil {
+		resolved, err := request.OutputRoot.ExternalProcessPath(rawArtifactPath)
+		if err != nil {
+			return nil, errors.Join(ErrTranscriptionFailed, err)
+		}
+		rawPath = resolved
 	}
-	rawPrefix := request.TemporaryOutputPath + ".whisper" + suffix
-	rawPath := rawPrefix + ".json"
-	rawArtifactPath := request.TemporaryArtifactPath + ".whisper" + suffix + ".json"
 	cleanupRaw := func() {
 		if request.OutputRoot != nil {
 			_ = request.OutputRoot.Remove(rawArtifactPath)

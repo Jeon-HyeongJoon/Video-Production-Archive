@@ -57,7 +57,22 @@ func TestMain(m *testing.M) {
 	if mode == "missing" {
 		os.Exit(0)
 	}
+	if mode == "capture-missing" {
+		if err := os.WriteFile(os.Getenv("ARCHIVE_TEST_PRIOR_OUTPUT"), []byte(prefix+".json"), 0600); err != nil {
+			os.Exit(2)
+		}
+		os.Exit(0)
+	}
 	payload := `{"result":{"language":"ko"},"transcription":[{"offsets":{"from":0,"to":500},"text":"private-transcript-sentinel"}]}`
+	if mode == "late-previous" {
+		// Only the old subprocess's requested output arrives. This invocation
+		// exits successfully without producing its own JSON.
+		prior, err := os.ReadFile(os.Getenv("ARCHIVE_TEST_PRIOR_OUTPUT"))
+		if err != nil || os.WriteFile(string(prior), []byte(payload), 0600) != nil {
+			os.Exit(2)
+		}
+		os.Exit(0)
+	}
 	if mode == "korean" {
 		payload = `{"result":{"language":"ko"},"transcription":[{"offsets":{"from":0,"to":1600},"text":"행사 녹화"},{"offsets":{"from":1700,"to":2000},"text":"범위 밖"}]}`
 	}
@@ -139,7 +154,7 @@ media:
 		spec.Outputs[0].RelativePath = "staging/" + strings.Repeat("a", 100) + "/" + strings.Repeat("b", 100) + "/transcript.json"
 	}
 	var verifyPackage func(commandResult)
-	if mode == "bad-utf8" || mode == "korean" {
+	if mode == "bad-utf8" || mode == "korean" || mode == "late-previous" {
 		spec.Inputs, spec.Outputs = spec.Inputs[:1], spec.Outputs[:1]
 		verifyPackage = prepareSTTPackage(t, root, source, spec.Inputs[0], spec.Outputs[0])
 	}
@@ -147,9 +162,18 @@ media:
 	if err != nil {
 		t.Fatal(err)
 	}
+	args := []string{"transcribe", "--config", filepath.Join(root, "media.yaml"), "--execution-token", "19"}
+	if mode == "late-previous" {
+		t.Setenv("ARCHIVE_TEST_PRIOR_OUTPUT", filepath.Join(logs, "prior-output"))
+		t.Setenv("ARCHIVE_TEST_STT_ENGINE", "capture-missing")
+		var previous, diagnostic bytes.Buffer
+		if code := run(context.Background(), args, bytes.NewReader(data), &previous, &diagnostic); code != 1 {
+			t.Fatalf("previous missing output: %d %s", code, previous.String())
+		}
+	}
 	t.Setenv("ARCHIVE_TEST_STT_ENGINE", mode)
 	var stdout, stderr bytes.Buffer
-	code := run(context.Background(), []string{"transcribe", "--config", filepath.Join(root, "media.yaml"), "--execution-token", "19"}, bytes.NewReader(data), &stdout, &stderr)
+	code := run(context.Background(), args, bytes.NewReader(data), &stdout, &stderr)
 	for _, secret := range []string{"private-transcript-sentinel", "private-diagnostic-sentinel", root} {
 		if strings.Contains(stdout.String()+stderr.String(), secret) {
 			t.Fatal("operation stream disclosed private data")
@@ -217,7 +241,7 @@ func TestTranscriptionFailureIdentifiesLastObservedBoundaryAndSafeCause(t *testi
 	if runtime.GOOS == "windows" {
 		openCause = "WHISPER_LONG_OUTPUT_OPEN_FAILED"
 	}
-	for _, tc := range []struct{ mode, cause string }{{"output-open", openCause}, {"other-output", "PROCESS_EXIT_NONZERO"}, {"bad-model", "WHISPER_MODEL_INVALID"}, {"bad-audio", "WHISPER_CHUNK_PLAN_FAILED"}, {"exit", "PROCESS_EXIT_NONZERO"}, {"invalid", "WHISPER_OUTPUT_INVALID"}, {"bad-utf8", "WHISPER_OUTPUT_INVALID"}, {"missing", "WHISPER_OUTPUT_UNAVAILABLE"}} {
+	for _, tc := range []struct{ mode, cause string }{{"output-open", openCause}, {"other-output", "PROCESS_EXIT_NONZERO"}, {"bad-model", "WHISPER_MODEL_INVALID"}, {"bad-audio", "WHISPER_CHUNK_PLAN_FAILED"}, {"exit", "PROCESS_EXIT_NONZERO"}, {"invalid", "WHISPER_OUTPUT_INVALID"}, {"bad-utf8", "WHISPER_OUTPUT_INVALID"}, {"missing", "WHISPER_OUTPUT_UNAVAILABLE"}, {"late-previous", "WHISPER_OUTPUT_UNAVAILABLE"}} {
 		t.Run(tc.mode, func(t *testing.T) {
 			code, r, samples := runTranscriptionFixture(t, tc.mode)
 			if code != 1 || r.Success || r.CauseCode != tc.cause || len(r.VerificationReferences) != 0 {
