@@ -14,6 +14,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"videoarchive/internal/repositorycheck"
 )
 
 type catalog struct {
@@ -159,7 +161,7 @@ func repositoryRoot() (string, error) {
 
 func annotatedTests(root string) ([]testRef, error) {
 	var tests []testRef
-	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+	err := repositorycheck.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}

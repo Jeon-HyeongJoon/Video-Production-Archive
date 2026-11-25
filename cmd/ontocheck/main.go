@@ -13,6 +13,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"videoarchive/internal/repositorycheck"
 )
 
 type ontology struct {
@@ -256,7 +258,7 @@ func globallyForbiddenWords(root string, words []string) ([]string, error) {
 		return nil, nil
 	}
 	var problems []string
-	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+	err := repositorycheck.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
@@ -479,7 +481,7 @@ func forbiddenIdentifiers(root string, terms []term) ([]string, error) {
 	}
 
 	var problems []string
-	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+	err := repositorycheck.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
