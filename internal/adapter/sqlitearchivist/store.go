@@ -127,7 +127,7 @@ func (store *Store) PutToolCall(ctx context.Context, record archivistcontrol.Too
 			(existing.TargetID != "" && record.Call.TargetID != "" && existing.TargetID != record.Call.TargetID) {
 			return command.ErrIdempotencyConflict
 		}
-		if (existing.State == "COMPLETED" || existing.State == "ACTION_CARD") && record.Call.State == "RUNNING" {
+		if existing.State == "COMPLETED" || existing.State == "ACTION_CARD" {
 			return nil
 		}
 		if record.Call.TargetID == "" {
@@ -197,10 +197,10 @@ func (store *Store) ListTurnEntries(ctx context.Context, turnID string) ([]archi
 	return result, rows.Err()
 }
 
-func (store *Store) PutActionCard(ctx context.Context, record archivistcontrol.ActionCardRecord) error {
+func (store *Store) PutActionCard(ctx context.Context, record archivistcontrol.ActionCardRecord) (archivistcontrol.ActionCardProjection, error) {
 	tx, err := store.db.BeginTx(ctx, nil)
 	if err != nil {
-		return err
+		return archivistcontrol.ActionCardProjection{}, err
 	}
 	defer tx.Rollback()
 	var existingSessionID, existingTurnID string
@@ -212,23 +212,23 @@ func (store *Store) PutActionCard(ctx context.Context, record archivistcontrol.A
 		var existing archivistcontrol.ActionCardProjection
 		if json.Unmarshal(existingPayload, &existing) != nil || existingSessionID != record.SessionID || existingTurnID != record.Card.ArchivistTurnID ||
 			!sameActionCardProposal(existing, record.Card) {
-			return command.ErrIdempotencyConflict
+			return archivistcontrol.ActionCardProjection{}, command.ErrIdempotencyConflict
 		}
-		return nil
+		return existing, nil
 	} else if !errors.Is(err, sql.ErrNoRows) {
-		return err
+		return archivistcontrol.ActionCardProjection{}, err
 	}
 	payload, err := json.Marshal(record.Card)
 	if err != nil {
-		return err
+		return archivistcontrol.ActionCardProjection{}, err
 	}
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO archivist_action_cards(action_card_id, session_id, turn_id, payload) VALUES (?, ?, ?, ?)
 	`, record.Card.ID, record.SessionID, record.Card.ArchivistTurnID, payload)
 	if err != nil {
-		return err
+		return archivistcontrol.ActionCardProjection{}, err
 	}
-	return tx.Commit()
+	return record.Card, tx.Commit()
 }
 
 func sameActionCardProposal(left, right archivistcontrol.ActionCardProjection) bool {

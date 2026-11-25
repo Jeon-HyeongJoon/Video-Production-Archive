@@ -750,11 +750,11 @@ func (fixture fixtureArchivistRuntime) RecordToolCall(_ context.Context, _, _ st
 	}
 	return nil
 }
-func (fixture fixtureArchivistRuntime) RecordActionCard(_ context.Context, _ string, card archivistcontrol.ActionCardProjection) error {
+func (fixture fixtureArchivistRuntime) RecordActionCard(_ context.Context, _ string, card archivistcontrol.ActionCardProjection) (archivistcontrol.ActionCardProjection, error) {
 	if fixture.cards != nil {
 		*fixture.cards = append(*fixture.cards, card)
 	}
-	return nil
+	return card, nil
 }
 func (fixture fixtureArchivistRuntime) TurnDriveSelection(context.Context, string, string) (archivistruntime.DriveSelection, error) {
 	if fixture.selectionTarget != nil && fixture.selectionTarget.WorkspaceDriveID != "" {

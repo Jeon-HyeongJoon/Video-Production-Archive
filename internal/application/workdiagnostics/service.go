@@ -135,6 +135,8 @@ type JobDiagnostic struct {
 }
 
 type Snapshot struct {
+	WorkState        archivework.State         `json:"work_state,omitempty"`
+	ResultCount      *int                      `json:"result_count,omitempty"`
 	WorkKind         archivistruntime.WorkKind `json:"work_kind"`
 	WorkID           string                    `json:"work_id"`
 	WorkRevision     uint64                    `json:"work_revision"`
@@ -227,6 +229,7 @@ func (service *Service) Diagnose(ctx context.Context, reference archivistruntime
 			recoveriesByFailure[summary.RecoverySource.FailureEvidenceID] = summary
 		}
 	}
+	result := Snapshot{WorkKind: reference.Kind, WorkID: reference.WorkID, WorkRevision: reference.Revision, ObservedAt: now}
 	switch reference.Kind {
 	case archivistruntime.WorkJob:
 		jobIDs = append(jobIDs, reference.WorkID)
@@ -235,6 +238,11 @@ func (service *Service) Diagnose(ctx context.Context, reference archivistruntime
 		if loadErr != nil {
 			return Snapshot{}, loadErr
 		}
+		summary := view.Summary
+		result.WorkState, result.ResultCount = summary.State, &summary.ResultCount
+		result.Facts = append(result.Facts, diagnosticFact("ARCHIVE_RUN_OUTCOME",
+			fmt.Sprintf("ArchiveRun is %s with %d archived packages", summary.State, summary.ResultCount),
+			summary.LastEventAt, reference.WorkID, strconv.FormatUint(summary.Revision, 10), string(summary.State), strconv.Itoa(summary.ResultCount)))
 		for _, child := range view.Children {
 			if child.Job.StepState == workflow.Completed || (child.Job.StepState == workflow.Cancelled && view.Summary.State != archivework.StateCancelled) {
 				continue
@@ -243,7 +251,6 @@ func (service *Service) Diagnose(ctx context.Context, reference archivistruntime
 		}
 	}
 	sort.Strings(jobIDs)
-	result := Snapshot{WorkKind: reference.Kind, WorkID: reference.WorkID, WorkRevision: reference.Revision, ObservedAt: now}
 	for _, jobID := range jobIDs {
 		view, loadErr := service.jobs.Detail(ctx, jobID)
 		if loadErr != nil {
@@ -803,7 +810,7 @@ func fingerprint(snapshot Snapshot) string {
 	for _, value := range snapshot.Facts {
 		source.WriteByte(0)
 		source.WriteString(value.Code)
-		if value.Code == "DISPATCH_BLOCKED" {
+		if value.Code == "DISPATCH_BLOCKED" || value.Code == "ARCHIVE_RUN_OUTCOME" {
 			source.WriteString("/" + value.EvidenceID)
 		}
 	}

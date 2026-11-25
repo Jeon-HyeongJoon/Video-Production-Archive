@@ -215,7 +215,7 @@ func TestAssistedArchiveRunActionCardBindsStartedRunToOriginTurn(t *testing.T) {
 			"session_id": "INTAKE-1", "source_volume_id": "VOLUME-1", "expected_candidate_revision": float64(7),
 			"archive_storage_id": "ARCHIVE-1", "input_revision": float64(7), "folder_ids": []string{"recordings"},
 			"expected_worker_id": "WORKER-1", "expected_source_storage_id": "SOURCE-1",
-			"expected_workspace_drive_id": "VOLUME-1", "selected_by": "operator-local",
+			"expected_workspace_drive_id": "VOLUME-1", "selected_by": "operator-local", "selected_by_type": "HUMAN",
 		},
 	}}
 	starter := &fixedArchiveRunStarter{result: archiveorganization.Result{Receipt: organization.ArchiveOrganizationReceipt{

@@ -57,7 +57,7 @@ type ArchivistRuntime interface {
 	TurnToolPolicy(context.Context, string, string) (archivistruntime.ArchivistTurnToolPolicy, error)
 	ValidateToolContext(context.Context, string, string, string, uint64) error
 	RecordToolCall(context.Context, string, string, string, string, string, string) error
-	RecordActionCard(context.Context, string, archivistcontrol.ActionCardProjection) error
+	RecordActionCard(context.Context, string, archivistcontrol.ActionCardProjection) (archivistcontrol.ActionCardProjection, error)
 	TurnDriveSelection(context.Context, string, string) (archivistruntime.DriveSelection, error)
 	TurnWorkReference(context.Context, string, string) (archivistruntime.WorkReference, error)
 	BindDriveSelection(context.Context, string, string, archivistruntime.DriveSelection) error
@@ -1124,14 +1124,7 @@ func (handler *Handler) archiveIntakeSelectionActionCard(writer http.ResponseWri
 		Reason: "current Worker, source, archive, and folder selection required",
 		Basis:  []string{"ArchivistTurn " + call.TurnID, "ToolCall " + call.ToolCallID},
 	}
-	if err := handler.archivists.RecordActionCard(request.Context(), call.SessionID, card); err != nil {
-		writeError(writer, http.StatusInternalServerError, "MCP_ACTION_CARD_FAILED")
-		return
-	}
-	_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, "", "ACTION_CARD")
-	writeJSON(writer, http.StatusAccepted, map[string]any{"data": map[string]any{
-		"action_card_id": card.ID, "state": card.State,
-	}})
+	handler.writeArchiveActionCard(writer, request, call, card)
 }
 
 func (handler *Handler) startArchiveTranscription(writer http.ResponseWriter, request *http.Request, call callRequest) {
@@ -1174,12 +1167,13 @@ func (handler *Handler) startArchiveTranscription(writer http.ResponseWriter, re
 }
 
 func (handler *Handler) writeArchiveActionCard(writer http.ResponseWriter, request *http.Request, call callRequest, card archivistcontrol.ActionCardProjection) {
-	if err := handler.archivists.RecordActionCard(request.Context(), call.SessionID, card); err != nil {
+	stored, err := handler.archivists.RecordActionCard(request.Context(), call.SessionID, card)
+	if err != nil {
 		writeError(writer, http.StatusInternalServerError, "MCP_ACTION_CARD_FAILED")
 		return
 	}
 	_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, card.TargetID, "ACTION_CARD")
-	writeJSON(writer, http.StatusAccepted, map[string]any{"data": map[string]any{"action_card_id": card.ID, "state": card.State}})
+	writeJSON(writer, http.StatusAccepted, map[string]any{"data": map[string]any{"action_card_id": stored.ID, "state": stored.State}})
 }
 
 func validEmptyInput(raw json.RawMessage) bool {

@@ -52,28 +52,62 @@ func main() {
 		"idempotency_key": "fixture:" + turnID, "input_digest": "fixture-v1",
 		"tool": "archive.assets.search.v1", "input": map[string]any{"text": ""},
 	}
-	if err := callMCP(client, mcpURL, searchPayload, http.StatusOK); err != nil {
+	if *scenario == "collaboration-resume" {
+		searchPayload["tool"] = "archive.intake.selection.get.v1"
+		searchPayload["input"] = map[string]any{}
+	}
+	var selected struct {
+		Data struct {
+			Bound bool   `json:"bound"`
+			RunID string `json:"archive_run_id"`
+		}
+	}
+	var searchResult any
+	if *scenario == "collaboration-resume" {
+		searchResult = &selected
+	}
+	if err := callMCP(client, mcpURL, searchPayload, http.StatusOK, searchResult); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(6)
 	}
 	emitProgress("아카이브 자료 조회 완료")
 	resultIDs := []string{}
+	summary := "Archive query completed"
 	if *scenario == "collaboration-resume" {
-		jobID := "JOB-" + turnID
+		runID := "RUN-" + turnID
+		if !selected.Data.Bound || token > 1 && selected.Data.RunID != runID {
+			fmt.Fprintln(os.Stderr, "selected ArchiveRun does not match the durable Turn")
+			os.Exit(7)
+		}
 		actionPayload := map[string]any{
 			"session_id": sessionID, "turn_id": turnID, "fencing_token": token,
 			"tool_call_id": "CALL-ACTION-" + turnID, "command_id": "COMMAND-ACTION-" + turnID,
 			"idempotency_key": "fixture-action:" + turnID, "input_digest": "fixture-action-v1",
-			"tool": "archive.jobs.create.v1", "input": map[string]any{
-				"job_id": jobID, "template_name": "occasion-recording", "target_title": "Runtime resume acceptance",
-				"reason": "Runtime resume acceptance proposal",
-			},
+			"tool": "archive.run.start.v1", "input": map[string]any{"archive_run_id": runID},
 		}
-		if err := callMCP(client, mcpURL, actionPayload, http.StatusAccepted); err != nil {
+		var card struct {
+			Data struct {
+				ID    string `json:"action_card_id"`
+				State string `json:"state"`
+			}
+		}
+		if err := callMCP(client, mcpURL, actionPayload, http.StatusAccepted, &card); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(7)
 		}
-		resultIDs = append(resultIDs, jobID)
+		expected := "PENDING"
+		if token > 1 {
+			expected = "COMPLETED"
+		}
+		if card.Data.State != expected || card.Data.ID != "ACTION-CALL-ACTION-"+turnID {
+			fmt.Fprintln(os.Stderr, "unexpected durable ActionCard decision")
+			os.Exit(7)
+		}
+		summary = fmt.Sprintf("아카이브 실행 제안 %s의 상태는 %s입니다.", card.Data.ID, card.Data.State)
+		if selected.Data.RunID != "" {
+			resultIDs = append(resultIDs, selected.Data.RunID)
+			summary = fmt.Sprintf("보관 실행 %s의 시작 카드 상태는 %s입니다.", selected.Data.RunID, card.Data.State)
+		}
 	}
 	appendTrace(*traceFile, "TOOLS_DONE", turnID, fencingToken)
 	if *holdFile != "" {
@@ -94,7 +128,7 @@ func main() {
 	}
 	_ = json.NewEncoder(os.Stdout).Encode(map[string]any{
 		"type":       "final",
-		"summary":    "Windows Archivist Host resumed and completed the collaboration turn",
+		"summary":    summary,
 		"result_ids": resultIDs,
 	})
 }
@@ -103,7 +137,7 @@ func emitProgress(summary string) {
 	_ = json.NewEncoder(os.Stdout).Encode(map[string]any{"type": "progress", "summary": summary})
 }
 
-func callMCP(client *http.Client, mcpURL string, payload map[string]any, expectedStatus int) error {
+func callMCP(client *http.Client, mcpURL string, payload map[string]any, expectedStatus int, target any) error {
 	encoded, _ := json.Marshal(payload)
 	request, _ := http.NewRequest(http.MethodPost, mcpURL+"/mcp/v1/call", bytes.NewReader(encoded))
 	request.Header.Set("Content-Type", "application/json")
@@ -116,9 +150,12 @@ func callMCP(client *http.Client, mcpURL string, payload map[string]any, expecte
 		response.Body.Close()
 		return fmt.Errorf("MCP capability call returned %d, want %d: %s", response.StatusCode, expectedStatus, strings.TrimSpace(string(body)))
 	}
-	io.Copy(io.Discard, io.LimitReader(response.Body, 256<<10))
-	response.Body.Close()
-	return nil
+	defer response.Body.Close()
+	if target == nil {
+		_, err := io.Copy(io.Discard, io.LimitReader(response.Body, 256<<10))
+		return err
+	}
+	return json.NewDecoder(io.LimitReader(response.Body, 256<<10)).Decode(target)
 }
 
 func appendTrace(path, phase, turnID, fencingToken string) {

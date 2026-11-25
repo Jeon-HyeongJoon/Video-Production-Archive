@@ -47,11 +47,11 @@ func TestWindowsArchivistHostResumesCollaborationTurnWithoutDuplicateEffects(t *
 		t.Fatal(err)
 	}
 
-	configuration := runtimeTestConfiguration(t)
+	configuration, discovery := advisoryTestConfiguration(t)
 	configuration.ArchivistHosts[0].CredentialRef = credentialReference
 	configuration.ArchivistTurnLeaseTTL = 2 * time.Second
 	runtime, err := controlruntime.OpenWithDependencies(context.Background(), configuration, "windows-acceptance", controlruntime.Dependencies{
-		Secrets: runtimeSecret(credential), Now: time.Now,
+		Secrets: runtimeSecret(credential), Now: time.Now, ArchiveIntakeAnalyzers: driveAnalyzerFactoryFixture{now: time.Now().UTC()},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -109,10 +109,7 @@ workspace_roots:
 	if response := runtimeRequest(runtime.Handler(), http.MethodPost, "/api/v1/archivist-sessions", session, cookie, csrfToken, origin); response.Code != http.StatusCreated {
 		t.Fatalf("ArchivistSession create returned %d: %s", response.Code, response.Body.String())
 	}
-	turn := `{"turn_id":"TURN-WINDOWS-1","request_id":"REQUEST-WINDOWS-1","prompt":"Inspect the shared work and propose the next allowed action."}`
-	if response := runtimeRequest(runtime.Handler(), http.MethodPost, "/api/v1/archivist-sessions/SESSION-WINDOWS-1/turns", turn, cookie, csrfToken, origin); response.Code != http.StatusCreated {
-		t.Fatalf("ArchivistTurn create returned %d: %s", response.Code, response.Body.String())
-	}
+	queueScopedAdvisory(t, runtime, configuration.DatabasePath, "SESSION-WINDOWS-1", "TURN-WINDOWS-1", credential, discovery)
 
 	waitForWindowsAcceptance(t, 15*time.Second, "first CLI tool calls", func() bool {
 		tokens := completedTraceTokens(tracePath)
@@ -127,13 +124,16 @@ workspace_roots:
 		projection := readWindowsArchivistProjection(t, runtime.Handler())
 		return projection.actionCardState(cardID) == "PENDING"
 	})
+	ledger := openLedger(t, configuration.DatabasePath)
+	defer ledger.Close()
+	assertWindowsRowCount(t, ledger, `SELECT COUNT(*) FROM aggregate_states WHERE target_id=?`, 0, "RUN-TURN-WINDOWS-1")
 	if response := runtimeRequest(runtime.Handler(), http.MethodPost, "/api/v1/action-cards/"+cardID+"/execute", `{}`, cookie, csrfToken, origin); response.Code != http.StatusOK {
 		t.Fatalf("explicit ActionCard operation returned %d: %s", response.Code, response.Body.String())
 	}
-	waitForWindowsAcceptance(t, 10*time.Second, "completed ActionCard and created Job", func() bool {
+	waitForWindowsAcceptance(t, 10*time.Second, "completed ActionCard and created ArchiveRun", func() bool {
 		projection := readWindowsArchivistProjection(t, runtime.Handler())
-		job := runtimeRequest(runtime.Handler(), http.MethodGet, "/api/v1/jobs/JOB-TURN-WINDOWS-1", "", nil, "", "")
-		return projection.actionCardState(cardID) == "COMPLETED" && job.Code == http.StatusOK
+		work := runtimeRequest(runtime.Handler(), http.MethodGet, "/api/v1/work/RUN-TURN-WINDOWS-1", "", nil, "", "")
+		return projection.actionCardState(cardID) == "COMPLETED" && work.Code == http.StatusOK
 	})
 
 	firstHost.Stop(t)
@@ -156,17 +156,16 @@ workspace_roots:
 		projection := readWindowsArchivistProjection(t, runtime.Handler())
 		turn := projection.turn("TURN-WINDOWS-1")
 		return turn != nil && turn.State == "COMPLETED" && turn.FinalResponse != nil &&
-			turn.FinalResponse.Summary == "Windows Archivist Host resumed and completed the collaboration turn" &&
-			len(turn.FinalResponse.ResultIDs) == 1 && turn.FinalResponse.ResultIDs[0] == "JOB-TURN-WINDOWS-1"
+			turn.FinalResponse.Summary == "보관 실행 RUN-TURN-WINDOWS-1의 시작 카드 상태는 COMPLETED입니다." &&
+			len(turn.FinalResponse.ResultIDs) == 1 && turn.FinalResponse.ResultIDs[0] == "RUN-TURN-WINDOWS-1"
 	})
 	secondHost.Stop(t)
 
-	ledger := openLedger(t, configuration.DatabasePath)
-	defer ledger.Close()
-	assertWindowsRowCount(t, ledger, `SELECT COUNT(*) FROM command_records WHERE target_id = ?`, 1, "JOB-HUMAN-WINDOWS-1")
-	assertWindowsRowCount(t, ledger, `SELECT COUNT(*) FROM command_records WHERE target_id = ?`, 1, "JOB-TURN-WINDOWS-1")
+	assertWindowsRowCount(t, ledger, `SELECT COUNT(*) FROM command_records WHERE command_id = ?`, 1, "COMMAND-HUMAN-WINDOWS-1")
+	assertWindowsRowCount(t, ledger, `SELECT COUNT(*) FROM command_records WHERE command_id = ?`, 1, "RUN-TURN-WINDOWS-1:create")
+	assertWindowsRowCount(t, ledger, `SELECT COUNT(*) FROM command_records WHERE target_id=? AND json_extract(payload,'$.envelope.actor.type')='HUMAN' AND json_extract(payload,'$.envelope.actor.id')='internal-operator' AND json_extract(payload,'$.envelope.parameters.selected_by.type')='ARCHIVIST'`, 1, "RUN-TURN-WINDOWS-1")
 	assertWindowsRowCount(t, ledger, `SELECT COUNT(*) FROM idempotency_receipts WHERE idempotency_key = ?`, 1, "windows-acceptance:human-job")
-	assertWindowsRowCount(t, ledger, `SELECT COUNT(*) FROM idempotency_receipts WHERE idempotency_key = ?`, 1, "fixture-action:TURN-WINDOWS-1")
+	assertWindowsRowCount(t, ledger, `SELECT COUNT(*) FROM idempotency_receipts WHERE idempotency_key = ?`, 1, "fixture-action:TURN-WINDOWS-1:archive-run")
 	assertWindowsRowCount(t, ledger, `SELECT COUNT(*) FROM archivist_tool_calls WHERE turn_id = ?`, 2, "TURN-WINDOWS-1")
 	assertWindowsRowCount(t, ledger, `SELECT COUNT(*) FROM archivist_action_cards WHERE turn_id = ?`, 1, "TURN-WINDOWS-1")
 
@@ -176,7 +175,7 @@ workspace_roots:
 		"requirement_id": "LRH-011", "host": hostname, "archivist_host_executable": filepath.Base(hostExecutable),
 		"cli_executable": filepath.Base(cliExecutable), "session_id": "SESSION-WINDOWS-1", "turn_id": "TURN-WINDOWS-1",
 		"fencing_tokens": tokens[:2], "tool_call_count": 2, "action_card_count": 1,
-		"human_command_count": 1, "archivist_command_count": 1, "final_response": "structured",
+		"direct_human_command_count": 1, "human_confirmed_archive_run_count": 1, "final_response": "structured",
 	})
 	t.Logf("acceptance_evidence=%s", evidence)
 }

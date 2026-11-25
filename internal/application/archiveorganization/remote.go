@@ -140,7 +140,7 @@ func (service *RemoteStartService) Start(ctx context.Context, request StartReque
 		replayed = true
 	} else if _, executeErr := service.archiveRuns.Execute(command.Envelope{
 		CommandID: request.ArchiveRunID + ":create", CommandType: archiverun.CreateCommand,
-		Actor: request.SelectedBy, RequestedVia: selectionRequestedVia(request.SelectedBy), TargetID: request.ArchiveRunID, ExpectedRevision: 0,
+		Actor: request.Actor, RequestedVia: selectionRequestedVia(request.Actor), TargetID: request.ArchiveRunID, ExpectedRevision: 0,
 		IdempotencyKey: request.IdempotencyKey + ":archive-run",
 		Parameters: map[string]any{
 			"classification_policy":   organization.DrivePolicyVersion,

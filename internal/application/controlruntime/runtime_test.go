@@ -2116,13 +2116,18 @@ func mcpRequest(handler http.Handler, method, path, body, credential string) *ht
 
 func setupRunningArchivistTurn(t *testing.T, runtime *controlruntime.Runtime, sessionID, turnID, requestID string) {
 	t.Helper()
+	turn := fmt.Sprintf(`{"turn_id":%q,"request_id":%q,"prompt":"shared work"}`, turnID, requestID)
+	startArchivistTestTurn(t, runtime, sessionID, turnID, requestID, turn)
+}
+
+func startArchivistTestTurn(t *testing.T, runtime *controlruntime.Runtime, sessionID, turnID, requestID, turn string) {
+	t.Helper()
 	cookie, token := runtimeSession(t, runtime.Handler())
 	origin := "http://127.0.0.1:8080"
 	session := fmt.Sprintf(`{"session_id":%q,"name":"Test Archivist","archivist_host_id":"archivist-windows","cli_id":"codex"}`, sessionID)
 	if response := runtimeRequest(runtime.Handler(), http.MethodPost, "/api/v1/archivist-sessions", session, cookie, token, origin); response.Code != http.StatusCreated {
 		t.Fatalf("session create returned %d: %s", response.Code, response.Body.String())
 	}
-	turn := fmt.Sprintf(`{"turn_id":%q,"request_id":%q,"prompt":"shared work"}`, turnID, requestID)
 	if response := runtimeRequest(runtime.Handler(), http.MethodPost, "/api/v1/archivist-sessions/"+sessionID+"/turns", turn, cookie, token, origin); response.Code != http.StatusCreated {
 		t.Fatalf("turn create returned %d: %s", response.Code, response.Body.String())
 	}

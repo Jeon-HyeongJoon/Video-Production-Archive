@@ -1,6 +1,7 @@
 package sqlitecommand
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"database/sql"
@@ -76,6 +77,7 @@ func (store *Store) migrate(ctx context.Context) error {
 			target_id TEXT NOT NULL,
 			payload BLOB NOT NULL
 		)`,
+		`CREATE INDEX IF NOT EXISTS command_records_command_id ON command_records(command_id)`,
 		`CREATE TABLE IF NOT EXISTS domain_events (
 			sequence INTEGER PRIMARY KEY AUTOINCREMENT,
 			event_id TEXT NOT NULL UNIQUE,
@@ -390,6 +392,26 @@ func (store *Store) FindReceipt(idempotencyKey string) (command.Receipt, bool, e
 		return command.Receipt{}, false, err
 	}
 	return receipt, true, nil
+}
+
+// AcceptedEnvelope reads the original command that committed a receipt,
+// including receipts written before the Archivist Host reclaimed a Turn.
+func (store *Store) AcceptedEnvelope(commandID, key string) (command.Envelope, error) {
+	var payload []byte
+	err := store.db.QueryRow(`
+		SELECT payload FROM command_records WHERE command_id = ?
+		AND json_extract(payload, '$.accepted') = 1 AND json_extract(payload, '$.envelope.idempotency_key') = ?
+		ORDER BY sequence LIMIT 1`, commandID, key).Scan(&payload)
+	if err != nil {
+		return command.Envelope{}, err
+	}
+	var record command.CommandRecord
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	decoder.UseNumber()
+	if err := decoder.Decode(&record); err != nil {
+		return command.Envelope{}, err
+	}
+	return record.Envelope, nil
 }
 
 func (store *Store) Commit(idempotencyKey string, commit command.Commit) error {

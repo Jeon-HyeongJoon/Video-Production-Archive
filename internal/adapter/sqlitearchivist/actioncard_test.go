@@ -41,7 +41,7 @@ func TestInvalidActionCardResolutionReturnsClaimToPending(t *testing.T) {
 	if err := store.CreateTurn(ctx, archivistcontrol.TurnRecord{Turn: turn, Prompt: "invalid proposal", CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
-	if err := service.RecordActionCard(ctx, "SESSION-1", archivistcontrol.ActionCardProjection{
+	if _, err := service.RecordActionCard(ctx, "SESSION-1", archivistcontrol.ActionCardProjection{
 		ID: "CARD-1", ArchivistTurnID: turn.ID, CommandType: "unsupported.command", TargetID: "TARGET-1",
 		ExpectedRevision: 1, State: "PENDING", CommandID: "COMMAND-1", IdempotencyKey: "CARD-1", Reason: "invalid fixture",
 	}); err != nil {

@@ -294,7 +294,7 @@ func (handler *Handler) executeActionCard(writer http.ResponseWriter, request *h
 			ExpectedSourceStorageID:   parameterString(envelope.Parameters, "expected_source_storage_id"),
 			ExpectedWorkspaceDriveID:  parameterString(envelope.Parameters, "expected_workspace_drive_id"),
 			Actor:                     envelope.Actor,
-			SelectedBy:                command.Actor{Type: vocabulary.ActorHuman, ID: parameterString(envelope.Parameters, "selected_by")},
+			SelectedBy:                command.Actor{Type: vocabulary.ActorType(parameterString(envelope.Parameters, "selected_by_type")), ID: parameterString(envelope.Parameters, "selected_by")},
 			StartedAt:                 time.Now().UTC(),
 		})
 		if startErr != nil {

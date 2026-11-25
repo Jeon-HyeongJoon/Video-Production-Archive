@@ -175,3 +175,5 @@ Archivist의 채팅 응답은 어떤 표현을 포함해도 Approval이 아니�
 직접 local loop는 같은 process 메모리 전달 규칙을 OpenAI 호환 Chat Completions message로 변환하며 `stream: false`, `parallel_tool_calls: false`로 한 번에 한 Archive Tool Call만 조정한다. Authorization header와 raw model payload를 Control에 보내거나 영속하지 않는다. `AGT-019~021`, `LRH-016`
 
 로그 화면은 raw Provider 오류 본문을 기본 노출하지 않고 정규화 코드, 시각, account alias와 추적 ID를 표시한다.
+
+사람이 ADVISORY Turn의 보관 시작 카드를 실행하면 생성 Command의 행위자는 실행한 사람이다. 선택한 폴더의 출처에는 해당 Turn에 고정한 행위자 종류와 ID를 별도로 보존한다. 카드 재조회는 영속 결정 상태를 반환한다. `LRH-011`, `MCP-019`

@@ -1,12 +1,14 @@
 package command
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"sort"
 	"sync"
 
@@ -180,6 +182,7 @@ func (commit DispatchCommit) Validate(idempotencyKey string) error {
 type Store interface {
 	Load(targetID string) (Snapshot, error)
 	FindReceipt(idempotencyKey string) (Receipt, bool, error)
+	AcceptedEnvelope(commandID, idempotencyKey string) (Envelope, error)
 	Commit(idempotencyKey string, commit Commit) error
 }
 
@@ -334,6 +337,17 @@ func (store *MemoryStore) FindReceipt(key string) (Receipt, bool, error) {
 	return receipt, ok, nil
 }
 
+func (store *MemoryStore) AcceptedEnvelope(commandID, key string) (Envelope, error) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	for _, record := range store.records {
+		if record.Accepted && record.Envelope.CommandID == commandID && record.Envelope.IdempotencyKey == key {
+			return record.Envelope, nil
+		}
+	}
+	return Envelope{}, ErrTargetNotFound
+}
+
 func (store *MemoryStore) Commit(key string, commit Commit) error {
 	store.mu.Lock()
 	defer store.mu.Unlock()
@@ -464,6 +478,30 @@ func (executor *Executor) Execute(envelope Envelope) (Result, error) {
 		return Result{}, err
 	}
 	if found {
+		if envelope.Actor.Type == ArchivistActor && envelope.RequestedVia == "mcp" && envelope.Parameters["archivist_tool_call_id"] != nil && previous.Failure == nil {
+			// A reclaimed Turn has a new lease. Control checked that lease before
+			// mapping the Tool Call. Compare the business request to its first
+			// committed envelope, including its Session, Turn, Tool Call and actor.
+			original, err := executor.store.AcceptedEnvelope(previous.Result.CommandID, envelope.IdempotencyKey)
+			if err != nil {
+				return Result{}, err
+			}
+			request := envelope
+			request.Parameters = maps.Clone(envelope.Parameters)
+			request.Parameters["archivist_turn_lease_fencing_token"] = original.Parameters["archivist_turn_lease_fencing_token"]
+			first, err := json.Marshal(original)
+			if err != nil {
+				return Result{}, err
+			}
+			replay, err := json.Marshal(request)
+			if err != nil {
+				return Result{}, err
+			}
+			if !bytes.Equal(first, replay) {
+				return Result{}, executor.recordRejection(envelope, ErrIdempotencyConflict, nil)
+			}
+			return previous.Result, nil
+		}
 		if previous.Digest != digest {
 			return Result{}, executor.recordRejection(envelope, ErrIdempotencyConflict, nil)
 		}

@@ -194,7 +194,7 @@ func (service *StartService) Start(ctx context.Context, request StartRequest) (R
 	}
 	if _, err := service.archiveRuns.Execute(command.Envelope{
 		CommandID: request.ArchiveRunID + ":create", CommandType: archiverun.CreateCommand,
-		Actor: request.SelectedBy, RequestedVia: selectionRequestedVia(request.SelectedBy), TargetID: request.ArchiveRunID, ExpectedRevision: 0,
+		Actor: request.Actor, RequestedVia: selectionRequestedVia(request.Actor), TargetID: request.ArchiveRunID, ExpectedRevision: 0,
 		IdempotencyKey: request.IdempotencyKey + ":archive-run",
 		Parameters: map[string]any{
 			"classification_policy": organization.DrivePolicyVersion, "classification_contexts": contexts,

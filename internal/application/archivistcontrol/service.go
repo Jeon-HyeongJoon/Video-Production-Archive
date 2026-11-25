@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"videoarchive/internal/application/archiveorganization"
 	"videoarchive/internal/core/archivistruntime"
 	"videoarchive/internal/core/command"
 	"videoarchive/internal/core/vocabulary"
@@ -152,7 +153,7 @@ type Store interface {
 	PutToolCall(context.Context, ToolCallRecord) error
 	ListToolCalls(context.Context, string) ([]ToolCallProjection, error)
 	ListTurnEntries(context.Context, string) ([]archivistruntime.TurnEntry, error)
-	PutActionCard(context.Context, ActionCardRecord) error
+	PutActionCard(context.Context, ActionCardRecord) (ActionCardProjection, error)
 	ListActionCards(context.Context, string) ([]ActionCardProjection, error)
 	ActionCard(context.Context, string) (ActionCardRecord, error)
 	ClaimActionCard(context.Context, string) (ActionCardRecord, error)
@@ -604,10 +605,10 @@ func (service *Service) RecordToolCall(ctx context.Context, sessionID, turnID, i
 	return service.store.PutToolCall(ctx, record)
 }
 
-func (service *Service) RecordActionCard(ctx context.Context, sessionID string, card ActionCardProjection) error {
+func (service *Service) RecordActionCard(ctx context.Context, sessionID string, card ActionCardProjection) (ActionCardProjection, error) {
 	if strings.TrimSpace(sessionID) == "" || strings.TrimSpace(card.ID) == "" || strings.TrimSpace(card.ArchivistTurnID) == "" ||
 		strings.TrimSpace(card.CommandType) == "" || strings.TrimSpace(card.TargetID) == "" || strings.TrimSpace(card.State) == "" {
-		return ErrInvalidRequest
+		return ActionCardProjection{}, ErrInvalidRequest
 	}
 	return service.store.PutActionCard(ctx, ActionCardRecord{SessionID: strings.TrimSpace(sessionID), Card: card})
 }
@@ -631,6 +632,18 @@ func (service *Service) PrepareActionCard(ctx context.Context, cardID, actorID s
 		Source: archivistruntime.ActionFromCard, ActorType: vocabulary.ActorHuman,
 		ActorID: strings.TrimSpace(actorID), CurrentRevision: record.Card.ExpectedRevision,
 	})
+	if err == nil && decision.Command != nil && decision.Command.CommandType == archiveorganization.StartActionCardCommand {
+		// Pre-existing cards contain only the selection ID. The pinned Turn
+		// preserves its actor type independently of the human pressing the card.
+		selection, readErr := service.TurnDriveSelection(ctx, record.SessionID, record.Card.ArchivistTurnID)
+		if readErr != nil {
+			err = readErr
+		} else if decision.Command.Parameters["selected_by"] != selection.SelectedBy {
+			err = ErrInvalidRequest
+		} else {
+			decision.Command.Parameters["selected_by_type"] = string(selection.SelectedByType)
+		}
+	}
 	if err != nil || decision.Command == nil {
 		_ = service.store.ReleaseActionCard(context.WithoutCancel(ctx), record.Card.ID)
 		if err == nil {
