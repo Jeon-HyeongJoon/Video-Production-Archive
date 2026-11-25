@@ -25,6 +25,10 @@ type StepOutput struct {
 	TranscriptQuality   *transcription.QualityAssessment `json:"transcript_quality,omitempty"`
 }
 
+func (output StepOutput) VerificationReference(operation Operation) string {
+	return "verification://" + strings.ToLower(string(operation)) + "/" + output.ID + "/" + output.Checksum
+}
+
 type StepOutputRecord struct {
 	CatalogPublication     *CatalogPublication `json:"catalog_publication,omitempty"`
 	SpecDigest             string              `json:"spec_digest"`

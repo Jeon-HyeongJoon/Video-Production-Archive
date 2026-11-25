@@ -2,6 +2,7 @@ package organization
 
 import (
 	"path"
+	"slices"
 	"testing"
 	"time"
 
@@ -21,6 +22,13 @@ func TestSelectedCaptureInputsPinProfilesByRoleAcrossDrives(t *testing.T) {
 	first.name = "C0001.MP4"
 	gap := short
 	gap.name = "C0004.MP4"
+	const card = "촬영물/391216-행사/카드1"
+	named := func(name string) file {
+		f := short
+		f.name = name
+		return f
+	}
+	conflict := named("VJ-소스컷_PGM-녹화.mp4")
 	// These names and measurements reproduce the five inspected inputs from
 	// the Namyangju run; the checksum and asset identity stay separate per file.
 	mixed := []file{
@@ -49,6 +57,14 @@ func TestSelectedCaptureInputsPinProfilesByRoleAcrossDrives(t *testing.T) {
 		{"format bucket", "37년도/영상_mov", mixed, 4, hold, nil},
 		{"reference", capture + "/편집/Output", []file{short}, 4, hold, nil},
 		{"conflicting roles", "다른행사/VJ/PGM", []file{short}, 4, hold, nil},
+		{"explicit PGM filename", card, []file{named("PGM-녹화.mp4")}, 4, render, []string{RoleRecording}},
+		{"explicit VJ filename", card, []file{named("VJ-소스컷.mp4")}, 4, render, []string{RoleSource}},
+		{"PGM with generic capture word", card, []file{named("PGM_촬영.mp4")}, 4, render, []string{RoleRecording}},
+		{"VJ with embedded pgm letters", card, []file{named("VJ_Alpgmnotes.mp4")}, 4, render, []string{RoleSource}},
+		{"conflict within one filename", card, []file{conflict}, 4, hold, nil},
+		{"conflict on undated capture card", "촬영물/카드1", []file{conflict}, 4, hold, nil},
+		{"previous policy uses explicit PGM folder", card + "/PGM", []file{conflict}, 3, render, []string{RoleRecording}},
+		{"conflict holds independently identified sibling", card, []file{named("PGM-녹화.mp4"), conflict}, 4, hold, nil},
 		{"unknown role", "380102-자료/미확인", []file{short}, 4, hold, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -69,6 +85,15 @@ func TestSelectedCaptureInputsPinProfilesByRoleAcrossDrives(t *testing.T) {
 					t.Fatal(d)
 				}
 				for _, v := range d.Inputs {
+					if path.Base(v.RelativePath) == conflict.name {
+						found := slices.ContainsFunc(d.ClassificationEvidence.Files, func(f FileEvidence) bool {
+							return f.RelativePath == v.RelativePath && f.ReasonCode == "FILENAME_ROLE_CONFLICT" &&
+								f.NextCheck == "CHECK_SOURCE_OR_RECORDING" && slices.Contains(f.Basis, v.Inspection.ID)
+						})
+						if !found {
+							t.Fatalf("missing conflicting filename and inspection evidence: %+v", d.ClassificationEvidence)
+						}
+					}
 					if v.RenderSelection != nil {
 						t.Fatal("partial render plan on HOLD")
 					}
@@ -80,6 +105,12 @@ func TestSelectedCaptureInputsPinProfilesByRoleAcrossDrives(t *testing.T) {
 			}
 			for i, v := range d.Inputs {
 				role := tc.roles[i]
+				if tc.version == ContextPolicyVersion {
+					if d.SourceRole.Role != role || d.ProfileReference != mustOrganizationProfile(6_000).Reference() || v.RenderSelection != nil {
+						t.Fatalf("legacy recording decision: %+v", d)
+					}
+					continue
+				}
 				target := 6_000
 				if role == RoleSource {
 					target = 20_000

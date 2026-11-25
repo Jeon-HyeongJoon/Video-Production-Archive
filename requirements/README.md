@@ -31,6 +31,8 @@
 
 목적지 검증·게시·실행 집계·Archivist 조회를 다루는 `ARC-021~025`, `DSH-046`, `MCP-014`는 각각 기본 검증의 통합 테스트 하나에 대응한다. [실행 방법과 1:1 대응표](../docs/design/18-destination-metadata.md#7-구현-순서와-인수)
 
+`ORG-026`의 통합 테스트는 로컬 FFmpeg·ffprobe로 규격이 다른 두 VJ 컷과 VJ·PGM 혼합 폴더를 각각 개별 게시하고 Archivist의 경로·패키지 ID·원본별 검증 근거를 실제 영상·카탈로그와 대조한다. `ORG-029`의 분류 사례에는 단일 파일명 안의 VJ·PGM 충돌과 일반 촬영 단어 대조군이 있다.
+
 `make test-operational`은 경량 운영 회귀 요구사항을 선택 실행한다. CI는 전체 테스트 기록에서 같은 목록의 실제 통과를 확인한다. [검증 기준](../docs/design/10-capabilities-observability.md) (`TST-002`).
 
 작업 결과·실패 진단·드라이브 후보 요약·조회 전송 범위는 `DSH-048~051`, `LRH-025`, `MCP-016~017`에서 검증한다. [화면별 확인 순서](../docs/design/14-archive-workspace-ux.md#71-작업-결과와-확인-순서)

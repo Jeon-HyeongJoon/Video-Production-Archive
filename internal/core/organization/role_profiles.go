@@ -46,8 +46,10 @@ func applyRoleProfiles(d *OrganizationDecision, policy Policy, positionVerified 
 	allCuts, allRecordings := true, true
 	for i, input := range d.Inputs {
 		name := strings.ToLower(path.Base(input.RelativePath))
+		fileSource := sourceLabel.MatchString(name)
+		fileRecording := recordingName.MatchString(name)
 		video := primaryVideo(input.Inspection)
-		if video == nil || video.Width <= 0 || video.Height <= 0 || editedLabel.MatchString(name) {
+		if video == nil || video.Width <= 0 || video.Height <= 0 || editedLabel.MatchString(name) || (fileSource && fileRecording) {
 			unknown()
 			return
 		}
@@ -58,11 +60,11 @@ func applyRoleProfiles(d *OrganizationDecision, policy Policy, positionVerified 
 			assigned, basis = RoleRecording, "행사 안에서 대조된 위치별 녹화 채널"
 		case fixed && role.Strength != roleExplicit:
 			// A fixed camera label alone does not establish its channel.
-		case (source && recordingName.MatchString(name)) || (recording && sourceLabel.MatchString(name)):
+		case (source && fileRecording) || (recording && fileSource):
 			// Explicit role conflict within the selected leaf.
-		case recording && !source, recordingName.MatchString(name) && !source:
+		case recording || fileRecording:
 			assigned, basis = RoleRecording, "폴더 또는 파일명의 녹화 채널 표기"
-		case source || sourceLabel.MatchString(name):
+		case source || fileSource:
 			assigned, basis = RoleSource, "VJ·소스컷 역할 표기와 원본 영상 검사"
 		case capture && short && !strings.HasPrefix(name, "파일명 손실된 파일"):
 			assigned, basis = RoleSource, "촬영물 경로·원본 파일명·검사된 컷 길이"

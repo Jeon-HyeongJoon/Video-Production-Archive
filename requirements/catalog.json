@@ -4243,9 +4243,9 @@
       "level": "integration",
       "status": "implemented",
       "statement": "Archivist는 선택한 ArchiveRun의 행사별 결과 영상에 대해 현재 작업 단계와 이를 뒷받침하는 기록을 함께 조회할 수 있어야 한다.",
-      "given": "같은 실행에 렌더 중인 채널, 인코더 오류로 중단된 채널, QC와 manifest가 확인된 채널, 자막 게시 후 텍스트 검토가 필요한 채널이 있다.",
+      "given": "같은 실행에 렌더 중인 채널, 인코더 오류로 중단된 채널, 한 Folder Job에서 QC 후 개별 게시한 두 컷, 자막 게시 후 텍스트 검토가 필요한 채널이 있다.",
       "when": "Archivist가 고정한 실행의 상태를 조회한다.",
-      "then": "각 영상의 상대 목적지와 고정된 실행·입력 revision에서 진행량·단위·진행 근거, 실패 원인·실패 근거, 게시 검증 참조 또는 자막 검토 사유·개수·원출력 참조를 반환한다.",
+      "then": "각 영상의 상대 목적지와 고정된 실행·입력 revision에서 진행량·단위·진행 근거, 실패 원인·실패 근거, 게시 검증 참조 또는 자막 검토 사유·개수·원출력 참조를 반환한다. 개별 게시 건마다 패키지 ID와 원본 ID, 역할·규격, 해당 QC·게시 기록, 카탈로그 및 실제 영상과 일치하는 상대경로를 한 행에 연결한다.",
       "test_file": "internal/adapter/httpmcp/classification_contract_test.go",
       "test_name": "TestArchiveRunStatusReportsEventOutputWorkEvidence"
     },
@@ -4495,9 +4495,9 @@
       "level": "unit",
       "status": "implemented",
       "statement": "새 드라이브 실행은 촬영물과 녹화 기록의 원본별 역할에 따라 VJ 컷에 20 Mbps, 녹화에 6 Mbps를 자동 지정하고 검사 근거를 보존한다.",
-      "given": "촬영물 행사 폴더에 짧은 고화질 컷과 장시간 유음 기록이 섞여 있으며 다른 선택에는 단일 VJ 컷, 연속 컷, 녹화 채널, 노이즈 및 이전 정책 실행이 있다.",
+      "given": "촬영물 행사 폴더에 짧은 고화질 컷과 장시간 유음 기록이 섞여 있으며 다른 선택에는 단일 VJ 컷, 연속 컷, 녹화 채널, 노이즈 및 이전 정책 실행이 있다. 한 카드의 파일명에는 명확한 단일 역할, 한 파일 안의 상충하는 VJ·PGM 표기, 일반 촬영 단어가 각각 있다.",
       "when": "고정한 정책 버전과 폴더 맥락으로 검사된 대상 전체를 분류한다.",
-      "then": "v4는 컷마다 20 Mbps, 녹화마다 6 Mbps를 지정한다. 직접 폴더 전체가 순서와 호환성이 확인된 짧은 VJ 컷이면 마커를 넣어 합본하고 그 밖의 확인된 역할은 개별 보존한다. 파일별 근거가 부족하거나 노이즈이면 보류하고 이전 버전은 원래 판정을 재현한다.",
+      "then": "v4는 컷마다 20 Mbps, 녹화마다 6 Mbps를 지정한다. 직접 폴더 전체가 순서와 호환성이 확인된 짧은 VJ 컷이면 마커를 넣어 합본하고 그 밖의 확인된 역할은 개별 보존한다. 파일별 근거가 부족하거나 노이즈이면 보류하고 이전 버전은 원래 판정을 재현한다. 한 파일명에 명시적인 소스컷과 녹화 역할이 함께 있으면 폴더 전체를 보류하고 실행·규격 선택 없이 해당 파일의 충돌 사유·검사 ID·확인 방법을 기록한다.",
       "test_file": "internal/core/organization/role_profiles_test.go",
       "test_name": "TestSelectedCaptureInputsPinProfilesByRoleAcrossDrives"
     },

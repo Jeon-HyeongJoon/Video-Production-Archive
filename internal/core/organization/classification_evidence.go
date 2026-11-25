@@ -1,6 +1,7 @@
 package organization
 
 import (
+	"path"
 	"slices"
 	"strings"
 
@@ -44,6 +45,7 @@ func (d *OrganizationDecision) recordHold(context EventContext, inputs []Input) 
 		if d.SourceRole != nil {
 			f.Basis = append(f.Basis, d.SourceRole.Basis)
 		}
+		name := strings.ToLower(path.Base(v.RelativePath))
 		switch {
 		case d.HoldReasons[0] == vocabulary.OrganizationHoldMissingInspection:
 			f.NextCheck = "CHECK_INSPECTION"
@@ -72,6 +74,9 @@ func (d *OrganizationDecision) recordHold(context EventContext, inputs []Input) 
 		case noiseKind == "CAMERA_PROXY":
 			f.ReasonCode = "UNPAIRED_PROXY"
 			f.NextCheck = "FIND_CARD_ORIGINAL"
+		case d.PolicyVersion == DrivePolicyVersion && sourceLabel.MatchString(name) && recordingName.MatchString(name):
+			f.ReasonCode, f.NextCheck = "FILENAME_ROLE_CONFLICT", "CHECK_SOURCE_OR_RECORDING"
+			f.Basis = append(f.Basis, "한 파일명에 VJ·소스컷과 녹화 채널 표기가 함께 있음")
 		case context.InputRevision != 0 && context.EventFolder == "":
 			f.ReasonCode = "EVENT_UNKNOWN"
 			f.NextCheck = "CHECK_EVENT_OWNERSHIP"

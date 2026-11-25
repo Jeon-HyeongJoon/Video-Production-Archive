@@ -81,6 +81,12 @@ func TestHoldDetailReturnsRecordedClassificationEvidence(t *testing.T) {
 
 // Requirement: ORG-026
 func TestArchiveRunStatusReportsEventOutputWorkEvidence(t *testing.T) {
+	t.Run("two published VJ packages", func(t *testing.T) {
+		checkPublishedEventOutputs(t, "391216-행사/VJ", "C0002.MP4", organization.RoleSource)
+	})
+	t.Run("VJ and PGM published separately", func(t *testing.T) {
+		checkPublishedEventOutputs(t, "촬영물/391216-행사/카드1", "PGM-녹화.MP4", organization.RoleRecording)
+	})
 	state := holdReviewDriveState(t)
 	const facts = `{"EventOutputEvidence":[{"archive_run_id":"ARCHIVE-RUN-1","input_revision":7,"relative_video":"행사/PGM.mp4","stage":"RENDERING","completed":20,"total":60,"unit":"seconds","basis":["progress-7"]},{"archive_run_id":"ARCHIVE-RUN-1","input_revision":7,"relative_video":"행사/천장캠.mp4","stage":"FAILED","cause_code":"ENCODER_UNAVAILABLE","basis":["failure-3"]},{"archive_run_id":"ARCHIVE-RUN-1","input_revision":7,"relative_video":"행사/측면캠.mp4","stage":"STORED","basis":["qc-4","manifest-4"]},{"archive_run_id":"ARCHIVE-RUN-1","input_revision":7,"relative_video":"행사/VJ.mp4","stage":"SUBTITLE_REVIEW","cause_code":"INVALID_UTF8","issue_count":10,"basis":["native-caption-9"]}]}`
 	if err := json.Unmarshal([]byte(facts), &state.view); err != nil {

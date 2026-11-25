@@ -255,6 +255,7 @@ func (service *Service) Projection(ctx context.Context) ([]DriveView, error) {
 				CompletedCount: completedItemCount(classificationState, 0, view.VideoCount), TotalCount: view.VideoCount,
 			})
 			var stageOneJob job.State
+			var packages []storedOutput
 			if view.JobID != "" {
 				snapshot, err := service.jobs.Load(view.JobID)
 				if err != nil {
@@ -269,8 +270,13 @@ func (service *Service) Projection(ctx context.Context) ([]DriveView, error) {
 				view.CurrentStepID = jobState.CurrentStepID
 				view.StepState = currentStepState(jobState)
 				view.Stages = append(view.Stages, projectStageOne(jobState, view.VideoCount)...)
-				view.ArchivePackageID, view.ArchiveState = storedPackage(jobState)
-				projectArchivePresentation(&view, decision)
+				packages = storedOutputs(decision, jobState)
+				// Older clients show the first package in the folder summary.
+				if len(packages) > 0 {
+					first := packages[0]
+					view.ArchivePackageID, view.ArchiveState = first.output.ID, archive.PackageStored
+					view.ArchiveDate, view.ArchiveDisplayName, view.ArchiveVideoFileName = first.presentation.ArchiveDate, first.presentation.DisplayName, first.presentation.VideoFileName
+				}
 				if view.ArchivePackageID != "" && service.archiveStates != nil {
 					packageState, stateErr := service.archiveStates.PackageState(ctx, state.view.ArchiveStorageID, view.ArchivePackageID)
 					if stateErr != nil {
@@ -304,7 +310,7 @@ func (service *Service) Projection(ctx context.Context) ([]DriveView, error) {
 				})
 				view.CanAddTranscription = false
 			}
-			state.view.EventOutputEvidence = append(state.view.EventOutputEvidence, eventOutput(receipt.ID, decision, stageOneJob, transcriptionJobs[receipt.ID+"\x00"+coordinated.Folder])...)
+			state.view.EventOutputEvidence = append(state.view.EventOutputEvidence, eventOutput(receipt.ID, decision, stageOneJob, packages, transcriptionJobs[receipt.ID+"\x00"+coordinated.Folder])...)
 			view.Stages = orderedStages(view.Stages)
 			previous, exists := state.folders[coordinated.Folder]
 			if !exists || view.InputRevision > previous.InputRevision ||
@@ -412,44 +418,30 @@ func (service *Service) completedWork(
 			if !found || !completedJob(jobState) {
 				continue
 			}
-			for _, step := range jobState.Steps {
-				if step.Workflow.ID != "organize" || step.Workflow.State != workflow.Completed || step.ExecutionSpec == nil || step.OutputRecord == nil {
+			for _, pkg := range storedOutputs(decision, jobState) {
+				output := pkg.output
+				if seenPackages[output.ID] || pkg.presentation.VideoFileName == "" {
 					continue
 				}
-				targets := make(map[string]execution.OutputTarget, len(step.ExecutionSpec.Outputs))
-				for _, target := range step.ExecutionSpec.Outputs {
-					targets[target.ID] = target
+				packageState := archive.PackageStored
+				if service.archiveStates != nil {
+					storedState, stateErr := service.archiveStates.PackageState(ctx, output.StorageID, output.ID)
+					if stateErr != nil {
+						return nil, stateErr
+					}
+					if storedState.Valid() {
+						packageState = storedState
+					}
 				}
-				for _, output := range step.OutputRecord.Outputs {
-					if output.Kind != execution.OutputOrganizedMedia || output.ID == "" || seenPackages[output.ID] {
-						continue
-					}
-					originalNames, sourceCount, outputProfile := completedWorkSources(decision, targets[output.ID].OriginalAssetID)
-					presentation, presentationErr := archive.PresentPackage(output.ID, decision.Folder, originalNames)
-					if presentationErr != nil {
-						continue
-					}
-					packageState := archive.PackageStored
-					if service.archiveStates != nil {
-						storedState, stateErr := service.archiveStates.PackageState(ctx, output.StorageID, output.ID)
-						if stateErr != nil {
-							return nil, stateErr
-						}
-						if storedState.Valid() {
-							packageState = storedState
-						}
-					}
-					seenPackages[output.ID] = true
-					result[receipt.WorkspaceDriveID] = append(result[receipt.WorkspaceDriveID], CompletedWorkView{
-						ArchiveRunID: receipt.ID, Folder: decision.Folder, JobID: jobState.ID,
-						Disposition: decision.Disposition, ProfileReference: outputProfile,
-						SourceVideoCount: sourceCount, ArchiveStorageID: output.StorageID,
-						ArchivePackageID: output.ID, ArchiveDate: presentation.ArchiveDate,
-						ArchiveDisplayName: presentation.DisplayName, ArchiveVideoFileName: presentation.VideoFileName,
-						ArchiveRelativePath: completedWorkRelativePath(output, targets[output.ID]),
-						ArchiveState:        packageState, CompletedAt: step.OutputRecord.RecordedAt,
-					})
-				}
+				seenPackages[output.ID] = true
+				result[receipt.WorkspaceDriveID] = append(result[receipt.WorkspaceDriveID], CompletedWorkView{
+					ArchiveRunID: receipt.ID, Folder: decision.Folder, JobID: jobState.ID,
+					Disposition: decision.Disposition, ProfileReference: pkg.profile,
+					SourceVideoCount: len(pkg.originalIDs), ArchiveStorageID: output.StorageID,
+					ArchivePackageID: output.ID, ArchiveDate: pkg.presentation.ArchiveDate,
+					ArchiveDisplayName: pkg.presentation.DisplayName, ArchiveVideoFileName: pkg.presentation.VideoFileName,
+					ArchiveRelativePath: pkg.directory, ArchiveState: packageState, CompletedAt: pkg.recordedAt,
+				})
 			}
 		}
 	}
@@ -482,25 +474,6 @@ func completedWorkRelativePath(output execution.StepOutput, target execution.Out
 		return ""
 	}
 	return directory
-}
-
-func completedWorkSources(decision organization.OrganizationDecision, originalAssetID string) ([]string, int, string) {
-	if originalAssetID != "" {
-		for _, input := range decision.Inputs {
-			if input.OriginalAssetID == originalAssetID {
-				profile := decision.ProfileReference
-				if input.RenderSelection != nil {
-					profile = input.RenderSelection.ProfileReference
-				}
-				return []string{path.Base(input.RelativePath)}, 1, profile
-			}
-		}
-	}
-	names := make([]string, 0, len(decision.Inputs))
-	for _, input := range decision.Inputs {
-		names = append(names, path.Base(input.RelativePath))
-	}
-	return names, len(names), decision.ProfileReference
 }
 
 func workOptions(decision organization.OrganizationDecision) []WorkOptionView {
@@ -877,23 +850,6 @@ func classificationAssets(decision organization.OrganizationDecision) []Classifi
 	return assets
 }
 
-func projectArchivePresentation(view *FolderView, decision organization.OrganizationDecision) {
-	if view == nil || view.ArchivePackageID == "" || len(decision.Inputs) == 0 {
-		return
-	}
-	originalNames := make([]string, 0, len(decision.Inputs))
-	for _, input := range decision.Inputs {
-		originalNames = append(originalNames, path.Base(input.RelativePath))
-	}
-	presentation, err := archive.PresentPackage(view.ArchivePackageID, decision.Folder, originalNames)
-	if err != nil {
-		return
-	}
-	view.ArchiveDate = presentation.ArchiveDate
-	view.ArchiveDisplayName = presentation.DisplayName
-	view.ArchiveVideoFileName = presentation.VideoFileName
-}
-
 func (service *Service) projectArchiveRun(view *DriveView, receipt organization.ArchiveOrganizationReceipt) {
 	if view == nil || receipt.ID == "" || receipt.ID != view.ArchiveRunID {
 		return
@@ -1050,7 +1006,7 @@ func (drive *projectionDriveState) projectCatalog(state job.State) {
 				}
 			}
 		} else if output.Kind == execution.OutputArchiveCatalog && output.StorageID == spec.Parameters.ArchiveStorageID && record.ValidateFor(*spec) == nil {
-			ref := "verification://write_archive_catalog/" + output.ID + "/" + output.Checksum
+			ref := output.VerificationReference(execution.OperationWriteArchiveCatalog)
 			if slices.Contains(record.VerificationReferences, ref) {
 				for _, input := range spec.Inputs {
 					if input.StorageID != output.StorageID || input.ArtifactID == "" || (input.Kind != execution.OutputArchiveRevision && input.Kind != execution.OutputOrganizedMedia) {
@@ -1270,20 +1226,6 @@ func orderedStages(stages []StageView) []StageView {
 		return left < right
 	})
 	return result
-}
-
-func storedPackage(state job.State) (string, archive.PackageState) {
-	for _, step := range state.Steps {
-		if step.Workflow.ID != "organize" || step.Workflow.State != workflow.Completed || step.OutputRecord == nil {
-			continue
-		}
-		for _, output := range step.OutputRecord.Outputs {
-			if output.Kind == execution.OutputOrganizedMedia && output.ID != "" {
-				return output.ID, archive.PackageStored
-			}
-		}
-	}
-	return "", ""
 }
 
 func summarizeFolders(folders []FolderView) (stageOneRemaining, stageTwoRemaining, holds, eligible int) {

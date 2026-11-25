@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"videoarchive/internal/application/archiveworkspace"
-	"videoarchive/internal/core/archive"
 	"videoarchive/internal/core/execution"
 	"videoarchive/internal/core/job"
 	"videoarchive/internal/core/organization"
@@ -20,6 +19,10 @@ type EventOutputEvidence struct {
 	ObservedAt       time.Time                      `json:"observed_at,omitzero"`
 	ManifestChecksum string                         `json:"manifest_checksum,omitempty"`
 	ReviewReasons    []transcription.QualityReason  `json:"review_reasons,omitempty"`
+	ArchivePackageID string                         `json:"archive_package_id,omitempty"`
+	OriginalAssetIDs []string                       `json:"original_asset_ids,omitempty"`
+	Role             string                         `json:"role,omitempty"`
+	ProfileReference string                         `json:"profile_reference,omitempty"`
 	ArchiveRunID     string                         `json:"archive_run_id"`
 	InputRevision    uint64                         `json:"input_revision"`
 	Folder           string                         `json:"folder,omitempty"`
@@ -34,85 +37,99 @@ type EventOutputEvidence struct {
 	Basis            []string                       `json:"basis"`
 }
 
-func eventOutput(run string, d organization.OrganizationDecision, first job.State, second []job.State) []EventOutputEvidence {
-	if d.EventPreview == nil || d.Disposition == vocabulary.OrganizationHold {
+func eventOutput(run string, d organization.OrganizationDecision, first job.State, packages []storedOutput, second []job.State) []EventOutputEvidence {
+	if d.Disposition == vocabulary.OrganizationHold {
 		return nil
 	}
-	row := EventOutputEvidence{ArchiveRunID: run, InputRevision: d.InputRevision, Folder: d.Folder,
-		RelativeVideo: path.Join(d.EventPreview.Directory, d.EventPreview.Video), PathState: "EVENT_PREVIEW", Stage: "PLANNED", Basis: []string{d.ID}}
-	var qcRefs []string
+	base := EventOutputEvidence{ArchiveRunID: run, InputRevision: d.InputRevision, Folder: d.Folder}
+	var rows []EventOutputEvidence
+	byPackage := make(map[string]int, len(packages))
+	for _, pkg := range packages {
+		if pkg.directory == "" || pkg.presentation.VideoFileName == "" || pkg.output.RelativePath == "" {
+			continue
+		}
+		row := base
+		row.ArchivePackageID, row.OriginalAssetIDs = pkg.output.ID, pkg.originalIDs
+		row.Role, row.ProfileReference = pkg.role, pkg.profile
+		row.RelativeVideo = path.Join(pkg.directory, pkg.presentation.VideoFileName)
+		row.Stage, row.PathState = "STORED", "PUBLISHED_PACKAGE"
+		row.ObservedAt, row.ManifestChecksum, row.Basis = pkg.recordedAt, pkg.output.Checksum, pkg.basis
+		byPackage[pkg.output.ID] = len(rows)
+		rows = append(rows, row)
+	}
 	var duration int64
-	for _, v := range d.Inputs {
-		duration += v.Inspection.DurationMillis
+	for _, input := range d.Inputs {
+		duration += input.Inspection.DurationMillis
 	}
-	for _, step := range first.Steps {
-		if step.Workflow.ID == "qc" && step.Workflow.State == workflow.Completed && step.OutputRecord != nil {
-			qcRefs = slices.Clone(step.OutputRecord.VerificationReferences)
+	if len(rows) == 0 {
+		if d.EventPreview == nil {
+			return nil
 		}
-		if step.Workflow.ID == "organize" && step.Workflow.State == workflow.Completed && step.OutputRecord != nil {
-			for _, out := range step.OutputRecord.Outputs {
-				if out.Kind != execution.OutputOrganizedMedia || out.RelativePath == "" {
-					continue
-				}
-				names, _, _ := completedWorkSources(d, "")
-				present, err := archive.PresentPackage(out.ID, d.Folder, names)
-				if err != nil {
-					continue
-				}
-				row.RelativeVideo = path.Join(path.Dir(out.RelativePath), present.VideoFileName)
-				row.PathState = "PUBLISHED_PACKAGE"
-				row.Stage = "STORED"
-				row.ObservedAt, row.ManifestChecksum = step.OutputRecord.RecordedAt, out.Checksum
-				row.Completed, row.Total, row.Unit = 0, 0, ""
-				row.Basis = append(slices.Clone(qcRefs), step.OutputRecord.VerificationReferences...)
-				row.Basis = append(row.Basis, out.RelativePath)
+		row := base
+		row.RelativeVideo = path.Join(d.EventPreview.Directory, d.EventPreview.Video)
+		row.Stage, row.PathState, row.Basis = "PLANNED", "EVENT_PREVIEW", []string{d.ID}
+		for _, step := range first.Steps {
+			if step.Workflow.ID == first.CurrentStepID {
+				row.observeStep(first.ID, step, duration)
 			}
 		}
-		if step.Workflow.ID == first.CurrentStepID && row.PathState != "PUBLISHED_PACKAGE" {
-			row.observeStep(first.ID, step, duration)
-		}
+		rows = append(rows, row)
 	}
-	// Keep video publication evidence when the separate subtitle job is running or fails.
-	rows := []EventOutputEvidence{row}
+	// A transcription Job is pinned to one stage-one package. Older single
+	// output Jobs without that field still have exactly one possible video.
 	for _, j := range second {
-		sub := row
-		sub.Stage = "SUBTITLE_PENDING"
-		sub.ObservedAt, sub.ManifestChecksum = time.Time{}, ""
-		sub.Completed, sub.Total, sub.Unit, sub.CauseCode = 0, 0, "", ""
-		sub.Basis = []string{j.ID}
-		published := false
-		var quality *execution.StepOutput
+		var packageID string
 		for _, step := range j.Steps {
-			if step.Workflow.ID == j.CurrentStepID {
-				sub.observeStep(j.ID, step, duration)
-			}
-			if step.OutputRecord == nil || step.Workflow.State != workflow.Completed {
-				continue
-			}
-			for i, out := range step.OutputRecord.Outputs {
-				if out.Kind == execution.OutputTranscript && out.TranscriptQuality != nil && out.TranscriptQuality.State == transcription.QualityReviewRecommended {
-					quality = &step.OutputRecord.Outputs[i]
-				}
-				if out.Kind == execution.OutputArchiveRevision {
-					published = true
-					sub.ObservedAt, sub.ManifestChecksum = step.OutputRecord.RecordedAt, out.Checksum
-					sub.Basis = append(sub.Basis, step.OutputRecord.VerificationReferences...)
-				}
+			if step.ExecutionSpec != nil && step.ExecutionSpec.Parameters.ArchivePackageID != "" {
+				packageID = step.ExecutionSpec.Parameters.ArchivePackageID
+				break
 			}
 		}
-		if published && sub.Stage != "FAILED" {
-			sub.Stage = "SUBTITLE_STORED"
-			if quality != nil && len(quality.TranscriptQuality.Reasons) > 0 {
-				sub.Stage = "SUBTITLE_REVIEW"
-				sub.ReviewReasons = slices.Clone(quality.TranscriptQuality.Reasons)
-				sub.CauseCode = string(quality.TranscriptQuality.Reasons[0])
-				sub.IssueCount = quality.TranscriptQuality.IssueCount
-				sub.Basis = append(sub.Basis, quality.ID, quality.RelativePath, quality.Checksum)
-			}
+		index, found := byPackage[packageID]
+		if !found && (len(byPackage) > 1 || (packageID != "" && len(byPackage) > 0)) {
+			continue
 		}
-		rows = append(rows, sub)
+		rows = append(rows, subtitleOutput(rows[index], j, duration))
 	}
 	return rows
+}
+
+func subtitleOutput(sub EventOutputEvidence, j job.State, duration int64) EventOutputEvidence {
+	sub.Stage = "SUBTITLE_PENDING"
+	sub.ObservedAt, sub.ManifestChecksum = time.Time{}, ""
+	sub.Completed, sub.Total, sub.Unit, sub.CauseCode = 0, 0, "", ""
+	sub.Basis = []string{j.ID}
+	published := false
+	var quality *execution.StepOutput
+	for _, step := range j.Steps {
+		if step.Workflow.ID == j.CurrentStepID {
+			sub.observeStep(j.ID, step, duration)
+		}
+		if step.OutputRecord == nil || step.Workflow.State != workflow.Completed {
+			continue
+		}
+		for i, out := range step.OutputRecord.Outputs {
+			if out.Kind == execution.OutputTranscript && out.TranscriptQuality != nil && out.TranscriptQuality.State == transcription.QualityReviewRecommended {
+				quality = &step.OutputRecord.Outputs[i]
+			}
+			if out.Kind == execution.OutputArchiveRevision {
+				published = true
+				sub.ObservedAt, sub.ManifestChecksum = step.OutputRecord.RecordedAt, out.Checksum
+				sub.Basis = append(sub.Basis, step.OutputRecord.VerificationReferences...)
+			}
+		}
+	}
+	if published && sub.Stage != "FAILED" {
+		sub.Stage = "SUBTITLE_STORED"
+		if quality != nil && len(quality.TranscriptQuality.Reasons) > 0 {
+			sub.Stage = "SUBTITLE_REVIEW"
+			sub.ReviewReasons = slices.Clone(quality.TranscriptQuality.Reasons)
+			sub.CauseCode = string(quality.TranscriptQuality.Reasons[0])
+			sub.IssueCount = quality.TranscriptQuality.IssueCount
+			sub.Basis = append(sub.Basis, quality.ID, quality.RelativePath, quality.Checksum)
+		}
+	}
+	return sub
 }
 
 func (row *EventOutputEvidence) observeStep(jobID string, step job.Step, duration int64) {

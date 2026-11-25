@@ -1237,7 +1237,7 @@ func stepOutput(target execution.OutputTarget, checksum string) execution.StepOu
 func verificationReferences(operation execution.Operation, outputs []execution.StepOutput) []string {
 	references := make([]string, 0, len(outputs))
 	for _, output := range outputs {
-		references = append(references, fmt.Sprintf("verification://%s/%s/%s", strings.ToLower(string(operation)), output.ID, output.Checksum))
+		references = append(references, output.VerificationReference(operation))
 	}
 	return references
 }
