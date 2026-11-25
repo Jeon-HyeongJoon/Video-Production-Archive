@@ -419,14 +419,14 @@ func (service *Service) diagnoseJob(ctx context.Context, view archiveworkspace.J
 		}
 	}
 	active := summary.StepState == workflow.Reserved || summary.StepState == workflow.Running || summary.StepState == workflow.Verifying
-	if summary.StepState == workflow.Failed || item.ErrorClass != "" {
+	if summary.StepState == workflow.Failed || (item.ErrorClass != "" && summary.StepState != workflow.Cancelled && summary.StepState != workflow.Completed) {
 		report = true
 		facts = append(facts, diagnosticFact("REPORTED_FAILURE", "The Step reported "+item.ErrorClass, summary.LastEventAt,
 			summary.JobID, summary.CurrentStepID, item.ErrorClass, summary.LastEventAt.Format(time.RFC3339Nano)))
 		latest, actionCode := terminalRecovery(item, summary.TemplateName)
 		if latest.QCFailure != nil {
 			actions = append(actions, SuggestedAction{Code: "INSPECT_FAILURE_DETAIL", Summary: "Read the failed QC checks and compare the expected and measured values for the affected file"})
-		} else if latestProcessLog(item.FailureEvidence) == execution.ProcessLogAvailable {
+		} else if latest.ProcessLog != nil && latest.ProcessLog.State == execution.ProcessLogAvailable {
 			actions = append(actions, SuggestedAction{Code: "INSPECT_FAILURE_DETAIL", Summary: "Read the available persisted failure evidence detail before retrying"})
 		} else {
 			actions = append(actions, SuggestedAction{Code: "FAILURE_DETAIL_UNAVAILABLE", Summary: "Use the structured failure fields because process detail was not recorded"})
@@ -525,12 +525,13 @@ func (service *Service) diagnoseJob(ctx context.Context, view archiveworkspace.J
 
 func terminalRecovery(item JobDiagnostic, template string) (corejob.StepFailureEvidence, string) {
 	var latest corejob.StepFailureEvidence
-	if item.StepState == workflow.Failed {
-		for _, failure := range item.FailureEvidence {
-			if failure.StepID == item.StepID && failure.FailureSequence > latest.FailureSequence {
-				latest = failure
-			}
+	for _, failure := range item.FailureEvidence {
+		if failure.StepID == item.StepID && failure.FailureSequence > latest.FailureSequence {
+			latest = failure
 		}
+	}
+	if item.StepState != workflow.Failed {
+		return latest, ""
 	}
 	return latest, corejob.TerminalRecoveryAction(template, latest)
 }
@@ -603,13 +604,6 @@ func sanitizeFailureEvidenceWithTail(source corejob.StepFailureEvidence) corejob
 // an explicit UI disclosure. General diagnostics use the tail-free projection.
 func SanitizeFailureEvidenceForDisclosure(source corejob.StepFailureEvidence) corejob.StepFailureEvidence {
 	return sanitizeFailureEvidenceWithTail(source)
-}
-
-func latestProcessLog(evidence []corejob.StepFailureEvidence) execution.ProcessLogState {
-	if len(evidence) == 0 || evidence[len(evidence)-1].ProcessLog == nil {
-		return execution.ProcessLogLegacyUnresolvable
-	}
-	return evidence[len(evidence)-1].ProcessLog.State
 }
 
 func safeProcessTail(value string) string {

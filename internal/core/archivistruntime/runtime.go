@@ -314,7 +314,7 @@ func NewRemediationSystemTurn(id, sessionID, requestID string, work *WorkReferen
 
 func ClaimTurn(turn Turn, archivistHostID string, now time.Time, ttl time.Duration) (Turn, TurnLease, error) {
 	archivistHostID = strings.TrimSpace(archivistHostID)
-	if turn.ID == "" || !turn.State.Valid() || archivistHostID == "" || now.IsZero() || ttl <= 0 || terminalTurnState(turn.State) {
+	if turn.ID == "" || !turn.State.Valid() || archivistHostID == "" || now.IsZero() || ttl <= 0 || turn.Terminal() {
 		return turn, TurnLease{}, ErrInvalidTurn
 	}
 	if turn.Lease != nil && now.Before(turn.Lease.ExpiresAt) {
@@ -638,7 +638,8 @@ func runtimeEventState(current vocabulary.ArchivistTurnState, kind RuntimeEventK
 	}
 }
 
-func terminalTurnState(state vocabulary.ArchivistTurnState) bool {
+func (turn Turn) Terminal() bool {
+	state := turn.State
 	return state == vocabulary.ArchivistTurnCompleted || state == vocabulary.ArchivistTurnFailed || state == vocabulary.ArchivistTurnCancelled
 }
 

@@ -742,11 +742,9 @@ func (fixture fixtureArchivistRuntime) TurnToolPolicy(context.Context, string, s
 	return fixture.policy.Effective(), nil
 }
 
-func (fixture fixtureArchivistRuntime) RecordToolCall(_ context.Context, _, _ string, callID, tool, target, state string) error {
+func (fixture fixtureArchivistRuntime) RecordToolCall(_ context.Context, _, _ string, call archivistcontrol.ToolCallProjection) error {
 	if fixture.recordedCalls != nil {
-		*fixture.recordedCalls = append(*fixture.recordedCalls, archivistcontrol.ToolCallProjection{
-			ID: callID, ToolName: tool, TargetID: target, State: state,
-		})
+		*fixture.recordedCalls = append(*fixture.recordedCalls, call)
 	}
 	return nil
 }

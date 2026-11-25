@@ -180,6 +180,8 @@ ArchivistToolCall receipt가 이미 있으면 최초 결과를 반환한다. tim
 
 재개 리스의 유효성은 매 호출 확인한다. 새 토큰에서 같은 Session·Turn·Tool Call의 최초 명령과 업무 입력이 일치하면 원래 영수증을 반환한다. 재제안에는 저장된 카드의 현재 결정이 포함된다. 명시한 사람이 실행한 보관 시작은 Command 행위자에 그 사람을, 선택 출처에는 Turn에 고정한 선택 행위자를 기록한다. Windows 재시작 인수는 ADVISORY 제안과 실행 전후의 실제 영수증을 조회한다. `MCP-019`, `LRH-011`
 
+유효한 Turn의 업무 도구가 요청을 거절하면 저장하는 Tool Call에 FAILED와 응답의 오류 코드를 기록한다. 고정 작업의 실패 상세에서 다른 증적 ID를 요청하면 그 대상의 내용을 공개하지 않는다. 종료된 Turn에서 시작만 남아 있는 과거 호출은 두 영속 기록을 함께 읽어 `UNOBSERVED`(결과 기록 없음)으로 표시한다. 활성 Turn에서 결과를 기다리는 호출은 RUNNING이다. `MCP-020`
+
 재개된 CLI가 같은 Tool Call ID와 ActionCard ID를 다시 보고하면 저장소는 새 행을 만들지 않는다. 기존 ActionCard 제안 내용이 같으면 현재 투영 상태를 보존하고, 특히 `COMPLETED`를 `PENDING`으로 되돌리지 않는다. 같은 ID의 제안 내용이 다르면 idempotency 충돌로 거부한다.
 
 ## 8. 아카이브 작업 공간 계약

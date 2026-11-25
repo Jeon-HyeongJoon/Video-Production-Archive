@@ -293,6 +293,7 @@ type archivistTurnView struct {
 }
 
 type archivistToolCallView struct {
+	ResultCode string    `json:"result_code,omitempty"`
 	ToolCallID string    `json:"tool_call_id"`
 	ToolName   string    `json:"tool_name"`
 	TargetID   string    `json:"target_id,omitempty"`

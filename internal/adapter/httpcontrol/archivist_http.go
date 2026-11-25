@@ -81,7 +81,7 @@ func (handler *Handler) archivistSessions(writer http.ResponseWriter, request *h
 			for _, call := range turn.ToolCalls {
 				turnView.ToolCalls = append(turnView.ToolCalls, archivistToolCallView{
 					ToolCallID: call.ID, ToolName: call.ToolName, TargetID: call.TargetID,
-					State: call.State, UpdatedAt: call.UpdatedAt,
+					State: call.State, ResultCode: call.ResultCode, UpdatedAt: call.UpdatedAt,
 				})
 			}
 			view.Turns = append(view.Turns, turnView)

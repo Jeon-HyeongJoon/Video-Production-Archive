@@ -70,8 +70,8 @@ function cardScope(card) {
 
 // ─── Thread pieces ──────────────────────────────────────────────────────────
 
-const ToolRow = ({ call }) => html`<li class="tool tool-row" title=${call.tool_name} data-state=${call.state}>
-  <${StatusIcon} kind=${call.state === "FAILED" ? "fault" : call.state === "RUNNING" ? "work" : call.state === "ACTION_CARD" ? "decide" : "done"} />
+const ToolRow = ({ call }) => html`<li class="tool tool-row" title=${[call.tool_name, call.result_code].filter(Boolean).join(" · ")} data-state=${call.state}>
+  <${StatusIcon} kind=${["FAILED", "UNOBSERVED"].includes(call.state) ? "fault" : call.state === "RUNNING" ? "work" : call.state === "ACTION_CARD" ? "decide" : "done"} />
   <b>${label("tool", call.tool_name)}</b><span>${call.target_id || ""} · ${label("call", call.state)}</span></li>`;
 
 const EntryRow = ({ entry }) => {

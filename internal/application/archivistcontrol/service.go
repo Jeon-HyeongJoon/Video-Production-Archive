@@ -80,11 +80,12 @@ type TurnProjection struct {
 }
 
 type ToolCallProjection struct {
-	ID        string
-	ToolName  string
-	TargetID  string
-	State     string
-	UpdatedAt time.Time
+	ResultCode string `json:",omitempty"`
+	ID         string
+	ToolName   string
+	TargetID   string
+	State      string
+	UpdatedAt  time.Time
 }
 
 type ActionCardProjection struct {
@@ -572,6 +573,15 @@ func (service *Service) Projection(ctx context.Context) ([]SessionProjection, er
 			if err != nil {
 				return nil, err
 			}
+			// Older Hosts could leave only a start record. Once the Turn is
+			// terminal, both facts are durable but the call outcome is unknown.
+			if turn.Turn.Terminal() {
+				for i := range toolCalls {
+					if toolCalls[i].State == "RUNNING" {
+						toolCalls[i].State, toolCalls[i].ResultCode = "UNOBSERVED", "MCP_TOOL_RESULT_UNOBSERVED"
+					}
+				}
+			}
 			entries, err := service.store.ListTurnEntries(ctx, turn.Turn.ID)
 			if err != nil {
 				return nil, err
@@ -594,11 +604,11 @@ func (service *Service) Projection(ctx context.Context) ([]SessionProjection, er
 	return result, nil
 }
 
-func (service *Service) RecordToolCall(ctx context.Context, sessionID, turnID, id, toolName, targetID, state string) error {
-	record := ToolCallRecord{SessionID: strings.TrimSpace(sessionID), TurnID: strings.TrimSpace(turnID), Call: ToolCallProjection{
-		ID: strings.TrimSpace(id), ToolName: strings.TrimSpace(toolName), TargetID: strings.TrimSpace(targetID),
-		State: strings.TrimSpace(state), UpdatedAt: service.now().UTC(),
-	}}
+func (service *Service) RecordToolCall(ctx context.Context, sessionID, turnID string, call ToolCallProjection) error {
+	call.ID, call.ToolName = strings.TrimSpace(call.ID), strings.TrimSpace(call.ToolName)
+	call.TargetID, call.State = strings.TrimSpace(call.TargetID), strings.TrimSpace(call.State)
+	call.UpdatedAt = service.now().UTC()
+	record := ToolCallRecord{SessionID: strings.TrimSpace(sessionID), TurnID: strings.TrimSpace(turnID), Call: call}
 	if record.SessionID == "" || record.TurnID == "" || record.Call.ID == "" || record.Call.ToolName == "" || record.Call.State == "" {
 		return ErrInvalidRequest
 	}

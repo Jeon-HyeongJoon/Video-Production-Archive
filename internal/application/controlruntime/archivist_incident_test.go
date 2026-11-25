@@ -15,6 +15,7 @@ import (
 	"videoarchive/internal/adapter/controlruntime"
 	"videoarchive/internal/adapter/sqlitecommand"
 	"videoarchive/internal/adapter/storageinventory"
+	"videoarchive/internal/application/archivework"
 	"videoarchive/internal/application/archivistloop"
 	"videoarchive/internal/application/workdiagnostics"
 	"videoarchive/internal/application/workerclient"
@@ -115,8 +116,8 @@ func TestResumedArchivistJobCallReturnsOriginalReceipt(t *testing.T) {
 	}
 }
 
-// Requirement: MCP-018
-func TestBoundArchiveRunDiagnosisCitesOutcomeAndRecordedAttempt(t *testing.T) {
+func startFailedIncidentTurn(t *testing.T) (*controlruntime.Runtime, string, workerclient.Assignment, archivework.Summary) {
+	t.Helper()
 	tmp := t.TempDir()
 	src, dst := filepath.Join(tmp, "source"), filepath.Join(tmp, "archive")
 	const folder = "370105-행사_촬영-본당"
@@ -142,7 +143,7 @@ func TestBoundArchiveRunDiagnosisCitesOutcomeAndRecordedAttempt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rt.Close()
+	t.Cleanup(func() { rt.Close() })
 	beat := func(seq int) {
 		t.Helper()
 		r := workerHeartbeatRequest(rt.Handler(), fmt.Sprintf(`{"worker_id":"worker-main","snapshot_id":%d,"observed_at":"2026-11-23T03:00:00Z","idle_stable_millis":60000,"available_memory_bytes":34359738368,"available_vram_bytes":8589934592,"scratch_free_bytes":536870912000,"accepting_work":true,"accessible_storage_ids":["source-main","archive-main"]}`, seq), "runtime-service-secret")
@@ -185,14 +186,10 @@ func TestBoundArchiveRunDiagnosisCitesOutcomeAndRecordedAttempt(t *testing.T) {
 	work := runtimeRequest(rt.Handler(), http.MethodGet, "/api/v1/work/RUN-INCIDENT", "", nil, "", "")
 	var truth struct {
 		Data struct {
-			Summary struct {
-				State       string
-				ResultCount *int `json:"result_count"`
-				Revision    uint64
-			}
+			Summary archivework.Summary
 		}
 	}
-	if err := json.Unmarshal(work.Body.Bytes(), &truth); err != nil || truth.Data.Summary.State != "FAILED" || truth.Data.Summary.ResultCount == nil || *truth.Data.Summary.ResultCount != 0 {
+	if err := json.Unmarshal(work.Body.Bytes(), &truth); err != nil || truth.Data.Summary.State != "FAILED" || truth.Data.Summary.ResultCount != 0 {
 		t.Fatalf("work truth %s err=%v", work.Body, err)
 	}
 	store, err := sqlitecommand.Open(cfg.DatabasePath)
@@ -207,6 +204,12 @@ func TestBoundArchiveRunDiagnosisCitesOutcomeAndRecordedAttempt(t *testing.T) {
 	const question = "이 작업은 몇 건 보관됐고 어느 입력에서 멈췄나요? 마지막 출력 위치와 원인 근거만 알려 주세요."
 	turn := fmt.Sprintf(`{"turn_id":"TURN-INCIDENT","request_id":"REQUEST-INCIDENT","prompt":%q,"work_reference":{"kind":"ARCHIVE_RUN","work_id":"RUN-INCIDENT","revision":%d}}`, question, run.Revision)
 	startArchivistTestTurn(t, rt, "SESSION-INCIDENT", "TURN-INCIDENT", "REQUEST-INCIDENT", turn)
+	return rt, cfg.DatabasePath, a, truth.Data.Summary
+}
+
+// Requirement: MCP-018
+func TestBoundArchiveRunDiagnosisCitesOutcomeAndRecordedAttempt(t *testing.T) {
+	rt, dbPath, a, truth := startFailedIncidentTurn(t)
 	started := time.Now()
 	d := incidentCall(t, rt, 1, "diagnostic", "archive.work.diagnostics.get.v1", `{}`)
 	var diagnostic struct {
@@ -253,7 +256,7 @@ func TestBoundArchiveRunDiagnosisCitesOutcomeAndRecordedAttempt(t *testing.T) {
 	if completed.Code != 200 {
 		t.Fatal(completed.Body)
 	}
-	db := openLedger(t, cfg.DatabasePath)
+	db := openLedger(t, dbPath)
 	defer db.Close()
 	var calls int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM archivist_tool_calls WHERE turn_id='TURN-INCIDENT' AND json_extract(payload,'$.State')='COMPLETED'`).Scan(&calls); err != nil || calls != 2 {
@@ -263,7 +266,7 @@ func TestBoundArchiveRunDiagnosisCitesOutcomeAndRecordedAttempt(t *testing.T) {
 	if !strings.Contains(got.Body.String(), answer) {
 		t.Fatalf("durable answer missing: %s", got.Body)
 	}
-	checks := []bool{diagnostic.Data.WorkID == "RUN-INCIDENT", state == truth.Data.Summary.State, count == fmt.Sprint(*truth.Data.Summary.ResultCount), strings.HasPrefix(outcomeID, "EVD-DIAGNOSTIC-"), job.JobID == a.JobID && log.Data.JobID == a.JobID, position.Update.InputIndex == 2 && position.Update.InputCount == 3, position.Update.OutputMillis == 1518 && position.FencingToken == failure.FencingToken, log.Data.CauseCode == "SOURCE_DECODE_FAILED" && log.Data.WorkflowAttempt == 1, log.Data.EvidenceID == failure.EvidenceID && log.Data.ProcessExitCode != nil && *log.Data.ProcessExitCode == 69, log.Data.ProcessLog.Reference == "evidence://process-log/PLOG-INCIDENT" && log.Data.ProcessLog.SanitizedTail == "decoder rejected invalid input packet", len(diagnostic.Data.RecoveryActions) == 0}
+	checks := []bool{diagnostic.Data.WorkID == "RUN-INCIDENT", state == string(truth.State), count == fmt.Sprint(truth.ResultCount), strings.HasPrefix(outcomeID, "EVD-DIAGNOSTIC-"), job.JobID == a.JobID && log.Data.JobID == a.JobID, position.Update.InputIndex == 2 && position.Update.InputCount == 3, position.Update.OutputMillis == 1518 && position.FencingToken == failure.FencingToken, log.Data.CauseCode == "SOURCE_DECODE_FAILED" && log.Data.WorkflowAttempt == 1, log.Data.EvidenceID == failure.EvidenceID && log.Data.ProcessExitCode != nil && *log.Data.ProcessExitCode == 69, log.Data.ProcessLog.Reference == "evidence://process-log/PLOG-INCIDENT" && log.Data.ProcessLog.SanitizedTail == "decoder rejected invalid input packet", len(diagnostic.Data.RecoveryActions) == 0}
 	matched := 0
 	for _, ok := range checks {
 		if ok {
@@ -273,5 +276,68 @@ func TestBoundArchiveRunDiagnosisCitesOutcomeAndRecordedAttempt(t *testing.T) {
 	t.Logf("evidence_agreement=%d/%d tool_calls=%d diagnostic_to_persisted_answer=%s answer=%s", matched, len(checks), calls, time.Since(started), answer)
 	if matched != len(checks) {
 		t.Fatalf("answer/receipt mismatch: %v", checks)
+	}
+}
+
+// Requirement: MCP-020
+func TestCompletedTurnReportsRejectedAndUnobservedReads(t *testing.T) {
+	rt, dbPath, _, _ := startFailedIncidentTurn(t)
+	// A work reference authorizes work diagnosis. The separate drive status
+	// capability requires a prepared drive selection.
+	rejected := incidentCall(t, rt, 1, "status", "archive.run.status.v1", "{}")
+	wrong := incidentCall(t, rt, 1, "wrong-evidence", "archive.work.failure_evidence.get.v1", `{"evidence_id":"EVD-WORKER-OTHER"}`)
+	good := incidentCall(t, rt, 1, "diagnose", "archive.work.diagnostics.get.v1", "{}")
+	if rejected.Code != 409 || wrong.Code != 404 || good.Code != 200 {
+		t.Fatalf("status=%d detail=%d diagnostics=%d", rejected.Code, wrong.Code, good.Code)
+	}
+	var reason struct{ Error struct{ Code string } }
+	if err := json.Unmarshal(rejected.Body.Bytes(), &reason); err != nil || reason.Error.Code != "MCP_DRIVE_SELECTION_REQUIRED" {
+		t.Fatalf("status rejection=%s err=%v", rejected.Body, err)
+	}
+	db := openLedger(t, dbPath)
+	defer db.Close()
+	var denied int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM archivist_tool_calls WHERE turn_id = 'TURN-INCIDENT'
+		AND json_extract(payload, '$.State') = 'FAILED' AND json_extract(payload, '$.ResultCode') IN (?, ?)`,
+		reason.Error.Code, "MCP_FAILURE_EVIDENCE_NOT_FOUND").Scan(&denied); err != nil || denied != 2 {
+		t.Fatalf("persisted refusals=%d err=%v", denied, err)
+	}
+	// This older row has a recorded start and no recorded response.
+	if _, err := db.Exec(`INSERT INTO archivist_tool_calls(tool_call_id,session_id,turn_id,updated_at,payload)
+		VALUES('CALL-OLD','SESSION-INCIDENT','TURN-INCIDENT','2026-11-23T03:00:00Z','{"ID":"CALL-OLD","ToolName":"archive.jobs.get.v1","State":"RUNNING"}')`); err != nil {
+		t.Fatal(err)
+	}
+	done := archivistHostRequest(rt.Handler(), http.MethodPost, "/archivist/v1/turns/TURN-INCIDENT/events", `{"fencing_token":1,"cursor":3,"request_id":"REQUEST-INCIDENT","kind":"TURN_COMPLETED","final_response":{"summary":"작업 조회를 마쳤습니다."}}`, "runtime-service-secret")
+	if done.Code != 200 {
+		t.Fatal(done.Body)
+	}
+	projection := runtimeRequest(rt.Handler(), http.MethodGet, "/api/v1/archivist-sessions", "", nil, "", "")
+	var sessions struct {
+		Data []struct {
+			Turns []struct {
+				State string
+				Calls []struct {
+					Tool   string `json:"tool_name"`
+					State  string
+					Reason string `json:"result_code"`
+				} `json:"tool_calls"`
+			}
+		}
+	}
+	if err := json.Unmarshal(projection.Body.Bytes(), &sessions); err != nil || len(sessions.Data) != 1 || len(sessions.Data[0].Turns) != 1 || len(sessions.Data[0].Turns[0].Calls) != 4 {
+		t.Fatal(projection.Body, err)
+	}
+	turn := sessions.Data[0].Turns[0]
+	results := map[string]string{}
+	for _, call := range turn.Calls {
+		results[call.Tool] = call.State + "/" + call.Reason
+	}
+	for tool, want := range map[string]string{
+		"archive.run.status.v1": "FAILED/" + reason.Error.Code, "archive.work.diagnostics.get.v1": "COMPLETED/",
+		"archive.work.failure_evidence.get.v1": "FAILED/MCP_FAILURE_EVIDENCE_NOT_FOUND", "archive.jobs.get.v1": "UNOBSERVED/MCP_TOOL_RESULT_UNOBSERVED",
+	} {
+		if turn.State != "COMPLETED" || results[tool] != want {
+			t.Errorf("Turn %s, %s=%q want %q", turn.State, tool, results[tool], want)
+		}
 	}
 }

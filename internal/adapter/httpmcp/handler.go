@@ -56,7 +56,7 @@ type ArchivistRuntime interface {
 	Authenticate(string, string) error
 	TurnToolPolicy(context.Context, string, string) (archivistruntime.ArchivistTurnToolPolicy, error)
 	ValidateToolContext(context.Context, string, string, string, uint64) error
-	RecordToolCall(context.Context, string, string, string, string, string, string) error
+	RecordToolCall(context.Context, string, string, archivistcontrol.ToolCallProjection) error
 	RecordActionCard(context.Context, string, archivistcontrol.ActionCardProjection) (archivistcontrol.ActionCardProjection, error)
 	TurnDriveSelection(context.Context, string, string) (archivistruntime.DriveSelection, error)
 	TurnWorkReference(context.Context, string, string) (archivistruntime.WorkReference, error)
@@ -265,21 +265,18 @@ func (handler *Handler) call(writer http.ResponseWriter, request *http.Request) 
 		return
 	}
 	if policy == archivistruntime.ToolPolicyDiagnostic && !diagnosticToolAllowed(payload.Tool) {
-		_ = handler.archivists.RecordToolCall(request.Context(), payload.SessionID, payload.TurnID, payload.ToolCallID, payload.Tool, "", "FAILED")
-		writeError(writer, http.StatusForbidden, "MCP_DIAGNOSTIC_POLICY_DENIED")
+		handler.failTool(writer, request, payload, http.StatusForbidden, "MCP_DIAGNOSTIC_POLICY_DENIED", "")
 		return
 	}
 	if policy == archivistruntime.ToolPolicyAdvisory && !advisoryToolAllowed(payload.Tool) {
-		_ = handler.archivists.RecordToolCall(request.Context(), payload.SessionID, payload.TurnID, payload.ToolCallID, payload.Tool, "", "FAILED")
-		writeError(writer, http.StatusForbidden, "MCP_ADVISORY_POLICY_DENIED")
+		handler.failTool(writer, request, payload, http.StatusForbidden, "MCP_ADVISORY_POLICY_DENIED", "")
 		return
 	}
 	if policy == archivistruntime.ToolPolicyRemediation && !remediationToolAllowed(payload.Tool) {
-		_ = handler.archivists.RecordToolCall(request.Context(), payload.SessionID, payload.TurnID, payload.ToolCallID, payload.Tool, "", "FAILED")
-		writeError(writer, http.StatusForbidden, "MCP_REMEDIATION_POLICY_DENIED")
+		handler.failTool(writer, request, payload, http.StatusForbidden, "MCP_REMEDIATION_POLICY_DENIED", "")
 		return
 	}
-	if err := handler.archivists.RecordToolCall(request.Context(), payload.SessionID, payload.TurnID, payload.ToolCallID, payload.Tool, "", "RUNNING"); err != nil {
+	if err := handler.recordCall(request.Context(), payload, "", "RUNNING", ""); err != nil {
 		writeError(writer, http.StatusBadRequest, "MCP_INPUT_INVALID")
 		return
 	}
@@ -323,6 +320,20 @@ func (handler *Handler) call(writer http.ResponseWriter, request *http.Request) 
 	}
 }
 
+func (handler *Handler) recordCall(ctx context.Context, call callRequest, targetID, state, resultCode string) error {
+	return handler.archivists.RecordToolCall(ctx, call.SessionID, call.TurnID, archivistcontrol.ToolCallProjection{
+		ID: call.ToolCallID, ToolName: call.Tool, TargetID: targetID, State: state, ResultCode: resultCode,
+	})
+}
+
+func (handler *Handler) failTool(writer http.ResponseWriter, request *http.Request, call callRequest, status int, code, targetID string) {
+	if err := handler.recordCall(context.WithoutCancel(request.Context()), call, targetID, "FAILED", code); err != nil {
+		writeError(writer, http.StatusInternalServerError, "MCP_TOOL_CALL_RECORD_FAILED")
+		return
+	}
+	writeError(writer, status, code)
+}
+
 func remediationToolAllowed(tool string) bool {
 	return diagnosticToolAllowed(tool) || tool == ToolWorkRecoveryApply
 }
@@ -350,26 +361,24 @@ func advisoryToolAllowed(tool string) bool {
 
 func (handler *Handler) getWorkReference(writer http.ResponseWriter, request *http.Request, call callRequest) {
 	if !validEmptyInput(call.Input) {
-		_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, "", "FAILED")
-		writeError(writer, http.StatusBadRequest, "MCP_INPUT_INVALID")
+		handler.failTool(writer, request, call, http.StatusBadRequest, "MCP_INPUT_INVALID", "")
 		return
 	}
 	reference, err := handler.archivists.TurnWorkReference(request.Context(), call.SessionID, call.TurnID)
 	if errors.Is(err, archivistcontrol.ErrWorkReferenceNotBound) {
-		_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, "", "COMPLETED")
+		_ = handler.recordCall(request.Context(), call, "", "COMPLETED", "")
 		writeJSON(writer, http.StatusOK, map[string]any{"data": map[string]any{"bound": false}})
 		return
 	}
 	if err != nil {
-		_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, "", "FAILED")
 		if errors.Is(err, archivistcontrol.ErrInvalidRequest) || errors.Is(err, archivistcontrol.ErrTurnNotFound) {
-			writeError(writer, http.StatusConflict, "MCP_TURN_CONTEXT_INVALID")
+			handler.failTool(writer, request, call, http.StatusConflict, "MCP_TURN_CONTEXT_INVALID", "")
 		} else {
-			writeError(writer, http.StatusInternalServerError, "MCP_WORK_REFERENCE_LOOKUP_FAILED")
+			handler.failTool(writer, request, call, http.StatusInternalServerError, "MCP_WORK_REFERENCE_LOOKUP_FAILED", "")
 		}
 		return
 	}
-	_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, reference.WorkID, "COMPLETED")
+	_ = handler.recordCall(request.Context(), call, reference.WorkID, "COMPLETED", "")
 	writeJSON(writer, http.StatusOK, map[string]any{"data": struct {
 		Bound bool `json:"bound"`
 		archivistruntime.WorkReference
@@ -378,82 +387,74 @@ func (handler *Handler) getWorkReference(writer http.ResponseWriter, request *ht
 
 func (handler *Handler) getWorkDiagnostics(writer http.ResponseWriter, request *http.Request, call callRequest) {
 	if handler.workDiagnostics == nil {
-		writeError(writer, http.StatusNotFound, "MCP_CAPABILITY_NOT_FOUND")
+		handler.failTool(writer, request, call, http.StatusNotFound, "MCP_CAPABILITY_NOT_FOUND", "")
 		return
 	}
 	if !validEmptyInput(call.Input) {
-		_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, "", "FAILED")
-		writeError(writer, http.StatusBadRequest, "MCP_INPUT_INVALID")
+		handler.failTool(writer, request, call, http.StatusBadRequest, "MCP_INPUT_INVALID", "")
 		return
 	}
 	reference, err := handler.archivists.TurnWorkReference(request.Context(), call.SessionID, call.TurnID)
 	if err != nil {
-		_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, "", "FAILED")
-		writeError(writer, http.StatusConflict, "MCP_WORK_REFERENCE_REQUIRED")
+		handler.failTool(writer, request, call, http.StatusConflict, "MCP_WORK_REFERENCE_REQUIRED", "")
 		return
 	}
 	diagnostic, err := handler.workDiagnostics.Diagnose(request.Context(), reference)
 	if err != nil {
-		_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, reference.WorkID, "FAILED")
-		writeError(writer, http.StatusConflict, "MCP_WORK_DIAGNOSTICS_UNAVAILABLE")
+		handler.failTool(writer, request, call, http.StatusConflict, "MCP_WORK_DIAGNOSTICS_UNAVAILABLE", reference.WorkID)
 		return
 	}
-	_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, reference.WorkID, "COMPLETED")
+	_ = handler.recordCall(request.Context(), call, reference.WorkID, "COMPLETED", "")
 	writeJSON(writer, http.StatusOK, map[string]any{"data": workdiagnostics.Sanitize(diagnostic)})
 }
 
 func (handler *Handler) getWorkFailureEvidence(writer http.ResponseWriter, request *http.Request, call callRequest) {
 	if handler.workFailureEvidence == nil {
-		writeError(writer, http.StatusNotFound, "MCP_CAPABILITY_NOT_FOUND")
+		handler.failTool(writer, request, call, http.StatusNotFound, "MCP_CAPABILITY_NOT_FOUND", "")
 		return
 	}
 	var input struct {
 		EvidenceID string `json:"evidence_id"`
 	}
 	if !decodeToolInput(call.Input, &input) || strings.TrimSpace(input.EvidenceID) == "" {
-		_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, "", "FAILED")
-		writeError(writer, http.StatusBadRequest, "MCP_INPUT_INVALID")
+		handler.failTool(writer, request, call, http.StatusBadRequest, "MCP_INPUT_INVALID", "")
 		return
 	}
 	reference, err := handler.archivists.TurnWorkReference(request.Context(), call.SessionID, call.TurnID)
 	if err != nil {
-		_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, "", "FAILED")
-		writeError(writer, http.StatusConflict, "MCP_WORK_REFERENCE_REQUIRED")
+		handler.failTool(writer, request, call, http.StatusConflict, "MCP_WORK_REFERENCE_REQUIRED", "")
 		return
 	}
 	detail, err := handler.workFailureEvidence.FailureEvidence(request.Context(), reference, strings.TrimSpace(input.EvidenceID))
 	if err != nil {
-		_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, reference.WorkID, "FAILED")
-		writeError(writer, http.StatusNotFound, "MCP_FAILURE_EVIDENCE_NOT_FOUND")
+		handler.failTool(writer, request, call, http.StatusNotFound, "MCP_FAILURE_EVIDENCE_NOT_FOUND", reference.WorkID)
 		return
 	}
-	_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, reference.WorkID, "COMPLETED")
+	_ = handler.recordCall(request.Context(), call, reference.WorkID, "COMPLETED", "")
 	writeJSON(writer, http.StatusOK, map[string]any{"data": workdiagnostics.SanitizeFailureDetail(detail)})
 }
 
 func (handler *Handler) getSystemStatus(writer http.ResponseWriter, request *http.Request, call callRequest) {
 	if handler.systemStatus == nil {
-		writeError(writer, http.StatusNotFound, "MCP_CAPABILITY_NOT_FOUND")
+		handler.failTool(writer, request, call, http.StatusNotFound, "MCP_CAPABILITY_NOT_FOUND", "")
 		return
 	}
 	if !validEmptyInput(call.Input) {
-		_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, "", "FAILED")
-		writeError(writer, http.StatusBadRequest, "MCP_INPUT_INVALID")
+		handler.failTool(writer, request, call, http.StatusBadRequest, "MCP_INPUT_INVALID", "")
 		return
 	}
 	snapshot, err := handler.systemStatus.Snapshot(request.Context())
 	if err != nil {
-		_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, "", "FAILED")
-		writeError(writer, http.StatusInternalServerError, "MCP_SYSTEM_STATUS_UNAVAILABLE")
+		handler.failTool(writer, request, call, http.StatusInternalServerError, "MCP_SYSTEM_STATUS_UNAVAILABLE", "")
 		return
 	}
-	_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, "", "COMPLETED")
+	_ = handler.recordCall(request.Context(), call, "", "COMPLETED", "")
 	writeJSON(writer, http.StatusOK, map[string]any{"data": snapshot})
 }
 
 func (handler *Handler) applyWorkRecovery(writer http.ResponseWriter, request *http.Request, hostID string, call callRequest) {
 	if handler.workRecovery == nil || handler.workDiagnostics == nil {
-		writeError(writer, http.StatusNotFound, "MCP_CAPABILITY_NOT_FOUND")
+		handler.failTool(writer, request, call, http.StatusNotFound, "MCP_CAPABILITY_NOT_FOUND", "")
 		return
 	}
 	var input struct {
@@ -468,7 +469,7 @@ func (handler *Handler) applyWorkRecovery(writer http.ResponseWriter, request *h
 		Reason                string   `json:"reason"`
 	}
 	if !decodeToolInput(call.Input, &input) {
-		handler.failRecoveryTool(writer, request, call, http.StatusBadRequest, "MCP_INPUT_INVALID", "")
+		handler.failTool(writer, request, call, http.StatusBadRequest, "MCP_INPUT_INVALID", "")
 		return
 	}
 	input.ActionCode = strings.TrimSpace(input.ActionCode)
@@ -482,12 +483,12 @@ func (handler *Handler) applyWorkRecovery(writer http.ResponseWriter, request *h
 	if (!expiredExecution && !terminalRecovery) || input.JobID == "" || input.ExpectedJobRevision == 0 ||
 		input.StepID == "" || input.FencingToken == 0 || input.DiagnosticFingerprint == "" ||
 		len(input.Basis) == 0 || input.Reason == "" || len(input.Reason) > 256 {
-		handler.failRecoveryTool(writer, request, call, http.StatusBadRequest, "MCP_INPUT_INVALID", input.JobID)
+		handler.failTool(writer, request, call, http.StatusBadRequest, "MCP_INPUT_INVALID", input.JobID)
 		return
 	}
 	reference, err := handler.archivists.TurnWorkReference(request.Context(), call.SessionID, call.TurnID)
 	if err != nil {
-		handler.failRecoveryTool(writer, request, call, http.StatusConflict, "MCP_WORK_REFERENCE_REQUIRED", input.JobID)
+		handler.failTool(writer, request, call, http.StatusConflict, "MCP_WORK_REFERENCE_REQUIRED", input.JobID)
 		return
 	}
 	commandType := job.RecoverExpiredExecutionCommand
@@ -507,7 +508,7 @@ func (handler *Handler) applyWorkRecovery(writer http.ResponseWriter, request *h
 		},
 	}, nil)
 	if err != nil || decision.Command == nil {
-		handler.failRecoveryTool(writer, request, call, http.StatusBadRequest, "MCP_INPUT_INVALID", input.JobID)
+		handler.failTool(writer, request, call, http.StatusBadRequest, "MCP_INPUT_INVALID", input.JobID)
 		return
 	}
 	result, err := handler.workRecovery.Apply(request.Context(), reference, *decision.Command)
@@ -518,16 +519,11 @@ func (handler *Handler) applyWorkRecovery(writer http.ResponseWriter, request *h
 			!errors.Is(err, command.ErrIdempotencyConflict) {
 			status, code = http.StatusInternalServerError, "MCP_WORK_RECOVERY_FAILED"
 		}
-		handler.failRecoveryTool(writer, request, call, status, code, input.JobID)
+		handler.failTool(writer, request, call, status, code, input.JobID)
 		return
 	}
-	_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, input.JobID, "COMPLETED")
+	_ = handler.recordCall(request.Context(), call, input.JobID, "COMPLETED", "")
 	writeJSON(writer, http.StatusOK, map[string]any{"data": result})
-}
-
-func (handler *Handler) failRecoveryTool(writer http.ResponseWriter, request *http.Request, call callRequest, status int, code, targetID string) {
-	_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, strings.TrimSpace(targetID), "FAILED")
-	writeError(writer, status, code)
 }
 
 func (handler *Handler) searchArchiveIntakeCandidates(writer http.ResponseWriter, request *http.Request, call callRequest) {
@@ -536,12 +532,12 @@ func (handler *Handler) searchArchiveIntakeCandidates(writer http.ResponseWriter
 		Limit int    `json:"limit"`
 	}
 	if !decodeToolInput(call.Input, &input) {
-		handler.failIntakeTool(writer, request, call, http.StatusBadRequest, "MCP_INPUT_INVALID", "")
+		handler.failTool(writer, request, call, http.StatusBadRequest, "MCP_INPUT_INVALID", "")
 		return
 	}
 	input.Query = strings.TrimSpace(input.Query)
 	if len(input.Query) > 256 || input.Limit < 0 || input.Limit > 50 {
-		handler.failIntakeTool(writer, request, call, http.StatusBadRequest, "MCP_INPUT_INVALID", "")
+		handler.failTool(writer, request, call, http.StatusBadRequest, "MCP_INPUT_INVALID", "")
 		return
 	}
 	if input.Limit == 0 {
@@ -549,7 +545,7 @@ func (handler *Handler) searchArchiveIntakeCandidates(writer http.ResponseWriter
 	}
 	drives, err := handler.drives.Projection(request.Context())
 	if err != nil {
-		handler.failIntakeTool(writer, request, call, http.StatusInternalServerError, "MCP_INTAKE_CANDIDATES_FAILED", "")
+		handler.failTool(writer, request, call, http.StatusInternalServerError, "MCP_INTAKE_CANDIDATES_FAILED", "")
 		return
 	}
 	tokens := strings.Fields(strings.ToLower(input.Query))
@@ -595,7 +591,7 @@ func (handler *Handler) searchArchiveIntakeCandidates(writer http.ResponseWriter
 			"matched_folders": folders, "archive_storage_candidates": archives,
 		})
 	}
-	_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, "", "COMPLETED")
+	_ = handler.recordCall(request.Context(), call, "", "COMPLETED", "")
 	writeJSON(writer, http.StatusOK, map[string]any{"data": map[string]any{"drives": result}})
 }
 
@@ -605,17 +601,17 @@ func (handler *Handler) selectArchiveIntakeSource(writer http.ResponseWriter, re
 		ExpectedCandidateRevision uint64 `json:"expected_candidate_revision"`
 	}
 	if !decodeToolInput(call.Input, &input) || strings.TrimSpace(input.WorkspaceDriveID) == "" || input.ExpectedCandidateRevision == 0 {
-		handler.failIntakeTool(writer, request, call, http.StatusBadRequest, "MCP_INPUT_INVALID", "")
+		handler.failTool(writer, request, call, http.StatusBadRequest, "MCP_INPUT_INVALID", "")
 		return
 	}
 	input.WorkspaceDriveID = strings.TrimSpace(input.WorkspaceDriveID)
 	drive, found, err := handler.currentCandidateDrive(request.Context(), input.WorkspaceDriveID)
 	if err != nil {
-		handler.failIntakeTool(writer, request, call, http.StatusInternalServerError, "MCP_INTAKE_CANDIDATES_FAILED", input.WorkspaceDriveID)
+		handler.failTool(writer, request, call, http.StatusInternalServerError, "MCP_INTAKE_CANDIDATES_FAILED", input.WorkspaceDriveID)
 		return
 	}
 	if !found || drive.CandidateRevision != input.ExpectedCandidateRevision {
-		handler.failIntakeTool(writer, request, call, http.StatusConflict, "MCP_INTAKE_CANDIDATE_STALE", input.WorkspaceDriveID)
+		handler.failTool(writer, request, call, http.StatusConflict, "MCP_INTAKE_CANDIDATE_STALE", input.WorkspaceDriveID)
 		return
 	}
 	sessionID := stableToolTarget("INTAKE-MCP", call.SessionID, call.TurnID, input.WorkspaceDriveID)
@@ -625,14 +621,14 @@ func (handler *Handler) selectArchiveIntakeSource(writer http.ResponseWriter, re
 			Actor: command.Actor{Type: vocabulary.ActorArchivist, ID: "archivist:" + call.SessionID}, SelectedAt: time.Now().UTC(),
 		})
 		if selectErr != nil {
-			handler.failIntakeTool(writer, request, call, http.StatusConflict, "MCP_INTAKE_SOURCE_SELECTION_REJECTED", input.WorkspaceDriveID)
+			handler.failTool(writer, request, call, http.StatusConflict, "MCP_INTAKE_SOURCE_SELECTION_REJECTED", input.WorkspaceDriveID)
 			return
 		}
 		if access.Root != nil {
 			_ = access.Root.Close()
 		}
 	}
-	_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, sessionID, "COMPLETED")
+	_ = handler.recordCall(request.Context(), call, sessionID, "COMPLETED", "")
 	writeJSON(writer, http.StatusOK, map[string]any{"data": map[string]any{
 		"intake_session_id": sessionID, "workspace_drive_id": input.WorkspaceDriveID,
 		"candidate_revision": input.ExpectedCandidateRevision,
@@ -651,12 +647,12 @@ func (handler *Handler) pinArchiveIntakeSelection(writer http.ResponseWriter, re
 		FolderIDs               []string `json:"folder_ids"`
 	}
 	if !decodeToolInput(call.Input, &input) {
-		handler.failIntakeTool(writer, request, call, http.StatusBadRequest, "MCP_INPUT_INVALID", "")
+		handler.failTool(writer, request, call, http.StatusBadRequest, "MCP_INPUT_INVALID", "")
 		return
 	}
 	drive, found, err := handler.currentCandidateDrive(request.Context(), strings.TrimSpace(input.WorkspaceDriveID))
 	if err != nil {
-		handler.failIntakeTool(writer, request, call, http.StatusInternalServerError, "MCP_INTAKE_CANDIDATES_FAILED", "")
+		handler.failTool(writer, request, call, http.StatusInternalServerError, "MCP_INTAKE_CANDIDATES_FAILED", "")
 		return
 	}
 	workerID := drive.ConnectionWorkerID
@@ -667,7 +663,7 @@ func (handler *Handler) pinArchiveIntakeSelection(writer http.ResponseWriter, re
 		drive.FolderDiscoveryState != vocabulary.FolderDiscoveryReady || workerID != strings.TrimSpace(input.WorkerID) ||
 		drive.SourceStorageID != strings.TrimSpace(input.SourceStorageID) || drive.SelectionSessionID != strings.TrimSpace(input.IntakeSessionID) ||
 		len(input.FolderIDs) == 0 {
-		handler.failIntakeTool(writer, request, call, http.StatusConflict, "MCP_INTAKE_SELECTION_STALE", input.WorkspaceDriveID)
+		handler.failTool(writer, request, call, http.StatusConflict, "MCP_INTAKE_SELECTION_STALE", input.WorkspaceDriveID)
 		return
 	}
 	availableFolders := make(map[string]archiveintakeworkspace.FolderView, len(drive.DiscoveredFolders))
@@ -680,7 +676,7 @@ func (handler *Handler) pinArchiveIntakeSelection(writer http.ResponseWriter, re
 		folderID = strings.TrimSpace(strings.ReplaceAll(folderID, "\\", "/"))
 		folder, ok := availableFolders[folderID]
 		if !ok || seenFolders[folderID] {
-			handler.failIntakeTool(writer, request, call, http.StatusConflict, "MCP_INTAKE_SELECTION_OUTSIDE_CANDIDATES", folderID)
+			handler.failTool(writer, request, call, http.StatusConflict, "MCP_INTAKE_SELECTION_OUTSIDE_CANDIDATES", folderID)
 			return
 		}
 		seenFolders[folderID] = true
@@ -696,7 +692,7 @@ func (handler *Handler) pinArchiveIntakeSelection(writer http.ResponseWriter, re
 		break
 	}
 	if !archiveFound {
-		handler.failIntakeTool(writer, request, call, http.StatusConflict, "MCP_ARCHIVE_STORAGE_INELIGIBLE", input.ArchiveStorageID)
+		handler.failTool(writer, request, call, http.StatusConflict, "MCP_ARCHIVE_STORAGE_INELIGIBLE", input.ArchiveStorageID)
 		return
 	}
 	selection, err := archivistruntime.NewDriveSelection(archivistruntime.DriveSelection{
@@ -706,11 +702,11 @@ func (handler *Handler) pinArchiveIntakeSelection(writer http.ResponseWriter, re
 		FolderIDs: input.FolderIDs, SelectedByType: vocabulary.ActorArchivist, SelectedBy: "archivist:" + call.SessionID,
 	})
 	if err != nil || handler.archivists.BindDriveSelection(request.Context(), call.SessionID, call.TurnID, selection) != nil {
-		handler.failIntakeTool(writer, request, call, http.StatusConflict, "MCP_INTAKE_SELECTION_CONFLICT", input.WorkspaceDriveID)
+		handler.failTool(writer, request, call, http.StatusConflict, "MCP_INTAKE_SELECTION_CONFLICT", input.WorkspaceDriveID)
 		return
 	}
 	runID := stableToolTarget("ARCHIVE-RUN", call.SessionID, call.TurnID, strings.Join(selection.FolderIDs, "\x00"))
-	_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, drive.WorkspaceDriveID, "COMPLETED")
+	_ = handler.recordCall(request.Context(), call, drive.WorkspaceDriveID, "COMPLETED", "")
 	writeJSON(writer, http.StatusOK, map[string]any{"data": map[string]any{
 		"selection": selection, "archive_run_id": runID, "estimated_output_bytes": selectedBytes,
 	}})
@@ -753,11 +749,6 @@ func decodeToolInput(raw json.RawMessage, target any) bool {
 	return decoder.Decode(&struct{}{}) == io.EOF
 }
 
-func (handler *Handler) failIntakeTool(writer http.ResponseWriter, request *http.Request, call callRequest, status int, code, targetID string) {
-	_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, strings.TrimSpace(targetID), "FAILED")
-	writeError(writer, status, code)
-}
-
 func (handler *Handler) archiveIntakeSelection(ctx context.Context, call callRequest) (archivistruntime.DriveSelection, error) {
 	if handler.drives == nil || handler.archiveRuns == nil || handler.archiveTranscriptions == nil {
 		return archivistruntime.DriveSelection{}, errors.New("drive capabilities are unavailable")
@@ -768,20 +759,19 @@ func (handler *Handler) archiveIntakeSelection(ctx context.Context, call callReq
 func (handler *Handler) getArchiveIntakeSelection(writer http.ResponseWriter, request *http.Request, call callRequest) {
 	selection, err := handler.archiveIntakeSelection(request.Context(), call)
 	if errors.Is(err, archivistcontrol.ErrDriveSelectionNotBound) {
-		_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, "", "COMPLETED")
+		_ = handler.recordCall(request.Context(), call, "", "COMPLETED", "")
 		writeJSON(writer, http.StatusOK, map[string]any{"data": map[string]any{"bound": false}})
 		return
 	}
 	if err != nil {
-		_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, "", "FAILED")
 		if errors.Is(err, archivistcontrol.ErrInvalidRequest) || errors.Is(err, archivistcontrol.ErrTurnNotFound) {
-			writeError(writer, http.StatusConflict, "MCP_TURN_CONTEXT_INVALID")
+			handler.failTool(writer, request, call, http.StatusConflict, "MCP_TURN_CONTEXT_INVALID", "")
 		} else {
-			writeError(writer, http.StatusInternalServerError, "MCP_DRIVE_SELECTION_LOOKUP_FAILED")
+			handler.failTool(writer, request, call, http.StatusInternalServerError, "MCP_DRIVE_SELECTION_LOOKUP_FAILED", "")
 		}
 		return
 	}
-	_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, selection.ArchiveRunID, "COMPLETED")
+	_ = handler.recordCall(request.Context(), call, selection.ArchiveRunID, "COMPLETED", "")
 	writeJSON(writer, http.StatusOK, map[string]any{"data": struct {
 		Bound bool `json:"bound"`
 		archivistruntime.DriveSelection
@@ -791,12 +781,12 @@ func (handler *Handler) getArchiveIntakeSelection(writer http.ResponseWriter, re
 func (handler *Handler) getArchiveRunStatus(writer http.ResponseWriter, request *http.Request, call callRequest) {
 	selection, err := handler.archiveIntakeSelection(request.Context(), call)
 	if err != nil {
-		writeError(writer, http.StatusConflict, "MCP_DRIVE_SELECTION_REQUIRED")
+		handler.failTool(writer, request, call, http.StatusConflict, "MCP_DRIVE_SELECTION_REQUIRED", "")
 		return
 	}
 	drives, err := handler.drives.Projection(request.Context())
 	if err != nil {
-		writeError(writer, http.StatusInternalServerError, "MCP_DRIVE_STATUS_FAILED")
+		handler.failTool(writer, request, call, http.StatusInternalServerError, "MCP_DRIVE_STATUS_FAILED", selection.ArchiveRunID)
 		return
 	}
 	for _, drive := range drives {
@@ -806,7 +796,7 @@ func (handler *Handler) getArchiveRunStatus(writer http.ResponseWriter, request 
 			if handler.work != nil && drive.ArchiveRunID != "" {
 				view, err := handler.work.Detail(request.Context(), drive.ArchiveRunID)
 				if err != nil {
-					writeError(writer, http.StatusInternalServerError, "MCP_WORK_STATUS_FAILED")
+					handler.failTool(writer, request, call, http.StatusInternalServerError, "MCP_WORK_STATUS_FAILED", selection.ArchiveRunID)
 					return
 				}
 				outcome = view.Summary.State
@@ -818,7 +808,7 @@ func (handler *Handler) getArchiveRunStatus(writer http.ResponseWriter, request 
 					outputs = append(outputs, o)
 				}
 			}
-			_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, selection.ArchiveRunID, "COMPLETED")
+			_ = handler.recordCall(request.Context(), call, selection.ArchiveRunID, "COMPLETED", "")
 			writeJSON(writer, http.StatusOK, map[string]any{"data": map[string]any{
 				"workspace_drive_id": drive.WorkspaceDriveID, "worker_id": drive.WorkerID, "state": drive.State, "work_state": outcome, "archive_run_state": drive.ArchiveRunState,
 				"input_revision": drive.InputRevision, "file_count": drive.FileCount, "result_count": resultCount,
@@ -827,7 +817,7 @@ func (handler *Handler) getArchiveRunStatus(writer http.ResponseWriter, request 
 			return
 		}
 	}
-	writeError(writer, http.StatusNotFound, "MCP_DRIVE_STATUS_NOT_FOUND")
+	handler.failTool(writer, request, call, http.StatusNotFound, "MCP_DRIVE_STATUS_NOT_FOUND", selection.ArchiveRunID)
 }
 
 func (handler *Handler) selectedDriveProjection(ctx context.Context, call callRequest) (archivistruntime.DriveSelection, archiveintakeworkspace.DriveView, error) {
@@ -870,12 +860,12 @@ func selectedHold(selection archivistruntime.DriveSelection, drive archiveintake
 
 func (handler *Handler) listOrganizationHolds(writer http.ResponseWriter, request *http.Request, call callRequest) {
 	if !validEmptyInput(call.Input) {
-		handler.failHoldTool(writer, request, call, http.StatusBadRequest, "MCP_INPUT_INVALID", "")
+		handler.failTool(writer, request, call, http.StatusBadRequest, "MCP_INPUT_INVALID", "")
 		return
 	}
 	selection, drive, err := handler.selectedDriveProjection(request.Context(), call)
 	if err != nil {
-		handler.failHoldTool(writer, request, call, http.StatusConflict, "MCP_HOLD_SELECTION_REQUIRED", "")
+		handler.failTool(writer, request, call, http.StatusConflict, "MCP_HOLD_SELECTION_REQUIRED", "")
 		return
 	}
 	holds := make([]map[string]any, 0)
@@ -894,7 +884,7 @@ func (handler *Handler) listOrganizationHolds(writer http.ResponseWriter, reques
 		}
 		holds = append(holds, item)
 	}
-	_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, selection.ArchiveRunID, "COMPLETED")
+	_ = handler.recordCall(request.Context(), call, selection.ArchiveRunID, "COMPLETED", "")
 	writeJSON(writer, http.StatusOK, map[string]any{"data": map[string]any{
 		"archive_run_id": selection.ArchiveRunID, "workspace_drive_id": selection.WorkspaceDriveID, "holds": holds,
 	}})
@@ -905,24 +895,24 @@ func (handler *Handler) getOrganizationHold(writer http.ResponseWriter, request 
 		Folder string `json:"folder"`
 	}
 	if json.Unmarshal(call.Input, &input) != nil || strings.TrimSpace(input.Folder) == "" {
-		handler.failHoldTool(writer, request, call, http.StatusBadRequest, "MCP_INPUT_INVALID", "")
+		handler.failTool(writer, request, call, http.StatusBadRequest, "MCP_INPUT_INVALID", "")
 		return
 	}
 	selection, drive, err := handler.selectedDriveProjection(request.Context(), call)
 	if err != nil {
-		handler.failHoldTool(writer, request, call, http.StatusConflict, "MCP_HOLD_SELECTION_REQUIRED", input.Folder)
+		handler.failTool(writer, request, call, http.StatusConflict, "MCP_HOLD_SELECTION_REQUIRED", input.Folder)
 		return
 	}
 	folder, ok := selectedHold(selection, drive, input.Folder)
 	if !ok {
-		handler.failHoldTool(writer, request, call, http.StatusNotFound, "MCP_HOLD_NOT_FOUND", input.Folder)
+		handler.failTool(writer, request, call, http.StatusNotFound, "MCP_HOLD_NOT_FOUND", input.Folder)
 		return
 	}
 	evidence := folder.ClassificationEvidence
 	if evidence == nil {
 		evidence = &organization.ClassificationEvidence{State: "NOT_RECORDED"}
 	}
-	_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, folder.DecisionID, "COMPLETED")
+	_ = handler.recordCall(request.Context(), call, folder.DecisionID, "COMPLETED", "")
 	writeJSON(writer, http.StatusOK, map[string]any{"data": map[string]any{
 		"archive_run_id": selection.ArchiveRunID, "workspace_drive_id": selection.WorkspaceDriveID,
 		"folder": folder.Folder, "decision_id": folder.DecisionID, "decision_sequence": folder.DecisionSequence,
@@ -942,7 +932,7 @@ func (handler *Handler) classifyOrganizationHold(writer http.ResponseWriter, req
 		Basis                  []string `json:"basis"`
 	}
 	if json.Unmarshal(call.Input, &input) != nil {
-		handler.failHoldTool(writer, request, call, http.StatusBadRequest, "MCP_INPUT_INVALID", "")
+		handler.failTool(writer, request, call, http.StatusBadRequest, "MCP_INPUT_INVALID", "")
 		return
 	}
 	input.Folder = strings.TrimSpace(input.Folder)
@@ -951,26 +941,26 @@ func (handler *Handler) classifyOrganizationHold(writer http.ResponseWriter, req
 	disposition := vocabulary.OrganizationDisposition(strings.TrimSpace(input.Disposition))
 	if input.Folder == "" || input.ExpectedInputRevision == 0 || input.Reason == "" || len(input.Basis) == 0 ||
 		!validArchivistDisposition(disposition, input.TargetVideoBitRateKbps) {
-		handler.failHoldTool(writer, request, call, http.StatusBadRequest, "MCP_CLASSIFICATION_INVALID", input.Folder)
+		handler.failTool(writer, request, call, http.StatusBadRequest, "MCP_CLASSIFICATION_INVALID", input.Folder)
 		return
 	}
 	selection, drive, err := handler.selectedDriveProjection(request.Context(), call)
 	if err != nil {
-		handler.failHoldTool(writer, request, call, http.StatusConflict, "MCP_HOLD_SELECTION_REQUIRED", input.Folder)
+		handler.failTool(writer, request, call, http.StatusConflict, "MCP_HOLD_SELECTION_REQUIRED", input.Folder)
 		return
 	}
 	folder, ok := selectedHold(selection, drive, input.Folder)
 	if !ok || folder.InputRevision != input.ExpectedInputRevision {
-		handler.failHoldTool(writer, request, call, http.StatusConflict, "MCP_HOLD_REFERENCE_STALE", input.Folder)
+		handler.failTool(writer, request, call, http.StatusConflict, "MCP_HOLD_REFERENCE_STALE", input.Folder)
 		return
 	}
 	if folder.NoiseReview != nil || organization.NoiseCandidateKind(folder.Folder, folder.SourceRole) != "" {
-		handler.failHoldTool(writer, request, call, http.StatusForbidden, "MCP_NOISE_REQUIRES_HUMAN_CHOICE", input.Folder)
+		handler.failTool(writer, request, call, http.StatusForbidden, "MCP_NOISE_REQUIRES_HUMAN_CHOICE", input.Folder)
 		return
 	}
 	route, err := archivistruntime.RouteArchivistCommand(vocabulary.ActionProcess)
 	if err != nil {
-		handler.failHoldTool(writer, request, call, http.StatusForbidden, "MCP_ARCHIVIST_POLICY_DENIED", input.Folder)
+		handler.failTool(writer, request, call, http.StatusForbidden, "MCP_ARCHIVIST_POLICY_DENIED", input.Folder)
 		return
 	}
 	decisionID := holdDecisionID(call, folder)
@@ -1002,20 +992,15 @@ func (handler *Handler) classifyOrganizationHold(writer http.ResponseWriter, req
 		if errors.Is(err, organization.ErrStaleInputRevision) || errors.Is(err, command.ErrIdempotencyConflict) {
 			status, code = http.StatusConflict, "MCP_HOLD_REFERENCE_STALE"
 		}
-		handler.failHoldTool(writer, request, call, status, code, folder.Folder)
+		handler.failTool(writer, request, call, status, code, folder.Folder)
 		return
 	}
-	_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, decision.ID, "COMPLETED")
+	_ = handler.recordCall(request.Context(), call, decision.ID, "COMPLETED", "")
 	writeJSON(writer, http.StatusOK, map[string]any{"data": map[string]any{
 		"decision_id": decision.ID, "decision_sequence": decision.Sequence,
 		"input_revision": decision.InputRevision, "disposition": decision.Disposition,
 		"profile_reference": decision.ProfileReference, "decided_by_type": decision.DecidedByType,
 	}})
-}
-
-func (handler *Handler) failHoldTool(writer http.ResponseWriter, request *http.Request, call callRequest, status int, code, targetID string) {
-	_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, strings.TrimSpace(targetID), "FAILED")
-	writeError(writer, status, code)
 }
 
 func normalizeClassificationBasis(source []string) []string {
@@ -1059,13 +1044,12 @@ func (handler *Handler) startArchiveRun(writer http.ResponseWriter, request *htt
 	}
 	if json.Unmarshal(call.Input, &input) != nil || strings.TrimSpace(input.ArchiveRunID) == "" ||
 		(selection.ArchiveRunID != "" && selection.ArchiveRunID != strings.TrimSpace(input.ArchiveRunID)) {
-		writeError(writer, http.StatusConflict, "MCP_DRIVE_SELECTION_REQUIRED")
+		handler.failTool(writer, request, call, http.StatusConflict, "MCP_DRIVE_SELECTION_REQUIRED", "")
 		return
 	}
 	route, err := archivistruntime.RouteArchivistCommand(vocabulary.ActionProcess)
 	if err != nil {
-		_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, "", "FAILED")
-		writeError(writer, http.StatusForbidden, "MCP_ARCHIVIST_POLICY_DENIED")
+		handler.failTool(writer, request, call, http.StatusForbidden, "MCP_ARCHIVIST_POLICY_DENIED", "")
 		return
 	}
 	if policy == archivistruntime.ToolPolicyAdvisory || route == archivistruntime.RouteActionCard {
@@ -1084,16 +1068,14 @@ func (handler *Handler) startArchiveRun(writer http.ResponseWriter, request *htt
 	})
 	if err != nil {
 		slog.Warn("MCP archive run start rejected", "session_id", call.SessionID, "turn_id", call.TurnID, "error", err)
-		_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, input.ArchiveRunID, "FAILED")
-		writeError(writer, http.StatusConflict, "MCP_ARCHIVE_RUN_START_REJECTED")
+		handler.failTool(writer, request, call, http.StatusConflict, "MCP_ARCHIVE_RUN_START_REJECTED", input.ArchiveRunID)
 		return
 	}
 	if err := handler.archivists.BindArchiveRun(request.Context(), call.SessionID, call.TurnID, result.Receipt.ID, 1); err != nil {
-		_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, result.Receipt.ID, "FAILED")
-		writeError(writer, http.StatusInternalServerError, "MCP_ARCHIVE_RUN_BIND_FAILED")
+		handler.failTool(writer, request, call, http.StatusInternalServerError, "MCP_ARCHIVE_RUN_BIND_FAILED", result.Receipt.ID)
 		return
 	}
-	_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, result.Receipt.ID, "COMPLETED")
+	_ = handler.recordCall(request.Context(), call, result.Receipt.ID, "COMPLETED", "")
 	writeJSON(writer, http.StatusOK, map[string]any{"data": map[string]any{
 		"archive_run_id": result.Receipt.ID, "folder_count": len(result.Receipt.Folders), "replayed": result.Replayed,
 	}})
@@ -1131,13 +1113,12 @@ func (handler *Handler) startArchiveTranscription(writer http.ResponseWriter, re
 	selection, err := handler.archiveIntakeSelection(request.Context(), call)
 	if err != nil || !validEmptyInput(call.Input) ||
 		selection.ArchiveRunID == "" || selection.ArchiveRunRevision == 0 {
-		writeError(writer, http.StatusConflict, "MCP_ARCHIVE_RUN_REFERENCE_REQUIRED")
+		handler.failTool(writer, request, call, http.StatusConflict, "MCP_ARCHIVE_RUN_REFERENCE_REQUIRED", selection.ArchiveRunID)
 		return
 	}
 	route, err := archivistruntime.RouteArchivistCommand(vocabulary.ActionProcess)
 	if err != nil {
-		_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, selection.ArchiveRunID, "FAILED")
-		writeError(writer, http.StatusForbidden, "MCP_ARCHIVIST_POLICY_DENIED")
+		handler.failTool(writer, request, call, http.StatusForbidden, "MCP_ARCHIVIST_POLICY_DENIED", selection.ArchiveRunID)
 		return
 	}
 	if route == archivistruntime.RouteActionCard {
@@ -1158,21 +1139,20 @@ func (handler *Handler) startArchiveTranscription(writer http.ResponseWriter, re
 		StartedAt: time.Now().UTC(),
 	})
 	if err != nil {
-		_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, selection.ArchiveRunID, "FAILED")
-		writeError(writer, http.StatusConflict, "MCP_ARCHIVE_TRANSCRIPTION_START_FAILED")
+		handler.failTool(writer, request, call, http.StatusConflict, "MCP_ARCHIVE_TRANSCRIPTION_START_FAILED", selection.ArchiveRunID)
 		return
 	}
-	_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, selection.ArchiveRunID, "COMPLETED")
+	_ = handler.recordCall(request.Context(), call, selection.ArchiveRunID, "COMPLETED", "")
 	writeJSON(writer, http.StatusOK, map[string]any{"data": result})
 }
 
 func (handler *Handler) writeArchiveActionCard(writer http.ResponseWriter, request *http.Request, call callRequest, card archivistcontrol.ActionCardProjection) {
 	stored, err := handler.archivists.RecordActionCard(request.Context(), call.SessionID, card)
 	if err != nil {
-		writeError(writer, http.StatusInternalServerError, "MCP_ACTION_CARD_FAILED")
+		handler.failTool(writer, request, call, http.StatusInternalServerError, "MCP_ACTION_CARD_FAILED", card.TargetID)
 		return
 	}
-	_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, card.TargetID, "ACTION_CARD")
+	_ = handler.recordCall(request.Context(), call, card.TargetID, "ACTION_CARD", "")
 	writeJSON(writer, http.StatusAccepted, map[string]any{"data": map[string]any{"action_card_id": stored.ID, "state": stored.State}})
 }
 
@@ -1189,17 +1169,15 @@ func (handler *Handler) getJob(writer http.ResponseWriter, request *http.Request
 		JobID string `json:"job_id"`
 	}
 	if json.Unmarshal(call.Input, &input) != nil || strings.TrimSpace(input.JobID) == "" {
-		_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, input.JobID, "FAILED")
-		writeError(writer, http.StatusBadRequest, "MCP_INPUT_INVALID")
+		handler.failTool(writer, request, call, http.StatusBadRequest, "MCP_INPUT_INVALID", input.JobID)
 		return
 	}
 	view, err := handler.archiveWorkspace.Detail(request.Context(), input.JobID)
 	if err != nil {
-		_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, input.JobID, "FAILED")
-		writeError(writer, http.StatusNotFound, "JOB_NOT_FOUND")
+		handler.failTool(writer, request, call, http.StatusNotFound, "JOB_NOT_FOUND", input.JobID)
 		return
 	}
-	_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, input.JobID, "COMPLETED")
+	_ = handler.recordCall(request.Context(), call, input.JobID, "COMPLETED", "")
 	writeJSON(writer, http.StatusOK, map[string]any{"data": view})
 }
 
@@ -1211,8 +1189,7 @@ func (handler *Handler) searchAssets(writer http.ResponseWriter, request *http.R
 		MaxDurationMillis int64  `json:"max_duration_ms"`
 	}
 	if json.Unmarshal(call.Input, &input) != nil {
-		_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, "", "FAILED")
-		writeError(writer, http.StatusBadRequest, "MCP_INPUT_INVALID")
+		handler.failTool(writer, request, call, http.StatusBadRequest, "MCP_INPUT_INVALID", "")
 		return
 	}
 	results, err := handler.catalog.Search(request.Context(), catalog.SearchQuery{
@@ -1220,11 +1197,10 @@ func (handler *Handler) searchAssets(writer http.ResponseWriter, request *http.R
 		MinDurationMillis: input.MinDurationMillis, MaxDurationMillis: input.MaxDurationMillis,
 	})
 	if err != nil {
-		_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, "", "FAILED")
-		writeError(writer, http.StatusBadRequest, "MCP_INPUT_INVALID")
+		handler.failTool(writer, request, call, http.StatusBadRequest, "MCP_INPUT_INVALID", "")
 		return
 	}
-	_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, "", "COMPLETED")
+	_ = handler.recordCall(request.Context(), call, "", "COMPLETED", "")
 	writeJSON(writer, http.StatusOK, map[string]any{"data": results})
 }
 
@@ -1236,14 +1212,12 @@ func (handler *Handler) createJob(writer http.ResponseWriter, request *http.Requ
 		Reason       string `json:"reason"`
 	}
 	if json.Unmarshal(call.Input, &input) != nil {
-		_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, "", "FAILED")
-		writeError(writer, http.StatusBadRequest, "MCP_INPUT_INVALID")
+		handler.failTool(writer, request, call, http.StatusBadRequest, "MCP_INPUT_INVALID", "")
 		return
 	}
 	route, err := archivistruntime.RouteArchivistCommand(vocabulary.ActionProcess)
 	if err != nil || route != archivistruntime.RouteDirectCommand {
-		_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, input.JobID, "FAILED")
-		writeError(writer, http.StatusConflict, "MCP_ACTION_CARD_REQUIRED")
+		handler.failTool(writer, request, call, http.StatusConflict, "MCP_ACTION_CARD_REQUIRED", input.JobID)
 		return
 	}
 	decision, err := archivistruntime.PrepareToolCall(archivistruntime.ToolCallRequest{
@@ -1254,17 +1228,15 @@ func (handler *Handler) createJob(writer http.ResponseWriter, request *http.Requ
 		Parameters: map[string]any{"template_name": input.TemplateName, "target_title": input.TargetTitle},
 	}, nil)
 	if err != nil || decision.Command == nil {
-		_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, input.JobID, "FAILED")
-		writeError(writer, http.StatusBadRequest, "MCP_INPUT_INVALID")
+		handler.failTool(writer, request, call, http.StatusBadRequest, "MCP_INPUT_INVALID", input.JobID)
 		return
 	}
 	result, err := handler.commands.Execute(request.Context(), *decision.Command)
 	if err != nil {
-		_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, input.JobID, "FAILED")
-		writeError(writer, http.StatusConflict, "MCP_COMMAND_FAILED")
+		handler.failTool(writer, request, call, http.StatusConflict, "MCP_COMMAND_FAILED", input.JobID)
 		return
 	}
-	_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, input.JobID, "COMPLETED")
+	_ = handler.recordCall(request.Context(), call, input.JobID, "COMPLETED", "")
 	writeJSON(writer, http.StatusOK, map[string]any{"data": map[string]any{
 		"command_id": result.CommandID, "target_id": result.TargetID, "revision": result.Revision,
 	}})

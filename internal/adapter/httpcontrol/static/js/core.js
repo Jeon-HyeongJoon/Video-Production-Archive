@@ -99,7 +99,7 @@ export const labels = {
     "archive.run.transcription.start.v1": "자막·텍스트 만들기", "archive.jobs.get.v1": "작업 확인", "archive.work.reference.get.v1": "이어갈 작업 확인", "archive.work.failure_evidence.get.v1": "실패 근거 상세 확인", "archive.work.recovery.apply.v1": "안전 복구 실행", "archive.system.status.get.v1": "전체 현황 확인",
     "archive.assets.search.v1": "보관 영상 검색", "archive.jobs.create.v1": "작업 추가",
   },
-  call: { COMPLETED: "완료", ACTION_CARD: "결정 요청", FAILED: "실패", RUNNING: "처리 중" },
+  call: { UNOBSERVED: "결과 기록 없음", COMPLETED: "완료", ACTION_CARD: "결정 요청", FAILED: "실패", RUNNING: "처리 중" },
   card: { "archive_run.start": "영상 정리·보관 시작", "archive_run.transcription.start": "자막·텍스트 만들기", "archive_intake.selection.required": "작업 대상 선택 필요", "job.create": "작업 추가" },
   cardState: { PENDING: "실행 전 확인 필요", COMPLETED: "진행함", REJECTED: "진행하지 않음" },
   storageRole: { SOURCE_MEDIA: "가져올 영상", ARCHIVE_PRIMARY: "결과 저장 위치" },

@@ -77,7 +77,7 @@ func TestWorkDiagnosticsExposePersistedFailureEvidenceAsFactsWithoutRawProcessDa
 	}
 	t.Run("cancelled run retains its child's previous failure", func(t *testing.T) {
 		stopped := view
-		stopped.Summary.StepState, stopped.Summary.ErrorClass = workflow.Cancelled, ""
+		stopped.Summary.StepState = workflow.Cancelled // The stored Job retains the previous attempt's ErrorClass.
 		work := fixedWorkReader{view: archivework.View{
 			Summary: archivework.Summary{WorkID: "RUN-CANCELLED", State: archivework.StateCancelled},
 			Children: []archivework.ChildJob{
@@ -90,7 +90,7 @@ func TestWorkDiagnosticsExposePersistedFailureEvidenceAsFactsWithoutRawProcessDa
 			t.Fatal(err)
 		}
 		got, err := svc.Diagnose(context.Background(), archivistruntime.WorkReference{Kind: archivistruntime.WorkArchiveRun, WorkID: work.view.Summary.WorkID, Revision: 1})
-		if err != nil || len(got.Jobs) != 1 || got.Jobs[0].StepState != workflow.Cancelled || !hasFactEvidence(got.Facts, "WORKER_FAILURE_RECORDED", "EVD-WORKER-SECOND") {
+		if err != nil || len(got.Jobs) != 1 || got.Jobs[0].StepState != workflow.Cancelled || hasFact(got.Facts, "REPORTED_FAILURE") || len(got.RecoveryActions) != 0 || !hasFactEvidence(got.Facts, "WORKER_FAILURE_RECORDED", "EVD-WORKER-SECOND") {
 			t.Fatalf("cancelled work lost recorded failure evidence: %+v, %v", got, err)
 		}
 	})
@@ -190,14 +190,17 @@ func TestWorkDiagnosticsExposeAvailableDetailAndMarkLegacyReferenceUnresolvable(
 	legacy.EvidenceID = "EVD-WORKER-LEGACY"
 	legacy.LogReference = "worker://operation-failed"
 	legacy.ProcessLog = nil
-	view.Steps[0].FailureEvidence = []corejob.StepFailureEvidence{legacy}
+	legacy.FailureSequence, legacy.WorkflowAttempt, legacy.FencingToken = 2, 2, 9
+	// A prior Worker clock is later than the authoritative failure sequence.
+	legacy.ObservedAt = failure.ObservedAt.Add(-time.Minute)
+	view.Steps[0].FailureEvidence = []corejob.StepFailureEvidence{failure, legacy}
 	service, _ = New(fixedWorkReader{}, fixedJobReader{view: view}, fixedWorkerReader{}, fixedExecutionReader{}, func() time.Time { return now }, 10*time.Minute)
 	diagnostic, err = service.Diagnose(context.Background(), reference)
 	if err != nil {
 		t.Fatal(err)
 	}
-	projected = diagnostic.Jobs[0].FailureEvidence[0]
-	if projected.ProcessLog == nil || projected.ProcessLog.State != execution.ProcessLogLegacyUnresolvable ||
+	current, err := service.FailureEvidence(context.Background(), reference, legacy.EvidenceID)
+	if err != nil || current.ProcessLog.State != execution.ProcessLogLegacyUnresolvable || current.WorkflowAttempt != 2 ||
 		hasSuggestedAction(diagnostic.SuggestedActions, "INSPECT_FAILURE_DETAIL") || !hasSuggestedAction(diagnostic.SuggestedActions, "FAILURE_DETAIL_UNAVAILABLE") {
 		t.Fatalf("legacy reference was presented as resolvable: %+v", diagnostic)
 	}
