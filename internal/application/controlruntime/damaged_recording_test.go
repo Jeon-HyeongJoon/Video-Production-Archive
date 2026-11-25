@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -192,8 +193,8 @@ func TestDamagedRecordingStopsAfterOneWorkerAttemptAcrossControlRestart(t *testi
 		t.Fatal(err)
 	}
 	defer destination.Close()
-	if exists, err := destination.Exists("archive-catalog.csv"); err != nil || exists {
-		t.Fatalf("unexpected destination catalog: exists=%v, err=%v", exists, err)
+	if _, _, err := destination.FileSHA256("archive-catalog.csv"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("unexpected destination catalog: %v", err)
 	}
 	ledger, err := sqlitecommand.Open(cfg.DatabasePath)
 	if err != nil {
@@ -216,9 +217,9 @@ func TestDamagedRecordingStopsAfterOneWorkerAttemptAcrossControlRestart(t *testi
 			t.Fatal("expected three planned render targets and no complete Step output")
 		}
 		for i, out := range step.ExecutionSpec.Outputs {
-			exists, err := destination.Exists(out.RelativePath)
-			if err != nil || exists != (i == 0) {
-				t.Fatalf("staging item %d exists=%v err=%v", i+1, exists, err)
+			size, _, err := destination.FileSHA256(out.RelativePath)
+			if (i == 0 && (err != nil || size == 0)) || (i != 0 && !errors.Is(err, os.ErrNotExist)) {
+				t.Fatalf("staging item %d size=%d err=%v", i+1, size, err)
 			}
 		}
 	}
