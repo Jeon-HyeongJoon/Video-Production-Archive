@@ -549,10 +549,10 @@ export function jobLane(job) {
 
 export function workLane(work) {
   if (work?.replacement_work_id) return "done";
-  return { FAILED: "fault", ATTENTION: "decide", ACTIVE: "work", QUEUED: "queue", COMPLETED: "done" }[work?.state] || "queue";
+  return { FAILED: "fault", ATTENTION: "decide", ACTIVE: "work", QUEUED: "queue", COMPLETED: "done", CANCELLED: "done" }[work?.state] || "queue";
 }
 
-export const WORK_TEXT = { FAILED: "실패", ATTENTION: "직접 확인 필요", ACTIVE: "처리 중", QUEUED: "시작 대기", COMPLETED: "완료" };
+export const WORK_TEXT = { FAILED: "실패", ATTENTION: "직접 확인 필요", ACTIVE: "처리 중", QUEUED: "시작 대기", COMPLETED: "완료", CANCELLED: "취소됨" };
 
 // workDrive is the drive whose current ArchiveRun is this work, if it still is.
 export function workDrive(work) {
@@ -564,6 +564,7 @@ export function workDrive(work) {
 // workPhase names where an archive work is: its drive's phase while it is the
 // drive's current run, its stored state after that.
 export function workPhase(work) {
+  if (work?.state === "CANCELLED") return "done";
   const current = workDrive(work);
   if (current) return drivePhase(current);
   return work?.state === "COMPLETED" ? "done" : work?.state === "QUEUED" ? "intake" : "stage1";
@@ -581,12 +582,13 @@ const LANE_KIND = { fault: "fault", decide: "decide", work: "work", resource: "w
 // workText is a work's state in words: an archive work names its phase.
 export function workText(work) {
   if (work.replacement_work_id) return "새 작업으로 넘김";
-  if (work.kind === "JOB" || ["QUEUED", "FAILED", "ATTENTION"].includes(work.state)) return WORK_TEXT[work.state] || work.state;
+  if (work.kind === "JOB" || ["QUEUED", "FAILED", "ATTENTION", "CANCELLED"].includes(work.state)) return WORK_TEXT[work.state] || work.state;
   return PHASE_LABEL[workPhase(work)] || WORK_TEXT[work.state];
 }
 
 export function workKind(work) {
   if (work.replacement_work_id) return "done";
+  if (work.state === "CANCELLED") return "idle";
   if (work.kind === "ARCHIVE_RUN" && !["QUEUED", "FAILED", "ATTENTION"].includes(work.state)) return PHASE_ICON[workPhase(work)] || "idle";
   return LANE_KIND[workLane(work)] || "idle";
 }

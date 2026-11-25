@@ -70,6 +70,7 @@ type WorkCounts struct {
 	Attention int `json:"attention"`
 	Failed    int `json:"failed"`
 	Completed int `json:"completed"`
+	Cancelled int `json:"cancelled"`
 }
 
 type OpenIssue struct {
@@ -194,7 +195,7 @@ func (service *Service) Snapshot(ctx context.Context) (Snapshot, error) {
 	for _, work := range works {
 		state := effectiveState(work)
 		incrementCount(&result.WorkCounts, state)
-		if work.ReplacementWorkID != "" || state == archivework.StateCompleted {
+		if work.ReplacementWorkID != "" || state == archivework.StateCompleted || state == archivework.StateCancelled {
 			continue
 		}
 		reference := archivistruntime.WorkReference{Kind: workKind(work.Kind), WorkID: work.WorkID, Revision: work.Revision}
@@ -256,6 +257,8 @@ func incrementCount(counts *WorkCounts, state archivework.State) {
 		counts.Failed++
 	case archivework.StateCompleted:
 		counts.Completed++
+	case archivework.StateCancelled:
+		counts.Cancelled++
 	}
 }
 

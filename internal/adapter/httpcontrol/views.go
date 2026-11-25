@@ -13,7 +13,6 @@ import (
 	"videoarchive/internal/core/organization"
 	"videoarchive/internal/core/summary"
 	"videoarchive/internal/core/worker"
-	"videoarchive/internal/core/workflow"
 )
 
 type summaryView struct {
@@ -459,23 +458,7 @@ func projectWorkSummary(value archivework.Summary) workSummaryView {
 }
 
 func projectStandaloneWork(value archiveworkspace.JobSummary) workSummaryView {
-	state := archivework.StateQueued
-	if value.StepState == workflow.Failed || value.ErrorClass != "" {
-		state = archivework.StateFailed
-	} else if value.NeedsHumanIntervention {
-		state = archivework.StateAttention
-	} else {
-		switch value.StepState {
-		case workflow.Reserved, workflow.Running, workflow.Verifying:
-			state = archivework.StateActive
-		case workflow.Completed, workflow.Cancelled:
-			state = archivework.StateCompleted
-		}
-	}
-	return projectWorkSummary(archivework.Summary{
-		Items: value.Items, WorkID: value.JobID, Kind: archivework.StandaloneJob, State: state, CreatedAt: value.LastEventAt,
-		LastEventAt: value.LastEventAt, WorkerID: value.WorkerID, ChildJobCount: 1, Progress: value.Progress, Title: value.TargetTitle,
-	})
+	return projectWorkSummary(archivework.StandaloneSummary(value))
 }
 
 func projectWorkDetail(value archivework.View) workDetailView {

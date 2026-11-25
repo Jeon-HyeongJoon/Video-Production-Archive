@@ -27,6 +27,7 @@ function RunFacts({ summary }) {
     <${Fact} label="가져올 드라이브 → 저장 위치" value=${`${source} → ${summary.archive_storage_id || "—"}`} />
     <${Fact} label="폴더" value=${formatCount(summary.folder_count)} />
     <${Fact} label="영상" value=${formatCount(summary.video_count)} />
+    ${summary.state === "CANCELLED" && html`<${Fact} label="보관 결과" value=${`${formatCount(summary.result_count)}개`} />`}
     ${summary.effective_jobs > 0 && html`<${Fact} label="하위 작업 완료" value=${`${summary.completed_jobs || 0}/${summary.effective_jobs}개`} />`}
     ${summary.items && html`<${Fact} label="현재 단계" value=${itemProgressText(summary.items)} />`}
   </div>`;

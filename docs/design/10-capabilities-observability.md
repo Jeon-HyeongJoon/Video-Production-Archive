@@ -145,6 +145,8 @@ artifacts/      manifest, checksum, 보고서 같은 작은 검증 산출물
 
 기능 팀장의 시험 입력, PM의 경계 검증과 배포 판정 제안은 [기능별 안정성 검증 설계](19-quality-verification-proposal.md)에 정리했다.
 
+여러 입력 중 하나가 치명적으로 손상되면 해당 Folder Job은 첫 실패에서 멈춘다. 먼저 검증한 작업 파일은 같은 입력으로 재개할 때 사용할 수 있도록 보존하고, 미처리 원본이나 부분 렌더를 보관 성공으로 세지 않는다. `APP-011`는 실제 FFmpeg와 HTTP Worker로 손상된 두 번째 입력을 처리하고 Control을 다시 연 뒤, 원본 세 개의 해시와 작업·목적지 파일, 저장된 실패 순번·프로세스 로그·후속 배정을 대조한다. Archivist는 취소된 실행에서도 중단 전의 실패 근거를 조회할 수 있다. `OBS-003`
+
 로컬 CLI acceptance는 실제 Windows Archivist Host·CLI ID·backend ID를 증적에 남기되 credential, resume token, raw 대화와 실제 filesystem path는 정제한다. 강제 연결 종료 전후의 ArchivistTurn event cursor, Tool Call receipt와 Command ID를 비교해 재개 뒤 중복 실행이 없음을 검증한다. `LRH-009`
 
 FFmpeg가 원본 패킷을 거부하고 디코더가 입력 오류로 종료하거나, AAC 설정 불일치와 오디오 필터의 치명 종료가 함께 나타나면 Worker는 실패한 입력의 순번·마지막 출력 위치·종료 코드·로그 참조를 보존한다. 이 입력 실패는 워크플로의 자동 재시도를 끝낸다. 성공 종료의 경고 및 출력 장치 문제는 별도 경계로 유지한다. `WRK-022`

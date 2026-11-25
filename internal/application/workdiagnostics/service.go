@@ -236,7 +236,7 @@ func (service *Service) Diagnose(ctx context.Context, reference archivistruntime
 			return Snapshot{}, loadErr
 		}
 		for _, child := range view.Children {
-			if child.Job.StepState == workflow.Completed || child.Job.StepState == workflow.Cancelled {
+			if child.Job.StepState == workflow.Completed || (child.Job.StepState == workflow.Cancelled && view.Summary.State != archivework.StateCancelled) {
 				continue
 			}
 			jobIDs = append(jobIDs, child.Job.JobID)

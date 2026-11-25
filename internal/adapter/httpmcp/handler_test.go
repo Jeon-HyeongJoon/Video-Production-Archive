@@ -1028,9 +1028,19 @@ func TestArchiveRunStatusSeparatesWorkOutcomeFromTerminalPhase(t *testing.T) {
 	state := holdReviewDriveState(t)
 	state.view.State, state.view.ArchiveRunState = "COMPLETED", "COMPLETED"
 	handler := holdReviewMCPHandler(t, state)
-	handler.work = outcomeReader{state.view.ArchiveRunID: archivework.StateFailed}
-	response := mcpTestRequest(handler, http.MethodPost, "/mcp/v1/call", archiveToolCall("STATUS", ToolArchiveRunStatus, `{}`), "secret")
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"work_state":"FAILED"`) || !strings.Contains(response.Body.String(), `"archive_run_state":"COMPLETED"`) {
-		t.Fatal(response.Body.String())
+	for _, outcome := range []archivework.State{archivework.StateFailed, archivework.StateCancelled} {
+		handler.work = outcomeReader{state.view.ArchiveRunID: outcome}
+		response := mcpTestRequest(handler, http.MethodPost, "/mcp/v1/call", archiveToolCall("STATUS-"+string(outcome), ToolArchiveRunStatus, `{}`), "secret")
+		var payload struct {
+			Data struct {
+				WorkState archivework.State `json:"work_state"`
+				Phase     string            `json:"archive_run_state"`
+				Results   *int              `json:"result_count"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil || response.Code != http.StatusOK ||
+			payload.Data.WorkState != outcome || payload.Data.Phase != "COMPLETED" || payload.Data.Results == nil || *payload.Data.Results != 0 {
+			t.Fatal(response.Body.String(), err)
+		}
 	}
 }

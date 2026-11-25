@@ -17,9 +17,12 @@ import (
 	"videoarchive/internal/core/workflow"
 )
 
-type fixedWorkReader struct{}
+type fixedWorkReader struct{ view archivework.View }
 
-func (fixedWorkReader) Detail(context.Context, string) (archivework.View, error) {
+func (r fixedWorkReader) Detail(_ context.Context, workID string) (archivework.View, error) {
+	if r.view.Summary.WorkID == workID {
+		return r.view, nil
+	}
 	return archivework.View{}, archivework.ErrWorkNotFound
 }
 
@@ -72,6 +75,25 @@ func TestWorkDiagnosticsExposePersistedFailureEvidenceAsFactsWithoutRawProcessDa
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Run("cancelled run retains its child's previous failure", func(t *testing.T) {
+		stopped := view
+		stopped.Summary.StepState, stopped.Summary.ErrorClass = workflow.Cancelled, ""
+		work := fixedWorkReader{view: archivework.View{
+			Summary: archivework.Summary{WorkID: "RUN-CANCELLED", State: archivework.StateCancelled},
+			Children: []archivework.ChildJob{
+				{Job: archiveworkspace.JobSummary{JobID: "inspection", StepState: workflow.Completed}},
+				{Job: stopped.Summary},
+			},
+		}}
+		svc, err := New(work, fixedJobReader{view: stopped}, fixedWorkerReader{}, fixedExecutionReader{}, func() time.Time { return now }, time.Minute)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := svc.Diagnose(context.Background(), archivistruntime.WorkReference{Kind: archivistruntime.WorkArchiveRun, WorkID: work.view.Summary.WorkID, Revision: 1})
+		if err != nil || len(got.Jobs) != 1 || got.Jobs[0].StepState != workflow.Cancelled || !hasFactEvidence(got.Facts, "WORKER_FAILURE_RECORDED", "EVD-WORKER-SECOND") {
+			t.Fatalf("cancelled work lost recorded failure evidence: %+v, %v", got, err)
+		}
+	})
 	for _, forbidden := range []string{`C:\private`, "token-secret", "password", "credential"} {
 		if strings.Contains(strings.ToLower(string(payload)), strings.ToLower(forbidden)) {
 			t.Fatalf("diagnostic exposed raw process data: %s", payload)

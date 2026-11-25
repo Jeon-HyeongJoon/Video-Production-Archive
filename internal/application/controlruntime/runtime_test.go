@@ -337,50 +337,7 @@ func TestControlRuntimeStartsArchiveOrganizationFromRegisteredSourceStorage(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	configurationPath := filepath.Join(directory, "control.yaml")
-	payload := fmt.Sprintf(`schema_version: 1
-database: {path: data/control.db}
-server:
-  listen_address: 127.0.0.1:0
-  allowed_cidrs: [127.0.0.0/8]
-  allowed_origins: [http://127.0.0.1:8080]
-  trusted_proxies: []
-security: {auth_mode: disabled, mcp_listen_address: 127.0.0.1:0}
-features: {}
-provider_accounts: []
-workers:
-  heartbeat_ttl: 30s
-  definitions:
-    - id: worker-main
-      enabled: true
-      credential_ref: wincred://worker/main
-      processing_kinds: [INSPECT, RENDER, AUDIO_EXTRACT, STT, QC, ORGANIZE]
-      allowed_storage_ids: [source-main, archive-main]
-storage:
-  - id: source-main
-    role: SOURCE_MEDIA
-    physical_device_id: source-drive
-    partition_id: source-partition
-    volume_id: source-volume
-    root: %s
-  - id: archive-main
-    role: ARCHIVE_PRIMARY
-    physical_device_id: archive-drive
-    partition_id: archive-partition
-    volume_id: archive-volume
-    root: %s
-archive_organization:
-  ffprobe:
-    executable: %s
-    version: ffprobe-fixture-v1
-`, sourceRoot, workingRoot, executable)
-	if err := os.WriteFile(configurationPath, []byte(payload), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	configuration, err := bootconfig.Load(configurationPath)
-	if err != nil {
-		t.Fatal(err)
-	}
+	configuration := registeredMediaConfiguration(t, directory, sourceRoot, workingRoot, executable)
 	now := time.Date(2026, 10, 30, 22, 0, 0, 0, time.UTC)
 	runtime, err := controlruntime.OpenWithDependencies(context.Background(), configuration, "v1-test", controlruntime.Dependencies{
 		Secrets: runtimeSecret("service-secret"), Now: func() time.Time { return now },
@@ -1973,6 +1930,55 @@ func openLedger(t *testing.T, path string) *sql.DB {
 		t.Fatal(err)
 	}
 	return ledger
+}
+
+func registeredMediaConfiguration(t *testing.T, directory, sourceRoot, workingRoot, executable string) bootconfig.Configuration {
+	t.Helper()
+	configurationPath := filepath.Join(directory, "control.yaml")
+	payload := fmt.Sprintf(`schema_version: 1
+database: {path: data/control.db}
+server:
+  listen_address: 127.0.0.1:0
+  allowed_cidrs: [127.0.0.0/8]
+  allowed_origins: [http://127.0.0.1:8080]
+  trusted_proxies: []
+security: {auth_mode: disabled, mcp_listen_address: 127.0.0.1:0}
+features: {}
+provider_accounts: []
+workers:
+  heartbeat_ttl: 30s
+  definitions:
+    - id: worker-main
+      enabled: true
+      credential_ref: wincred://worker/main
+      processing_kinds: [INSPECT, RENDER, AUDIO_EXTRACT, STT, QC, ORGANIZE]
+      allowed_storage_ids: [source-main, archive-main]
+storage:
+  - id: source-main
+    role: SOURCE_MEDIA
+    physical_device_id: source-drive
+    partition_id: source-partition
+    volume_id: source-volume
+    root: %q
+  - id: archive-main
+    role: ARCHIVE_PRIMARY
+    physical_device_id: archive-drive
+    partition_id: archive-partition
+    volume_id: archive-volume
+    root: %q
+archive_organization:
+  ffprobe:
+    executable: %q
+    version: ffprobe-fixture-v1
+`, sourceRoot, workingRoot, executable)
+	if err := os.WriteFile(configurationPath, []byte(payload), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	configuration, err := bootconfig.Load(configurationPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return configuration
 }
 
 func runtimeTestConfiguration(t *testing.T) bootconfig.Configuration {

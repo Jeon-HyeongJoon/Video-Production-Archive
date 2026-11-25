@@ -45,6 +45,7 @@ const (
 	StateActive    State = "ACTIVE"
 	StateQueued    State = "QUEUED"
 	StateCompleted State = "COMPLETED"
+	StateCancelled State = "CANCELLED"
 )
 
 type ChildRole string
@@ -454,7 +455,7 @@ func (service *Service) project(ctx context.Context) ([]View, error) {
 			continue
 		}
 		result = append(result, View{
-			Summary:  summarizeStandalone(summary),
+			Summary:  StandaloneSummary(summary),
 			Children: []ChildJob{{Role: ChildFolder, Folder: summary.TargetTitle, Job: summary}},
 			Failures: failuresFromChildren([]ChildJob{{Role: ChildFolder, Folder: summary.TargetTitle, Job: summary}}),
 		})
@@ -708,7 +709,7 @@ func measureChildren(summary *Summary, children []ChildJob) {
 	}
 }
 
-func summarizeStandalone(job archiveworkspace.JobSummary) Summary {
+func StandaloneSummary(job archiveworkspace.JobSummary) Summary {
 	return Summary{
 		Items: job.Items, WorkID: job.JobID, Revision: job.Revision, Kind: StandaloneJob, State: stateFromJob(job), CreatedAt: job.LastEventAt,
 		LastEventAt: job.LastEventAt, WorkerID: job.WorkerID, ChildJobCount: 1, Progress: job.Progress, Title: job.TargetTitle,
@@ -716,38 +717,35 @@ func summarizeStandalone(job archiveworkspace.JobSummary) Summary {
 }
 
 func summarizeState(children []ChildJob, drive archiveintakeworkspace.DriveView, current bool) State {
+	state := StateCompleted
+	cancelled := false
 	for _, child := range children {
-		if child.Job.StepState == workflow.Failed || child.Job.ErrorClass != "" {
-			return StateFailed
+		candidate := stateFromJob(child.Job)
+		if candidate == StateFailed {
+			return candidate
+		}
+		if candidate == StateCancelled {
+			cancelled = true
+		}
+		if stateRank(candidate) > stateRank(state) {
+			state = candidate
 		}
 	}
-	if current {
-		if drive.HoldCount > 0 || driveNeedsReview(drive) {
-			return StateAttention
+	if current && (drive.HoldCount > 0 || driveNeedsReview(drive)) {
+		return StateAttention
+	}
+	if cancelled {
+		if state == StateCompleted {
+			return StateCancelled
 		}
+		return state
+	}
+	if current {
 		if drive.ArchiveRunState == "COMPLETED" {
 			return StateCompleted
 		}
 		if drive.ArchiveRunState == "STAGE_ONE_RUNNING" || drive.ArchiveRunState == "TRANSCRIPTION_READY" || drive.ArchiveRunState == "STAGE_TWO_RUNNING" {
 			return StateActive
-		}
-	}
-	state := StateCompleted
-	for _, child := range children {
-		candidate := stateFromJob(child.Job)
-		switch candidate {
-		case StateFailed:
-			return StateFailed
-		case StateAttention:
-			state = StateAttention
-		case StateActive:
-			if state != StateAttention {
-				state = StateActive
-			}
-		case StateQueued:
-			if state == StateCompleted {
-				state = StateQueued
-			}
 		}
 	}
 	if len(children) == 0 {
@@ -766,8 +764,10 @@ func stateFromJob(summary archiveworkspace.JobSummary) State {
 	switch summary.StepState {
 	case workflow.Reserved, workflow.Running, workflow.Verifying:
 		return StateActive
-	case workflow.Completed, workflow.Cancelled:
+	case workflow.Completed:
 		return StateCompleted
+	case workflow.Cancelled:
+		return StateCancelled
 	default:
 		return StateQueued
 	}
@@ -798,7 +798,7 @@ func stateRank(state State) int {
 		return 3
 	case StateQueued:
 		return 2
-	case StateCompleted:
+	case StateCompleted, StateCancelled:
 		return 1
 	default:
 		return 0

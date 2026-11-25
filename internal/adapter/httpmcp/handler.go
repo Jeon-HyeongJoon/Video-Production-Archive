@@ -802,6 +802,7 @@ func (handler *Handler) getArchiveRunStatus(writer http.ResponseWriter, request 
 	for _, drive := range drives {
 		if drive.WorkspaceDriveID == selection.WorkspaceDriveID && (selection.ArchiveRunID == "" || drive.ArchiveRunID == selection.ArchiveRunID) {
 			var outcome archivework.State
+			var resultCount *int
 			if handler.work != nil && drive.ArchiveRunID != "" {
 				view, err := handler.work.Detail(request.Context(), drive.ArchiveRunID)
 				if err != nil {
@@ -809,6 +810,7 @@ func (handler *Handler) getArchiveRunStatus(writer http.ResponseWriter, request 
 					return
 				}
 				outcome = view.Summary.State
+				resultCount = &view.Summary.ResultCount
 			}
 			var outputs []archiveintakeworkspace.EventOutputEvidence
 			for _, o := range drive.EventOutputEvidence {
@@ -819,7 +821,7 @@ func (handler *Handler) getArchiveRunStatus(writer http.ResponseWriter, request 
 			_ = handler.archivists.RecordToolCall(request.Context(), call.SessionID, call.TurnID, call.ToolCallID, call.Tool, selection.ArchiveRunID, "COMPLETED")
 			writeJSON(writer, http.StatusOK, map[string]any{"data": map[string]any{
 				"workspace_drive_id": drive.WorkspaceDriveID, "worker_id": drive.WorkerID, "state": drive.State, "work_state": outcome, "archive_run_state": drive.ArchiveRunState,
-				"input_revision": drive.InputRevision, "file_count": drive.FileCount,
+				"input_revision": drive.InputRevision, "file_count": drive.FileCount, "result_count": resultCount,
 				"archive_run_id": drive.ArchiveRunID, "event_output_evidence": outputs, "folder_count": drive.FolderCount, "folders": drive.Folders,
 			}})
 			return

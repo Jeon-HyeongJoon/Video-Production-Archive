@@ -6,6 +6,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $repository = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+$FFmpegDirectory = (Resolve-Path -LiteralPath $FFmpegDirectory).Path
 $ffmpeg = Join-Path $FFmpegDirectory 'ffmpeg.exe'
 $ffprobe = Join-Path $FFmpegDirectory 'ffprobe.exe'
 if (-not (Test-Path -LiteralPath $ffmpeg -PathType Leaf) -or
@@ -20,8 +21,10 @@ $rawLog = Join-Path $evidenceDirectory 'go-test.jsonl'
 $media = Join-Path $binaryDirectory 'archive-media.exe'
 New-Item -ItemType Directory -Force -Path $binaryDirectory | Out-Null
 
+$originalPath = $env:Path
 Push-Location $repository
 try {
+    $env:Path = $FFmpegDirectory + [IO.Path]::PathSeparator + $originalPath
     & go build -o $media ./cmd/archive-media
     if ($LASTEXITCODE -ne 0) {
         throw "Archive Media build failed with exit code $LASTEXITCODE"
@@ -36,7 +39,7 @@ try {
     $logWriter = [System.IO.StreamWriter]::new($rawLog, $false, $utf8WithoutBOM)
     try {
         & go test -json -count=1 `
-            -run '^TestWindowsArchiveRunCompletesSourceSequenceAcrossWorkerRestart$' `
+            -run '^(TestWindowsArchiveRunCompletesSourceSequenceAcrossWorkerRestart|TestDamagedRecordingStopsAfterOneWorkerAttemptAcrossControlRestart)$' `
             ./internal/application/controlruntime 2>&1 | ForEach-Object {
                 $line = $_.ToString()
                 $logWriter.WriteLine($line)
@@ -60,5 +63,6 @@ try {
     }
     Write-Output $evidenceDirectory
 } finally {
+    $env:Path = $originalPath
     Pop-Location
 }

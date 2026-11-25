@@ -165,7 +165,7 @@ function ChildFolder({ work, current, name, job, movedTo }) {
       <span class="job-time">${formatCount(folder.video_count)} 영상</span>
     </a>`;
   }
-  const lane = job ? workLane({ state: { COMPLETED: "COMPLETED", FAILED: "FAILED", RUNNING: "ACTIVE" }[job.step_state] || "QUEUED" }) : "";
+  const lane = job ? workLane({ state: { COMPLETED: "COMPLETED", CANCELLED: "CANCELLED", FAILED: "FAILED", RUNNING: "ACTIVE" }[job.step_state] || "QUEUED" }) : "";
   return html`<a class="child-row" href=${job ? `#/jobs/${encodeURIComponent(job.job_id)}` : `#/runs/${encodeURIComponent(work.work_id)}`} data-folder-id=${name} data-job-id=${job?.job_id || null}>
     <b>${name}</b>
     <span class="state">${job ? html`<${StatusIcon} kind=${{ done: "done", fault: "fault", work: "work" }[lane] || "idle"} />${label("step", job.step_state)}` : html`<span class="muted">고정 범위</span>`}</span>

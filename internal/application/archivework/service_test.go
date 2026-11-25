@@ -240,6 +240,56 @@ func snapshotOf(t *testing.T, id string, revision uint64, state any) command.Sna
 	return command.Snapshot{TargetID: id, Revision: revision, State: payload}
 }
 
+// Requirement: DSH-056
+func TestCancelledWorkReportsPublishedPackagesAndPreservesUnfinishedChildren(t *testing.T) {
+	const runID = "ARCHIVE-RUN-CANCEL"
+	now := time.Date(2026, 11, 25, 0, 0, 0, 0, time.UTC)
+	inspection := linkedJob("inspection", "archive-intake-inspection", "drive", runID, "", workflow.Completed, now)
+	stopped := linkedJob("stopped", "archive-intake-render-recordings", "stage", runID, "stage", workflow.Cancelled, now)
+	standalone := linkedJob("standalone", "occasion-recording", "stage", "", "", workflow.Cancelled, now)
+	for _, tc := range []struct {
+		name    string
+		sibling workflow.StepState
+		results int
+		want    State
+	}{
+		{"cancelled before publication", "", 0, StateCancelled},
+		{"already published sibling", workflow.Completed, 1, StateCancelled},
+		{"another folder running", workflow.Running, 0, StateActive},
+		{"another folder queued", workflow.Queued, 0, StateQueued},
+		{"unresolved sibling failure", workflow.Failed, 0, StateFailed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			states := []job.State{inspection, stopped, standalone}
+			if tc.sibling != "" {
+				states = append(states, linkedJob("sibling", "archive-intake-render-recordings", "other", runID, "other", tc.sibling, now))
+			}
+			var ledger fixedSnapshots
+			var jobs fixedJobs
+			for _, state := range states {
+				ledger.snapshots = append(ledger.snapshots, snapshotOf(t, state.ID, state.Revision, state))
+				jobs.summaries = append(jobs.summaries, summaryOf(state, state.Steps[0].Workflow.State, 0))
+			}
+			drive := archiveintakeworkspace.DriveView{ArchiveRunID: runID, ArchiveRunState: "COMPLETED"}
+			if tc.results > 0 {
+				drive.CompletedWork = []archiveintakeworkspace.CompletedWorkView{{ArchiveRunID: runID, JobID: "sibling", ArchivePackageID: "published"}}
+			}
+			service, err := New(ledger, jobs, fixedDrives{views: []archiveintakeworkspace.DriveView{drive}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			run, err := service.Detail(context.Background(), runID)
+			if err != nil || run.Summary.State != tc.want || run.Summary.ResultCount != tc.results || len(run.CompletedWork) != tc.results {
+				t.Fatalf("projected run %+v, results %+v, err %v", run.Summary, run.CompletedWork, err)
+			}
+			single, err := service.Detail(context.Background(), standalone.ID)
+			if err != nil || single.Summary.State != StateCancelled {
+				t.Fatalf("standalone %+v, err %v", single.Summary, err)
+			}
+		})
+	}
+}
+
 type fixedSnapshots struct{ snapshots []command.Snapshot }
 
 func (store fixedSnapshots) ListSnapshots() ([]command.Snapshot, error) {

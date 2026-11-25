@@ -48,6 +48,15 @@ jobs:
       - name: Download modules
         run: go mod download
 
+      - name: Prepare media tools for the operational tests
+        run: |
+          if ! command -v ffmpeg || ! command -v ffprobe; then
+            sudo apt-get update -qq
+            sudo apt-get install -y ffmpeg
+          fi
+          ffmpeg -version > "$EVIDENCE_DIR/ffmpeg-version.txt"
+          ffprobe -version > "$EVIDENCE_DIR/ffprobe-version.txt"
+
       - name: Run all tests and normalize evidence
         id: tests
         shell: bash
