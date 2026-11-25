@@ -254,9 +254,9 @@ func damagedRecordingSiblings(t *testing.T, ffmpeg, probe, folder string) map[st
 	if err := json.Unmarshal(packets, &raw); err != nil || len(raw.Packets) != 24 {
 		t.Fatalf("packet positions: %s (%v)", packets, err)
 	}
-	// Keep the headers and the first three decodable frames. Damage only the video payload.
+	// Preserve the container index and audio while making the video undecodable.
 	damaged := append([]byte(nil), healthy...)
-	for _, p := range raw.Packets[3:] {
+	for _, p := range raw.Packets {
 		copy(damaged[p.Pos:p.Pos+4], []byte{0x7f, 0xff, 0xff, 0xff})
 	}
 	files := map[string][]byte{"A 녹화.mp4": healthy, "B 녹화.mp4": damaged, "C0001.MP4": healthy}
