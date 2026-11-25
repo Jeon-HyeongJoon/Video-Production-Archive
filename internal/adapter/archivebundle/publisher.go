@@ -20,9 +20,10 @@ import (
 )
 
 var (
-	ErrInvalidRequest = errors.New("archive bundle request is invalid")
-	ErrPackageExists  = errors.New("archive bundle already exists")
-	ErrPackageState   = errors.New("archive bundle state does not permit this operation")
+	ErrInvalidRequest     = errors.New("archive bundle request is invalid")
+	ErrStoredFileMismatch = fmt.Errorf("published file differs from revision checksum or size: %w", ErrInvalidRequest)
+	ErrPackageExists      = errors.New("archive bundle already exists")
+	ErrPackageState       = errors.New("archive bundle state does not permit this operation")
 )
 
 type RootKind string
@@ -368,7 +369,19 @@ func (publisher *Publisher) replayedStoredRevision(current currentDocument, requ
 		if latest.Revision != current.Revision || !checksumsMatch(expected, latest.Files) {
 			return Package{}, false, ErrPackageState
 		}
-		return publisher.loadPackage(current), true, nil
+		stored, err := document.inspectFiles(publisher.archive, current.packageDirectory, current.packageDirectory)
+		return stored, true, err
+	}
+	if current.LayoutVersion == FlatLayoutVersion {
+		// The public sidecars may already be from the next revision while the
+		// pointer still names this one. Let the pending write resume under lock.
+		pending, err := publisher.archive.Exists(path.Join(current.packageDirectory, revisionFileName(current.Revision+1, "metadata.json")))
+		if err != nil {
+			return Package{}, false, err
+		}
+		if pending {
+			return Package{}, false, ErrPackageState
+		}
 	}
 	stored := publisher.loadPackage(current)
 	paths := map[string]string{

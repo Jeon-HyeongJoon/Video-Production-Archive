@@ -405,12 +405,17 @@ func operationFailureDetails(operation execution.Operation, err error) (string, 
 }
 
 func typedFailureCause(err error) (string, string, bool) {
+	var conflict *archivebundle.SourceMetadataConflict
+	if errors.As(err, &conflict) {
+		return "ARCHIVE_SOURCE_METADATA_MISMATCH", conflict.Error(), true
+	}
 	type classification struct {
 		target  error
 		code    string
 		summary string
 	}
 	classifications := []classification{
+		{archivebundle.ErrStoredFileMismatch, "ARCHIVE_PACKAGE_FILE_MISMATCH", "Published archive file size or SHA-256 differs from the stored revision"},
 		{archivebundle.ErrPackageExists, "ARCHIVE_PACKAGE_ALREADY_EXISTS", "The Archive Package already exists"},
 		{archivebundle.ErrLayoutPathMismatch, "PACKAGE_LAYOUT_PATH_MISMATCH", "The saved metadata path differs from the archive package layout"},
 		{archivebundle.ErrPackageState, "ARCHIVE_PACKAGE_STATE_INVALID", "The Archive Package state does not permit this operation"},

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/csv"
 	"encoding/json"
+	"errors"
 	"path"
 	"strings"
 	"testing"
@@ -13,7 +14,8 @@ import (
 	"videoarchive/internal/core/vocabulary"
 )
 
-func TestFlatResultPackageRevisionRetryReturnsThePublishedRevision(t *testing.T) {
+func flatRevisionFixture(t *testing.T) (*Publisher, *archive.StorageRoot, Package, RevisionRequest) {
+	t.Helper()
 	publisher, _, archiveRoot, checksum, _, _ := publisherFixture(t)
 	request := compactInitialRequest("VP-20261108-FLAT-RETRY", "DECISION-FLAT-RETRY", checksum, []SourceReference{{
 		OriginalAssetID: "ASSET-FLAT-RETRY", OriginalName: "event.mov", RelativePath: "recordings/event.mov", Checksum: checksum,
@@ -30,10 +32,16 @@ func TestFlatResultPackageRevisionRetryReturnsThePublishedRevision(t *testing.T)
 		Subtitle:       FileSource{Root: RootArchive, Path: "staging/subtitle.srt", Checksum: fixtureDigest("1\n00:00:00,000 --> 00:00:01,000\n행사\n")},
 		CreatedAt:      request.CreatedAt.Add(time.Hour),
 	}
+	return publisher, archiveRoot, initial, revisionRequest
+}
+
+func TestFlatResultPackageRevisionRetryReturnsThePublishedRevision(t *testing.T) {
+	publisher, archiveRoot, initial, revisionRequest := flatRevisionFixture(t)
 	first, err := publisher.ReviseStored(revisionRequest)
 	if err != nil {
 		t.Fatal(err)
 	}
+	revisionRequest.CreatedAt = revisionRequest.CreatedAt.Add(time.Hour)
 	replayed, err := publisher.ReviseStored(revisionRequest)
 	if err != nil || first.Revision != 2 || replayed.Revision != 2 || first.ManifestDigest != replayed.ManifestDigest ||
 		first.MetadataPath != path.Join(path.Dir(initial.MetadataPath), "metadata.json") {
@@ -41,6 +49,63 @@ func TestFlatResultPackageRevisionRetryReturnsThePublishedRevision(t *testing.T)
 	}
 	if _, observed, hashErr := archiveRoot.FileSHA256(first.TranscriptTextPath); hashErr != nil || observed != revisionRequest.TranscriptText.Checksum {
 		t.Fatalf("flat revision text was not verified: checksum=%s err=%v", observed, hashErr)
+	}
+}
+
+func testFlatResultPackageRevisionRetry(t *testing.T) {
+	publisher, archiveRoot, _, revisionRequest := flatRevisionFixture(t)
+	first, err := publisher.ReviseStored(revisionRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Exercise an interruption above revision 1, where the Worker first asks
+	// whether the public sidecars belong to the revision named by the pointer.
+	next := revisionRequest
+	next.BaseRevision = first.Revision
+	next.TranscriptText = FileSource{Root: RootArchive, Path: "staging/updated.txt", Checksum: fixtureDigest("수정\n")}
+	if err := archiveRoot.WriteFile(next.TranscriptText.Path, []byte("수정\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	partial := path.Join(path.Dir(first.MetadataPath), "current.json.partial")
+	if err := archiveRoot.MkdirAll(partial, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := publisher.ReviseStored(next); err == nil {
+		t.Fatal("pointer interruption returned success")
+	}
+	if exists, err := archiveRoot.Exists(partial); err != nil {
+		t.Fatal(err)
+	} else if exists {
+		if err := archiveRoot.Remove(partial); err != nil {
+			t.Fatal(err)
+		}
+	}
+	prepared := next.CreatedAt
+	next.CreatedAt = next.CreatedAt.Add(24 * time.Hour)
+	replay := next
+	replay.BaseRevision--
+	if _, err := publisher.ReviseStored(replay); !errors.Is(err, ErrPackageState) {
+		t.Fatalf("revision 2 accepted revision 3's sidecars: %v", err)
+	}
+	conflict := next
+	conflict.TranscriptText = revisionRequest.TranscriptText
+	if _, err := publisher.ReviseStored(conflict); !errors.Is(err, ErrPackageExists) {
+		t.Fatalf("pending revision accepted different content: %v", err)
+	}
+	if err := archiveRoot.WriteFile(first.SubtitlePath, []byte("incomplete projection"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	third, err := publisher.ReviseStored(next)
+	if err != nil || third.Revision != 3 || third.ManifestDigest == first.ManifestDigest {
+		t.Fatalf("failed to resume revision 3: %+v, %v", third, err)
+	}
+	data, err := archiveRoot.ReadFile(third.MetadataPath)
+	var metadata Metadata
+	if err != nil || json.Unmarshal(data, &metadata) != nil || !metadata.CreatedAt.Equal(prepared) {
+		t.Fatalf("resumed revision lost original event time: %s, %v", data, err)
+	}
+	if _, hash, err := archiveRoot.FileSHA256(third.SubtitlePath); err != nil || hash != next.Subtitle.Checksum {
+		t.Fatalf("resumed projection differs from the immutable subtitle: %s, %v", hash, err)
 	}
 }
 

@@ -5739,6 +5739,7 @@
         "원본 생성 시각과 원본 영상명을 인접한 앞 열에 두고 두 값을 합치지 않는다.",
         "OriginalAsset ID·원본 상대경로·checksum·길이·크기·컨테이너·video/audio stream 규격과 판정 ID를 기록한다.",
         "다중 소스 결과는 OriginalAsset 수만큼 행을 가지지만 ArchiveCatalog에는 ArchivePackage 행 하나만 대응한다.",
+        "layout v3 검증과 재생성은 복구 문서의 원본 순서와 원본별 기술정보를 PackageVideoInfo의 각 행·열과 대조한다.",
         "관찰되지 않은 기술정보를 다른 날짜나 stream 값에서 추정하지 않는다.",
         "Storage 절대 root와 mount path를 포함하지 않는다."
       ],

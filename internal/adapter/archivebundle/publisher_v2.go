@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"path"
 	"sort"
 	"strconv"
@@ -104,11 +105,24 @@ func (publisher *Publisher) ReviseV2(request RevisionRequest) (Package, error) {
 	}
 	metadata.Revision++
 	metadata.CreatedAt = request.CreatedAt.UTC()
+	// The first immutable write fixes the revision time across Worker attempts.
+	// All pending bytes must still match the regenerated revision before publication.
+	pending, err := publisher.archive.ReadFile(path.Join(current.packageDirectory, revisionFileName(metadata.Revision, "metadata.json")))
+	resuming := err == nil
+	if resuming {
+		var staged Metadata
+		if json.Unmarshal(pending, &staged) != nil || staged.CreatedAt.IsZero() {
+			return Package{}, ErrPackageExists
+		}
+		metadata.CreatedAt = staged.CreatedAt
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return Package{}, err
+	}
 	return publisher.publishRevisionV2(current, metadata, map[string]FileSource{
 		"transcript.json": request.Transcript,
 		"transcript.txt":  request.TranscriptText,
 		"subtitle.srt":    request.Subtitle,
-	})
+	}, resuming)
 }
 
 func (publisher *Publisher) publishInitialV2(metadata Metadata, video FileSource, packageDirectory string) (Package, error) {
@@ -170,7 +184,7 @@ func (publisher *Publisher) publishInitialV2(metadata Metadata, video FileSource
 	return publisher.loadPackage(current), nil
 }
 
-func (publisher *Publisher) publishRevisionV2(current currentDocument, metadata Metadata, additions map[string]FileSource) (Package, error) {
+func (publisher *Publisher) publishRevisionV2(current currentDocument, metadata Metadata, additions map[string]FileSource, resuming bool) (Package, error) {
 	directory := current.packageDirectory
 	videoPath := path.Join(directory, metadata.VideoFileName)
 	_, videoChecksum, err := publisher.archive.FileSHA256(videoPath)
@@ -211,10 +225,8 @@ func (publisher *Publisher) publishRevisionV2(current currentDocument, metadata 
 	for name, payload := range additionPayloads {
 		payloads[name] = payload
 	}
-	for name, payload := range revisionPayloads(metadata.Revision, payloads) {
-		if err := publisher.writeImmutable(path.Join(directory, name), payload); err != nil {
-			return Package{}, err
-		}
+	if err := publisher.stageRevisionV2(directory, metadata.Revision, payloads); err != nil {
+		return Package{}, err
 	}
 	publicNames := make([]string, 0, len(payloads))
 	for name := range payloads {
@@ -225,7 +237,17 @@ func (publisher *Publisher) publishRevisionV2(current currentDocument, metadata 
 	}
 	sort.Strings(publicNames)
 	for _, name := range publicNames {
-		if err := publisher.writeCurrentFile(path.Join(directory, name), payloads[name]); err != nil {
+		target := path.Join(directory, name)
+		if resuming {
+			published, err := publisher.archive.ReadFile(target)
+			if err != nil && !errors.Is(err, fs.ErrNotExist) {
+				return Package{}, err
+			}
+			if err == nil && bytes.Equal(published, payloads[name]) {
+				continue
+			}
+		}
+		if err := publisher.writeCurrentFile(target, payloads[name]); err != nil {
 			return Package{}, err
 		}
 	}
@@ -306,19 +328,34 @@ func (publisher *Publisher) readVerifiedSource(source FileSource) ([]byte, strin
 	return payload, source.Checksum, nil
 }
 
-func (publisher *Publisher) writeImmutable(target string, payload []byte) error {
-	exists, err := publisher.archive.Exists(target)
-	if err != nil {
-		return err
-	}
-	if exists {
-		current, readErr := publisher.archive.ReadFile(target)
-		if readErr != nil || !bytes.Equal(current, payload) {
-			return errors.Join(ErrPackageExists, readErr)
+func (publisher *Publisher) stageRevisionV2(directory string, revision uint64, payloads map[string][]byte) error {
+	// Check every surviving immutable file before adding any missing ones.
+	// Older publishers staged the files in unspecified order.
+	names := []string{"metadata.json", "manifest-sha256.txt"}
+	for name := range payloads {
+		if name != "metadata.json" && name != "manifest-sha256.txt" {
+			names = append(names, name)
 		}
-		return nil
 	}
-	return publisher.writeCurrentFile(target, payload)
+	var missing []string
+	for _, name := range names {
+		target := path.Join(directory, revisionFileName(revision, name))
+		current, err := publisher.archive.ReadFile(target)
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+			missing = append(missing, name)
+		case err != nil:
+			return err
+		case !bytes.Equal(current, payloads[name]):
+			return ErrPackageExists
+		}
+	}
+	for _, name := range missing {
+		if err := publisher.writeCurrentFile(path.Join(directory, revisionFileName(revision, name)), payloads[name]); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (publisher *Publisher) writeCurrentFile(target string, payload []byte) error {
@@ -387,21 +424,64 @@ func videoInfoCSV(decisionID string, sources []SourceReference) ([]byte, error) 
 }
 
 func ParseVideoInfoCount(payload []byte) (int, error) {
+	records, err := parseVideoInfo(payload)
+	return len(records), err
+}
+
+func parseVideoInfo(payload []byte) ([][]string, error) {
 	reader := csv.NewReader(bytes.NewReader(payload))
 	records, err := reader.ReadAll()
 	if err != nil || len(records) < 2 || !equalStringSlices(records[0], videoInfoHeader) {
-		return 0, ErrInvalidRequest
+		return nil, ErrInvalidRequest
 	}
 	seen := make(map[string]bool, len(records)-1)
 	for _, record := range records[1:] {
 		if len(record) != len(videoInfoHeader) || strings.TrimSpace(record[1]) == "" ||
 			!checksumPattern.MatchString(strings.TrimSpace(record[3])) || strings.TrimSpace(record[22]) == "" || seen[record[22]] {
-			return 0, ErrInvalidRequest
+			return nil, ErrInvalidRequest
 		}
 		seen[record[22]] = true
 	}
-	return len(records) - 1, nil
+	return records[1:], nil
 }
+
+func verifyVideoInfo(metadata Metadata, payload []byte) error {
+	rows, err := parseVideoInfo(payload)
+	if err != nil || len(rows) != len(metadata.Sources) {
+		return fmt.Errorf("video-info.csv source records: %w", ErrInvalidRequest)
+	}
+	expected, err := videoInfoCSV(metadata.DecisionID, metadata.Sources)
+	if err != nil || bytes.Equal(payload, expected) {
+		return err
+	}
+	// Alternate CSV quoting or line endings can represent the same records.
+	want, err := parseVideoInfo(expected)
+	if err != nil {
+		return fmt.Errorf("invalid recovery document sources: %w", err)
+	}
+	for i, row := range rows {
+		for j, value := range row {
+			if value != want[i][j] {
+				return &SourceMetadataConflict{PackageID: metadata.PackageID, Row: i + 1, Column: videoInfoHeader[j]}
+			}
+		}
+	}
+	return nil
+}
+
+// SourceMetadataConflict identifies a conflicting CSV field without disclosing
+// source paths or values in Worker failure evidence.
+type SourceMetadataConflict struct {
+	PackageID string
+	Row       int
+	Column    string
+}
+
+func (conflict *SourceMetadataConflict) Error() string {
+	return fmt.Sprintf("video-info.csv source %d field %s disagrees with recovery document", conflict.Row, conflict.Column)
+}
+
+func (*SourceMetadataConflict) Unwrap() error { return ErrInvalidRequest }
 
 func equalStringSlices(left, right []string) bool {
 	if len(left) != len(right) {

@@ -3,6 +3,7 @@ package archivecatalog
 import (
 	"encoding/csv"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"path"
@@ -167,7 +168,12 @@ func (r *Reconciler) scanPackages() ([]PackageRow, []VerificationEntry, Coverage
 			}
 		}
 		if err != nil {
-			invalid = append(invalid, VerificationEntry{ResultFolder: name, State: ConsistencyLayoutInvalid, Detail: err.Error()})
+			entry := VerificationEntry{ResultFolder: name, State: ConsistencyLayoutInvalid, Detail: err.Error()}
+			if errors.As(err, &entry.sourceConflict) {
+				entry.PackageID = entry.sourceConflict.PackageID
+				entry.Differences = []string{entry.sourceConflict.Column}
+			}
+			invalid = append(invalid, entry)
 		}
 		for _, row := range found {
 			if _, ok := candidates[row.ResultVideoPath]; !ok {

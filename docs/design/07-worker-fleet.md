@@ -186,7 +186,7 @@ profile reference와 operation별 typed parameter
 
 장시간 MediaOperation은 lease heartbeat와 별도로 제한된 빈도의 `StepProgressEvidence`를 제출한다. Worker가 현재 fencing token과 단조 증가 보고 순번으로 operation·계획/시작/완료/실패 상태·청크 순번과 전체 수·원본 시작/종료 millisecond·완료 비율을 보고하면 Control의 `WorkerLifecycleHandler`가 진행률·최근 관측 시각·변경 불가능한 증적과 Domain Event를 같은 Job transaction으로 확정한다. 같은 보고 재전송은 증적을 중복하지 않고 오래된 token은 거부한다. 이 구조에는 원문 stdout·stderr, 실행 인수, credential, 절대경로와 음성 내용이 없으며 작업 상세와 WorkDiagnostic이 같은 증적 ID를 읽는다. `WRK-017`
 
-`RECONCILE_ARCHIVE_PUBLICATION`은 진단이 허용한 새 복구 Job에서만 쓰는 typed operation이다. 패키지 리비전 실패이면 현재 패키지와 동일 전사 JSON·시간 코드 text·자막 checksum을 확인해 이미 게시된 리비전을 재사용하거나 현재 리비전 위에 한 번만 추가하고, 카탈로그 실패이면 검증된 현재 패키지를 그대로 사용한다. 두 경우 모두 Storage 최상위 카탈로그를 원자적으로 다시 게시한다. 같은 명세가 다른 fencing token으로 다시 실행돼도 같은 전사 산출물로 패키지 리비전을 더 만들지 않는다. `WRK-018`
+`RECONCILE_ARCHIVE_PUBLICATION`은 진단이 허용한 새 복구 Job에서만 쓰는 typed operation이다. 패키지 리비전 실패이면 현재 패키지와 동일 전사 JSON·시간 코드 text·자막 checksum을 확인해 이미 게시된 리비전을 재사용하거나 현재 리비전 위에 한 번만 추가하고, 카탈로그 실패이면 검증된 현재 패키지를 그대로 사용한다. v3 영상이 직전 manifest와 다르면 성공 출력 없이 끝나며 리비전과 루트 CSV를 보존한다. v2 포인터 교체 장애가 해소되면 최초 불변 리비전과 그 시각을 기준으로 게시를 마친다. 성공한 재전송은 같은 전사 리비전과 카탈로그 checksum을 반환한다. `WRK-018`
 
 권장 상태:
 

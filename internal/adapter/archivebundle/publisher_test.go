@@ -132,6 +132,7 @@ func TestPublisherStoresOneResultPerRecoverablePackageAndAddsStageTwoAsNewRevisi
 
 // Requirement: ARC-011
 func TestCommittedPackageRejectsFurtherRevisionAndKeepsPriorRevisionsImmutable(t *testing.T) {
+	t.Run("flat pointer interrupted", testFlatResultPackageRevisionRetry)
 	publisher, _, archiveRoot, originalChecksum, _, _ := publisherFixture(t)
 	now := time.Date(2026, 10, 31, 10, 0, 0, 0, time.UTC)
 	first, err := publisher.PublishInitial(InitialRequest{

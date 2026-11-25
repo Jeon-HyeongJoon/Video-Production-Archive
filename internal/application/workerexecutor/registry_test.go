@@ -1,12 +1,16 @@
 package workerexecutor
 
 import (
+	"bytes"
 	"context"
+	_ "embed"
+	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	osexec "os/exec"
+	"path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -15,6 +19,7 @@ import (
 	"time"
 
 	"videoarchive/internal/adapter/archivebundle"
+	"videoarchive/internal/adapter/archivecatalog"
 	"videoarchive/internal/adapter/workerconfig"
 	"videoarchive/internal/application/workerclient"
 	"videoarchive/internal/core/archive"
@@ -996,8 +1001,16 @@ func TestMultiFileAsIsPackagesPreserveEachReadyInputProfile(t *testing.T) {
 	}
 }
 
+//go:embed testdata/recovery.mp4
+var recoveryVideo []byte
+
 // Requirement: WRK-018
 func TestArchivePublicationRecoveryReconcilesPackageAndCatalogIdempotently(t *testing.T) {
+	t.Run("compact", func(t *testing.T) { testArchiveRecovery(t, archive.PackageLayoutCompactResultFolder) })
+	t.Run("interrupted flat pointer", func(t *testing.T) { testArchiveRecovery(t, archive.PackageLayoutFlatResultFolder) })
+}
+
+func testArchiveRecovery(t *testing.T, layout archive.PackageLayoutVersion) {
 	directory := t.TempDir()
 	sourcePath := filepath.Join(directory, "source")
 	archivePath := filepath.Join(directory, "archive")
@@ -1021,7 +1034,7 @@ func TestArchivePublicationRecoveryReconcilesPackageAndCatalogIdempotently(t *te
 		t.Fatal(err)
 	}
 	defer roots.Close()
-	if err := roots.MustRoot("source").WriteFile("recording.mp4", []byte("video"), 0o600); err != nil {
+	if err := roots.MustRoot("source").WriteFile("recording.mp4", recoveryVideo, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	_, videoChecksum, err := roots.MustRoot("source").FileSHA256("recording.mp4")
@@ -1034,13 +1047,23 @@ func TestArchivePublicationRecoveryReconcilesPackageAndCatalogIdempotently(t *te
 	}
 	now := time.Date(2026, 11, 19, 17, 0, 0, 0, time.UTC)
 	packageID := "VP-20261119-RECOVERY"
-	stored, err := publisher.PublishInitialCompact(archivebundle.InitialRequest{
-		LayoutVersion: archive.PackageLayoutCompactResultFolder, PackageID: packageID,
+	initial := archivebundle.InitialRequest{
+		LayoutVersion: layout, PackageID: packageID,
 		WorkspaceDriveID: "VOLUME-1", DecisionID: "DECISION-1", MediaFolder: "recordings",
 		Disposition: vocabulary.OrganizationAsIs, ProfileReference: "archive-1080p-6mbps@v1", CreatedAt: now,
 		Video:   archivebundle.FileSource{Root: archivebundle.RootSource, Path: "recording.mp4", Checksum: videoChecksum},
 		Sources: []archivebundle.SourceReference{{OriginalAssetID: "ASSET-1", OriginalName: "recording.mp4", RelativePath: "recording.mp4", Checksum: videoChecksum}},
-	})
+	}
+	publish := publisher.PublishInitialCompact
+	if layout == archive.PackageLayoutFlatResultFolder {
+		publish = publisher.PublishInitialV2
+	}
+	stored, err := publish(initial)
+	if err != nil {
+		t.Fatal(err)
+	}
+	initial.PackageID, initial.LayoutVersion = "VP-20261119-OTHER", archive.PackageLayoutCompactResultFolder
+	other, err := publisher.PublishInitialCompact(initial)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1086,19 +1109,150 @@ func TestArchivePublicationRecoveryReconcilesPackageAndCatalogIdempotently(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	for token := uint64(1); token <= 2; token++ {
-		result := registry.Execute(context.Background(), workerclient.Assignment{JobID: spec.JobID, StepID: spec.StepID, FencingToken: token, LeaseExpiresAt: time.Now().Add(time.Minute), ExecutionSpec: spec})
-		if !result.Success || len(result.Outputs) != 1 || result.Outputs[0].Kind != execution.OutputArchiveCatalog {
-			t.Fatalf("archive publication recovery failed on attempt %d: %+v", token, result)
+	root := roots.MustRoot("archive")
+	reconciler, err := archivecatalog.NewReconciler(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseline, err := reconciler.Rebuild()
+	if err != nil || baseline.RowCount != 2 {
+		t.Fatalf("initial catalog: %+v, %v", baseline, err)
+	}
+	read := func(name string) []byte {
+		t.Helper()
+		b, err := root.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return b
+	}
+	rows := func() map[string][]string {
+		t.Helper()
+		records, err := csv.NewReader(bytes.NewReader(read(baseline.Path))).ReadAll()
+		if err != nil || len(records) != 3 {
+			t.Fatalf("catalog rows: %v, %v", records, err)
+		}
+		return map[string][]string{records[1][17]: records[1], records[2][17]: records[2]}
+	}
+	verify := func(wantCurrent bool) {
+		t.Helper()
+		report, err := reconciler.Verify()
+		if err != nil || report.Current() != wantCurrent {
+			t.Fatalf("destination verification: %+v, %v", report, err)
 		}
 	}
-	current, err := publisher.Current(packageID)
-	if err != nil || current.Revision != stored.Revision+1 || current.TranscriptTextPath == "" || current.SubtitlePath == "" {
-		t.Fatalf("recovery did not publish exactly one package revision: before=%+v current=%+v err=%v", stored, current, err)
+	var token uint64
+	execute := func(request execution.StepExecutionSpec) workerclient.ExecutionResult {
+		token++
+		return registry.Execute(context.Background(), workerclient.Assignment{JobID: request.JobID, StepID: request.StepID, FencingToken: token, LeaseExpiresAt: time.Now().Add(time.Minute), ExecutionSpec: request})
 	}
-	if payload, err := roots.MustRoot("archive").ReadFile("archive-catalog.csv"); err != nil || !strings.Contains(string(payload), packageID) ||
-		!strings.Contains(string(payload), "transcript.txt") || !strings.Contains(string(payload), "subtitle.srt") {
-		t.Fatalf("recovery did not publish the completed catalog row: %s err=%v", payload, err)
+	reject := func(request execution.StepExecutionSpec, cause string) {
+		t.Helper()
+		result := execute(request)
+		if result.Success || result.CauseCode != cause || len(result.Outputs)+len(result.VerificationReferences) != 0 {
+			t.Fatalf("expected %s without success evidence: %+v", cause, result)
+		}
+	}
+	initialCSV, initialMetadata := read(baseline.Path), read(stored.MetadataPath)
+	otherRow, otherMetadata := rows()[other.PackageID], read(other.MetadataPath)
+	damaged := bytes.Clone(recoveryVideo)
+	damaged[len(damaged)/2] ^= 1
+	var stagedMetadata []byte
+	if layout == archive.PackageLayoutCompactResultFolder {
+		if err := root.WriteFile(stored.VideoPath, damaged, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		verify(false)
+		reject(spec, "ARCHIVE_PACKAGE_FILE_MISMATCH")
+		reject(spec, "ARCHIVE_PACKAGE_FILE_MISMATCH")
+		verify(false)
+		if !bytes.Equal(initialMetadata, read(stored.MetadataPath)) || !bytes.Equal(initialCSV, read(baseline.Path)) {
+			t.Fatal("damaged video changed the published revision or catalog")
+		}
+		for _, name := range []string{"transcript.txt", "subtitle.srt"} {
+			if exists, err := root.Exists(path.Join(path.Dir(stored.MetadataPath), name)); err != nil || exists {
+				t.Fatalf("unexpected sidecar %s: %v", name, err)
+			}
+		}
+		if err := root.WriteFile(stored.VideoPath, recoveryVideo, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	} else {
+		partial := path.Join(path.Dir(stored.MetadataPath), "current.json.partial")
+		if err := root.MkdirAll(partial, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		reject(spec, "STORAGE_UNAVAILABLE")
+		if exists, err := root.Exists(partial); err != nil {
+			t.Fatal(err)
+		} else if exists {
+			if err := root.Remove(partial); err != nil {
+				t.Fatal(err)
+			}
+		}
+		current, err := publisher.Current(packageID)
+		stagedMetadata = read(path.Join(path.Dir(stored.MetadataPath), ".r000002.metadata.json"))
+		if err != nil || current.Revision != 1 || !bytes.Equal(stagedMetadata, read(stored.MetadataPath)) || !bytes.Equal(initialCSV, read(baseline.Path)) {
+			t.Fatalf("expected revision 2 staged behind pointer and catalog at 1: %+v, %v", current, err)
+		}
+		verify(false)
+	}
+	var csvSHA string
+	for i := 0; i < 2; i++ {
+		result := execute(spec)
+		if !result.Success || len(result.Outputs) != 1 {
+			t.Fatalf("archive publication recovery failed on attempt %d: %+v", token, result)
+		}
+		output := result.Outputs[0]
+		publication := output.CatalogPublication
+		current, err := publisher.Current(packageID)
+		_, actualSHA, hashErr := root.FileSHA256(baseline.Path)
+		if err != nil || current.Revision != 2 || publication == nil || len(publication.Packages) != 1 ||
+			publication.Packages[0] != (execution.PublishedPackage{PackageID: packageID, Revision: 2, ManifestDigest: current.ManifestDigest}) ||
+			hashErr != nil || actualSHA != output.Checksum || (i > 0 && csvSHA != actualSHA) {
+			t.Fatalf("catalog receipt: %+v, package %+v, CSV SHA %s, errors %v %v", output, current, actualSHA, err, hashErr)
+		}
+		csvSHA = actualSHA
+		catalogRows := rows()
+		row := catalogRows[packageID]
+		if len(row) != 18 || row[5] != "2" || row[6] != current.ManifestDigest || row[4] != stored.VideoPath ||
+			row[12] != current.TranscriptTextPath || row[13] != current.SubtitlePath ||
+			!slices.Equal(otherRow, catalogRows[other.PackageID]) || !bytes.Equal(otherMetadata, read(other.MetadataPath)) {
+			t.Fatalf("unexpected destination rows: %v", catalogRows)
+		}
+		verify(true)
+	}
+	if stagedMetadata != nil && !bytes.Equal(stagedMetadata, read(stored.MetadataPath)) {
+		t.Fatal("retry changed the interrupted revision metadata")
+	}
+	if layout == archive.PackageLayoutCompactResultFolder {
+		// Both a sidecar replay and a catalog-only recovery can arrive after media damage.
+		catalogOnly := spec
+		_, metadataSHA, err := root.FileSHA256(stored.MetadataPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		catalogOnly.Inputs = []execution.InputReference{{ArtifactID: packageID, StorageID: "archive", RelativePath: stored.MetadataPath, Checksum: metadataSHA, Kind: execution.OutputArchiveRevision}}
+		catalogOnly, err = execution.NewStepExecutionSpec(catalogOnly)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result := execute(catalogOnly); !result.Success || len(result.Outputs) != 1 || result.Outputs[0].Checksum != csvSHA {
+			t.Fatalf("healthy catalog-only recovery: %+v", result)
+		}
+		if err := root.WriteFile(stored.VideoPath, damaged, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		reject(spec, "ARCHIVE_PACKAGE_FILE_MISMATCH")
+		reject(catalogOnly, "ARCHIVE_PACKAGE_FILE_MISMATCH")
+		verify(false)
+		_, hash, err := root.FileSHA256(baseline.Path)
+		if err != nil || hash != csvSHA {
+			t.Fatalf("damaged replay changed the catalog: %s, %v", hash, err)
+		}
+	}
+	if _, after, err := roots.MustRoot("source").FileSHA256("recording.mp4"); err != nil || after != videoChecksum {
+		t.Fatalf("source changed: %s, %v", after, err)
 	}
 }
 

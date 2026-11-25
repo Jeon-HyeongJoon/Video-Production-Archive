@@ -65,6 +65,7 @@ type VerificationEntry struct {
 	CatalogDigest   string           `json:"catalog_manifest_digest,omitempty"`
 	PackageDigest   string           `json:"package_manifest_digest,omitempty"`
 	Differences     []string         `json:"differences,omitempty"`
+	sourceConflict  *archivebundle.SourceMetadataConflict
 }
 
 type Verification struct {
@@ -274,6 +275,14 @@ func compareRows(packages, rows []PackageRow, invalid []VerificationEntry, cover
 	for _, row := range rows {
 		rowsByID[row.PackageID] = append(rowsByID[row.PackageID], row)
 	}
+	for i := range result.Entries {
+		entry := &result.Entries[i]
+		matching := rowsByID[entry.PackageID]
+		if entry.sourceConflict != nil && len(matching) == 1 && matching[0].ResultFolder == entry.ResultFolder {
+			entry.CatalogRevision, entry.CatalogDigest = matching[0].Revision, matching[0].ManifestDigest
+			delete(rowsByID, entry.PackageID)
+		}
+	}
 	packageCounts := make(map[string]int, len(packages))
 	for _, candidate := range packages {
 		packageCounts[candidate.PackageID]++
@@ -347,8 +356,14 @@ func (reconciler *Reconciler) RebuildWithEvidence() (RebuildEvidence, error) {
 	if err != nil {
 		return RebuildEvidence{}, err
 	}
+	repair := RebuildEvidence{Before: compareRows(packages, rows, invalid, coverage, before)}
+	for _, entry := range invalid {
+		if entry.sourceConflict != nil {
+			return repair, fmt.Errorf("%w: %s: %w", ErrCatalogReconciliation, entry.ResultFolder, entry.sourceConflict)
+		}
+	}
 	if len(invalid) != 0 || coverage.State == "INCOMPLETE" {
-		return RebuildEvidence{}, ErrCatalogReconciliation
+		return repair, ErrCatalogReconciliation
 	}
 	seen := make(map[string]bool, len(packages))
 	for _, row := range packages {
@@ -357,7 +372,6 @@ func (reconciler *Reconciler) RebuildWithEvidence() (RebuildEvidence, error) {
 		}
 		seen[row.PackageID] = true
 	}
-	repair := RebuildEvidence{Before: compareRows(packages, rows, nil, coverage, before)}
 	lock, err := reconciler.root.AcquireExclusiveLock(context.Background(), ".archive-catalog.csv.lock")
 	if err != nil {
 		return RebuildEvidence{}, err
@@ -482,26 +496,9 @@ func (reconciler *Reconciler) inspectPackage(directory string) (PackageRow, erro
 }
 
 func (reconciler *Reconciler) inspectCompactPackage(directory string) (PackageRow, error) {
-	payload, err := reconciler.root.ReadFile(path.Join(directory, archivebundle.CompactPackageDocumentName))
-	if err != nil {
-		return PackageRow{}, err
-	}
-	var metadata archivebundle.Metadata
-	if json.Unmarshal(payload, &metadata) != nil || metadata.LayoutVersion != archive.PackageLayoutCompactResultFolder ||
-		metadata.PackageID == "" || metadata.Revision == 0 || len(metadata.Sources) == 0 {
-		return PackageRow{}, ErrCatalogReconciliation
-	}
-	packageView, err := archivebundle.InspectCompactPackage(reconciler.root, directory)
+	packageView, metadata, err := archivebundle.InspectCompactMetadata(reconciler.root, directory)
 	if err != nil {
 		return PackageRow{}, errors.Join(ErrCatalogReconciliation, err)
-	}
-	videoInfo, err := reconciler.root.ReadFile(path.Join(directory, "video-info.csv"))
-	if err != nil {
-		return PackageRow{}, err
-	}
-	sourceCount, err := archivebundle.ParseVideoInfoCount(videoInfo)
-	if err != nil || sourceCount != len(metadata.Sources) {
-		return PackageRow{}, ErrCatalogReconciliation
 	}
 	return PackageRowFrom(metadata, packageView)
 }

@@ -130,15 +130,16 @@ func (publisher *Publisher) ReviseCompact(request RevisionRequest) (Package, err
 	if err != nil {
 		return Package{}, err
 	}
+	baseFiles, err := document.verifiedBaseFiles(publisher.archive, current.packageDirectory)
+	if err != nil {
+		return Package{}, err
+	}
 	document.Revision++
 	document.CreatedAt = request.CreatedAt.UTC()
 	document.TranscriptPath = path.Join(current.packageDirectory, CompactPackageDocumentName)
 	document.TranscriptTextPath = path.Join(current.packageDirectory, "transcript.txt")
 	document.SubtitlePath = path.Join(current.packageDirectory, "subtitle.srt")
-	revision, err := compactRevision(document.Metadata, request.CreatedAt.UTC(), transcript, transcriptText, subtitle, publisher.archive, current.packageDirectory)
-	if err != nil {
-		return Package{}, err
-	}
+	revision := compactRevision(document.Metadata, baseFiles, transcript, transcriptText, subtitle)
 	document.ManifestDigest = revision.ManifestDigest
 	document.Revisions = append(document.Revisions, revision)
 	if !document.valid() {
@@ -204,7 +205,7 @@ func (publisher *Publisher) publishInitialCompact(metadata Metadata, video FileS
 	if err := publisher.archive.WriteFile(path.Join(temporary, CompactPackageDocumentName), payload, 0o600); err != nil {
 		return Package{}, err
 	}
-	if _, err := inspectCompactAt(publisher.archive, temporary, directory); err != nil {
+	if _, _, err := inspectCompactAt(publisher.archive, temporary, directory); err != nil {
 		return Package{}, err
 	}
 	if err := publisher.archive.Rename(temporary, directory); err != nil {
@@ -213,30 +214,66 @@ func (publisher *Publisher) publishInitialCompact(metadata Metadata, video FileS
 	return InspectCompactPackage(publisher.archive, directory)
 }
 
-func compactRevision(metadata Metadata, createdAt time.Time, transcript, transcriptText, subtitle []byte, root *archive.StorageRoot, directory string) (CompactRevision, error) {
-	previous, err := root.ReadFile(path.Join(directory, "video-info.csv"))
-	if err != nil {
-		return CompactRevision{}, err
+// Only the video and source CSV carry forward across STT revisions. Public
+// sidecars can already belong to an interrupted attempt at the next revision.
+func (document CompactDocument) verifiedBaseFiles(root *archive.StorageRoot, directory string) ([]CompactFile, error) {
+	var files []CompactFile
+	for _, file := range document.Revisions[len(document.Revisions)-1].Files {
+		switch file.Path {
+		case document.VideoFileName:
+			if err := file.verifyStored(root, directory); err != nil {
+				return nil, err
+			}
+		case "video-info.csv":
+			payload, err := root.ReadFile(path.Join(directory, file.Path))
+			if err != nil {
+				return nil, err
+			}
+			if int64(len(payload)) != file.Size || digest(payload) != file.Checksum {
+				return nil, fmt.Errorf("%s: %w", file.Path, ErrStoredFileMismatch)
+			}
+			if err := verifyVideoInfo(document.Metadata, payload); err != nil {
+				return nil, err
+			}
+			if file.Content == nil {
+				content := string(payload)
+				file.Content = &content
+			}
+		default:
+			continue
+		}
+		files = append(files, file)
 	}
-	videoSize, videoChecksum, err := root.FileSHA256(path.Join(directory, metadata.VideoFileName))
-	if err != nil {
-		return CompactRevision{}, err
+	if len(files) != 2 {
+		return nil, fmt.Errorf("missing video or video-info.csv in compact revision: %w", ErrInvalidRequest)
 	}
-	videoInfoText := string(previous)
+	return files, nil
+}
+
+func (file CompactFile) verifyStored(root *archive.StorageRoot, directory string) error {
+	size, checksum, err := root.FileSHA256(path.Join(directory, file.Path))
+	if err != nil {
+		return err
+	}
+	if size != file.Size || checksum != file.Checksum {
+		return fmt.Errorf("%s: %w", file.Path, ErrStoredFileMismatch)
+	}
+	return nil
+}
+
+func compactRevision(metadata Metadata, baseFiles []CompactFile, transcript, transcriptText, subtitle []byte) CompactRevision {
 	transcriptTextValue := string(transcriptText)
 	subtitleValue := string(subtitle)
 	revision := CompactRevision{
-		Revision: metadata.Revision, CreatedAt: createdAt, Transcript: append(json.RawMessage(nil), transcript...),
-		Files: []CompactFile{
-			{Path: metadata.VideoFileName, Checksum: videoChecksum, Size: videoSize},
-			{Path: "video-info.csv", Checksum: digest(previous), Size: int64(len(previous)), Content: &videoInfoText},
-			{Path: "transcript.json", Checksum: digest(transcript), Size: int64(len(transcript)), Embedded: true},
-			{Path: "transcript.txt", Checksum: digest(transcriptText), Size: int64(len(transcriptText)), Content: &transcriptTextValue},
-			{Path: "subtitle.srt", Checksum: digest(subtitle), Size: int64(len(subtitle)), Content: &subtitleValue},
-		},
+		Revision: metadata.Revision, CreatedAt: metadata.CreatedAt, Transcript: append(json.RawMessage(nil), transcript...),
+		Files: append(baseFiles,
+			CompactFile{Path: "transcript.json", Checksum: digest(transcript), Size: int64(len(transcript)), Embedded: true},
+			CompactFile{Path: "transcript.txt", Checksum: digest(transcriptText), Size: int64(len(transcriptText)), Content: &transcriptTextValue},
+			CompactFile{Path: "subtitle.srt", Checksum: digest(subtitle), Size: int64(len(subtitle)), Content: &subtitleValue},
+		),
 	}
 	revision.ManifestDigest = compactManifestDigest(metadata.PackageID, revision)
-	return revision, nil
+	return revision
 }
 
 func (publisher *Publisher) readCompactDocument(directory string) (CompactDocument, error) {
@@ -265,18 +302,30 @@ func (publisher *Publisher) commitCompact(current currentDocument) error {
 }
 
 func InspectCompactPackage(root *archive.StorageRoot, directory string) (Package, error) {
+	p, _, err := InspectCompactMetadata(root, directory)
+	return p, err
+}
+
+// InspectCompactMetadata reads the package identity and source records from the
+// same recovery document, verifying them against the published files.
+func InspectCompactMetadata(root *archive.StorageRoot, directory string) (Package, Metadata, error) {
 	return inspectCompactAt(root, directory, directory)
 }
 
-func inspectCompactAt(root *archive.StorageRoot, readDirectory, logicalDirectory string) (Package, error) {
+func inspectCompactAt(root *archive.StorageRoot, readDirectory, logicalDirectory string) (Package, Metadata, error) {
 	payload, err := root.ReadFile(path.Join(readDirectory, CompactPackageDocumentName))
 	if err != nil {
-		return Package{}, err
+		return Package{}, Metadata{}, err
 	}
 	document, err := decodeCompactDocument(payload)
 	if err != nil {
-		return Package{}, err
+		return Package{}, Metadata{}, err
 	}
+	result, err := document.inspectFiles(root, readDirectory, logicalDirectory)
+	return result, document.Metadata, err
+}
+
+func (document CompactDocument) inspectFiles(root *archive.StorageRoot, readDirectory, logicalDirectory string) (Package, error) {
 	entries, err := root.ReadDir(readDirectory)
 	if err != nil {
 		return Package{}, err
@@ -304,29 +353,16 @@ func inspectCompactAt(root *archive.StorageRoot, readDirectory, logicalDirectory
 		document.VideoInfoPath != path.Join(logicalDirectory, "video-info.csv") {
 		return Package{}, fmt.Errorf("compact projection paths: %w", ErrInvalidRequest)
 	}
+	if _, err := document.verifiedBaseFiles(root, readDirectory); err != nil {
+		return Package{}, err
+	}
 	for _, file := range current.Files {
-		var payload []byte
-		switch {
-		case file.Embedded && file.Path == "transcript.json":
-			var compact bytes.Buffer
-			if err := json.Compact(&compact, current.Transcript); err != nil {
-				return Package{}, errors.Join(ErrInvalidRequest, err)
-			}
-			payload = compact.Bytes()
-		case file.Embedded:
-			return Package{}, fmt.Errorf("unsupported embedded file %s: %w", file.Path, ErrInvalidRequest)
-		default:
-			size, checksum, err := root.FileSHA256(path.Join(readDirectory, file.Path))
-			if err != nil {
-				return Package{}, err
-			}
-			if size != file.Size || checksum != file.Checksum {
-				return Package{}, fmt.Errorf("compact file %s checksum or size: %w", file.Path, ErrInvalidRequest)
-			}
+		// decodeCompactDocument verified embedded transcript bytes.
+		if file.Embedded || file.Path == document.VideoFileName || file.Path == "video-info.csv" {
 			continue
 		}
-		if int64(len(payload)) != file.Size || digest(payload) != file.Checksum {
-			return Package{}, fmt.Errorf("compact file %s checksum or size: %w", file.Path, ErrInvalidRequest)
+		if err := file.verifyStored(root, readDirectory); err != nil {
+			return Package{}, err
 		}
 	}
 	return Package{

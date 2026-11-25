@@ -65,6 +65,10 @@ func TestArchiveCatalogVerifyReportsBidirectionalStatesWithoutChangingStorage(t 
 	_, _, currentRow := fixture.publish(t, "VP-20261108-VERIFY1", "DECISION-VERIFY-1", "current", catalogSource(fixture.checksum, "CURRENT"))
 	_, _, _ = fixture.publish(t, "VP-20261108-VERIFY2", "DECISION-VERIFY-2", "missing", catalogSource(fixture.checksum, "MISSING"))
 	_, _, mismatchRow := fixture.publish(t, "VP-20261108-VERIFY3", "DECISION-VERIFY-3", "mismatch", catalogSource(fixture.checksum, "MISMATCH"))
+	driftSources := catalogSource(fixture.checksum, "DRIFT")
+	driftSources[0].Width = 320
+	drift, _, driftRow := fixture.publish(t, "VP-20261108-DRIFT", "DECISION-DRIFT", "drift", driftSources)
+	changeSourceWidth(t, fixture.archiveRoot, drift.MetadataPath)
 	mismatchRow.Revision++
 	orphanRow := currentRow
 	orphanRow.PackageID = "VP-20261108-ORPHAN"
@@ -76,7 +80,7 @@ func TestArchiveCatalogVerifyReportsBidirectionalStatesWithoutChangingStorage(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := publisher.PublishPackageRowsMerged([]PackageRow{currentRow, mismatchRow, orphanRow}, ".verify.partial", "archive-catalog.csv"); err != nil {
+	if _, err := publisher.PublishPackageRowsMerged([]PackageRow{currentRow, mismatchRow, orphanRow, driftRow}, ".verify.partial", "archive-catalog.csv"); err != nil {
 		t.Fatal(err)
 	}
 	catalogPayload, err := fixture.archiveRoot.ReadFile("archive-catalog.csv")
@@ -84,7 +88,7 @@ func TestArchiveCatalogVerifyReportsBidirectionalStatesWithoutChangingStorage(t 
 		t.Fatal(err)
 	}
 	records, err := csv.NewReader(bytes.NewReader(catalogPayload)).ReadAll()
-	if err != nil || len(records) != 4 {
+	if err != nil || len(records) != 5 {
 		t.Fatal(err)
 	}
 	for _, record := range records[1:] {
@@ -93,7 +97,7 @@ func TestArchiveCatalogVerifyReportsBidirectionalStatesWithoutChangingStorage(t 
 			break
 		}
 	}
-	if len(records) != 5 {
+	if len(records) != 6 {
 		t.Fatal("duplicate package identity fixture was not created")
 	}
 	var duplicated bytes.Buffer
@@ -122,8 +126,18 @@ func TestArchiveCatalogVerifyReportsBidirectionalStatesWithoutChangingStorage(t 
 	}
 	after := snapshotStorage(t, fixture.archiveRoot, ".")
 	states := make(map[ConsistencyState]int)
+	reportedDrift := false
 	for _, entry := range report.Entries {
 		states[entry.State]++
+		if entry.PackageID == drift.PackageID {
+			if reportedDrift || entry.ResultFolder != driftRow.ResultFolder || entry.State != ConsistencyLayoutInvalid || !strings.Contains(entry.Detail, "source 1 field source_width") {
+				t.Fatalf("unexpected classification for a source conflict: %+v", entry)
+			}
+			reportedDrift = true
+		}
+	}
+	if !reportedDrift {
+		t.Fatalf("source width conflict missing from verification: %+v", report.Entries)
 	}
 	for _, expected := range []ConsistencyState{
 		ConsistencyCurrent, ConsistencyCatalogMissing, ConsistencyCatalogOrphan,
@@ -143,7 +157,9 @@ func TestArchiveCatalogRebuildAtomicallyReplacesOnlyCatalogAfterPackageVerificat
 	fixture := newV2CatalogFixture(t)
 	defer fixture.close()
 	firstPackage, _, firstRow := fixture.publish(t, "VP-20261108-REBUILD1", "DECISION-REBUILD-1", "first", catalogSource(fixture.checksum, "FIRST"))
-	secondPackage, _, secondRow := fixture.publish(t, "VP-20261108-REBUILD2", "DECISION-REBUILD-2", "second", catalogSource(fixture.checksum, "SECOND"))
+	secondSources := catalogSource(fixture.checksum, "SECOND")
+	secondSources[0].Width = 320
+	secondPackage, _, secondRow := fixture.publish(t, "VP-20261108-REBUILD2", "DECISION-REBUILD-2", "second", secondSources)
 	stale := firstRow
 	stale.Revision++
 	orphan := firstRow
@@ -201,6 +217,26 @@ func TestArchiveCatalogRebuildAtomicallyReplacesOnlyCatalogAfterPackageVerificat
 		if after := snapshotStorage(t, fixture.archiveRoot, directory); !equalSnapshots(before, after) {
 			t.Fatalf("catalog rebuild changed package %s: before=%v after=%v", directory, before, after)
 		}
+	}
+	changeSourceWidth(t, fixture.archiveRoot, secondPackage.MetadataPath)
+	before := snapshotStorage(t, fixture.archiveRoot, ".")
+	if _, err := reconciler.Rebuild(); !errors.Is(err, ErrCatalogReconciliation) || !strings.Contains(err.Error(), "source_width") {
+		t.Fatalf("rebuild did not identify the conflicting source width: %v", err)
+	}
+	if !equalSnapshots(before, snapshotStorage(t, fixture.archiveRoot, ".")) {
+		t.Fatal("rejected rebuild modified destination files")
+	}
+}
+
+func changeSourceWidth(t *testing.T, root *archive.StorageRoot, name string) {
+	t.Helper()
+	data, err := root.ReadFile(name)
+	field := []byte(`"width": 320`)
+	if err != nil || bytes.Count(data, field) != 1 {
+		t.Fatalf("expected unique source width in %s: %v", name, err)
+	}
+	if err := root.WriteFile(name, bytes.Replace(data, field, []byte(`"width": 321`), 1), 0o600); err != nil {
+		t.Fatal(err)
 	}
 }
 

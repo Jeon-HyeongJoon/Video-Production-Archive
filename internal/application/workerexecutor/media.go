@@ -911,6 +911,21 @@ func (operations *mediaOperations) reconcileArchivePublication(ctx context.Conte
 			ArtifactID: spec.Parameters.ArchivePackageID, StorageID: spec.Outputs[0].StorageID,
 			RelativePath: current.MetadataPath, Checksum: checksum, Kind: execution.OutputArchiveRevision,
 		}}
+	} else {
+		// Catalog-only recovery has no revision step to recheck the compact
+		// package before restoring a missing row or confirming an existing one.
+		for _, input := range spec.Inputs {
+			if path.Base(input.RelativePath) != archivebundle.CompactPackageDocumentName {
+				continue
+			}
+			current, err := archivebundle.InspectCompactPackage(roots.MustRoot(input.StorageID), path.Dir(input.RelativePath))
+			if err != nil {
+				return nil, nil, err
+			}
+			if current.PackageID != input.ArtifactID || current.MetadataPath != input.RelativePath {
+				return nil, nil, archivecatalog.ErrCatalogReconciliation
+			}
+		}
 	}
 	return operations.writeArchiveCatalog(ctx, catalogSpec, roots)
 }
