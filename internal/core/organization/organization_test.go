@@ -3,6 +3,7 @@ package organization
 import (
 	"errors"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 
@@ -52,6 +53,28 @@ func TestAutomaticOrganizationDecisionIsDeterministicAndHoldsAmbiguousInputs(t *
 		len(first.Actions) != 0 {
 		t.Fatalf("ambiguous inputs were inferred or classification changed: first=%+v second=%+v", first, second)
 	}
+
+	t.Run("case-distinct camera files in reversed inspection order", func(t *testing.T) {
+		request.Folder = "촬영물/391216-행사/카드1"
+		request.Policy.Version = DrivePolicyVersion
+		request.Inputs = []Input{
+			organizationInput("ASSET-UPPER", request.Folder+"/C0001.MP4", 12_000, 28_000_000, 1920, 1080),
+			organizationInput("ASSET-LOWER", request.Folder+"/c0001.mp4", 12_000, 28_000_000, 1920, 1080),
+		}
+		first, err := Classify(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		slices.Reverse(request.Inputs)
+		second, err := Classify(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if first.Disposition != vocabulary.OrganizationRenderRecordings || !slices.Equal(first.OrderedOriginalAssetIDs, []string{"ASSET-UPPER", "ASSET-LOWER"}) ||
+			!reflect.DeepEqual(first, second) {
+			t.Fatalf("reordering separate cuts changed the decision: %v %v / %v %v", first.Disposition, first.OrderedOriginalAssetIDs, second.Disposition, second.OrderedOriginalAssetIDs)
+		}
+	})
 }
 
 // Requirement: ORG-003

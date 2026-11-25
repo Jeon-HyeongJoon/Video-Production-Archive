@@ -6,8 +6,10 @@ import (
 	"io/fs"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"testing"
 	"time"
 
@@ -75,6 +77,69 @@ func TestSelectedAttachedSourceIsScannedAsynchronouslyWithoutFollowingHiddenOrLi
 		observations[0].Folders[0].VideoCount != 2 || observations[0].Folders[0].InputBytes != uint64(len("first")+len("second")) {
 		t.Fatalf("selected source was not isolated and inventoried: %+v", observations)
 	}
+
+	t.Run("case-distinct camera files in reversed directory order", func(t *testing.T) {
+		dir := t.TempDir()
+		root, err := archive.OpenReadOnlyStorageRoot(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer root.Close()
+		// Present two case-distinct names even when the host filesystem ignores case.
+		card := orderedCameraCard{root: root, backingPaths: map[string]string{}}
+		for _, relative := range []string{"upper/C0001.MP4", "lower/c0001.mp4"} {
+			subdir, name := path.Dir(relative), path.Base(relative)
+			if err := os.Mkdir(filepath.Join(dir, subdir), 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, relative), []byte(subdir), 0600); err != nil {
+				t.Fatal(err)
+			}
+			entries, err := root.ReadDir(subdir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			card.entries = append(card.entries, entries...)
+			card.backingPaths[name] = relative
+		}
+		first, err := scanContents(t.Context(), worker.StorageObservation{}, card, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		slices.Reverse(card.entries)
+		second, err := scanContents(t.Context(), worker.StorageObservation{}, card, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if first.DiscoveryRevision == 0 || first.DiscoveryRevision != second.DiscoveryRevision ||
+			len(first.Folders) != 1 || len(second.Folders) != 1 || len(first.Folders[0].Videos) != 2 ||
+			first.Folders[0].Videos[0].RelativePath != "C0001.MP4" || first.Folders[0].Videos[1].RelativePath != "c0001.mp4" ||
+			!slices.Equal(first.Folders[0].Videos, second.Folders[0].Videos) {
+			t.Fatalf("reordering camera entries changed discovery: %d %v / %d %v", first.DiscoveryRevision, first.Folders, second.DiscoveryRevision, second.Folders)
+		}
+	})
+}
+
+// orderedCameraCard exposes files from independent backing paths in one chosen directory order.
+type orderedCameraCard struct {
+	root         *archive.ReadOnlyStorageRoot
+	entries      []fs.DirEntry
+	backingPaths map[string]string
+}
+
+func (card orderedCameraCard) ReadDir(name string) ([]fs.DirEntry, error) {
+	if name != "" {
+		return nil, fs.ErrNotExist
+	}
+	return slices.Clone(card.entries), nil
+}
+
+func (card orderedCameraCard) Open(name string) (*os.File, error) {
+	backing, ok := card.backingPaths[name]
+	if !ok {
+		return nil, fs.ErrNotExist
+	}
+	return card.root.Open(backing)
 }
 
 // Requirement: DEV-011

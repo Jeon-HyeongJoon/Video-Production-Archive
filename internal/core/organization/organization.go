@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"videoarchive/internal/core/intake"
 	"videoarchive/internal/core/mediaanalysis"
 	"videoarchive/internal/core/rendering"
 	"videoarchive/internal/core/vocabulary"
@@ -318,7 +319,10 @@ func normalizeInputs(source []Input) ([]Input, bool) {
 		input.Inspection = normalized
 	}
 	sort.Slice(inputs, func(i, j int) bool {
-		return strings.ToLower(inputs[i].RelativePath) < strings.ToLower(inputs[j].RelativePath)
+		if order := intake.CompareRelativePaths(inputs[i].RelativePath, inputs[j].RelativePath); order != 0 {
+			return order < 0
+		}
+		return inputs[i].OriginalAssetID < inputs[j].OriginalAssetID
 	})
 	return inputs, true
 }

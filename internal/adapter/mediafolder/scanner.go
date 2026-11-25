@@ -5,8 +5,11 @@ import (
 	"errors"
 	"io/fs"
 	"path"
+	"slices"
 	"sort"
 	"strings"
+
+	"videoarchive/internal/core/intake"
 )
 
 var ErrScanFailed = errors.New("media folder scan failed")
@@ -94,7 +97,7 @@ func snapshot(grouped map[string][]string) []Folder {
 	folders := make([]Folder, 0, len(grouped))
 	for folder, videoPaths := range grouped {
 		videoPaths = append([]string(nil), videoPaths...)
-		sort.Slice(videoPaths, func(i, j int) bool { return strings.ToLower(videoPaths[i]) < strings.ToLower(videoPaths[j]) })
+		slices.SortFunc(videoPaths, intake.CompareRelativePaths)
 		folders = append(folders, Folder{RelativePath: folder, VideoPaths: videoPaths})
 	}
 	sort.Slice(folders, func(i, j int) bool { return folders[i].RelativePath < folders[j].RelativePath })

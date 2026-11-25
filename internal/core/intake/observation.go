@@ -46,3 +46,11 @@ func NewInputFileObservation(value InputFileObservation) (InputFileObservation, 
 	}
 	return value, nil
 }
+
+// CompareRelativePaths orders source files by lowercase path, then by their original spelling.
+func CompareRelativePaths(left, right string) int {
+	if order := strings.Compare(strings.ToLower(left), strings.ToLower(right)); order != 0 {
+		return order
+	}
+	return strings.Compare(left, right)
+}
