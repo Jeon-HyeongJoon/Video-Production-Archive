@@ -143,6 +143,8 @@ artifacts/      manifest, checksum, 보고서 같은 작은 검증 산출물
 
 운영 Windows 장치·GPU·FFmpeg acceptance는 현재 CI 성공과 분리한다. 운영기기가 SSH로 제공되면 별도 승인된 acceptance job이 장비 식별자와 결과를 같은 증적 형식으로 남긴다.
 
+기능 팀장의 시험 입력, PM의 경계 검증과 배포 판정 제안은 [기능별 안정성 검증 설계](19-quality-verification-proposal.md)에 정리했다.
+
 로컬 CLI acceptance는 실제 Windows Archivist Host·CLI ID·backend ID를 증적에 남기되 credential, resume token, raw 대화와 실제 filesystem path는 정제한다. 강제 연결 종료 전후의 ArchivistTurn event cursor, Tool Call receipt와 Command ID를 비교해 재개 뒤 중복 실행이 없음을 검증한다. `LRH-009`
 
 FFmpeg가 원본 패킷을 거부하고 디코더가 입력 오류로 종료하거나, AAC 설정 불일치와 오디오 필터의 치명 종료가 함께 나타나면 Worker는 실패한 입력의 순번·마지막 출력 위치·종료 코드·로그 참조를 보존한다. 이 입력 실패는 워크플로의 자동 재시도를 끝낸다. 성공 종료의 경고 및 출력 장치 문제는 별도 경계로 유지한다. `WRK-022`
