@@ -12,6 +12,7 @@ Each feature lead owns the performance of their area and decides when its work i
 | Classification and folder mapping | Verify source classification, grouping and holds across drive layouts. Compare the destination preview with the paths actually published. |
 | Metadata extraction and preservation | Trace ffprobe measurements and checksums from the original through package metadata to the destination catalog. Check missing records and reconciliation. |
 | STT and subtitles | Verify speech extraction, chunk boundaries, subtitle timing, transcription quality evidence, and recovery from interrupted work. |
+| Archivist agent | Verify Session and Turn resumption, tool selection, evidence-backed diagnosis and proposed actions, human approval, and command receipts. Measure time and tool calls to a correct diagnosis against the same recorded incident. |
 
 For a performance change, the lead and PM agree on the user-visible outcome and a relevant measure before implementation. Examples include render time per source minute at the required profile and QC, classification time at a known accuracy on a labeled sample, catalog reconciliation time with all records accounted for, and STT time per audio minute at the required transcript quality. Compare the baseline and candidate on the same representative inputs, hardware, and settings. Each lead reports feature completion, the affected requirement and test, measured results, and remaining defects or unverified behavior.
 
