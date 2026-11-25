@@ -1009,9 +1009,20 @@ var recoveryVideo []byte
 func TestArchivePublicationRecoveryReconcilesPackageAndCatalogIdempotently(t *testing.T) {
 	t.Run("compact", func(t *testing.T) { testArchiveRecovery(t, archive.PackageLayoutCompactResultFolder) })
 	t.Run("interrupted flat pointer", func(t *testing.T) { testArchiveRecovery(t, archive.PackageLayoutFlatResultFolder) })
+	t.Run("interleaved package revisions", testInterleavedArchiveRecovery)
 }
 
-func testArchiveRecovery(t *testing.T, layout archive.PackageLayoutVersion) {
+type archiveRecoveryFixture struct {
+	configuration workerconfig.Configuration
+	roots         *workerconfig.StorageRoots
+	publisher     *archivebundle.Publisher
+	registry      *Registry
+	stored, other archivebundle.Package
+	spec          execution.StepExecutionSpec
+}
+
+func newArchiveRecoveryFixture(t *testing.T, layout archive.PackageLayoutVersion) archiveRecoveryFixture {
+	t.Helper()
 	directory := t.TempDir()
 	sourcePath := filepath.Join(directory, "source")
 	archivePath := filepath.Join(directory, "archive")
@@ -1034,7 +1045,7 @@ func testArchiveRecovery(t *testing.T, layout archive.PackageLayoutVersion) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer roots.Close()
+	t.Cleanup(func() { roots.Close() })
 	if err := roots.MustRoot("source").WriteFile("recording.mp4", recoveryVideo, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -1064,6 +1075,17 @@ func testArchiveRecovery(t *testing.T, layout archive.PackageLayoutVersion) {
 		t.Fatal(err)
 	}
 	initial.PackageID, initial.LayoutVersion = "VP-20261119-OTHER", archive.PackageLayoutCompactResultFolder
+	// A valid, empty MP4 free-space box gives the second source a distinct SHA.
+	secondVideo := append(bytes.Clone(recoveryVideo), 0, 0, 0, 8, 'f', 'r', 'e', 'e')
+	if err := roots.MustRoot("source").WriteFile("other.mp4", secondVideo, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, secondSHA, err := roots.MustRoot("source").FileSHA256("other.mp4")
+	if err != nil {
+		t.Fatal(err)
+	}
+	initial.Video.Path, initial.Video.Checksum = "other.mp4", secondSHA
+	initial.Sources = []archivebundle.SourceReference{{OriginalAssetID: "ASSET-2", OriginalName: "other.mp4", RelativePath: "other.mp4", Checksum: secondSHA}}
 	other, err := publisher.PublishInitialCompact(initial)
 	if err != nil {
 		t.Fatal(err)
@@ -1110,6 +1132,14 @@ func testArchiveRecovery(t *testing.T, layout archive.PackageLayoutVersion) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	return archiveRecoveryFixture{configuration: configuration, roots: roots, publisher: publisher, registry: registry, stored: stored, other: other, spec: spec}
+}
+
+func testArchiveRecovery(t *testing.T, layout archive.PackageLayoutVersion) {
+	f := newArchiveRecoveryFixture(t, layout)
+	roots, publisher, registry := f.roots, f.publisher, f.registry
+	stored, other, spec := f.stored, f.other, f.spec
+	packageID, videoChecksum := stored.PackageID, spec.Parameters.SourceInputs[0].Checksum
 	root := roots.MustRoot("archive")
 	reconciler, err := archivecatalog.NewReconciler(root)
 	if err != nil {

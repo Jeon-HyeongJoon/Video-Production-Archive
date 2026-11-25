@@ -849,12 +849,32 @@ func (operations *mediaOperations) reviseArchivePackage(_ context.Context, spec 
 	if err != nil || revised.Revision != spec.Parameters.ArchivePackageRevision+1 || revised.MetadataPath != spec.Outputs[0].RelativePath {
 		return nil, nil, errors.Join(ErrProductionExecution, err)
 	}
-	_, checksum, err := root.FileSHA256(revised.MetadataPath)
+	checksum, err := archiveRevisionChecksum(root, revised)
 	if err != nil {
 		return nil, nil, err
 	}
 	output := stepOutput(spec.Outputs[0], checksum)
 	return []execution.StepOutput{output}, verificationReferences(spec.Operation, []execution.StepOutput{output}), nil
+}
+
+// The package lock is released before the Worker hands the metadata to the
+// next operation. Hash the same bytes whose revision this attempt verified.
+func archiveRevisionChecksum(root *archive.StorageRoot, published archivebundle.Package) (string, error) {
+	payload, err := root.ReadFile(published.MetadataPath)
+	if err != nil {
+		return "", err
+	}
+	var identity struct {
+		PackageID      string `json:"package_id"`
+		Revision       uint64 `json:"revision"`
+		ManifestDigest string `json:"manifest_digest"`
+	}
+	if json.Unmarshal(payload, &identity) != nil || identity.PackageID != published.PackageID || identity.Revision != published.Revision ||
+		(published.LayoutVersion == archive.PackageLayoutCompactResultFolder && identity.ManifestDigest != published.ManifestDigest) {
+		return "", archivebundle.ErrPackageState
+	}
+	sum := sha256.Sum256(payload)
+	return hex.EncodeToString(sum[:]), nil
 }
 
 // reconcileArchivePublication is the idempotent Worker boundary used by a
@@ -891,39 +911,18 @@ func (operations *mediaOperations) reconcileArchivePublication(ctx context.Conte
 		if err != nil {
 			return nil, nil, err
 		}
-		current, err := publisher.Current(spec.Parameters.ArchivePackageID)
-		if err != nil {
-			return nil, nil, err
-		}
-		request := archivebundle.RevisionRequest{
+		current, err := publisher.ReviseStored(archivebundle.RevisionRequest{
 			PackageID:      spec.Parameters.ArchivePackageID,
+			BaseRevision:   spec.Parameters.ArchivePackageRevision,
 			Transcript:     archivebundle.FileSource{Root: archivebundle.RootArchive, Path: transcriptInput.RelativePath, Checksum: transcriptInput.Checksum},
 			TranscriptText: archivebundle.FileSource{Root: archivebundle.RootArchive, Path: textInput.RelativePath, Checksum: textInput.Checksum},
 			Subtitle:       archivebundle.FileSource{Root: archivebundle.RootArchive, Path: subtitleInput.RelativePath, Checksum: subtitleInput.Checksum},
 			CreatedAt:      operations.now(),
+		})
+		if err != nil {
+			return nil, nil, err
 		}
-		if current.Revision > 1 {
-			request.BaseRevision = current.Revision - 1
-			if replayed, replayErr := publisher.ReviseStored(request); replayErr == nil {
-				current = replayed
-			} else {
-				if !errors.Is(replayErr, archivebundle.ErrPackageState) {
-					return nil, nil, replayErr
-				}
-				request.BaseRevision = current.Revision
-				current, err = publisher.ReviseStored(request)
-				if err != nil {
-					return nil, nil, err
-				}
-			}
-		} else {
-			request.BaseRevision = current.Revision
-			current, err = publisher.ReviseStored(request)
-			if err != nil {
-				return nil, nil, err
-			}
-		}
-		_, checksum, err := root.FileSHA256(current.MetadataPath)
+		checksum, err := archiveRevisionChecksum(root, current)
 		if err != nil {
 			return nil, nil, err
 		}
